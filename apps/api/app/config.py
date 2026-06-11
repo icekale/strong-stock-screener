@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,7 +11,10 @@ class Settings(BaseSettings):
     candidate_provider: str = "thsdk"
     kline_provider: str = "baidu"
     quote_provider: str = "tickflow"
-    tickflow_api_key: str = ""
+    tickflow_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("STRONG_STOCK_TICKFLOW_API_KEY", "TICKFLOW_API_KEY"),
+    )
     tickflow_base_url: str = "https://api.tickflow.org"
     provider_timeout_seconds: float = 12
     cors_allow_origins: str = "http://localhost:3110,http://127.0.0.1:3110"
@@ -30,4 +34,3 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

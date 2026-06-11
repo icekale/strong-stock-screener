@@ -46,18 +46,26 @@ def data_source_status() -> dict[str, object]:
     candidate_provider = _candidate_provider()
     kline_provider = _kline_provider()
     quote_provider = _quote_provider()
+    candidate_status = candidate_provider.status() if hasattr(candidate_provider, "status") else None
+    kline_status = kline_provider.status() if hasattr(kline_provider, "status") else None
     quote_status = quote_provider.status() if hasattr(quote_provider, "status") else None
     return {
         "items": [
-            StrongStockSourceStatus(
-                source=candidate_provider.source_name,
-                status="success",
-                detail="候选池源已配置",
+            (
+                candidate_status
+                or StrongStockSourceStatus(
+                    source=candidate_provider.source_name,
+                    status="success",
+                    detail="候选池源已配置",
+                )
             ).model_dump(mode="json"),
-            StrongStockSourceStatus(
-                source=kline_provider.source_name,
-                status="success",
-                detail="K线源已配置",
+            (
+                kline_status
+                or StrongStockSourceStatus(
+                    source=kline_provider.source_name,
+                    status="success",
+                    detail="K线源已配置",
+                )
             ).model_dump(mode="json"),
             (
                 quote_status

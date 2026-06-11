@@ -1,5 +1,5 @@
 from app.providers.baidu_kline import parse_baidu_kline_payload
-from app.providers.thsdk_candidates import parse_thsdk_candidate_rows
+from app.providers.thsdk_candidates import ThsdkCandidateProvider, parse_thsdk_candidate_rows
 from app.providers.tickflow import TickFlowQuote, TickFlowQuoteProvider, parse_tickflow_quote_payload
 from app.providers.watchlist import parse_watchlist_text
 
@@ -125,6 +125,16 @@ def test_parse_thsdk_candidate_rows_requires_limit_up_evidence_and_dedupes() -> 
     assert [item.symbol for item in candidates] == ["603890.SH"]
     assert candidates[0].limit_up_evidence == ["20日内涨停"]
     assert candidates[0].board_note == "近20日涨停次数: 2"
+
+
+def test_thsdk_status_reports_unavailable_when_package_missing() -> None:
+    provider = ThsdkCandidateProvider(client_factory=None)
+
+    status = provider.status()
+
+    assert status.source == "THSDK 问财"
+    assert status.status == "failed"
+    assert "THSDK 未安装" in status.detail
 
 
 def test_parse_watchlist_text_supports_symbols_and_names() -> None:

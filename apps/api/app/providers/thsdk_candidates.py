@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from app.models import StrongStockCandidate, StrongStockDataUnavailable
+from app.models import StrongStockSourceStatus
 
 
 class ThsdkCandidateProvider:
@@ -29,6 +30,19 @@ class ThsdkCandidateProvider:
         if not getattr(response, "success", False):
             raise StrongStockDataUnavailable(str(getattr(response, "error", "") or "THSDK 问财返回失败"))
         return parse_thsdk_candidate_rows(getattr(response, "data", None) or [])
+
+    def status(self) -> StrongStockSourceStatus:
+        if self.client_factory is None:
+            return StrongStockSourceStatus(
+                source=self.source_name,
+                status="failed",
+                detail="THSDK 未安装，无法查询20日内涨停候选池",
+            )
+        return StrongStockSourceStatus(
+            source=self.source_name,
+            status="success",
+            detail="THSDK 已安装",
+        )
 
 
 def parse_thsdk_candidate_rows(rows: object) -> list[StrongStockCandidate]:
@@ -96,4 +110,3 @@ def _limit_up_note(row: dict[str, Any]) -> str | None:
         if "涨停" in str(key) and value not in (None, ""):
             return f"{key}: {value}"
     return None
-

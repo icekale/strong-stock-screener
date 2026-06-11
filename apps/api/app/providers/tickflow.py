@@ -43,7 +43,7 @@ class TickFlowQuoteProvider:
             return StrongStockSourceStatus(
                 source=self.source_name,
                 status="missing_key",
-                detail="TICKFLOW_API_KEY 未配置",
+                detail="STRONG_STOCK_TICKFLOW_API_KEY 或 TICKFLOW_API_KEY 未配置",
             )
         return StrongStockSourceStatus(
             source=self.source_name,
@@ -55,7 +55,7 @@ class TickFlowQuoteProvider:
         if not symbols:
             return []
         if not self.api_key:
-            raise StrongStockDataUnavailable("TICKFLOW_API_KEY 未配置")
+            raise StrongStockDataUnavailable("STRONG_STOCK_TICKFLOW_API_KEY 或 TICKFLOW_API_KEY 未配置")
         try:
             response = self.http_client.post(
                 f"{self.base_url}/v1/quotes",

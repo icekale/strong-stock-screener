@@ -3,7 +3,12 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.models import KlineBar, StrongStockCandidate, StrongStockDataUnavailable
+from app.models import (
+    KlineBar,
+    StrongStockCandidate,
+    StrongStockDataUnavailable,
+    StrongStockSourceStatus,
+)
 from app.providers.watchlist import WatchlistSnapshot, WatchlistItem
 
 
@@ -48,6 +53,15 @@ class FailingCandidateProvider:
 
     def get_candidates(self, trade_date: str) -> list[StrongStockCandidate]:
         raise StrongStockDataUnavailable("候选池数据源失败")
+
+
+class UnavailableStatusCandidateProvider(FakeCandidateProvider):
+    def status(self) -> StrongStockSourceStatus:
+        return StrongStockSourceStatus(
+            source=self.source_name,
+            status="failed",
+            detail="候选池不可用",
+        )
 
 
 class FakeKlineProvider:
@@ -98,6 +112,18 @@ def test_data_source_status_reports_tickflow_missing_key(tmp_path: Path) -> None
     assert payload["items"][0]["source"] == "fake候选池"
     assert payload["items"][2]["source"] == "TickFlow"
     assert payload["items"][2]["status"] == "missing_key"
+
+
+def test_data_source_status_uses_candidate_provider_status(tmp_path: Path) -> None:
+    client = _client(tmp_path, candidate_provider=UnavailableStatusCandidateProvider())
+
+    response = client.get("/api/data-sources/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["items"][0]["source"] == "fake候选池"
+    assert payload["items"][0]["status"] == "failed"
+    assert payload["items"][0]["detail"] == "候选池不可用"
 
 
 def test_screen_run_returns_items_and_persists_latest_without_empty_status(tmp_path: Path) -> None:

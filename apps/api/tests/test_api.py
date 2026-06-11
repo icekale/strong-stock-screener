@@ -48,6 +48,23 @@ class FakeCandidateProvider:
         ]
 
 
+class LargeCandidateProvider:
+    source_name = "fake大候选池"
+
+    def __init__(self, count: int) -> None:
+        self.count = count
+
+    def get_candidates(self, trade_date: str) -> list[StrongStockCandidate]:
+        return [
+            StrongStockCandidate(
+                symbol=f"{600000 + index:06d}.SH",
+                name=f"示例{index}",
+                limit_up_evidence=["20日内涨停"],
+            )
+            for index in range(self.count)
+        ]
+
+
 class FailingCandidateProvider:
     source_name = "fake候选池"
 
@@ -73,6 +90,15 @@ class FakeKlineProvider:
         return _bars([10 + index * 0.05 for index in range(220)])
 
 
+class CountingKlineProvider(FakeKlineProvider):
+    def __init__(self) -> None:
+        self.symbols: list[str] = []
+
+    def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
+        self.symbols.append(symbol)
+        return super().get_klines(symbol, count=count)
+
+
 class FakeQuoteProvider:
     source_name = "TickFlow"
 
@@ -82,9 +108,13 @@ class FakeQuoteProvider:
         return StrongStockSourceStatus(source="TickFlow", status="missing_key", detail="TICKFLOW_API_KEY 未配置")
 
 
-def _client(tmp_path: Path, candidate_provider: object | None = None) -> TestClient:
+def _client(
+    tmp_path: Path,
+    candidate_provider: object | None = None,
+    kline_provider: object | None = None,
+) -> TestClient:
     app.state.candidate_provider = candidate_provider or FakeCandidateProvider()
-    app.state.kline_provider = FakeKlineProvider()
+    app.state.kline_provider = kline_provider or FakeKlineProvider()
     app.state.quote_provider = FakeQuoteProvider()
     app.state.watchlist_snapshot = WatchlistSnapshot(
         items=[WatchlistItem(symbol="002000.SZ", name="示例股份")]
@@ -142,6 +172,28 @@ def test_screen_run_returns_items_and_persists_latest_without_empty_status(tmp_p
     assert latest_response.status_code == 200
     assert latest_response.json()["trade_date"] == "2026-06-11"
     assert (tmp_path / "latest.json").exists()
+
+
+def test_screen_run_respects_scan_limit_before_fetching_klines(tmp_path: Path) -> None:
+    kline_provider = CountingKlineProvider()
+    client = _client(
+        tmp_path,
+        candidate_provider=LargeCandidateProvider(count=50),
+        kline_provider=kline_provider,
+    )
+
+    response = client.post(
+        "/api/screen/runs",
+        json={"trade_date": "2026-06-11", "limit": 10, "scan_limit": 12},
+    )
+
+    assert response.status_code == 200
+    scanned_candidates = [symbol for symbol in kline_provider.symbols if symbol.startswith("600")]
+    assert len(scanned_candidates) == 12
+    assert "002000.SZ" in kline_provider.symbols
+    payload = response.json()
+    assert len(payload["items"]) == 10
+    assert "本次分析 12/50" in payload["source_status"][0]["detail"]
 
 
 def test_screen_run_rejects_candidate_source_failure(tmp_path: Path) -> None:

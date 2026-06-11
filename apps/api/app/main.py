@@ -19,6 +19,7 @@ from app.services.screener import StrongStockScreener
 class ScreenRunRequest(BaseModel):
     trade_date: str
     limit: int = Field(default=30, ge=1, le=100)
+    scan_limit: int = Field(default=40, ge=1, le=300)
 
 
 def _cors_allow_origins() -> list[str]:
@@ -89,6 +90,7 @@ def create_screen_run(request: ScreenRunRequest) -> dict[str, object]:
         result = screener.screen(
             trade_date=request.trade_date,
             limit=request.limit,
+            scan_limit=request.scan_limit,
             watchlist_snapshot=_watchlist_snapshot(),
         )
     except StrongStockDataUnavailable as exc:

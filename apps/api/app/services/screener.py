@@ -42,22 +42,24 @@ class StrongStockScreener:
         self,
         trade_date: str,
         limit: int,
+        scan_limit: int,
         watchlist_snapshot: WatchlistSnapshot | None = None,
     ) -> StrongStockScreeningResult:
         candidates = self.candidate_provider.get_candidates(trade_date)
         if not candidates:
             raise StrongStockDataUnavailable("20日内涨停候选池为空")
+        candidates_to_scan = candidates[:scan_limit]
 
         source_status = [
             StrongStockSourceStatus(
                 source=self.candidate_provider.source_name,
                 status="success",
-                detail=f"返回 {len(candidates)} 只 20 日涨停候选",
+                detail=f"返回 {len(candidates)} 只 20 日涨停候选，本次分析 {len(candidates_to_scan)}/{len(candidates)}",
             )
         ]
         items: list[StrongStockScreeningItem] = []
         failures = 0
-        for candidate in candidates:
+        for candidate in candidates_to_scan:
             try:
                 bars = self.kline_provider.get_klines(candidate.symbol, count=220)
             except Exception:
@@ -113,4 +115,3 @@ class StrongStockScreener:
                 )
             )
         return risks
-

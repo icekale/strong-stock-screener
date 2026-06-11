@@ -20,11 +20,12 @@ export async function getDataSourceStatus(): Promise<DataSourceStatusResponse> {
 export async function createScreenRun(
   tradeDate: string,
   limit = 30,
+  scanLimit = 40,
 ): Promise<StrongStockScreeningResponse> {
   const response = await fetch(`${API_BASE_URL}/api/screen/runs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ trade_date: tradeDate, limit }),
+    body: JSON.stringify({ trade_date: tradeDate, limit, scan_limit: scanLimit }),
   });
   if (!response.ok) {
     let detail = await response.text();
@@ -48,4 +49,3 @@ export async function getLatestScreenRun(): Promise<StrongStockScreeningResponse
   }
   return response.json() as Promise<StrongStockScreeningResponse>;
 }
-

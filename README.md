@@ -61,4 +61,5 @@ corepack pnpm test
 2. Start the web app on `127.0.0.1:3110`.
 3. Open `http://localhost:3110`.
 4. Check data-source status first. Candidate and K-line sources are required for screening; TickFlow can remain `missing_key` until quote features need live data.
-5. Run the screener for a trade date. New-stock screening statuses never include `empty`; empty-position discipline appears only in watchlist or holding risk.
+5. Run the screener for a trade date. The default run analyzes the first `40` limit-up candidates so the workbench returns promptly instead of waiting for the full THSDK candidate pool.
+6. New-stock screening statuses never include `empty`; empty-position discipline appears only in watchlist or holding risk.

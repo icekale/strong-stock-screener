@@ -13,6 +13,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(typesSource, /risk_action: "hold_watch" \| "reduce" \| "empty"/);
   assert.doesNotMatch(typesSource, /status: .*"empty"/);
   assert.match(apiSource, /createScreenRun/);
+  assert.match(apiSource, /scan_limit: scanLimit/);
   assert.match(apiSource, /getDataSourceStatus/);
   assert.match(componentSource, /强势股选股工作台/);
   assert.match(componentSource, /TickFlow/);

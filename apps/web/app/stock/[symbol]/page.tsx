@@ -817,34 +817,31 @@ function ResearchPanel({
       </div>
 
       <div className="grid gap-3 xl:grid-cols-2">
-        <ResearchSection title="公司资料" payload={research?.profile ?? {}} />
         <ResearchSection
-          title="财务估值"
-          payload={{ ...(research?.valuation ?? {}), ...(research?.financials ?? {}) }}
+          title="行业研究"
+          payload={buildIndustryResearchPayload(research, currentStock)}
         />
-        <ResearchSection
-          title="板块强度"
-          payload={{
-            所属行业: currentStock?.industry ?? "--",
-            筛选板块强度: candidate?.industry_strength ?? "--",
-            筛选行业得分: candidate ? candidate.industry_score : "--",
-            ...(research?.sector ?? {}),
-          }}
-        />
+        <ResearchSection title="财务指标" payload={buildFinancialResearchPayload(research)} />
+        <ResearchSection title="估值指标" payload={buildValuationResearchPayload(research)} />
         <ResearchRecordsSection
           title="风险事件"
           emptyText="暂无 iFinD 风险事件"
           records={research?.events ?? []}
           tone="amber"
         />
+        <ResearchRecordsSection
+          title="公司公告"
+          emptyText="暂无 iFinD 公司公告"
+          records={research?.notices ?? []}
+          tone="slate"
+        />
+        <ResearchRecordsSection
+          title="新闻资讯"
+          emptyText="暂无 iFinD 新闻资讯"
+          records={research?.news ?? []}
+          tone="slate"
+        />
       </div>
-
-      <ResearchRecordsSection
-        title="公告新闻"
-        emptyText="暂无 iFinD 公告新闻"
-        records={[...(research?.notices ?? []), ...(research?.news ?? [])]}
-        tone="slate"
-      />
     </div>
   );
 }
@@ -910,6 +907,36 @@ function ResearchRecordsSection({
       )}
     </section>
   );
+}
+
+function buildIndustryResearchPayload(
+  research: StockResearchResponse | null,
+  currentStock: StockListItem | null,
+): Record<string, unknown> {
+  const sector = research?.sector ?? {};
+  return {
+    所属行业: currentStock?.industry ?? research?.profile?.["所属行业"] ?? "--",
+    板块强度: candidateSectorLabel(sector["强度"]),
+    板块得分: sector["得分"] ?? sector["score"] ?? "--",
+    板块排名: sector["排名"] ?? sector["rank"] ?? "--",
+    板块备注: sector["备注"] ?? sector["说明"] ?? sector["reason"] ?? "--",
+    板块概览: sector["摘要"] ?? sector["概览"] ?? sector["summary"] ?? "--",
+  };
+}
+
+function buildFinancialResearchPayload(research: StockResearchResponse | null): Record<string, unknown> {
+  return research?.financials ?? {};
+}
+
+function buildValuationResearchPayload(research: StockResearchResponse | null): Record<string, unknown> {
+  return research?.valuation ?? {};
+}
+
+function candidateSectorLabel(value: unknown): string {
+  if (typeof value === "string" && value.trim()) {
+    return value;
+  }
+  return "--";
 }
 
 function InfoCard({ label, tone = "text-slate-950", value }: { label: string; tone?: string; value: string }) {

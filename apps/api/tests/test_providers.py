@@ -1,6 +1,7 @@
 from app.models import KlineBar, StrongStockDataUnavailable
 from app.providers.baidu_kline import parse_baidu_kline_payload
 from app.providers.kline_fallback import FallbackKlineProvider
+from app.providers.ifind import IfindMcpProvider
 from app.providers.recent_limit_up_candidates import (
     RecentLimitUpCandidateProvider,
     parse_recent_limit_up_rows,
@@ -74,6 +75,56 @@ def test_tickflow_status_reports_missing_key_without_fake_quotes() -> None:
     assert status.source == "TickFlow"
     assert status.status == "missing_key"
     assert "TICKFLOW_API_KEY" in status.detail
+
+
+def test_ifind_status_reports_missing_key() -> None:
+    provider = IfindMcpProvider(api_key="", base_url="https://api-mcp.51ifind.com:8643")
+
+    status = provider.status()
+
+    assert status.source == "iFinD MCP"
+    assert status.status == "missing_key"
+    assert "IFIND" in status.detail
+
+
+def test_ifind_tools_probe_uses_jsonrpc_tools_list() -> None:
+    client = FakeHttpClient(
+        {
+            "result": {
+                "tools": [
+                    {
+                        "name": "stock.profile",
+                        "description": "A股基础资料",
+                        "inputSchema": {"type": "object", "properties": {}},
+                    }
+                ]
+            }
+        }
+    )
+    provider = IfindMcpProvider(
+        api_key="ifind-test",
+        base_url="https://api-mcp.51ifind.com:8643",
+        http_client=client,
+    )
+
+    status = provider.probe_tools("hexin-ifind-ds-stock-mcp")
+
+    assert status.status == "success"
+    assert status.source == "iFinD A股数据"
+    assert "1 个工具" in status.detail
+    assert client.last_request is not None
+    assert client.last_request["url"] == (
+        "https://api-mcp.51ifind.com:8643/ds-mcp-servers/hexin-ifind-ds-stock-mcp"
+    )
+    assert client.last_request["headers"] == {
+        "Authorization": "ifind-test",
+        "Content-Type": "application/json",
+    }
+    assert client.last_request["json"] == {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list",
+    }
 
 
 def test_analyze_negative_news_rows_flags_regulatory_and_loss_keywords() -> None:

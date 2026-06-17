@@ -12,7 +12,7 @@
 - 风险提示：展示严重异动、负面新闻、均线破位、实体阴线等风险信号。
 - 自选股管理：支持分组、标签、行业、备注、批量移动、删除。
 - K 线详情页：使用 TickFlow 日 K 数据，支持缩放、均线开关、十字定位线、成交量和 KDJ。
-- 数据源设置页：可在 UI 查看 TickFlow key 状态、数据源健康检查、请求延迟和 fallback 情况。
+- 数据源设置页：可在 UI 查看 TickFlow、iFinD key 状态、数据源健康检查、请求延迟和 fallback 情况。
 - 独立部署：后端 FastAPI，前端 Next.js，支持 Docker Compose 一键启动。
 
 ## 技术栈
@@ -41,9 +41,10 @@
 - 候选池：AKShare / 东方财富近 20 个交易日涨停池。
 - 日 K：TickFlow 日 K。
 - 实时行情/分钟线：TickFlow。
+- 研究增强：iFinD MCP，用于后续接入行业板块、公告新闻、财务估值和风险事件。
 - 新闻风险：东方财富个股新闻。
 
-TickFlow key 可以通过环境变量配置，也可以启动后在 UI 的“数据源设置”页面中配置。公开仓库不会提交 `.env`、历史筛选记录、自选股文件或 runtime 配置。
+TickFlow key 和 iFinD MCP key 可以通过环境变量配置，也可以启动后在 UI 的“数据源设置”页面中配置。公开仓库不会提交 `.env`、历史筛选记录、自选股文件或 runtime 配置。
 
 ## Docker Compose 部署
 
@@ -58,12 +59,16 @@ cp .env.example .env
 ```bash
 STRONG_STOCK_TICKFLOW_API_KEY=你的_tickflow_key
 STRONG_STOCK_TICKFLOW_BASE_URL=https://api.tickflow.org
+STRONG_STOCK_IFIND_API_KEY=你的_ifind_mcp_key
+STRONG_STOCK_IFIND_BASE_URL=https://api-mcp.51ifind.com:8643
+STRONG_STOCK_IFIND_SERVICE_ID=hexin-ifind-ds-stock-mcp
 STRONG_STOCK_CANDIDATE_PROVIDER=recent_limit_up
 STRONG_STOCK_DATA_DIR=./data
 STRONG_STOCK_CORS_ALLOW_ORIGINS=http://localhost:3110,http://127.0.0.1:3110
 ```
 
 如果暂时不填 TickFlow key，后端会显示 `missing_key`，选股和 K 线能力会受限。
+如果暂时不填 iFinD key，研究增强能力会显示 `missing_key`，但不会影响 TickFlow 行情和现有选股主流程。
 
 ### 2. 启动
 
@@ -180,6 +185,10 @@ curl http://localhost:8010/health
 | `STRONG_STOCK_TICKFLOW_API_KEY` | 空 | TickFlow API Key |
 | `TICKFLOW_API_KEY` | 空 | TickFlow API Key 兼容变量 |
 | `STRONG_STOCK_TICKFLOW_BASE_URL` | `https://api.tickflow.org` | TickFlow API 地址 |
+| `STRONG_STOCK_IFIND_API_KEY` | 空 | iFinD MCP Key |
+| `IFIND_API_KEY` | 空 | iFinD MCP Key 兼容变量 |
+| `STRONG_STOCK_IFIND_BASE_URL` | `https://api-mcp.51ifind.com:8643` | iFinD MCP API 地址 |
+| `STRONG_STOCK_IFIND_SERVICE_ID` | `hexin-ifind-ds-stock-mcp` | 默认 iFinD MCP 服务 |
 | `STRONG_STOCK_CANDIDATE_PROVIDER` | `recent_limit_up` | 候选池来源，可选 `recent_limit_up` / `thsdk` |
 | `STRONG_STOCK_DATA_DIR` | `./data` | 后端数据目录 |
 | `STRONG_STOCK_CORS_ALLOW_ORIGINS` | `http://localhost:3110,http://127.0.0.1:3110` | CORS 允许来源 |

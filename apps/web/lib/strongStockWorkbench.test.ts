@@ -10,6 +10,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   const watchlistPageSource = readFileSync(new URL("../app/watchlist/page.tsx", import.meta.url), "utf8");
   const stockPageUrl = new URL("../app/stock/[symbol]/page.tsx", import.meta.url);
   const stockPageSource = existsSync(stockPageUrl) ? readFileSync(stockPageUrl, "utf8") : "";
+  const settingsPageSource = readFileSync(new URL("../app/settings/page.tsx", import.meta.url), "utf8");
 
   assert.match(typesSource, /StrongStockScreeningResponse/);
   assert.match(typesSource, /ScreenRunFilters/);
@@ -40,6 +41,11 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(apiSource, /saveWatchlistPool/);
   assert.match(apiSource, /addWatchlistPoolItem/);
   assert.match(apiSource, /getStockKline/);
+  assert.match(typesSource, /ifind_api_key_configured: boolean/);
+  assert.match(typesSource, /ifind_service_id: "hexin-ifind-ds-stock-mcp" \| "hexin-ifind-ds-news-mcp" \| "hexin-ifind-ds-index-mcp"/);
+  assert.match(apiSource, /ifind_api_key\?: string \| null/);
+  assert.match(apiSource, /ifind_base_url: string/);
+  assert.match(apiSource, /ifind_service_id: "hexin-ifind-ds-stock-mcp" \| "hexin-ifind-ds-news-mcp" \| "hexin-ifind-ds-index-mcp"/);
   assert.match(typesSource, /note: string \| null/);
   assert.match(typesSource, /note\?: string \| null/);
   assert.match(typesSource, /ma60: number \| null/);
@@ -174,4 +180,9 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.doesNotMatch(stockPageSource, /h-\[500px\]/);
   assert.doesNotMatch(watchlistPageSource, /盘中监控/);
   assert.doesNotMatch(componentSource + pageSource, /报告生成|历史报告|OCR|定时生成/);
+  assert.match(settingsPageSource, /iFinD 研究增强/);
+  assert.match(settingsPageSource, /ifind_api_key/);
+  assert.match(settingsPageSource, /ifind_base_url/);
+  assert.match(settingsPageSource, /hexin-ifind-ds-stock-mcp/);
+  assert.match(settingsPageSource, /不替代 TickFlow 行情/);
 });

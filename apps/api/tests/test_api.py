@@ -322,6 +322,33 @@ class FakeLiveQuoteProvider:
         }
 
 
+class FakeIfindHealthClient:
+    def __init__(self) -> None:
+        self.calls: list[dict[str, object]] = []
+
+    def post(self, url: str, **kwargs: object) -> object:
+        self.calls.append({"url": url, **kwargs})
+
+        class _Response:
+            def raise_for_status(self) -> None:
+                return None
+
+            def json(self) -> object:
+                return {
+                    "result": {
+                        "tools": [
+                            {
+                                "name": "stock.profile",
+                                "description": "A股基础资料",
+                                "inputSchema": {"type": "object", "properties": {}},
+                            }
+                        ]
+                    }
+                }
+
+        return _Response()
+
+
 def _client(
     tmp_path: Path,
     candidate_provider: object | None = None,
@@ -401,6 +428,62 @@ def test_settings_can_be_saved_and_read_without_exposing_full_key(tmp_path: Path
     assert get_response.status_code == 200
     assert get_response.json()["config"]["provider_timeout_seconds"] == 3.5
     assert "tk_saved_secret" not in get_response.text
+
+
+def test_settings_can_be_saved_with_ifind_configuration(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.put(
+        "/api/settings",
+        json={
+            "candidate_provider": "recent_limit_up",
+            "kline_provider": "tickflow",
+            "quote_provider": "tickflow",
+            "tickflow_api_key": "tk_saved_secret",
+            "tickflow_base_url": "https://api.example.test",
+            "provider_timeout_seconds": 3.5,
+            "ifind_api_key": "ifind_saved_secret",
+            "ifind_base_url": "https://api-mcp.51ifind.com:8643",
+            "ifind_service_id": "hexin-ifind-ds-stock-mcp",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["config"]["ifind_api_key_configured"] is True
+    assert payload["config"]["ifind_api_key_preview"] != "ifind_saved_secret"
+    assert payload["config"]["ifind_base_url"] == "https://api-mcp.51ifind.com:8643"
+    assert payload["config"]["ifind_service_id"] == "hexin-ifind-ds-stock-mcp"
+    assert "ifind_api_key" not in payload["saved"]
+
+
+def test_settings_health_check_reports_ifind_mcp_probe(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    app.state.ifind_http_client = FakeIfindHealthClient()
+    save_response = client.put(
+        "/api/settings",
+        json={
+            "candidate_provider": "recent_limit_up",
+            "kline_provider": "tickflow",
+            "quote_provider": "tickflow",
+            "tickflow_api_key": "tk_saved_secret",
+            "tickflow_base_url": "https://api.example.test",
+            "provider_timeout_seconds": 3.5,
+            "ifind_api_key": "ifind_saved_secret",
+            "ifind_base_url": "https://api-mcp.51ifind.com:8643",
+            "ifind_service_id": "hexin-ifind-ds-stock-mcp",
+        },
+    )
+    assert save_response.status_code == 200
+
+    response = client.get("/api/settings/health?symbol=603890.SH")
+
+    assert response.status_code == 200
+    payload = response.json()
+    probe_names = [item["name"] for item in payload["probes"]]
+    assert "iFinD MCP" in probe_names
+    assert "iFinD A股数据" in probe_names
+    assert all(isinstance(item["latency_ms"], int) for item in payload["probes"])
 
 
 def test_settings_health_check_reports_provider_probes(tmp_path: Path) -> None:

@@ -29,3 +29,33 @@ def test_settings_defaults_candidate_provider_to_recent_limit_up_pool() -> None:
     settings = Settings(_env_file=None)
 
     assert settings.candidate_provider == "recent_limit_up"
+
+
+def test_settings_defaults_ifind_api_key_to_empty() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.ifind_api_key == ""
+
+
+def test_settings_defaults_ifind_base_url_to_mcp_endpoint() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.ifind_base_url == "https://api-mcp.51ifind.com:8643"
+
+
+def test_settings_accepts_direct_ifind_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("STRONG_STOCK_IFIND_API_KEY", raising=False)
+    monkeypatch.setenv("IFIND_API_KEY", "ifind-direct")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.ifind_api_key == "ifind-direct"
+
+
+def test_settings_prefers_prefixed_ifind_api_key(monkeypatch) -> None:
+    monkeypatch.setenv("STRONG_STOCK_IFIND_API_KEY", "ifind-prefixed")
+    monkeypatch.setenv("IFIND_API_KEY", "ifind-direct")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.ifind_api_key == "ifind-prefixed"

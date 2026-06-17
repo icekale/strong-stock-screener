@@ -16,6 +16,12 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("STRONG_STOCK_TICKFLOW_API_KEY", "TICKFLOW_API_KEY"),
     )
     tickflow_base_url: str = "https://api.tickflow.org"
+    ifind_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("STRONG_STOCK_IFIND_API_KEY", "IFIND_API_KEY"),
+    )
+    ifind_base_url: str = "https://api-mcp.51ifind.com:8643"
+    ifind_service_id: str = "hexin-ifind-ds-stock-mcp"
     provider_timeout_seconds: float = 12
     cors_allow_origins: str = "http://localhost:3110,http://127.0.0.1:3110"
 

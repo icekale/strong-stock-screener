@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.models import StockKlineResponse, StrongStockDataUnavailable, StrongStockSourceStatus
+from app.providers.ifind import IfindMcpProvider
 from app.providers.news_risk import EastmoneyNewsRiskProvider
 from app.providers.recent_limit_up_candidates import RecentLimitUpCandidateProvider
 from app.providers.thsdk_candidates import ThsdkCandidateProvider
@@ -163,6 +164,8 @@ def update_runtime_settings(request: SettingsUpdate) -> dict[str, object]:
 @app.get("/api/settings/health")
 def settings_health(symbol: str = "605289.SH") -> dict[str, object]:
     quote_provider = _quote_provider()
+    ifind_provider = _ifind_provider()
+    settings = _effective_settings()
     return {
         "config": public_settings_payload(_effective_settings()),
         "probes": [
@@ -183,6 +186,14 @@ def settings_health(symbol: str = "605289.SH") -> dict[str, object]:
             _probe(
                 "TickFlow 当日分钟线",
                 lambda: quote_provider.get_intraday_bars([symbol], period="1m", count=5),
+            ).model_dump(mode="json"),
+            _probe(
+                "iFinD MCP 服务",
+                lambda: ifind_provider.status(),
+            ).model_dump(mode="json"),
+            _probe(
+                "iFinD A股数据",
+                lambda: ifind_provider.probe_tools(settings.ifind_service_id),
             ).model_dump(mode="json"),
         ],
     }
@@ -364,6 +375,19 @@ def _news_risk_provider() -> object:
     return EastmoneyNewsRiskProvider.from_akshare()
 
 
+def _ifind_provider() -> IfindMcpProvider:
+    injected = getattr(app.state, "ifind_provider", None)
+    if injected is not None:
+        return injected
+    settings = _effective_settings()
+    return IfindMcpProvider(
+        api_key=settings.ifind_api_key,
+        base_url=settings.ifind_base_url,
+        timeout_seconds=settings.provider_timeout_seconds,
+        http_client=getattr(app.state, "ifind_http_client", None),
+    )
+
+
 def _watchlist_snapshot() -> WatchlistSnapshot | None:
     return getattr(app.state, "watchlist_snapshot", None)
 
@@ -408,7 +432,7 @@ def _effective_settings():
 def _public_saved_settings() -> dict[str, object]:
     return load_runtime_settings(_runtime_config_path()).model_dump(
         mode="json",
-        exclude={"tickflow_api_key"},
+        exclude={"tickflow_api_key", "ifind_api_key"},
         exclude_none=True,
     )
 

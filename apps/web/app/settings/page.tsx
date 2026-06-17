@@ -10,6 +10,9 @@ type SettingsDraft = {
   quote_provider: "tickflow";
   tickflow_api_key: string;
   tickflow_base_url: string;
+  ifind_api_key: string;
+  ifind_base_url: string;
+  ifind_service_id: "hexin-ifind-ds-stock-mcp" | "hexin-ifind-ds-news-mcp" | "hexin-ifind-ds-index-mcp";
   provider_timeout_seconds: number;
 };
 
@@ -19,6 +22,9 @@ const DEFAULT_DRAFT: SettingsDraft = {
   quote_provider: "tickflow",
   tickflow_api_key: "",
   tickflow_base_url: "https://api.tickflow.org",
+  ifind_api_key: "",
+  ifind_base_url: "https://api-mcp.51ifind.com:8643",
+  ifind_service_id: "hexin-ifind-ds-stock-mcp",
   provider_timeout_seconds: 12,
 };
 
@@ -48,6 +54,9 @@ export default function SettingsPage() {
         quote_provider: response.config.quote_provider,
         tickflow_api_key: "",
         tickflow_base_url: response.config.tickflow_base_url,
+        ifind_api_key: "",
+        ifind_base_url: response.config.ifind_base_url,
+        ifind_service_id: response.config.ifind_service_id,
         provider_timeout_seconds: response.config.provider_timeout_seconds,
       });
       setMessage("已读取当前设置");
@@ -69,6 +78,9 @@ export default function SettingsPage() {
         quote_provider: draft.quote_provider,
         tickflow_api_key: draft.tickflow_api_key.trim() || undefined,
         tickflow_base_url: draft.tickflow_base_url.trim(),
+        ifind_api_key: draft.ifind_api_key.trim() || undefined,
+        ifind_base_url: draft.ifind_base_url.trim(),
+        ifind_service_id: draft.ifind_service_id,
         provider_timeout_seconds: draft.provider_timeout_seconds,
       });
       setConfig(response.config);
@@ -76,6 +88,9 @@ export default function SettingsPage() {
         ...current,
         tickflow_api_key: "",
         tickflow_base_url: response.config.tickflow_base_url,
+        ifind_api_key: "",
+        ifind_base_url: response.config.ifind_base_url,
+        ifind_service_id: response.config.ifind_service_id,
         provider_timeout_seconds: response.config.provider_timeout_seconds,
       }));
       setMessage("设置已保存");
@@ -117,7 +132,7 @@ export default function SettingsPage() {
             <div>
               <p className="text-xs font-semibold uppercase text-slate-400">Settings</p>
               <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950">数据源配置</h1>
-              <p className="mt-1 text-sm font-medium text-slate-500">独立选股工作台的 TickFlow 和候选源配置。</p>
+              <p className="mt-1 text-sm font-medium text-slate-500">独立选股工作台的行情源、候选源和 iFinD 研究增强配置。</p>
             </div>
             <div className="flex flex-wrap gap-2">
               <a className="inline-flex min-h-[36px] items-center rounded-md bg-white px-3 text-xs font-bold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-100" href="/">
@@ -144,12 +159,13 @@ export default function SettingsPage() {
                 <StatusPill label="K线源" value={config?.kline_provider ?? "未读取"} />
                 <StatusPill label="行情源" value={config?.quote_provider ?? "未读取"} />
                 <StatusPill label="TickFlow Key" value={config?.tickflow_api_key_configured ? "已配置" : "未配置"} />
-                <StatusPill label="Key 来源" value={config?.tickflow_api_key_source ?? "未读取"} />
+                <StatusPill label="iFinD Key" value={config?.ifind_api_key_configured ? "已配置" : "未配置"} />
+                <StatusPill label="iFinD 服务" value={config?.ifind_service_id ?? "未读取"} />
                 <StatusPill label="超时" value={config ? `${config.provider_timeout_seconds}s` : "未读取"} />
               </div>
             </Panel>
 
-            <Panel title="配置编辑" subtitle="Key 只在本机保存，页面不会回显完整值">
+            <Panel title="行情与候选源" subtitle="TickFlow 继续负责 K 线、分钟线和实时行情">
               <div className="grid gap-3 md:grid-cols-2">
                 <Field label="候选源">
                   <select className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" value={draft.candidate_provider} onChange={(event) => setDraft({ ...draft, candidate_provider: event.target.value as SettingsDraft["candidate_provider"] })}>
@@ -172,6 +188,29 @@ export default function SettingsPage() {
                 <Field label="请求超时（秒）">
                   <input className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" type="number" min={1} max={60} step={0.5} value={draft.provider_timeout_seconds} onChange={(event) => setDraft({ ...draft, provider_timeout_seconds: Number(event.target.value) || 12 })} />
                 </Field>
+              </div>
+            </Panel>
+
+            <Panel title="iFinD 研究增强" subtitle="用于行业板块、公告新闻、财务估值和风险事件；不替代 TickFlow 行情">
+              <div className="grid gap-3 md:grid-cols-2">
+                <Field label="iFinD Base URL">
+                  <input className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" value={draft.ifind_base_url} onChange={(event) => setDraft({ ...draft, ifind_base_url: event.target.value })} />
+                </Field>
+                <Field label="默认 MCP 服务">
+                  <select className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" value={draft.ifind_service_id} onChange={(event) => setDraft({ ...draft, ifind_service_id: event.target.value as SettingsDraft["ifind_service_id"] })}>
+                    <option value="hexin-ifind-ds-stock-mcp">A股数据</option>
+                    <option value="hexin-ifind-ds-news-mcp">新闻公告</option>
+                    <option value="hexin-ifind-ds-index-mcp">指数板块</option>
+                  </select>
+                </Field>
+                <Field label="iFinD MCP Key">
+                  <input className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" placeholder={config?.ifind_api_key_configured ? "留空表示沿用已保存 Key" : "请输入 iFinD MCP Key"} value={draft.ifind_api_key} onChange={(event) => setDraft({ ...draft, ifind_api_key: event.target.value })} />
+                </Field>
+                <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+                  <div className="text-xs font-semibold text-slate-500">Key 来源</div>
+                  <div className="mt-1 text-sm font-black text-slate-950">{config?.ifind_api_key_source ?? "未读取"}</div>
+                  <div className="mt-1 text-xs text-slate-500">{config?.ifind_api_key_preview || "未配置"}</div>
+                </div>
               </div>
             </Panel>
           </section>

@@ -19,6 +19,11 @@ export type RuntimeSettingsConfig = {
   tickflow_api_key_preview: string;
   tickflow_api_key_source: "runtime" | "env" | "none";
   tickflow_base_url: string;
+  ifind_api_key_configured: boolean;
+  ifind_api_key_preview: string;
+  ifind_api_key_source: "runtime" | "env" | "none";
+  ifind_base_url: string;
+  ifind_service_id: "hexin-ifind-ds-stock-mcp" | "hexin-ifind-ds-news-mcp" | "hexin-ifind-ds-index-mcp";
   provider_timeout_seconds: number;
   runtime_config_path: string;
 };
@@ -30,6 +35,8 @@ export type RuntimeSettingsResponse = {
     kline_provider?: "tickflow";
     quote_provider?: "tickflow";
     tickflow_base_url?: string | null;
+    ifind_base_url?: string | null;
+    ifind_service_id?: "hexin-ifind-ds-stock-mcp" | "hexin-ifind-ds-news-mcp" | "hexin-ifind-ds-index-mcp" | null;
     provider_timeout_seconds?: number | null;
   };
 };

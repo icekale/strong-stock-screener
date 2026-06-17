@@ -41,6 +41,9 @@ export async function saveRuntimeSettings(payload: {
   quote_provider: "tickflow";
   tickflow_api_key?: string | null;
   tickflow_base_url: string;
+  ifind_api_key?: string | null;
+  ifind_base_url: string;
+  ifind_service_id: "hexin-ifind-ds-stock-mcp" | "hexin-ifind-ds-news-mcp" | "hexin-ifind-ds-index-mcp";
   provider_timeout_seconds: number;
 }): Promise<RuntimeSettingsResponse> {
   const response = await fetch(`${API_BASE_URL}/api/settings`, {

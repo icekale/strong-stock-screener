@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from time import perf_counter
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -7,19 +8,71 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
-from app.models import StrongStockDataUnavailable, StrongStockSourceStatus
-from app.providers.baidu_kline import BaiduKlineProvider
+from app.models import StockKlineResponse, StrongStockDataUnavailable, StrongStockSourceStatus
+from app.providers.news_risk import EastmoneyNewsRiskProvider
+from app.providers.recent_limit_up_candidates import RecentLimitUpCandidateProvider
 from app.providers.thsdk_candidates import ThsdkCandidateProvider
-from app.providers.tickflow import TickFlowQuoteProvider
-from app.providers.watchlist import WatchlistSnapshot
+from app.providers.tickflow import TickFlowDailyKlineProvider, TickFlowQuoteProvider
+from app.providers.watchlist import (
+    WatchlistItem,
+    WatchlistSnapshot,
+    parse_watchlist_text,
+    upsert_watchlist_item,
+)
+from app.services.intraday import IntradayMonitor
 from app.services.runs import RunStore
+from app.services.runtime_settings import (
+    SettingsUpdate,
+    effective_runtime_settings,
+    load_runtime_settings,
+    public_settings_payload,
+    save_runtime_settings,
+)
 from app.services.screener import StrongStockScreener
+
+
+class ScreenFiltersRequest(BaseModel):
+    min_market_cap_billion: float | None = Field(default=None, ge=0)
+    max_market_cap_billion: float | None = Field(default=None, ge=0)
+    kdj_j_max: float | None = None
+    industries: list[str] = Field(default_factory=list, max_length=20)
+    market_types: list[str] = Field(default_factory=list, max_length=4)
 
 
 class ScreenRunRequest(BaseModel):
     trade_date: str
     limit: int = Field(default=30, ge=1, le=100)
     scan_limit: int = Field(default=40, ge=1, le=300)
+    filters: ScreenFiltersRequest = Field(default_factory=ScreenFiltersRequest)
+
+
+class IntradaySnapshotRequest(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=100)
+    watchlist_text: str = ""
+    use_watchlist_pool: bool = False
+    limit: int = Field(default=30, ge=1, le=100)
+    period: str = Field(default="1m", pattern=r"^(1m|5m|10m|15m|30m|60m)$")
+    count: int = Field(default=120, ge=1, le=240)
+
+
+class WatchlistPoolRequest(BaseModel):
+    content: str = ""
+
+
+class WatchlistPoolItemRequest(BaseModel):
+    symbol: str
+    name: str | None = None
+    industry: str | None = None
+    group: str = "自选"
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    note: str | None = None
+
+
+class HealthProbe(BaseModel):
+    name: str
+    status: str
+    latency_ms: int
+    detail: str
 
 
 def _cors_allow_origins() -> list[str]:
@@ -47,9 +100,11 @@ def data_source_status() -> dict[str, object]:
     candidate_provider = _candidate_provider()
     kline_provider = _kline_provider()
     quote_provider = _quote_provider()
+    news_risk_provider = _news_risk_provider()
     candidate_status = candidate_provider.status() if hasattr(candidate_provider, "status") else None
     kline_status = kline_provider.status() if hasattr(kline_provider, "status") else None
     quote_status = quote_provider.status() if hasattr(quote_provider, "status") else None
+    news_risk_status = news_risk_provider.status() if hasattr(news_risk_provider, "status") else None
     return {
         "items": [
             (
@@ -76,7 +131,60 @@ def data_source_status() -> dict[str, object]:
                     detail="报价源未配置",
                 )
             ).model_dump(mode="json"),
+            (
+                news_risk_status
+                or StrongStockSourceStatus(
+                    source=getattr(news_risk_provider, "source_name", "news_risk_provider"),
+                    status="disabled",
+                    detail="新闻风险源未配置",
+                )
+            ).model_dump(mode="json"),
         ]
+    }
+
+
+@app.get("/api/settings")
+def get_runtime_settings() -> dict[str, object]:
+    return {
+        "config": public_settings_payload(_effective_settings()),
+        "saved": _public_saved_settings(),
+    }
+
+
+@app.put("/api/settings")
+def update_runtime_settings(request: SettingsUpdate) -> dict[str, object]:
+    save_runtime_settings(_runtime_config_path(), request)
+    return {
+        "config": public_settings_payload(_effective_settings()),
+        "saved": _public_saved_settings(),
+    }
+
+
+@app.get("/api/settings/health")
+def settings_health(symbol: str = "605289.SH") -> dict[str, object]:
+    quote_provider = _quote_provider()
+    return {
+        "config": public_settings_payload(_effective_settings()),
+        "probes": [
+            _probe(
+                getattr(_candidate_provider(), "source_name", "候选池"),
+                lambda: _candidate_provider().status()
+                if hasattr(_candidate_provider(), "status")
+                else StrongStockSourceStatus(source="候选池", status="success", detail="候选池源已配置"),
+            ).model_dump(mode="json"),
+            _probe(
+                getattr(_kline_provider(), "source_name", "K线"),
+                lambda: _kline_provider().get_klines(symbol, count=5),
+            ).model_dump(mode="json"),
+            _probe(
+                "TickFlow 实时行情",
+                lambda: quote_provider.get_quotes([symbol]),
+            ).model_dump(mode="json"),
+            _probe(
+                "TickFlow 当日分钟线",
+                lambda: quote_provider.get_intraday_bars([symbol], period="1m", count=5),
+            ).model_dump(mode="json"),
+        ],
     }
 
 
@@ -85,12 +193,14 @@ def create_screen_run(request: ScreenRunRequest) -> dict[str, object]:
     screener = StrongStockScreener(
         candidate_provider=_candidate_provider(),
         kline_provider=_kline_provider(),
+        news_risk_provider=_news_risk_provider(),
     )
     try:
         result = screener.screen(
             trade_date=request.trade_date,
             limit=request.limit,
             scan_limit=request.scan_limit,
+            filters=request.filters,
             watchlist_snapshot=_watchlist_snapshot(),
         )
     except StrongStockDataUnavailable as exc:
@@ -107,26 +217,139 @@ def get_latest_screen_run() -> dict[str, object]:
     return result.model_dump(mode="json")
 
 
+@app.get("/api/stocks/{symbol}/kline")
+def get_stock_kline(symbol: str, count: int = 220) -> dict[str, object]:
+    kline_provider = _kline_provider()
+    bounded_count = max(1, min(count, 260))
+    try:
+        bars = kline_provider.get_klines(symbol, count=bounded_count)[-bounded_count:]
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"K线获取失败: {exc.__class__.__name__}") from exc
+    return StockKlineResponse(
+        symbol=symbol,
+        source_status=StrongStockSourceStatus(
+            source=getattr(kline_provider, "source_name", "K线源"),
+            status="success",
+            detail=f"返回 {len(bars)} 条日K",
+        ),
+        bars=bars,
+    ).model_dump(mode="json")
+
+
+@app.post("/api/intraday/snapshot")
+def create_intraday_snapshot(request: IntradaySnapshotRequest) -> dict[str, object]:
+    symbols = request.symbols
+    name_map: dict[str, str] = {}
+    industry_map: dict[str, str] = {}
+    group_map: dict[str, str] = {}
+    tag_map: dict[str, list[str]] = {}
+    watchlist_items = _intraday_watchlist_items(request)
+    if watchlist_items:
+        symbols = [item.symbol for item in watchlist_items]
+        name_map = {item.symbol: item.name or item.symbol for item in watchlist_items}
+        industry_map = {item.symbol: item.industry for item in watchlist_items if item.industry}
+        group_map = {item.symbol: item.group for item in watchlist_items if item.group}
+        tag_map = {item.symbol: item.tags for item in watchlist_items if item.tags}
+    if not symbols:
+        latest = _run_store().load_latest()
+        if latest is None:
+            raise HTTPException(status_code=404, detail="no screen run")
+        symbols = [item.symbol for item in latest.items]
+        name_map = {item.symbol: item.name for item in latest.items}
+        industry_map = {item.symbol: item.industry for item in latest.items if item.industry}
+
+    monitor = IntradayMonitor(quote_provider=_quote_provider())
+    try:
+        result = monitor.snapshot(
+            symbols=symbols,
+            name_map=name_map,
+            industry_map=industry_map,
+            group_map=group_map,
+            tag_map=tag_map,
+            limit=request.limit,
+            period=request.period,
+            count=request.count,
+        )
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return result.model_dump(mode="json")
+
+
+@app.get("/api/watchlist/pool")
+def get_watchlist_pool() -> dict[str, object]:
+    content = _read_watchlist_pool()
+    items = parse_watchlist_text(content)
+    return {
+        "content": content,
+        "items": [item.model_dump(mode="json") for item in items],
+    }
+
+
+@app.put("/api/watchlist/pool")
+def update_watchlist_pool(request: WatchlistPoolRequest) -> dict[str, object]:
+    path = _watchlist_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = request.content.strip()
+    path.write_text(content, encoding="utf-8")
+    items = parse_watchlist_text(content)
+    return {
+        "content": content,
+        "items": [item.model_dump(mode="json") for item in items],
+    }
+
+
+@app.post("/api/watchlist/pool/items")
+def add_watchlist_pool_item(request: WatchlistPoolItemRequest) -> dict[str, object]:
+    path = _watchlist_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    content = upsert_watchlist_item(
+        _read_watchlist_pool(),
+        WatchlistItem(
+            symbol=request.symbol,
+            name=request.name,
+            industry=request.industry,
+            group=request.group,
+            tags=request.tags,
+            note=request.note,
+        ),
+    )
+    path.write_text(content, encoding="utf-8")
+    items = parse_watchlist_text(content)
+    return {
+        "content": content,
+        "items": [item.model_dump(mode="json") for item in items],
+    }
+
+
 def _candidate_provider() -> object:
     injected = getattr(app.state, "candidate_provider", None)
     if injected is not None:
         return injected
-    return ThsdkCandidateProvider.from_installed_package()
+    settings = _effective_settings()
+    if settings.candidate_provider == "thsdk":
+        return ThsdkCandidateProvider.from_installed_package()
+    return RecentLimitUpCandidateProvider.from_akshare()
 
 
 def _kline_provider() -> object:
     injected = getattr(app.state, "kline_provider", None)
     if injected is not None:
         return injected
-    settings = get_settings()
-    return BaiduKlineProvider(timeout_seconds=settings.provider_timeout_seconds)
+    settings = _effective_settings()
+    return TickFlowDailyKlineProvider(
+        api_key=settings.tickflow_api_key,
+        base_url=settings.tickflow_base_url,
+        timeout_seconds=settings.provider_timeout_seconds,
+    )
 
 
 def _quote_provider() -> object:
     injected = getattr(app.state, "quote_provider", None)
     if injected is not None:
         return injected
-    settings = get_settings()
+    settings = _effective_settings()
     return TickFlowQuoteProvider(
         api_key=settings.tickflow_api_key,
         base_url=settings.tickflow_base_url,
@@ -134,8 +357,27 @@ def _quote_provider() -> object:
     )
 
 
+def _news_risk_provider() -> object:
+    injected = getattr(app.state, "news_risk_provider", None)
+    if injected is not None:
+        return injected
+    return EastmoneyNewsRiskProvider.from_akshare()
+
+
 def _watchlist_snapshot() -> WatchlistSnapshot | None:
     return getattr(app.state, "watchlist_snapshot", None)
+
+
+def _intraday_watchlist_items(request: IntradaySnapshotRequest) -> list[WatchlistItem]:
+    if request.watchlist_text.strip():
+        return parse_watchlist_text(request.watchlist_text)
+    if request.use_watchlist_pool:
+        content = _read_watchlist_pool()
+        if content:
+            return parse_watchlist_text(content)
+        snapshot = _watchlist_snapshot()
+        return snapshot.items if snapshot is not None else []
+    return []
 
 
 def _run_store() -> RunStore:
@@ -143,3 +385,64 @@ def _run_store() -> RunStore:
     if runs_dir is not None:
         return RunStore(Path(runs_dir))
     return RunStore(get_settings().runs_dir)
+
+
+def _watchlist_path() -> Path:
+    injected = getattr(app.state, "watchlist_path", None)
+    if injected is not None:
+        return Path(injected)
+    return get_settings().watchlist_path
+
+
+def _runtime_config_path() -> Path:
+    injected = getattr(app.state, "runtime_config_path", None)
+    if injected is not None:
+        return Path(injected)
+    return get_settings().data_dir / "runtime_config.json"
+
+
+def _effective_settings():
+    return effective_runtime_settings(get_settings(), _runtime_config_path())
+
+
+def _public_saved_settings() -> dict[str, object]:
+    return load_runtime_settings(_runtime_config_path()).model_dump(
+        mode="json",
+        exclude={"tickflow_api_key"},
+        exclude_none=True,
+    )
+
+
+def _read_watchlist_pool() -> str:
+    path = _watchlist_path()
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8").strip()
+
+
+def _probe(name: str, action) -> HealthProbe:
+    started = perf_counter()
+    try:
+        result = action()
+        latency_ms = round((perf_counter() - started) * 1000)
+        if isinstance(result, StrongStockSourceStatus):
+            return HealthProbe(
+                name=result.source,
+                status=result.status,
+                latency_ms=latency_ms,
+                detail=result.detail,
+            )
+        size = len(result) if hasattr(result, "__len__") else 1
+        return HealthProbe(
+            name=name,
+            status="success",
+            latency_ms=latency_ms,
+            detail=f"返回 {size} 条数据",
+        )
+    except Exception as exc:
+        return HealthProbe(
+            name=name,
+            status="failed",
+            latency_ms=round((perf_counter() - started) * 1000),
+            detail=str(exc),
+        )

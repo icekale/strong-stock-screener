@@ -9,5 +9,5 @@ node_modules/
 .next/
 dist/
 data/
+docker-compose.override.yml
 *.tsbuildinfo
-

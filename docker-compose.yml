@@ -1,0 +1,37 @@
+services:
+  api:
+    build:
+      context: ./apps/api
+    container_name: strong-stock-screener-api
+    env_file:
+      - .env
+    environment:
+      STRONG_STOCK_DATA_DIR: /app/data
+      STRONG_STOCK_CORS_ALLOW_ORIGINS: http://localhost:3110,http://127.0.0.1:3110
+    ports:
+      - "8010:8010"
+    volumes:
+      - strong-stock-data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8010/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  web:
+    build:
+      context: ./apps/web
+      args:
+        NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL: http://localhost:8010
+    container_name: strong-stock-screener-web
+    depends_on:
+      api:
+        condition: service_healthy
+    environment:
+      NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL: http://localhost:8010
+    ports:
+      - "3110:3110"
+
+volumes:
+  strong-stock-data:

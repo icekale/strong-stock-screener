@@ -21,6 +21,7 @@ def analyze_screening_item(
         return StrongStockScreeningItem(
             symbol=candidate.symbol,
             name=candidate.name,
+            industry=candidate.industry,
             status="data_incomplete",
             score=0,
             rule_hits=list(candidate.limit_up_evidence),
@@ -38,7 +39,7 @@ def analyze_screening_item(
     recent200 = enriched[-200:]
     score = 0
     rule_hits = list(candidate.limit_up_evidence or ["20日内涨停"])
-    risk_flags: list[str] = []
+    risk_flags: list[str] = list(candidate.abnormal_flags)
 
     red_body, green_body, up_volume, down_volume = _body_and_volume_metrics(recent20)
     if red_body > green_body:
@@ -84,6 +85,7 @@ def analyze_screening_item(
         score -= 15
 
     score = max(0, min(100, round(score)))
+    kdj_j = _kdj_j(enriched[-9:])
     if "放量滞涨" in risk_flags:
         status: ScreenStatus = "reduce_risk"
     elif ma5_down or latest.close < (latest.ma10 or latest.close):
@@ -96,6 +98,7 @@ def analyze_screening_item(
     return StrongStockScreeningItem(
         symbol=candidate.symbol,
         name=candidate.name,
+        industry=candidate.industry,
         status=status,
         score=score,
         rule_hits=_dedupe(rule_hits),
@@ -108,6 +111,7 @@ def analyze_screening_item(
             "ma20": latest.ma20,
             "volume_ratio_5d": round(volume_ratio_5d, 2),
             "is_200d_high": is_200d_high,
+            "kdj_j": round(kdj_j, 2) if kdj_j is not None else None,
         },
         source_trace=[trade_date],
     )
@@ -122,6 +126,7 @@ def analyze_watchlist_risk(
         return StrongStockRiskItem(
             symbol=candidate.symbol,
             name=candidate.name,
+            industry=candidate.industry,
             risk_action="hold_watch",
             risk_flags=["K线不足20日"],
             intraday_notes=_intraday_notes("wait_pullback"),
@@ -147,6 +152,7 @@ def analyze_watchlist_risk(
     return StrongStockRiskItem(
         symbol=candidate.symbol,
         name=candidate.name,
+        industry=candidate.industry,
         risk_action=action,
         risk_flags=_dedupe(risk_flags),
         intraday_notes=_intraday_notes(action),
@@ -188,6 +194,20 @@ def _body_and_volume_metrics(bars: list[KlineBar]) -> tuple[float, float, float,
         mean(up_volumes) if up_volumes else 0.0,
         mean(down_volumes) if down_volumes else 0.0,
     )
+
+
+def _kdj_j(bars: list[KlineBar]) -> float | None:
+    if not bars:
+        return None
+    highest = max(bar.high for bar in bars)
+    lowest = min(bar.low for bar in bars)
+    if highest <= lowest:
+        return None
+    latest = bars[-1]
+    rsv = (latest.close - lowest) / (highest - lowest) * 100
+    k = (2 / 3) * 50 + (1 / 3) * rsv
+    d = (2 / 3) * 50 + (1 / 3) * k
+    return 3 * k - 2 * d
 
 
 def _intraday_notes(status_or_action: str) -> list[str]:

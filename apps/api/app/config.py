@@ -8,8 +8,8 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     app_env: str = "development"
     data_dir: Path = Path("./data")
-    candidate_provider: str = "thsdk"
-    kline_provider: str = "baidu"
+    candidate_provider: str = "recent_limit_up"
+    kline_provider: str = "tickflow"
     quote_provider: str = "tickflow"
     tickflow_api_key: str = Field(
         default="",
@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     @property
     def runs_dir(self) -> Path:
         return self.data_dir / "runs"
+
+    @property
+    def watchlist_path(self) -> Path:
+        return self.data_dir / "watchlist.txt"
 
 
 @lru_cache

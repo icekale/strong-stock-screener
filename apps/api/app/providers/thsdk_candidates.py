@@ -24,7 +24,7 @@ class ThsdkCandidateProvider:
     def get_candidates(self, trade_date: str) -> list[StrongStockCandidate]:
         if self.client_factory is None:
             raise StrongStockDataUnavailable("THSDK 未安装，无法查询20日内涨停候选池")
-        query = "20日内有过涨停，非ST，A股"
+        query = "20日内有过涨停，非ST，A股，显示所属行业，显示近期是否触发严重异动"
         with self.client_factory() as ths:
             response = ths.wencai_nlp(query)
         if not getattr(response, "success", False):
@@ -65,8 +65,11 @@ def parse_thsdk_candidate_rows(rows: object) -> list[StrongStockCandidate]:
             StrongStockCandidate(
                 symbol=symbol,
                 name=name,
+                industry=_industry(row),
                 limit_up_evidence=["20日内涨停"],
                 board_note=_limit_up_note(row),
+                abnormal_status=_abnormal_status(row),
+                abnormal_flags=_abnormal_flags(row),
             )
         )
     return candidates
@@ -110,3 +113,36 @@ def _limit_up_note(row: dict[str, Any]) -> str | None:
         if "涨停" in str(key) and value not in (None, ""):
             return f"{key}: {value}"
     return None
+
+
+def _industry(row: dict[str, Any]) -> str | None:
+    return _text_value(row, "所属同花顺行业", "所属行业", "行业", "申万行业") or None
+
+
+def _abnormal_flags(row: dict[str, Any]) -> list[str]:
+    flags: list[str] = []
+    for key, value in row.items():
+        key_text = str(key)
+        if "异动" not in key_text:
+            continue
+        value_text = str(value).strip()
+        if value in (None, "", 0, "0", "否", "无", "False", False):
+            continue
+        if "严重" in key_text or "严重" in value_text:
+            flags.append(f"{key_text}: {value_text}")
+    return flags
+
+
+def _abnormal_status(row: dict[str, Any]) -> str:
+    saw_abnormal_field = False
+    for key, value in row.items():
+        key_text = str(key)
+        if "异动" not in key_text:
+            continue
+        saw_abnormal_field = True
+        value_text = str(value).strip()
+        if value not in (None, "", 0, "0", "否", "无", "False", False) and (
+            "严重" in key_text or "严重" in value_text
+        ):
+            return "triggered"
+    return "clear" if saw_abnormal_field else "unknown"

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections import Counter
 from typing import Protocol
 
 from app.models import (
     KlineBar,
+    RiskCheckStatus,
     StrongStockCandidate,
     StrongStockDataUnavailable,
     StrongStockRiskItem,
@@ -13,6 +15,15 @@ from app.models import (
 )
 from app.providers.watchlist import WatchlistSnapshot
 from app.rules import analyze_screening_item, analyze_watchlist_risk
+from app.providers.news_risk import NegativeNewsRisk
+
+
+class ScreeningFilters(Protocol):
+    min_market_cap_billion: float | None
+    max_market_cap_billion: float | None
+    kdj_j_max: float | None
+    industries: list[str]
+    market_types: list[str]
 
 
 class CandidateProvider(Protocol):
@@ -29,36 +40,56 @@ class KlineProvider(Protocol):
         ...
 
 
+class NewsRiskProvider(Protocol):
+    source_name: str
+
+    def get_negative_news_risk(self, symbol: str) -> NegativeNewsRisk:
+        ...
+
+
 class StrongStockScreener:
     def __init__(
         self,
         candidate_provider: CandidateProvider,
         kline_provider: KlineProvider,
+        news_risk_provider: NewsRiskProvider | None = None,
     ) -> None:
         self.candidate_provider = candidate_provider
         self.kline_provider = kline_provider
+        self.news_risk_provider = news_risk_provider
 
     def screen(
         self,
         trade_date: str,
         limit: int,
         scan_limit: int,
+        filters: ScreeningFilters | None = None,
         watchlist_snapshot: WatchlistSnapshot | None = None,
     ) -> StrongStockScreeningResult:
         candidates = self.candidate_provider.get_candidates(trade_date)
         if not candidates:
             raise StrongStockDataUnavailable("20日内涨停候选池为空")
-        candidates_to_scan = candidates[:scan_limit]
+        candidates_before_filter = len(candidates)
+        filtered_candidates = _filter_candidates(candidates, filters)
+        stable_candidates = _candidates_for_scan(self.candidate_provider, filtered_candidates)
+        candidates_to_scan = stable_candidates[:scan_limit]
+        industry_context = _industry_context(candidates_to_scan)
 
         source_status = [
             StrongStockSourceStatus(
-                source=self.candidate_provider.source_name,
-                status="success",
-                detail=f"返回 {len(candidates)} 只 20 日涨停候选，本次分析 {len(candidates_to_scan)}/{len(candidates)}",
-            )
-        ]
+                    source=self.candidate_provider.source_name,
+                    status="success",
+                    detail=_candidate_status_detail(
+                        total=candidates_before_filter,
+                        filtered=len(filtered_candidates),
+                        scanned=len(candidates_to_scan),
+                        kdj_j_max=filters.kdj_j_max if filters is not None else None,
+                    ),
+                )
+            ]
         items: list[StrongStockScreeningItem] = []
         failures = 0
+        kdj_filtered = 0
         for candidate in candidates_to_scan:
             try:
                 bars = self.kline_provider.get_klines(candidate.symbol, count=220)
@@ -66,8 +97,26 @@ class StrongStockScreener:
                 failures += 1
                 continue
             item = analyze_screening_item(candidate, bars, trade_date=trade_date)
+            if not _passes_kdj_filter(item, filters):
+                kdj_filtered += 1
+                continue
             if item.status != "data_incomplete":
-                items.append(item)
+                items.append(
+                    _apply_candidate_risk_checks(
+                        _apply_industry_strength(item, industry_context),
+                        candidate=candidate,
+                        news_risk_provider=self.news_risk_provider,
+                    )
+                )
+
+        if kdj_filtered:
+            source_status[0] = source_status[0].model_copy(
+                update={
+                    "detail": f"{source_status[0].detail}；KDJ-J<{filters.kdj_j_max:g} 过滤 {kdj_filtered} 只"
+                    if filters is not None and filters.kdj_j_max is not None
+                    else source_status[0].detail
+                }
+            )
 
         if failures:
             source_status.append(
@@ -86,7 +135,7 @@ class StrongStockScreener:
                 )
             )
 
-        ranked = sorted(items, key=lambda item: (item.status == "focus", item.score), reverse=True)[:limit]
+        ranked = sorted(items, key=_screening_rank_key)[:limit]
         return StrongStockScreeningResult(
             trade_date=trade_date,
             source_status=source_status,
@@ -107,11 +156,183 @@ class StrongStockScreener:
                 bars = self.kline_provider.get_klines(item.symbol, count=220)
             except Exception:
                 continue
+            candidate = StrongStockCandidate(
+                symbol=item.symbol,
+                name=item.name or item.symbol,
+                industry=item.industry,
+            )
             risks.append(
-                analyze_watchlist_risk(
-                    StrongStockCandidate(symbol=item.symbol, name=item.name or item.symbol),
-                    bars,
-                    trade_date=trade_date,
+                _apply_candidate_risk_checks(
+                    analyze_watchlist_risk(candidate, bars, trade_date=trade_date),
+                    candidate=candidate,
+                    news_risk_provider=self.news_risk_provider,
                 )
             )
         return risks
+
+
+def _industry_context(candidates: list[StrongStockCandidate]) -> dict[str, dict[str, int]]:
+    counts = Counter(candidate.industry for candidate in candidates if candidate.industry)
+    ranked = sorted(counts.items(), key=lambda value: (-value[1], value[0]))
+    return {
+        industry: {"count": count, "rank": index + 1}
+        for index, (industry, count) in enumerate(ranked)
+    }
+
+
+def _filter_candidates(
+    candidates: list[StrongStockCandidate],
+    filters: ScreeningFilters | None,
+) -> list[StrongStockCandidate]:
+    if filters is None:
+        return candidates
+    return [candidate for candidate in candidates if _passes_candidate_filters(candidate, filters)]
+
+
+def _passes_candidate_filters(candidate: StrongStockCandidate, filters: ScreeningFilters) -> bool:
+    if filters.min_market_cap_billion is not None and not _market_cap_matches(
+        candidate,
+        minimum=filters.min_market_cap_billion * 100_000_000,
+        maximum=None,
+    ):
+        return False
+    if filters.max_market_cap_billion is not None and not _market_cap_matches(
+        candidate,
+        minimum=None,
+        maximum=filters.max_market_cap_billion * 100_000_000,
+    ):
+        return False
+    if filters.industries and (candidate.industry or "") not in filters.industries:
+        return False
+    if filters.market_types and _market_type(candidate.symbol) not in set(filters.market_types):
+        return False
+    return True
+
+
+def _market_cap_matches(
+    candidate: StrongStockCandidate,
+    minimum: float | None,
+    maximum: float | None,
+) -> bool:
+    market_cap = candidate.total_market_cap_cny
+    if market_cap is None:
+        return False
+    if minimum is not None and market_cap < minimum:
+        return False
+    if maximum is not None and market_cap > maximum:
+        return False
+    return True
+
+
+def _market_type(symbol: str) -> str:
+    code = symbol.split(".", 1)[0]
+    if code.startswith("300"):
+        return "gem"
+    if code.startswith("688"):
+        return "star"
+    if symbol.endswith(".BJ") or code.startswith(("4", "8")):
+        return "bj"
+    return "main"
+
+
+def _passes_kdj_filter(
+    item: StrongStockScreeningItem,
+    filters: ScreeningFilters | None,
+) -> bool:
+    if filters is None or filters.kdj_j_max is None:
+        return True
+    value = item.metrics.get("kdj_j")
+    return isinstance(value, (int, float)) and value < filters.kdj_j_max
+
+
+def _candidate_status_detail(
+    total: int,
+    filtered: int,
+    scanned: int,
+    kdj_j_max: float | None,
+) -> str:
+    detail = f"返回 {total} 只 20 日涨停候选"
+    if filtered != total:
+        detail = f"{detail}，筛选后 {filtered}/{total}"
+    detail = f"{detail}，本次分析 {scanned}/{filtered}"
+    if kdj_j_max is not None:
+        detail = f"{detail}，KDJ-J<{kdj_j_max:g}"
+    return detail
+
+
+def _candidates_for_scan(
+    candidate_provider: CandidateProvider,
+    candidates: list[StrongStockCandidate],
+) -> list[StrongStockCandidate]:
+    if getattr(candidate_provider, "preserve_candidate_order", False):
+        return candidates
+    return sorted(candidates, key=lambda candidate: candidate.symbol)
+
+
+def _screening_rank_key(item: StrongStockScreeningItem) -> tuple[int, int, str]:
+    focus_rank = 0 if item.status == "focus" else 1
+    return (focus_rank, -item.score, item.symbol)
+
+
+def _apply_industry_strength(
+    item: StrongStockScreeningItem,
+    industry_context: dict[str, dict[str, int]],
+) -> StrongStockScreeningItem:
+    if not item.industry or item.industry not in industry_context:
+        return item.model_copy(update={"industry_strength": None, "industry_score": 0, "industry_rank": None})
+
+    context = industry_context[item.industry]
+    count = context["count"]
+    if count >= 3:
+        strength = "strong"
+        score = 15
+        notes = [f"同板块20日涨停候选 {count} 只，板块强度加分"]
+        rule_hits = [*item.rule_hits, "板块强度加分"]
+    elif count == 2:
+        strength = "neutral"
+        score = 6
+        notes = [f"同板块20日涨停候选 {count} 只，板块有跟随"]
+        rule_hits = item.rule_hits
+    else:
+        strength = "neutral"
+        score = 0
+        notes = ["板块集中度一般"]
+        rule_hits = item.rule_hits
+
+    return item.model_copy(
+        update={
+            "industry_strength": strength,
+            "industry_score": score,
+            "industry_rank": context["rank"],
+            "industry_notes": notes,
+            "rule_hits": rule_hits,
+            "score": max(0, min(100, item.score + score)),
+        }
+    )
+
+
+def _apply_candidate_risk_checks(
+    item: StrongStockScreeningItem | StrongStockRiskItem,
+    candidate: StrongStockCandidate,
+    news_risk_provider: NewsRiskProvider | None,
+) -> StrongStockScreeningItem | StrongStockRiskItem:
+    news_risk = (
+        news_risk_provider.get_negative_news_risk(candidate.symbol)
+        if news_risk_provider is not None
+        else NegativeNewsRisk(status="unknown", flags=[])
+    )
+    return item.model_copy(
+        update={
+            "severe_abnormal_warning": _severe_abnormal_status(candidate),
+            "negative_news_status": news_risk.status,
+            "negative_news_flags": news_risk.flags,
+        }
+    )
+
+
+def _severe_abnormal_status(candidate: StrongStockCandidate) -> RiskCheckStatus:
+    if candidate.abnormal_status != "unknown":
+        return candidate.abnormal_status
+    if candidate.abnormal_flags:
+        return "triggered"
+    return "unknown"

@@ -101,6 +101,19 @@ export type StockKlineResponse = {
   bars: KlineBar[];
 };
 
+export type StockResearchResponse = {
+  symbol: string;
+  source_status: StrongStockSourceStatus[];
+  profile: Record<string, unknown>;
+  valuation: Record<string, unknown>;
+  financials: Record<string, unknown>;
+  events: Array<Record<string, unknown>>;
+  news: Array<Record<string, unknown>>;
+  notices: Array<Record<string, unknown>>;
+  sector: Record<string, unknown>;
+  generated_at: string;
+};
+
 export type WatchlistRiskItem = {
   symbol: string;
   name: string;

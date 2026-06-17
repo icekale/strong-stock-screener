@@ -1,12 +1,12 @@
 "use client";
 
 import { use, useEffect, useMemo, useState } from "react";
-import { getLatestScreenRun, getStockKline } from "../../../lib/api";
+import { getLatestScreenRun, getStockKline, getStockResearch } from "../../../lib/api";
 import { defaultKlineWindowSize, nextKlineWindowSize, sliceKlineWindow } from "../../../lib/klineWindow";
 import { formatKlineHoverDate, resolveCurrentPriceLabelX, resolveKlineHoverIndex } from "../../../lib/klineHover";
-import type { KlineBar, StockKlineResponse, StrongStockScreeningItem } from "../../../lib/types";
+import type { KlineBar, StockKlineResponse, StockResearchResponse, StrongStockScreeningItem } from "../../../lib/types";
 
-type ChartTab = "day" | "week" | "info" | "strategy" | "concept";
+type ChartTab = "day" | "week" | "info" | "strategy" | "concept" | "research";
 type MovingAverageField = "ma5" | "ma10" | "ma20" | "ma60";
 
 type StockListItem = {
@@ -30,6 +30,7 @@ const CHART_TABS: Array<{ key: ChartTab; label: string }> = [
   { key: "info", label: "信息" },
   { key: "strategy", label: "战法" },
   { key: "concept", label: "概念" },
+  { key: "research", label: "研究" },
 ];
 
 const MOVING_AVERAGES: Array<{ color: string; field: MovingAverageField; label: string; period: number }> = [
@@ -43,10 +44,13 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
   const { symbol: rawSymbol } = use(params);
   const symbol = decodeURIComponent(rawSymbol);
   const [data, setData] = useState<StockKlineResponse | null>(null);
+  const [research, setResearch] = useState<StockResearchResponse | null>(null);
   const [screenItems, setScreenItems] = useState<StrongStockScreeningItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [researchLoading, setResearchLoading] = useState(true);
   const [listLoading, setListLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [researchError, setResearchError] = useState<string | null>(null);
   const [chartWindowSize, setChartWindowSize] = useState(120);
   const [activeChartTab, setActiveChartTab] = useState<ChartTab>("day");
   const [visibleMovingAverages, setVisibleMovingAverages] = useState<MovingAverageField[]>([
@@ -73,6 +77,32 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
       .finally(() => {
         if (!cancelled) {
           setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setResearchLoading(true);
+    setResearchError(null);
+    getStockResearch(symbol)
+      .then((response) => {
+        if (!cancelled) {
+          setResearch(response);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setResearch(null);
+          setResearchError(err instanceof Error ? err.message : "读取个股研究失败");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setResearchLoading(false);
         }
       });
     return () => {
@@ -211,6 +241,9 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
                       candidate={currentCandidate}
                       currentStock={currentStock}
                       quote={quote}
+                      research={research}
+                      researchError={researchError}
+                      researchLoading={researchLoading}
                       sameIndustryItems={stockList.filter(
                         (item) => item.industry && item.industry === currentStock?.industry,
                       )}
@@ -437,7 +470,7 @@ function QuoteSummary({
 
 function ChartTabs({ activeTab, onChange }: { activeTab: ChartTab; onChange: (tab: ChartTab) => void }) {
   return (
-    <div className="grid border-b border-slate-200 bg-slate-50 text-center text-sm font-black text-slate-500 md:grid-cols-5">
+    <div className="grid border-b border-slate-200 bg-slate-50 text-center text-sm font-black text-slate-500 md:grid-cols-6">
       {CHART_TABS.map((item) => (
         <button
           aria-pressed={activeTab === item.key}
@@ -648,6 +681,9 @@ function StockDetailPanel({
   candidate,
   currentStock,
   quote,
+  research,
+  researchError,
+  researchLoading,
   sameIndustryItems,
 }: {
   activeTab: ChartTab;
@@ -655,6 +691,9 @@ function StockDetailPanel({
   candidate: StrongStockScreeningItem | null;
   currentStock: StockListItem | null;
   quote: QuoteSnapshot | null;
+  research: StockResearchResponse | null;
+  researchError: string | null;
+  researchLoading: boolean;
   sameIndustryItems: StockListItem[];
 }) {
   const latest = bars[bars.length - 1] ?? null;
@@ -692,6 +731,18 @@ function StockDetailPanel({
     );
   }
 
+  if (activeTab === "research") {
+    return (
+      <ResearchPanel
+        candidate={candidate}
+        currentStock={currentStock}
+        error={researchError}
+        loading={researchLoading}
+        research={research}
+      />
+    );
+  }
+
   return (
     <div className="min-h-[520px] space-y-4 bg-white p-4">
       <div className="grid gap-3 md:grid-cols-3">
@@ -716,6 +767,148 @@ function StockDetailPanel({
         </div>
       </div>
     </div>
+  );
+}
+
+function ResearchPanel({
+  candidate,
+  currentStock,
+  error,
+  loading,
+  research,
+}: {
+  candidate: StrongStockScreeningItem | null;
+  currentStock: StockListItem | null;
+  error: string | null;
+  loading: boolean;
+  research: StockResearchResponse | null;
+}) {
+  if (loading) {
+    return (
+      <div className="flex min-h-[520px] items-center justify-center bg-white text-sm font-bold text-slate-500">
+        正在读取 iFinD 研究...
+      </div>
+    );
+  }
+
+  const sourceStatuses = research?.source_status ?? [];
+  const failedSources = sourceStatuses.filter((item) => item.status !== "success");
+  const sourceSummary =
+    failedSources.length > 0
+      ? failedSources.map((item) => `${item.source}: ${item.detail}`).join("；")
+      : sourceStatuses.length > 0
+        ? sourceStatuses.map((item) => item.source).join(" / ")
+        : "iFinD 研究状态待读取";
+
+  return (
+    <div className="min-h-[520px] space-y-4 bg-white p-4">
+      <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h3 className="text-sm font-black text-slate-950">iFinD 研究</h3>
+            <p className="mt-1 text-xs font-bold text-slate-500">
+              {error ?? sourceSummary}
+            </p>
+          </div>
+          <span className="inline-flex w-fit rounded-md bg-white px-2.5 py-1 text-xs font-black text-slate-600 ring-1 ring-slate-200">
+            不替代 TickFlow 行情
+          </span>
+        </div>
+      </div>
+
+      <div className="grid gap-3 xl:grid-cols-2">
+        <ResearchSection title="公司资料" payload={research?.profile ?? {}} />
+        <ResearchSection
+          title="财务估值"
+          payload={{ ...(research?.valuation ?? {}), ...(research?.financials ?? {}) }}
+        />
+        <ResearchSection
+          title="板块强度"
+          payload={{
+            所属行业: currentStock?.industry ?? "--",
+            筛选板块强度: candidate?.industry_strength ?? "--",
+            筛选行业得分: candidate ? candidate.industry_score : "--",
+            ...(research?.sector ?? {}),
+          }}
+        />
+        <ResearchRecordsSection
+          title="风险事件"
+          emptyText="暂无 iFinD 风险事件"
+          records={research?.events ?? []}
+          tone="amber"
+        />
+      </div>
+
+      <ResearchRecordsSection
+        title="公告新闻"
+        emptyText="暂无 iFinD 公告新闻"
+        records={[...(research?.notices ?? []), ...(research?.news ?? [])]}
+        tone="slate"
+      />
+    </div>
+  );
+}
+
+function ResearchSection({ payload, title }: { payload: Record<string, unknown>; title: string }) {
+  const entries = Object.entries(payload).filter(([, value]) => formatResearchValue(value) !== "--").slice(0, 10);
+  return (
+    <section className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+      <h3 className="mb-3 text-xs font-black text-slate-500">{title}</h3>
+      {entries.length > 0 ? (
+        <div className="grid gap-2 sm:grid-cols-2">
+          {entries.map(([key, value]) => (
+            <div className="min-w-0 rounded-md bg-white px-3 py-2 ring-1 ring-slate-100" key={key}>
+              <div className="truncate text-sm font-black text-slate-900">{formatResearchValue(value)}</div>
+              <div className="mt-1 truncate text-xs font-bold text-slate-400">{key}</div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="rounded-md border border-dashed border-slate-200 bg-white px-3 py-5 text-sm font-bold text-slate-400">
+          暂无{title}数据
+        </p>
+      )}
+    </section>
+  );
+}
+
+function ResearchRecordsSection({
+  emptyText,
+  records,
+  title,
+  tone,
+}: {
+  emptyText: string;
+  records: Array<Record<string, unknown>>;
+  title: string;
+  tone: "amber" | "slate";
+}) {
+  const markerClass = tone === "amber" ? "bg-amber-500" : "bg-slate-500";
+  return (
+    <section className="rounded-lg border border-slate-100 bg-slate-50 p-3">
+      <h3 className="mb-3 text-xs font-black text-slate-500">{title}</h3>
+      {records.length > 0 ? (
+        <div className="space-y-2">
+          {records.slice(0, 8).map((record, index) => (
+            <div className="rounded-md bg-white px-3 py-3 ring-1 ring-slate-100" key={`${title}-${index}`}>
+              <div className="flex items-start gap-2">
+                <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${markerClass}`} />
+                <div className="min-w-0">
+                  <p className="line-clamp-2 text-sm font-black text-slate-900">{recordTitle(record)}</p>
+                  <p className="mt-1 line-clamp-2 text-xs font-semibold leading-5 text-slate-500">
+                    {recordSummary(record)}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="rounded-md border border-dashed border-slate-200 bg-white px-3 py-5 text-sm font-bold text-slate-400">
+          {emptyText}
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -944,6 +1137,68 @@ function HoverDateBadge({ bar, chart, index }: { bar: KlineBar; chart: PriceChar
 
 function formatNullablePrice(value: number | null | undefined): string {
   return value === null || value === undefined ? "--" : formatPrice(value);
+}
+
+function formatResearchValue(value: unknown): string {
+  if (value === null || value === undefined) {
+    return "--";
+  }
+  if (typeof value === "string") {
+    return value || "--";
+  }
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value.toLocaleString("zh-CN") : "--";
+  }
+  if (typeof value === "boolean") {
+    return value ? "是" : "否";
+  }
+  if (Array.isArray(value)) {
+    return value.length > 0 ? value.map((item) => formatResearchValue(item)).filter((item) => item !== "--").join(" / ") : "--";
+  }
+  if (typeof value === "object") {
+    return "--";
+  }
+  return String(value);
+}
+
+function recordTitle(record: Record<string, unknown>): string {
+  const candidates = [record.title, record.标题, record.name, record.名称, record.summary, record.摘要];
+  for (const candidate of candidates) {
+    const formatted = formatResearchValue(candidate);
+    if (formatted !== "--") {
+      return formatted;
+    }
+  }
+  return "未命名记录";
+}
+
+function recordSummary(record: Record<string, unknown>): string {
+  const preferredKeys = [
+    "detail",
+    "内容",
+    "desc",
+    "description",
+    "summary",
+    "摘要",
+    "level",
+    "sentiment",
+    "sentiment_label",
+    "source",
+    "date",
+    "date_time",
+    "日期",
+    "发布时间",
+  ];
+  const values = preferredKeys.map((key) => record[key]).filter((value) => value !== undefined && value !== null);
+  if (values.length > 0) {
+    return values.map((value) => formatResearchValue(value)).filter((item) => item !== "--").join(" · ");
+  }
+  const fallback = Object.entries(record)
+    .filter(([key]) => !["title", "标题", "name", "名称", "summary", "摘要"].includes(key))
+    .slice(0, 4)
+    .map(([key, value]) => `${key}: ${formatResearchValue(value)}`)
+    .filter((item) => !item.endsWith(": --"));
+  return fallback.length > 0 ? fallback.join(" · ") : "暂无摘要";
 }
 
 type PriceChartModel = {

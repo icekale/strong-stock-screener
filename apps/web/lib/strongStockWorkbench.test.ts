@@ -41,6 +41,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(apiSource, /saveWatchlistPool/);
   assert.match(apiSource, /addWatchlistPoolItem/);
   assert.match(apiSource, /getStockKline/);
+  assert.match(apiSource, /getStockResearch/);
+  assert.match(typesSource, /StockResearchResponse/);
   assert.match(typesSource, /ifind_api_key_configured: boolean/);
   assert.match(typesSource, /ifind_service_id: "hexin-ifind-ds-stock-mcp" \| "hexin-ifind-ds-news-mcp" \| "hexin-ifind-ds-index-mcp"/);
   assert.match(apiSource, /ifind_api_key\?: string \| null/);
@@ -137,6 +139,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(watchlistPageSource, /saveWatchlistPool/);
   assert.match(watchlistPageSource, /addWatchlistPoolItem/);
   assert.match(stockPageSource, /getStockKline/);
+  assert.match(stockPageSource, /getStockResearch/);
+  assert.match(stockPageSource, /StockResearchResponse/);
   assert.match(stockPageSource, /KLineChart/);
   assert.match(stockPageSource, /StockListPanel/);
   assert.match(stockPageSource, /行情摘要/);
@@ -168,6 +172,13 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(stockPageSource, /visibleMovingAverages/);
   assert.match(stockPageSource, /MA60/);
   assert.match(stockPageSource, /activeChartTab/);
+  assert.match(stockPageSource, /研究/);
+  assert.match(stockPageSource, /iFinD 研究/);
+  assert.match(stockPageSource, /公司资料/);
+  assert.match(stockPageSource, /财务估值/);
+  assert.match(stockPageSource, /风险事件/);
+  assert.match(stockPageSource, /公告新闻/);
+  assert.match(stockPageSource, /板块强度/);
   assert.match(stockPageSource, /setActiveChartTab/);
   assert.match(stockPageSource, /buildMovingAverageBars/);
   assert.match(stockPageSource, /buildWeeklyBars/);

@@ -349,6 +349,27 @@ class FakeIfindHealthClient:
         return _Response()
 
 
+class FakeIfindResearchProvider:
+    def get_stock_research(self, symbol: str):
+        from app.models import StockResearchResponse
+
+        return StockResearchResponse(
+            symbol=symbol,
+            source_status=[
+                StrongStockSourceStatus(source="iFinD A股数据", status="success", detail="fake profile"),
+                StrongStockSourceStatus(source="iFinD 新闻公告", status="success", detail="fake news"),
+                StrongStockSourceStatus(source="iFinD 指数板块", status="success", detail="fake sector"),
+            ],
+            profile={"公司简称": "春秋电子", "所属行业": "消费电子"},
+            valuation={"市盈率TTM": "28.5", "市净率": "3.2"},
+            financials={"ROE": "12.4%", "营业收入同比": "18.1%"},
+            events=[{"title": "近期严重异动核查", "level": "warning"}],
+            news=[{"title": "春秋电子获机构关注", "sentiment": "neutral"}],
+            notices=[{"title": "春秋电子风险提示公告"}],
+            sector={"板块": "消费电子", "强度": "strong"},
+        )
+
+
 def _client(
     tmp_path: Path,
     candidate_provider: object | None = None,
@@ -515,6 +536,40 @@ def test_stock_kline_endpoint_returns_daily_bars(tmp_path: Path) -> None:
     assert payload["source_status"]["source"] == "fake K线"
     assert len(payload["bars"]) == 5
     assert payload["bars"][-1]["close"] > payload["bars"][0]["close"]
+
+
+def test_stock_research_reports_missing_ifind_key_without_breaking(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.get("/api/stocks/603890.SH/research")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "603890.SH"
+    assert payload["source_status"][0]["source"] == "iFinD MCP"
+    assert payload["source_status"][0]["status"] == "missing_key"
+    assert payload["profile"] == {}
+    assert payload["financials"] == {}
+    assert payload["news"] == []
+    assert payload["sector"] == {}
+
+
+def test_stock_research_returns_ifind_payload_from_provider(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    app.state.ifind_provider = FakeIfindResearchProvider()
+
+    response = client.get("/api/stocks/603890.SH/research")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "603890.SH"
+    assert payload["profile"]["公司简称"] == "春秋电子"
+    assert payload["valuation"]["市盈率TTM"] == "28.5"
+    assert payload["financials"]["ROE"] == "12.4%"
+    assert payload["events"][0]["level"] == "warning"
+    assert payload["news"][0]["title"] == "春秋电子获机构关注"
+    assert payload["notices"][0]["title"] == "春秋电子风险提示公告"
+    assert payload["sector"]["强度"] == "strong"
 
 
 def test_screen_run_returns_items_and_persists_latest_without_empty_status(tmp_path: Path) -> None:

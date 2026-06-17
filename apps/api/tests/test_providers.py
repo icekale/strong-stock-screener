@@ -127,6 +127,51 @@ def test_ifind_tools_probe_uses_jsonrpc_tools_list() -> None:
     }
 
 
+def test_ifind_call_tool_uses_jsonrpc_tools_call_and_parses_text_json() -> None:
+    client = FakeHttpClient(
+        {
+            "result": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": '{"公司简称":"春秋电子","所属行业":"消费电子"}',
+                    }
+                ]
+            }
+        }
+    )
+    provider = IfindMcpProvider(
+        api_key="ifind-test",
+        base_url="https://api-mcp.51ifind.com:8643",
+        http_client=client,
+    )
+
+    payload = provider.call_tool(
+        "hexin-ifind-ds-stock-mcp",
+        "get_stock_info",
+        {"query": "603890.SH 的公司简称和所属行业"},
+    )
+
+    assert payload == {"公司简称": "春秋电子", "所属行业": "消费电子"}
+    assert client.last_request is not None
+    assert client.last_request["url"] == (
+        "https://api-mcp.51ifind.com:8643/ds-mcp-servers/hexin-ifind-ds-stock-mcp"
+    )
+    assert client.last_request["headers"] == {
+        "Authorization": "ifind-test",
+        "Content-Type": "application/json",
+    }
+    assert client.last_request["json"] == {
+        "jsonrpc": "2.0",
+        "id": "hexin-ifind-ds-stock-mcp:get_stock_info",
+        "method": "tools/call",
+        "params": {
+            "name": "get_stock_info",
+            "arguments": {"query": "603890.SH 的公司简称和所属行业"},
+        },
+    }
+
+
 def test_analyze_negative_news_rows_flags_regulatory_and_loss_keywords() -> None:
     risk = analyze_negative_news_rows(
         [

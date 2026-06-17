@@ -8,7 +8,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
-from app.models import StockKlineResponse, StrongStockDataUnavailable, StrongStockSourceStatus
+from app.models import (
+    StockKlineResponse,
+    StockResearchResponse,
+    StrongStockDataUnavailable,
+    StrongStockSourceStatus,
+)
 from app.providers.ifind import IfindMcpProvider
 from app.providers.news_risk import EastmoneyNewsRiskProvider
 from app.providers.recent_limit_up_candidates import RecentLimitUpCandidateProvider
@@ -247,6 +252,25 @@ def get_stock_kline(symbol: str, count: int = 220) -> dict[str, object]:
         ),
         bars=bars,
     ).model_dump(mode="json")
+
+
+@app.get("/api/stocks/{symbol}/research")
+def get_stock_research(symbol: str) -> dict[str, object]:
+    ifind_provider = _ifind_provider()
+    try:
+        research = ifind_provider.get_stock_research(symbol)
+    except StrongStockDataUnavailable as exc:
+        research = StockResearchResponse(
+            symbol=symbol,
+            source_status=[
+                StrongStockSourceStatus(
+                    source=ifind_provider.source_name,
+                    status="failed",
+                    detail=str(exc),
+                )
+            ],
+        )
+    return research.model_dump(mode="json")
 
 
 @app.post("/api/intraday/snapshot")

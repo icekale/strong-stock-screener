@@ -4,6 +4,7 @@ import type {
   RuntimeSettingsResponse,
   ScreenRunFilters,
   StockKlineResponse,
+  StockResearchResponse,
   StrongStockIntradaySnapshot,
   StrongStockScreeningResponse,
   WatchlistPoolItemRequest,
@@ -170,4 +171,12 @@ export async function getStockKline(symbol: string, count = 220): Promise<StockK
     throw new Error(`读取K线失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<StockKlineResponse>;
+}
+
+export async function getStockResearch(symbol: string): Promise<StockResearchResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/stocks/${encodeURIComponent(symbol)}/research`);
+  if (!response.ok) {
+    throw new Error(`读取个股研究失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<StockResearchResponse>;
 }

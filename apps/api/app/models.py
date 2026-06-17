@@ -104,6 +104,21 @@ class StockKlineResponse(BaseModel):
     bars: list[KlineBar] = Field(default_factory=list)
 
 
+class StockResearchResponse(BaseModel):
+    symbol: str
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    profile: dict[str, Any] = Field(default_factory=dict)
+    valuation: dict[str, Any] = Field(default_factory=dict)
+    financials: dict[str, Any] = Field(default_factory=dict)
+    events: list[dict[str, Any]] = Field(default_factory=list)
+    news: list[dict[str, Any]] = Field(default_factory=list)
+    notices: list[dict[str, Any]] = Field(default_factory=list)
+    sector: dict[str, Any] = Field(default_factory=dict)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
 class StrongStockScreeningResult(BaseModel):
     trade_date: str
     source_status: list[StrongStockSourceStatus] = Field(default_factory=list)

@@ -13,7 +13,13 @@ services:
     volumes:
       - strong-stock-data:/app/data
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8010/health"]
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://localhost:8010/health', timeout=3).read()",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3

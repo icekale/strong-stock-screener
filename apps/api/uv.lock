@@ -992,8 +992,12 @@ dependencies = [
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
-    { name = "thsdk" },
     { name = "uvicorn", extra = ["standard"] },
+]
+
+[package.optional-dependencies]
+thsdk = [
+    { name = "thsdk" },
 ]
 
 [package.dev-dependencies]
@@ -1010,9 +1014,10 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.10.0" },
     { name = "pydantic-settings", specifier = ">=2.7.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
-    { name = "thsdk", specifier = ">=1.7.18" },
+    { name = "thsdk", marker = "extra == 'thsdk'", specifier = ">=1.7.18" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
 ]
+provides-extras = ["thsdk"]
 
 [package.metadata.requires-dev]
 dev = [

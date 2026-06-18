@@ -7,7 +7,7 @@ services:
       - .env
     environment:
       STRONG_STOCK_DATA_DIR: /app/data
-      STRONG_STOCK_CORS_ALLOW_ORIGINS: http://localhost:3110,http://127.0.0.1:3110
+      STRONG_STOCK_CORS_ALLOW_ORIGINS: ${STRONG_STOCK_CORS_ALLOW_ORIGINS:-http://localhost:3110,http://127.0.0.1:3110}
     ports:
       - "8010:8010"
     volumes:

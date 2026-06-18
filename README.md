@@ -65,10 +65,18 @@ STRONG_STOCK_IFIND_SERVICE_ID=hexin-ifind-ds-stock-mcp
 STRONG_STOCK_CANDIDATE_PROVIDER=recent_limit_up
 STRONG_STOCK_DATA_DIR=./data
 STRONG_STOCK_CORS_ALLOW_ORIGINS=http://localhost:3110,http://127.0.0.1:3110
+NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL=http://localhost:8010
 ```
 
 如果暂时不填 TickFlow key，后端会显示 `missing_key`，选股和 K 线能力会受限。
 如果暂时不填 iFinD key，研究增强能力会显示 `missing_key`，但不会影响 TickFlow 行情和现有选股主流程。
+
+部署到 Unraid 或局域网服务器时，把浏览器可访问的 API 地址写进 `.env`，例如：
+
+```bash
+NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL=http://192.168.5.28:8010
+STRONG_STOCK_CORS_ALLOW_ORIGINS=http://192.168.5.28:3110,http://localhost:3110,http://127.0.0.1:3110
+```
 
 ### 2. 启动
 

@@ -29,13 +29,13 @@ services:
     build:
       context: ./apps/web
       args:
-        NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL: http://localhost:8010
+        NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL: ${NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL:-http://localhost:8010}
     container_name: strong-stock-screener-web
     depends_on:
       api:
         condition: service_healthy
     environment:
-      NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL: http://localhost:8010
+      NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL: ${NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL:-http://localhost:8010}
     ports:
       - "3110:3110"
 

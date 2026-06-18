@@ -11,6 +11,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   const stockPageUrl = new URL("../app/stock/[symbol]/page.tsx", import.meta.url);
   const stockPageSource = existsSync(stockPageUrl) ? readFileSync(stockPageUrl, "utf8") : "";
   const settingsPageSource = readFileSync(new URL("../app/settings/page.tsx", import.meta.url), "utf8");
+  const composeSource = readFileSync(new URL("../../../docker-compose.yml", import.meta.url), "utf8");
 
   assert.match(typesSource, /StrongStockScreeningResponse/);
   assert.match(typesSource, /ScreenRunFilters/);
@@ -42,6 +43,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(apiSource, /addWatchlistPoolItem/);
   assert.match(apiSource, /getStockKline/);
   assert.match(apiSource, /getStockResearch/);
+  assert.match(composeSource, /NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL: \$\{NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL:-http:\/\/localhost:8010\}/);
   assert.match(typesSource, /StockResearchResponse/);
   assert.match(typesSource, /ifind_api_key_configured: boolean/);
   assert.match(typesSource, /ifind_service_id: "hexin-ifind-ds-stock-mcp" \| "hexin-ifind-ds-news-mcp" \| "hexin-ifind-ds-index-mcp"/);

@@ -10,5 +10,6 @@ node_modules/
 dist/
 data/
 .worktrees/
+.superpowers/
 docker-compose.override.yml
 *.tsbuildinfo

@@ -11,7 +11,7 @@ services:
     ports:
       - "8010:8010"
     volumes:
-      - strong-stock-data:/app/data
+      - ./data:/app/data
     healthcheck:
       test:
         [
@@ -38,6 +38,3 @@ services:
       NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL: ${NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL:-http://localhost:8010}
     ports:
       - "3110:3110"
-
-volumes:
-  strong-stock-data:

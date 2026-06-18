@@ -45,6 +45,7 @@
 - 新闻风险：东方财富个股新闻。
 
 TickFlow key 和 iFinD MCP key 可以通过环境变量配置，也可以启动后在 UI 的“数据源设置”页面中配置。公开仓库不会提交 `.env`、历史筛选记录、自选股文件或 runtime 配置。
+Docker Compose 默认把后端数据保存到项目目录的 `data/`，用于持久化 UI 保存的数据源配置、自选股和筛选记录。
 
 ## Docker Compose 部署
 
@@ -115,14 +116,7 @@ docker compose down
 # 或者：docker-compose down
 ```
 
-如果需要同时删除数据卷：
-
-```bash
-docker compose down -v
-# 或者：docker-compose down -v
-```
-
-注意：`-v` 会删除容器内保存的筛选记录、自选股和运行时配置。
+如需清空筛选记录、自选股和 UI 保存的运行时配置，停止服务后删除项目目录下的 `data/`。公开仓库已忽略该目录，请不要把 key 或运行数据提交到 Git。
 
 ## 本地开发
 

@@ -172,6 +172,9 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(stockPageSource, /visibleMovingAverages/);
   assert.match(stockPageSource, /MA60/);
   assert.match(stockPageSource, /activeChartTab/);
+  assert.match(stockPageSource, /overflow-x-auto border-b border-slate-200 bg-slate-50/);
+  assert.match(stockPageSource, /grid min-w-\[520px\] grid-cols-6/);
+  assert.match(stockPageSource, /focus-visible:outline-none focus-visible:ring-2/);
   assert.match(stockPageSource, /研究/);
   assert.match(stockPageSource, /iFinD 研究/);
   assert.match(stockPageSource, /行业研究/);

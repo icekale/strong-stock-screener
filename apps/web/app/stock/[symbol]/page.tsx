@@ -455,7 +455,7 @@ function QuoteSummary({
           <p className="mt-2 text-xs font-semibold text-slate-400">行情摘要 · {source} · {status}</p>
         </div>
 
-        <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-6 xl:min-w-0">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6 xl:min-w-0">
           <HeaderMetric label="开" value={quote ? formatPrice(quote.open) : "--"} />
           <HeaderMetric label="高" tone="text-red-500" value={quote ? formatPrice(quote.high) : "--"} />
           <HeaderMetric label="低" tone="text-emerald-600" value={quote ? formatPrice(quote.low) : "--"} />
@@ -470,22 +470,24 @@ function QuoteSummary({
 
 function ChartTabs({ activeTab, onChange }: { activeTab: ChartTab; onChange: (tab: ChartTab) => void }) {
   return (
-    <div className="grid border-b border-slate-200 bg-slate-50 text-center text-sm font-black text-slate-500 md:grid-cols-6">
-      {CHART_TABS.map((item) => (
-        <button
-          aria-pressed={activeTab === item.key}
-          className={`min-h-[42px] border-b-2 transition ${
-            activeTab === item.key
-              ? "border-slate-950 bg-white text-slate-950"
-              : "border-transparent hover:bg-white hover:text-slate-800"
-          }`}
-          key={item.key}
-          onClick={() => onChange(item.key)}
-          type="button"
-        >
-          {item.label}
-        </button>
-      ))}
+    <div className="overflow-x-auto border-b border-slate-200 bg-slate-50">
+      <div className="grid min-w-[520px] grid-cols-6 text-center text-sm font-black text-slate-500">
+        {CHART_TABS.map((item) => (
+          <button
+            aria-pressed={activeTab === item.key}
+            className={`min-h-[42px] whitespace-nowrap border-b-2 px-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 focus-visible:ring-inset ${
+              activeTab === item.key
+                ? "border-slate-950 bg-white text-slate-950"
+                : "border-transparent hover:bg-white hover:text-slate-800"
+            }`}
+            key={item.key}
+            onClick={() => onChange(item.key)}
+            type="button"
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

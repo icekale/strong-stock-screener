@@ -85,3 +85,35 @@ def test_short_kline_returns_data_incomplete() -> None:
     assert item.status == "data_incomplete"
     assert item.data_status == "incomplete"
     assert "K线不足220日" in item.risk_flags
+
+
+def test_screening_item_includes_gsgf_analysis() -> None:
+    candidate = StrongStockCandidate(
+        symbol="603890.SH",
+        name="春秋电子",
+        industry="消费电子",
+        limit_up_evidence=["20日内涨停"],
+    )
+    item = analyze_screening_item(
+        candidate,
+        _bars([10 + index * 0.05 for index in range(220)]),
+        trade_date="2026-06-11",
+    )
+
+    assert item.gsgf is not None
+    assert item.gsgf.model_version == "gsgf-v1"
+    assert item.gsgf.total_score > 0
+    assert item.gsgf.zone in {"a_zone", "b_zone_a_point", "unformed"}
+
+
+def test_watchlist_risk_includes_gsgf_without_changing_empty_rule() -> None:
+    candidate = StrongStockCandidate(symbol="002000.SZ", name="示例股份")
+    risk_item = analyze_watchlist_risk(
+        candidate,
+        _bars([20 - index * 0.05 for index in range(220)]),
+        trade_date="2026-06-11",
+    )
+
+    assert risk_item.risk_action == "empty"
+    assert risk_item.gsgf is not None
+    assert risk_item.gsgf.zone == "c_zone"

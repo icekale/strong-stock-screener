@@ -10,6 +10,7 @@ from app.models import (
     StrongStockRiskItem,
     StrongStockScreeningItem,
 )
+from app.gsgf_rules import analyze_gsgf
 
 
 def analyze_screening_item(
@@ -30,6 +31,7 @@ def analyze_screening_item(
             metrics={},
             data_status="incomplete",
             source_trace=[trade_date],
+            gsgf=analyze_gsgf(bars),
         )
 
     enriched = _with_moving_averages(bars)
@@ -114,6 +116,7 @@ def analyze_screening_item(
             "kdj_j": round(kdj_j, 2) if kdj_j is not None else None,
         },
         source_trace=[trade_date],
+        gsgf=analyze_gsgf(bars),
     )
 
 
@@ -131,6 +134,7 @@ def analyze_watchlist_risk(
             risk_flags=["K线不足20日"],
             intraday_notes=_intraday_notes("wait_pullback"),
             source_trace=[trade_date],
+            gsgf=analyze_gsgf(bars),
         )
     enriched = _with_moving_averages(bars)
     latest = enriched[-1]
@@ -158,6 +162,7 @@ def analyze_watchlist_risk(
         intraday_notes=_intraday_notes(action),
         metrics={"close": latest.close, "ma5": latest.ma5, "ma10": latest.ma10, "ma20": latest.ma20},
         source_trace=[trade_date],
+        gsgf=analyze_gsgf(bars),
     )
 
 

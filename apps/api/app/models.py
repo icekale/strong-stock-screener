@@ -12,6 +12,38 @@ IntradayAction = Literal["watch", "low_buy_watch", "reduce", "avoid_chase", "dat
 SourceStatusValue = Literal["success", "failed", "disabled", "missing_key"]
 IndustryStrength = Literal["strong", "neutral", "weak"]
 RiskCheckStatus = Literal["triggered", "clear", "unknown"]
+GsgfAction = Literal["strong_candidate", "watch_candidate", "wait_trigger", "avoid"]
+GsgfZone = Literal["a_zone", "b_zone_a_point", "c_zone", "unformed", "unknown"]
+GsgfVolumeStructure = Literal[
+    "three_yang_controls_three_yin",
+    "neutral",
+    "three_yin_controls_three_yang",
+    "unknown",
+]
+ScreenStrategy = Literal["strong_stock", "gsgf", "combined"]
+
+
+class GsgfScoreBreakdown(BaseModel):
+    safety_pressure: int = 0
+    volume_thickness: int = 0
+    ma_alignment: int = 0
+    pattern_space: int = 0
+    star_trigger: int = 0
+    sector_theme: int = 0
+
+
+class GsgfAnalysis(BaseModel):
+    model_version: str = "gsgf-v1"
+    total_score: int = 0
+    action: GsgfAction = "wait_trigger"
+    zone: GsgfZone = "unknown"
+    volume_structure: GsgfVolumeStructure = "unknown"
+    scores: GsgfScoreBreakdown = Field(default_factory=GsgfScoreBreakdown)
+    pattern_tags: list[str] = Field(default_factory=list)
+    trigger_tags: list[str] = Field(default_factory=list)
+    pressure_flags: list[str] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    explanation: list[str] = Field(default_factory=list)
 
 
 class StrongStockCandidate(BaseModel):
@@ -58,6 +90,7 @@ class StrongStockScreeningItem(BaseModel):
     metrics: dict[str, Any] = Field(default_factory=dict)
     data_status: Literal["complete", "incomplete"] = "complete"
     source_trace: list[str] = Field(default_factory=list)
+    gsgf: GsgfAnalysis | None = None
 
 
 class StrongStockRiskItem(BaseModel):
@@ -72,6 +105,7 @@ class StrongStockRiskItem(BaseModel):
     intraday_notes: list[str] = Field(default_factory=list)
     metrics: dict[str, Any] = Field(default_factory=dict)
     source_trace: list[str] = Field(default_factory=list)
+    gsgf: GsgfAnalysis | None = None
 
 
 class StrongStockIntradayItem(BaseModel):
@@ -120,6 +154,10 @@ class StockResearchResponse(BaseModel):
 
 
 class StrongStockScreeningResult(BaseModel):
+    strategy: ScreenStrategy = "strong_stock"
+    strong_model_version: str = "strong-v1"
+    gsgf_model_version: str | None = None
+    sort_version: str = "strong-sort-v1"
     trade_date: str
     source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
     items: list[StrongStockScreeningItem] = Field(default_factory=list)

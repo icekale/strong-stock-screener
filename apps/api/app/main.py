@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.models import (
+    ScreenStrategy,
     StockKlineResponse,
     StockResearchResponse,
     StrongStockDataUnavailable,
@@ -50,6 +51,9 @@ class ScreenRunRequest(BaseModel):
     limit: int = Field(default=30, ge=1, le=100)
     scan_limit: int = Field(default=40, ge=1, le=300)
     filters: ScreenFiltersRequest = Field(default_factory=ScreenFiltersRequest)
+    strategy: ScreenStrategy = "strong_stock"
+    include_gsgf: bool = True
+    exclude_gsgf_hard_risk: bool = False
 
 
 class IntradaySnapshotRequest(BaseModel):
@@ -218,6 +222,8 @@ def create_screen_run(request: ScreenRunRequest) -> dict[str, object]:
             scan_limit=request.scan_limit,
             filters=request.filters,
             watchlist_snapshot=_watchlist_snapshot(),
+            strategy=request.strategy,
+            exclude_gsgf_hard_risk=request.exclude_gsgf_hard_risk,
         )
     except StrongStockDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc

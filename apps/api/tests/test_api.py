@@ -725,6 +725,36 @@ def test_screen_run_scores_industry_strength_without_overriding_trend_risk(tmp_p
     assert solo_item["industry_score"] == 0
 
 
+def test_screen_run_accepts_gsgf_strategy_and_returns_metadata(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.post(
+        "/api/screen/runs",
+        json={"trade_date": "2026-06-11", "limit": 10, "scan_limit": 10, "strategy": "gsgf"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["strategy"] == "gsgf"
+    assert payload["gsgf_model_version"] == "gsgf-v1"
+    assert payload["sort_version"] == "gsgf-sort-v1"
+    assert payload["items"][0]["gsgf"]["total_score"] >= 0
+
+
+def test_screen_run_accepts_combined_strategy(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.post(
+        "/api/screen/runs",
+        json={"trade_date": "2026-06-11", "limit": 10, "scan_limit": 10, "strategy": "combined"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["strategy"] == "combined"
+    assert payload["sort_version"] == "combined-sort-v1"
+
+
 def test_screen_run_rejects_candidate_source_failure(tmp_path: Path) -> None:
     client = _client(tmp_path, candidate_provider=FailingCandidateProvider())
 

@@ -6,6 +6,7 @@ from typing import Protocol
 from app.models import (
     KlineBar,
     RiskCheckStatus,
+    ScreenStrategy,
     StrongStockCandidate,
     StrongStockDataUnavailable,
     StrongStockRiskItem,
@@ -65,6 +66,8 @@ class StrongStockScreener:
         scan_limit: int,
         filters: ScreeningFilters | None = None,
         watchlist_snapshot: WatchlistSnapshot | None = None,
+        strategy: ScreenStrategy = "strong_stock",
+        exclude_gsgf_hard_risk: bool = False,
     ) -> StrongStockScreeningResult:
         candidates = self.candidate_provider.get_candidates(trade_date)
         if not candidates:
@@ -135,8 +138,13 @@ class StrongStockScreener:
                 )
             )
 
-        ranked = sorted(items, key=_screening_rank_key)[:limit]
+        if exclude_gsgf_hard_risk:
+            items = [item for item in items if not _has_gsgf_hard_risk(item)]
+        ranked = sorted(items, key=lambda item: _screening_rank_key(item, strategy))[:limit]
         return StrongStockScreeningResult(
+            strategy=strategy,
+            gsgf_model_version="gsgf-v1",
+            sort_version=_sort_version(strategy),
             trade_date=trade_date,
             source_status=source_status,
             items=ranked,
@@ -269,9 +277,53 @@ def _candidates_for_scan(
     return sorted(candidates, key=lambda candidate: candidate.symbol)
 
 
-def _screening_rank_key(item: StrongStockScreeningItem) -> tuple[int, int, str]:
+def _screening_rank_key(item: StrongStockScreeningItem, strategy: ScreenStrategy = "strong_stock") -> tuple:
+    if strategy == "gsgf":
+        return _gsgf_rank_key(item)
+    if strategy == "combined":
+        return _combined_rank_key(item)
+    return _strong_rank_key(item)
+
+
+def _strong_rank_key(item: StrongStockScreeningItem) -> tuple[int, int, str]:
     focus_rank = 0 if item.status == "focus" else 1
     return (focus_rank, -item.score, item.symbol)
+
+
+def _gsgf_rank_key(item: StrongStockScreeningItem) -> tuple[int, int, int, int, str]:
+    gsgf = item.gsgf
+    if gsgf is None:
+        return (1, 0, 1, 1, item.symbol)
+    hard_risk = 1 if _has_gsgf_hard_risk(item) else 0
+    zone_rank = 0 if gsgf.zone in {"a_zone", "b_zone_a_point"} else 1
+    volume_rank = 0 if gsgf.volume_structure == "three_yang_controls_three_yin" else 1
+    return (hard_risk, -gsgf.total_score, zone_rank, volume_rank, item.symbol)
+
+
+def _combined_rank_key(item: StrongStockScreeningItem) -> tuple[int, float, str]:
+    gsgf_score = item.gsgf.total_score if item.gsgf is not None else 0
+    hard_risk = 1 if _has_gsgf_hard_risk(item) else 0
+    combined = item.score * 0.45 + gsgf_score * 0.45 + item.industry_score * 0.10
+    if hard_risk:
+        combined -= 30
+    focus_rank = 0 if item.status == "focus" else 1
+    return (hard_risk, focus_rank, -combined, item.symbol)
+
+
+def _has_gsgf_hard_risk(item: StrongStockScreeningItem) -> bool:
+    if item.gsgf is None:
+        return False
+    return item.gsgf.zone == "c_zone" or any(
+        flag in {"高位巨量长上影", "C区风险"} for flag in item.gsgf.risk_flags
+    )
+
+
+def _sort_version(strategy: ScreenStrategy) -> str:
+    if strategy == "gsgf":
+        return "gsgf-sort-v1"
+    if strategy == "combined":
+        return "combined-sort-v1"
+    return "strong-sort-v1"
 
 
 def _apply_industry_strength(

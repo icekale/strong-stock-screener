@@ -5,14 +5,19 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EChartsOption } from "echarts";
 import type { ForwardRefExoticComponent, RefAttributes } from "react";
 import type {
-  IndicatorOptions,
   KLineChartProps,
   KLineChartRef,
   KlineData,
   KLineDataProvider,
   ThemeConfig,
 } from "kline-charts-react";
-import { buildKlinePanes, type KlineSubIndicator } from "../lib/klineIndicatorLayout";
+import { buildBrickIndicatorSeries, calculateBrickIndicator } from "../lib/brickIndicator";
+import {
+  buildKlineIndicatorOptions,
+  buildKlinePanes,
+  type KlineMovingAverage,
+  type KlineSubIndicator,
+} from "../lib/klineIndicatorLayout";
 import type { GsgfChartAnnotation, KlineBar } from "../lib/types";
 
 const ReactKLineChart = dynamic(
@@ -27,7 +32,7 @@ const ReactKLineChart = dynamic(
   },
 ) as ForwardRefExoticComponent<KLineChartProps & RefAttributes<KLineChartRef>>;
 
-type MovingAverageField = "ma5" | "ma10" | "ma20" | "ma60";
+export type KlineChartDataSourceMode = "tickflow" | "builtin";
 
 const KLINE_THEME: ThemeConfig = {
   activeColor: "#0f172a",
@@ -49,23 +54,10 @@ const KLINE_THEME: ThemeConfig = {
   volumeUpColor: "#f43f5e",
 };
 
-const KLINE_INDICATOR_OPTIONS: IndicatorOptions = {
-  ma: { periods: [5, 10, 20, 60], type: "sma" },
-  macd: { short: 12, long: 26, signal: 9 },
-  kdj: { dPeriod: 3, kPeriod: 3, period: 9 },
-  rsi: { periods: [6, 12, 24] },
-  wr: { periods: [6, 10] },
-  bias: { periods: [6, 12, 24] },
-  cci: { period: 14 },
-  atr: { period: 14 },
-  obv: { maPeriod: 30 },
-  roc: { period: 12, signalPeriod: 6 },
-  dmi: { adxPeriod: 6, period: 14 },
-};
-
 export function TickFlowKlineChart({
   annotations,
   bars,
+  dataSourceMode = "tickflow",
   height,
   movingAverages,
   period,
@@ -75,8 +67,9 @@ export function TickFlowKlineChart({
 }: {
   annotations: GsgfChartAnnotation[];
   bars: KlineBar[];
+  dataSourceMode?: KlineChartDataSourceMode;
   height: number;
-  movingAverages: MovingAverageField[];
+  movingAverages: KlineMovingAverage[];
   period: "daily" | "weekly";
   showGsgfAnnotations: boolean;
   subIndicators: KlineSubIndicator[];
@@ -84,24 +77,46 @@ export function TickFlowKlineChart({
 }) {
   const chartRef = useRef<KLineChartRef>(null);
   const [chartDataVersion, setChartDataVersion] = useState(0);
-  const handleDataLoad = useCallback(() => {
+  const [loadedChartData, setLoadedChartData] = useState<KlineData[]>([]);
+  const [builtinDataSourceError, setBuiltinDataSourceError] = useState<string | null>(null);
+  const handleDataLoad = useCallback((data: KlineData[]) => {
+    setLoadedChartData(data);
     setChartDataVersion((version) => version + 1);
+    setBuiltinDataSourceError(null);
   }, []);
+  const handleChartError = useCallback(
+    (error: Error) => {
+      if (dataSourceMode === "builtin") {
+        setBuiltinDataSourceError(error.message || "组件内置数据源请求失败");
+      }
+    },
+    [dataSourceMode],
+  );
   const chartData = useMemo(() => convertBarsForKlineChart(bars, symbol), [bars, symbol]);
-  const dataProvider = useMemo<KLineDataProvider>(
+  const overlayChartData = dataSourceMode === "tickflow" ? chartData : loadedChartData;
+  const tickflowDataProvider = useMemo<KLineDataProvider>(
     () => ({
       getKline: async () => chartData,
     }),
     [chartData],
   );
+  const effectiveDataProvider = dataSourceMode === "tickflow" ? tickflowDataProvider : undefined;
+  const effectiveSymbol = dataSourceMode === "tickflow" ? symbol : builtinStockSdkSymbol(symbol);
   const requestOptions = useMemo(() => ({ abortOnChange: true, debounceMs: 0, dedupe: false }), []);
+  const indicatorOptions = useMemo(() => buildKlineIndicatorOptions(movingAverages), [movingAverages]);
   const indicatorLayout = useMemo(
     () => buildKlinePanes(movingAverages, subIndicators),
     [movingAverages, subIndicators],
   );
   const echartsOption = useMemo(
-    () => buildTickFlowAnnotationOption(annotations, showGsgfAnnotations),
-    [annotations, showGsgfAnnotations],
+    () =>
+      buildTickFlowOverlayOption({
+        annotations,
+        chartData: overlayChartData,
+        showGsgfAnnotations: dataSourceMode === "tickflow" && showGsgfAnnotations,
+        subIndicators,
+      }),
+    [annotations, dataSourceMode, overlayChartData, showGsgfAnnotations, subIndicators],
   );
 
   useEffect(() => {
@@ -112,7 +127,12 @@ export function TickFlowKlineChart({
     instance.setOption(echartsOption, false);
   }, [chartDataVersion, echartsOption, indicatorLayout]);
 
-  if (bars.length === 0) {
+  useEffect(() => {
+    setLoadedChartData([]);
+    setBuiltinDataSourceError(null);
+  }, [dataSourceMode, effectiveSymbol, period]);
+
+  if (dataSourceMode === "tickflow" && bars.length === 0) {
     return (
       <div className="flex min-h-[460px] items-center justify-center bg-slate-50 text-sm font-bold text-slate-500">
         暂无 K 线数据
@@ -122,29 +142,51 @@ export function TickFlowKlineChart({
 
   return (
     <div className="tickflow-kline-chart h-full min-h-[460px] bg-white">
+      {dataSourceMode === "builtin" && builtinDataSourceError && (
+        <div className="border-b border-amber-100 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">
+          组件内置 K 线源加载失败：{builtinDataSourceError}。可切回 TickFlow 主源继续查看。
+        </div>
+      )}
       <ReactKLineChart
+        key={`${dataSourceMode}-${effectiveSymbol}-${period}`}
         ref={chartRef}
         adjust="qfq"
-        dataProvider={dataProvider}
+        dataProvider={effectiveDataProvider}
         height={height}
-        indicatorOptions={KLINE_INDICATOR_OPTIONS}
+        indicatorOptions={indicatorOptions}
         indicators={indicatorLayout.chartIndicators}
         market="A"
         maxSubPanes={subIndicators.length}
         onDataLoad={handleDataLoad}
+        onError={handleChartError}
         panes={indicatorLayout.panes}
         period={period}
         requestOptions={requestOptions}
         showIndicatorSelector={false}
         showPeriodSelector={false}
         showToolbar
-        symbol={symbol}
+        symbol={effectiveSymbol}
         theme={KLINE_THEME}
         visibleCount={120}
         width="100%"
       />
     </div>
   );
+}
+
+export function builtinStockSdkSymbol(symbol: string): string {
+  const normalized = symbol.trim();
+  const upper = normalized.toUpperCase();
+  if (/^\d{6}\.SH$/.test(upper)) {
+    return `sh${upper.slice(0, 6)}`;
+  }
+  if (/^\d{6}\.SZ$/.test(upper)) {
+    return `sz${upper.slice(0, 6)}`;
+  }
+  if (/^\d{6}\.BJ$/.test(upper)) {
+    return `bj${upper.slice(0, 6)}`;
+  }
+  return normalized.replace(".", "").toLowerCase();
 }
 
 export function convertBarsForKlineChart(bars: KlineBar[], symbol: string): KlineData[] {
@@ -167,10 +209,28 @@ export function convertBarsForKlineChart(bars: KlineBar[], symbol: string): Klin
   });
 }
 
-function buildTickFlowAnnotationOption(
-  annotations: GsgfChartAnnotation[],
-  showGsgfAnnotations: boolean,
-): EChartsOption {
+function buildTickFlowOverlayOption({
+  annotations,
+  chartData,
+  showGsgfAnnotations,
+  subIndicators,
+}: {
+  annotations: GsgfChartAnnotation[];
+  chartData: KlineData[];
+  showGsgfAnnotations: boolean;
+  subIndicators: KlineSubIndicator[];
+}): EChartsOption {
+  const brickPoints = calculateBrickIndicator(
+    chartData
+      .filter(hasBrickIndicatorPrices)
+      .map((bar) => ({
+        close: bar.close,
+        date: bar.date,
+        high: bar.high,
+        low: bar.low,
+      })),
+  );
+  const brickSeries = buildBrickIndicatorSeries(brickPoints, subIndicators);
   const enabled = showGsgfAnnotations ? annotations : [];
   const points = enabled
     .filter((item) => item.date && item.price !== null && item.price !== undefined)
@@ -213,8 +273,14 @@ function buildTickFlowAnnotationOption(
   };
 
   return {
-    series: [klineSeries] as EChartsOption["series"],
+    series: [klineSeries, ...brickSeries] as EChartsOption["series"],
   };
+}
+
+function hasBrickIndicatorPrices(
+  bar: KlineData,
+): bar is KlineData & { close: number; high: number; low: number } {
+  return bar.close !== null && bar.high !== null && bar.low !== null;
 }
 
 function annotationColor(severity: GsgfChartAnnotation["severity"]): string {

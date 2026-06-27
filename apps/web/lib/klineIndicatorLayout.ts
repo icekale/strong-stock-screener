@@ -1,4 +1,6 @@
-import type { IndicatorType, PaneConfig } from "kline-charts-react";
+import type { IndicatorOptions, IndicatorType, PaneConfig } from "kline-charts-react";
+
+export type KlineMovingAverage = "ma5" | "ma10" | "ma20" | "ma60";
 
 export type KlineSubIndicator =
   | "volume"
@@ -11,7 +13,8 @@ export type KlineSubIndicator =
   | "atr"
   | "obv"
   | "roc"
-  | "dmi";
+  | "dmi"
+  | "brick";
 
 export type KlineSubPaneCount = 1 | 2 | 3;
 
@@ -32,6 +35,7 @@ export const KLINE_SUB_INDICATOR_OPTIONS: Array<{ label: string; value: KlineSub
   { label: "OBV", value: "obv" },
   { label: "ROC", value: "roc" },
   { label: "DMI", value: "dmi" },
+  { label: "砖形图", value: "brick" },
 ];
 
 const DEFAULT_SUB_INDICATORS: KlineSubIndicator[] = ["volume", "macd", "kdj"];
@@ -65,7 +69,7 @@ export function parseStoredKlineIndicatorState(value: string | null): KlineIndic
 }
 
 export function buildKlinePanes(
-  movingAverages: string[],
+  movingAverages: KlineMovingAverage[],
   subIndicators: KlineSubIndicator[],
 ): { chartIndicators: IndicatorType[]; panes: PaneConfig[] } {
   const mainIndicators: IndicatorType[] = movingAverages.length > 0 ? ["ma"] : [];
@@ -79,13 +83,29 @@ export function buildKlinePanes(
     ...subIndicators.map((indicator, index) => ({
       id: `sub_${indicator}_${index}`,
       height: layout.sub,
-      indicators: [indicator],
+      indicators: nativeSubIndicators(indicator),
     })),
   ];
 
   return {
-    chartIndicators: uniqueIndicators([...mainIndicators, ...subIndicators]),
+    chartIndicators: uniqueIndicators([...mainIndicators, ...subIndicators.flatMap(nativeSubIndicators)]),
     panes,
+  };
+}
+
+export function buildKlineIndicatorOptions(movingAverages: KlineMovingAverage[]): IndicatorOptions {
+  return {
+    ma: { periods: selectedMovingAveragePeriods(movingAverages), type: "sma" },
+    macd: { short: 12, long: 26, signal: 9 },
+    kdj: { dPeriod: 3, kPeriod: 3, period: 9 },
+    rsi: { periods: [6, 12, 24] },
+    wr: { periods: [6, 10] },
+    bias: { periods: [6, 12, 24] },
+    cci: { period: 14 },
+    atr: { period: 14 },
+    obv: { maPeriod: 30 },
+    roc: { period: 12, signalPeriod: 6 },
+    dmi: { adxPeriod: 6, period: 14 },
   };
 }
 
@@ -124,6 +144,22 @@ function paneLayout(count: number): { main: string; sub: string } {
 
 function uniqueIndicators(indicators: IndicatorType[]): IndicatorType[] {
   return indicators.filter((indicator, index) => indicators.indexOf(indicator) === index);
+}
+
+function nativeSubIndicators(indicator: KlineSubIndicator): IndicatorType[] {
+  return indicator === "brick" ? [] : [indicator];
+}
+
+function selectedMovingAveragePeriods(movingAverages: KlineMovingAverage[]): number[] {
+  const selected = new Set(movingAverages);
+  return [
+    ["ma5", 5],
+    ["ma10", 10],
+    ["ma20", 20],
+    ["ma60", 60],
+  ]
+    .filter(([field]) => selected.has(field as KlineMovingAverage))
+    .map(([, period]) => period as number);
 }
 
 function isSubPaneCount(value: unknown): value is KlineSubPaneCount {

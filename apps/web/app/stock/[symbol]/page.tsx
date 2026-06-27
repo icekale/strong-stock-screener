@@ -17,7 +17,7 @@ import {
   Typography,
 } from "antd";
 import { use, useEffect, useMemo, useState } from "react";
-import { TickFlowKlineChart } from "../../../components/TickFlowKlineChart";
+import { TickFlowKlineChart, type KlineChartDataSourceMode } from "../../../components/TickFlowKlineChart";
 import { getLatestScreenRun, getStockKline, getStockResearch } from "../../../lib/api";
 import {
   buildKlineIndicatorState,
@@ -76,6 +76,7 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
   const [activeChartTab, setActiveChartTab] = useState<ChartTab>("day");
   const [candidateListCollapsed, setCandidateListCollapsed] = useState(true);
   const [showGsgfAnnotations, setShowGsgfAnnotations] = useState(true);
+  const [chartDataSource, setChartDataSource] = useState<KlineChartDataSourceMode>("tickflow");
   const [visibleMovingAverages, setVisibleMovingAverages] = useState<MovingAverageField[]>([
     "ma5",
     "ma10",
@@ -185,6 +186,8 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
   const quote = useMemo(() => buildQuote(dailyBars), [dailyBars]);
   const isChartTab = activeChartTab === "day" || activeChartTab === "week";
   const activeTabLabel = CHART_TABS.find((item) => item.key === activeChartTab)?.label ?? "日 K 线";
+  const chartDataSourceLabel =
+    chartDataSource === "tickflow" ? (data?.source_status.source ?? "TickFlow 读取中") : "kline-charts-react 内置 stock-sdk";
 
   function toggleMovingAverage(field: MovingAverageField) {
     setVisibleMovingAverages((current) => {
@@ -235,13 +238,15 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
               <div className="px-3 py-3 sm:px-4">
                 <ChartControlBar
                   activeTabLabel={activeTabLabel}
+                  chartDataSource={chartDataSource}
                   currentStock={currentStock}
-                  dataSource={data?.source_status.source ?? "读取中"}
+                  dataSource={chartDataSourceLabel}
                   indicatorState={indicatorState}
                   isChartTab={isChartTab}
                   loading={loading}
                   movingAverageSummaryText={movingAverageSummary(visibleMovingAverages)}
                   onAnnotationToggle={() => setShowGsgfAnnotations((value) => !value)}
+                  onChartDataSourceChange={setChartDataSource}
                   onMovingAverageToggle={toggleMovingAverage}
                   onSubIndicatorChange={changeSubIndicator}
                   onSubPaneCountChange={changeSubPaneCount}
@@ -254,12 +259,19 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
                   {isChartTab ? (
                     <div className="h-[calc(100vh-236px)] min-h-[560px] bg-white">
                       <TickFlowKlineChart
-                        annotations={activeChartTab === "day" ? data?.gsgf_annotations ?? [] : []}
+                        annotations={
+                          activeChartTab === "day" && chartDataSource === "tickflow"
+                            ? data?.gsgf_annotations ?? []
+                            : []
+                        }
                         bars={chartBars}
+                        dataSourceMode={chartDataSource}
                         height={KLINE_CHART_HEIGHT}
                         movingAverages={visibleMovingAverages}
                         period={activeChartTab === "week" ? "weekly" : "daily"}
-                        showGsgfAnnotations={activeChartTab === "day" && showGsgfAnnotations}
+                        showGsgfAnnotations={
+                          activeChartTab === "day" && chartDataSource === "tickflow" && showGsgfAnnotations
+                        }
                         subIndicators={indicatorState.subIndicators}
                         symbol={symbol}
                       />
@@ -369,6 +381,7 @@ function AnnotationControl({ active, onToggle }: { active: boolean; onToggle: ()
 function ChartControlBar({
   activeTabLabel,
   chartBarCount,
+  chartDataSource,
   currentStock,
   dataSource,
   indicatorState,
@@ -376,6 +389,7 @@ function ChartControlBar({
   loading,
   movingAverageSummaryText,
   onAnnotationToggle,
+  onChartDataSourceChange,
   onMovingAverageToggle,
   onSubIndicatorChange,
   onSubPaneCountChange,
@@ -385,6 +399,7 @@ function ChartControlBar({
 }: {
   activeTabLabel: string;
   chartBarCount: number;
+  chartDataSource: KlineChartDataSourceMode;
   currentStock: StockListItem | null;
   dataSource: string;
   indicatorState: KlineIndicatorState;
@@ -392,6 +407,7 @@ function ChartControlBar({
   loading: boolean;
   movingAverageSummaryText: string;
   onAnnotationToggle: () => void;
+  onChartDataSourceChange: (source: KlineChartDataSourceMode) => void;
   onMovingAverageToggle: (field: MovingAverageField) => void;
   onSubIndicatorChange: (index: number, indicator: KlineSubIndicator) => void;
   onSubPaneCountChange: (paneCount: KlineSubPaneCount) => void;
@@ -399,11 +415,13 @@ function ChartControlBar({
   symbol: string;
   visibleMovingAverages: MovingAverageField[];
 }) {
-  const summary = loading
-    ? "加载中"
-    : isChartTab
-      ? `${chartBarCount} 条数据 · ${movingAverageSummaryText}`
-      : `${currentStock?.industry ?? "行业待补"} · ${currentStock?.symbol ?? symbol}`;
+  const summary = isChartTab
+    ? chartDataSource === "tickflow"
+      ? loading
+        ? "加载中"
+        : `${chartBarCount} 条数据 · ${movingAverageSummaryText}`
+      : `组件内置源 · ${movingAverageSummaryText}`
+    : `${currentStock?.industry ?? "行业待补"} · ${currentStock?.symbol ?? symbol}`;
 
   return (
     <div className="mb-2 flex flex-col gap-2 2xl:flex-row 2xl:items-center 2xl:justify-between">
@@ -411,14 +429,35 @@ function ChartControlBar({
         <Typography.Text className="text-sm font-black text-slate-950">{activeTabLabel}</Typography.Text>
         <Typography.Text className="text-xs font-semibold text-slate-500">{summary}</Typography.Text>
         <Tag className="m-0 max-w-full truncate">{dataSource}</Tag>
+        {isChartTab && chartDataSource === "builtin" && (
+          <Typography.Text className="text-xs font-semibold text-amber-600">
+            组件内置源仅用于图表对照
+          </Typography.Text>
+        )}
       </div>
       {isChartTab && (
         <div className="flex flex-wrap items-center gap-2 rounded-md bg-slate-50 px-2 py-2 ring-1 ring-slate-100">
+          <div className="flex items-center gap-1.5">
+            <Typography.Text className="whitespace-nowrap text-xs font-black text-slate-500">
+              TickFlow / 组件内置
+            </Typography.Text>
+            <Segmented
+              onChange={(value) => onChartDataSourceChange(value as KlineChartDataSourceMode)}
+              options={[
+                { label: "TickFlow", value: "tickflow" },
+                { label: "组件内置", value: "builtin" },
+              ]}
+              size="small"
+              value={chartDataSource}
+            />
+          </div>
           <MovingAverageControl
             onToggle={onMovingAverageToggle}
             visibleMovingAverages={visibleMovingAverages}
           />
-          <AnnotationControl active={showGsgfAnnotations} onToggle={onAnnotationToggle} />
+          {chartDataSource === "tickflow" && (
+            <AnnotationControl active={showGsgfAnnotations} onToggle={onAnnotationToggle} />
+          )}
           <SubIndicatorControl
             indicatorState={indicatorState}
             onPaneCountChange={onSubPaneCountChange}
@@ -617,7 +656,7 @@ function QuoteSummary({
             </div>
           </div>
           <Typography.Text className="mt-2 block text-xs font-semibold text-slate-400">
-            行情摘要 · {source} · {status}
+            行情摘要 · {source} · {formatSourceStatus(status)}
           </Typography.Text>
         </div>
 
@@ -1202,6 +1241,22 @@ function statusColor(status: StockListItem["status"]): string {
     return "orange";
   }
   return "default";
+}
+
+function formatSourceStatus(status: string): string {
+  if (status === "success") {
+    return "可用";
+  }
+  if (status === "failed" || status === "error") {
+    return "异常";
+  }
+  if (status === "missing_key") {
+    return "缺Key";
+  }
+  if (status === "disabled") {
+    return "未启用";
+  }
+  return status || "未知";
 }
 
 function marketPrefix(symbol: string): string {

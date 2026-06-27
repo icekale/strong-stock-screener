@@ -9,12 +9,14 @@ from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.models import (
+    GsgfAnalysis,
     ScreenStrategy,
     StockKlineResponse,
     StockResearchResponse,
     StrongStockDataUnavailable,
     StrongStockSourceStatus,
 )
+from app.gsgf_rules import analyze_gsgf
 from app.providers.ifind import IfindMcpProvider
 from app.providers.news_risk import EastmoneyNewsRiskProvider
 from app.providers.recent_limit_up_candidates import RecentLimitUpCandidateProvider
@@ -362,6 +364,23 @@ def add_watchlist_pool_item(request: WatchlistPoolItemRequest) -> dict[str, obje
         "content": content,
         "items": [item.model_dump(mode="json") for item in items],
     }
+
+
+@app.get("/api/watchlist/gsgf-status")
+def get_watchlist_gsgf_status() -> dict[str, object]:
+    items = parse_watchlist_text(_read_watchlist_pool())
+    output: list[dict[str, object]] = []
+    for item in items:
+        try:
+            bars = _kline_provider().get_klines(item.symbol, count=220)
+            gsgf = analyze_gsgf(bars)
+        except Exception as exc:
+            gsgf = GsgfAnalysis(
+                risk_flags=[f"K线获取失败: {exc.__class__.__name__}"],
+                explanation=["自选股结构触发暂不可计算"],
+            )
+        output.append({**item.model_dump(mode="json"), "gsgf": gsgf.model_dump(mode="json")})
+    return {"items": output}
 
 
 def _candidate_provider() -> object:

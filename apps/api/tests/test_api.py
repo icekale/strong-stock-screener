@@ -764,6 +764,21 @@ def test_screen_run_rejects_candidate_source_failure(tmp_path: Path) -> None:
     assert "候选池数据源失败" in response.json()["detail"]
 
 
+def test_watchlist_gsgf_status_returns_structure_triggers(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    app.state.watchlist_path.write_text(
+        "603890.SH 春秋电子 | group=观察 | industry=消费电子",
+        encoding="utf-8",
+    )
+
+    response = client.get("/api/watchlist/gsgf-status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["items"][0]["symbol"] == "603890.SH"
+    assert payload["items"][0]["gsgf"]["model_version"] == "gsgf-v1"
+
+
 def test_latest_returns_404_before_first_run(tmp_path: Path) -> None:
     client = _client(tmp_path)
 

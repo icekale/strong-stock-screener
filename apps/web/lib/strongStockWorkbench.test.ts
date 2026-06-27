@@ -14,6 +14,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   const composeSource = readFileSync(new URL("../../../docker-compose.yml", import.meta.url), "utf8");
 
   assert.match(typesSource, /StrongStockScreeningResponse/);
+  assert.match(typesSource, /GsgfAnalysis/);
+  assert.match(typesSource, /ScreenStrategy = "strong_stock" \| "gsgf" \| "combined"/);
   assert.match(typesSource, /ScreenRunFilters/);
   assert.match(typesSource, /StrongStockIntradaySnapshot/);
   assert.match(typesSource, /industry: string \| null/);
@@ -55,6 +57,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(typesSource, /ma60: number \| null/);
   assert.match(apiSource, /scan_limit: scanLimit/);
   assert.match(apiSource, /filters/);
+  assert.match(apiSource, /strategy\?: ScreenStrategy/);
+  assert.match(apiSource, /getWatchlistGsgfStatus/);
   assert.match(componentSource, /scanLimit/);
   assert.match(componentSource, /扫描候选数/);
   assert.match(componentSource, /高级筛选/);

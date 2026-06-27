@@ -1,5 +1,34 @@
 export type SourceStatusValue = "success" | "failed" | "disabled" | "missing_key";
 export type RiskCheckStatus = "triggered" | "clear" | "unknown";
+export type ScreenStrategy = "strong_stock" | "gsgf" | "combined";
+export type GsgfAction = "strong_candidate" | "watch_candidate" | "wait_trigger" | "avoid";
+export type GsgfZone = "a_zone" | "b_zone_a_point" | "c_zone" | "unformed" | "unknown";
+export type GsgfVolumeStructure =
+  | "three_yang_controls_three_yin"
+  | "neutral"
+  | "three_yin_controls_three_yang"
+  | "unknown";
+
+export type GsgfAnalysis = {
+  model_version: string;
+  total_score: number;
+  action: GsgfAction;
+  zone: GsgfZone;
+  volume_structure: GsgfVolumeStructure;
+  scores: {
+    safety_pressure: number;
+    volume_thickness: number;
+    ma_alignment: number;
+    pattern_space: number;
+    star_trigger: number;
+    sector_theme: number;
+  };
+  pattern_tags: string[];
+  trigger_tags: string[];
+  pressure_flags: string[];
+  risk_flags: string[];
+  explanation: string[];
+};
 
 export type StrongStockSourceStatus = {
   source: string;
@@ -80,6 +109,7 @@ export type StrongStockScreeningItem = {
   metrics: Record<string, unknown>;
   data_status: "complete" | "incomplete";
   source_trace: string[];
+  gsgf: GsgfAnalysis | null;
 };
 
 export type KlineBar = {
@@ -126,6 +156,7 @@ export type WatchlistRiskItem = {
   intraday_notes: string[];
   metrics: Record<string, unknown>;
   source_trace: string[];
+  gsgf: GsgfAnalysis | null;
 };
 
 export type StrongStockIntradayItem = {
@@ -147,6 +178,10 @@ export type StrongStockIntradayItem = {
 };
 
 export type StrongStockScreeningResponse = {
+  strategy: ScreenStrategy;
+  strong_model_version: string;
+  gsgf_model_version: string | null;
+  sort_version: string;
   trade_date: string;
   source_status: StrongStockSourceStatus[];
   items: StrongStockScreeningItem[];
@@ -181,4 +216,8 @@ export type WatchlistPoolItemRequest = {
   group?: string;
   tags?: string[];
   note?: string | null;
+};
+
+export type WatchlistGsgfStatusResponse = {
+  items: Array<WatchlistPoolItem & { gsgf: GsgfAnalysis }>;
 };

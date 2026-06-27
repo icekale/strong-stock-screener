@@ -3,10 +3,12 @@ import type {
   RuntimeSettingsHealthResponse,
   RuntimeSettingsResponse,
   ScreenRunFilters,
+  ScreenStrategy,
   StockKlineResponse,
   StockResearchResponse,
   StrongStockIntradaySnapshot,
   StrongStockScreeningResponse,
+  WatchlistGsgfStatusResponse,
   WatchlistPoolItemRequest,
   WatchlistPoolResponse,
 } from "./types";
@@ -71,11 +73,16 @@ export async function createScreenRun(
   limit = 30,
   scanLimit = 40,
   filters: ScreenRunFilters = {},
+  options: {
+    strategy?: ScreenStrategy;
+    include_gsgf?: boolean;
+    exclude_gsgf_hard_risk?: boolean;
+  } = {},
 ): Promise<StrongStockScreeningResponse> {
   const response = await fetch(`${API_BASE_URL}/api/screen/runs`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ trade_date: tradeDate, limit, scan_limit: scanLimit, filters }),
+    body: JSON.stringify({ trade_date: tradeDate, limit, scan_limit: scanLimit, filters, ...options }),
   });
   if (!response.ok) {
     let detail = await response.text();
@@ -163,6 +170,14 @@ export async function addWatchlistPoolItem(item: WatchlistPoolItemRequest): Prom
     throw new Error(`加入自选股失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<WatchlistPoolResponse>;
+}
+
+export async function getWatchlistGsgfStatus(): Promise<WatchlistGsgfStatusResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/watchlist/gsgf-status`);
+  if (!response.ok) {
+    throw new Error(`读取自选股结构触发失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<WatchlistGsgfStatusResponse>;
 }
 
 export async function getStockKline(symbol: string, count = 220): Promise<StockKlineResponse> {

@@ -11,6 +11,26 @@ import type {
   WatchlistPoolItem,
   WatchlistRiskItem,
 } from "../lib/types";
+import type { ColumnsType } from "antd/es/table";
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Checkbox,
+  Collapse,
+  Empty,
+  Form,
+  Input,
+  InputNumber,
+  Segmented,
+  Space,
+  Statistic,
+  Table,
+  Tag,
+  Typography,
+} from "antd";
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 type ScreenerWorkbenchProps = {
@@ -35,13 +55,6 @@ type ScreenerWorkbenchProps = {
   onAddManyToWatchlist: (items: StrongStockScreeningItem[], group: string, tags: string[]) => void;
   onRun: () => void;
   onRefreshSources: () => void;
-};
-
-const sourceTone: Record<SourceStatusValue, string> = {
-  success: "bg-emerald-50 text-emerald-700 ring-emerald-100",
-  failed: "bg-red-50 text-red-700 ring-red-100",
-  disabled: "bg-slate-100 text-slate-600 ring-slate-200",
-  missing_key: "bg-amber-50 text-amber-700 ring-amber-100",
 };
 
 const statusCopy: Record<StrongStockScreeningItem["status"], { label: string; tone: string }> = {
@@ -123,6 +136,7 @@ export function ScreenerWorkbench({
   onRefreshSources,
 }: ScreenerWorkbenchProps) {
   const candidates = result?.items ?? [];
+  const { message } = App.useApp();
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
 
   useEffect(() => {
@@ -142,38 +156,42 @@ export function ScreenerWorkbench({
   const focusCount = candidates.filter((item) => item.status === "focus").length;
   const riskEmptyCount = result?.watchlist_risk_items.filter((item) => item.risk_action === "empty").length ?? 0;
 
+  useEffect(() => {
+    if (watchlistMessage) {
+      void message.success(watchlistMessage);
+    }
+  }, [message, watchlistMessage]);
+
   return (
-    <main className="min-h-screen bg-slate-50">
+    <main className="bg-slate-50">
       <div className="mx-auto max-w-[1680px] space-y-4 px-4 py-4 sm:px-6 lg:px-8">
-        <header className="rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-sm">
+        <Card className="workbench-card" styles={{ body: { padding: 18 } }}>
           <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase text-slate-400">Strong Stock Screener</p>
-              <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950">强势股选股工作台</h1>
+              <Typography.Text className="text-xs font-semibold uppercase text-slate-400">
+                Strong Stock Screener
+              </Typography.Text>
+              <Typography.Title className="mt-1 text-2xl font-black tracking-tight text-slate-950" level={1}>
+                强势股选股工作台
+              </Typography.Title>
             </div>
-            <div className="flex flex-col gap-3 sm:min-w-[420px]">
+            <div className="grid gap-3 sm:min-w-[520px] sm:grid-cols-[1fr_auto] sm:items-center">
               <div className="grid grid-cols-3 gap-2">
                 <Metric label="候选" value={candidates.length} />
                 <Metric label="可关注" value={focusCount} />
                 <Metric label="空仓风控" value={riskEmptyCount} />
               </div>
-              <a
-                aria-label="打开自选股管理页"
-                className="inline-flex min-h-[38px] items-center justify-center rounded-md bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 active:translate-y-px"
-                href="/watchlist"
-              >
-                管理自选股
-              </a>
-              <a
-                aria-label="打开数据源设置页"
-                className="inline-flex min-h-[38px] items-center justify-center rounded-md bg-white px-4 text-sm font-bold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-100 active:translate-y-px"
-                href="/settings"
-              >
-                数据源设置
-              </a>
+              <Space className="sm:justify-end" orientation="vertical" size={8}>
+                <Button aria-label="打开自选股管理页" href="/watchlist" type="primary">
+                  管理自选股
+                </Button>
+                <Button aria-label="打开数据源设置页" href="/settings">
+                  数据源设置
+                </Button>
+              </Space>
             </div>
           </div>
-        </header>
+        </Card>
 
         <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
           <WorkflowPanel
@@ -222,8 +240,11 @@ export function ScreenerWorkbench({
 function Metric({ label, value }: { label: string; value: number }) {
   return (
     <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
-      <div className="text-2xl font-black tabular-nums text-slate-950">{value}</div>
-      <div className="mt-1 text-xs font-semibold text-slate-500">{label}</div>
+      <Statistic
+        styles={{ content: { color: "#0f172a", fontSize: 24, fontWeight: 900, lineHeight: "28px" } }}
+        title={<span className="text-xs font-semibold text-slate-500">{label}</span>}
+        value={value}
+      />
     </div>
   );
 }
@@ -267,13 +288,14 @@ function WorkflowPanel({
 }) {
   return (
     <aside className="space-y-3">
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-lg font-black text-slate-950">今日流程</h2>
-          {error && <span className="rounded-full bg-red-50 px-2 py-1 text-xs font-bold text-red-700">错误</span>}
-        </div>
+      <Card
+        className="workbench-card"
+        size="small"
+        title={<span className="text-base font-black text-slate-950">今日流程</span>}
+        extra={error ? <Tag color="red">错误</Tag> : null}
+      >
         <DataSourceStrip onRefreshSources={onRefreshSources} sources={sources} />
-        {error && <p className="mt-3 rounded-lg bg-red-50 p-3 text-sm leading-6 text-red-700">{error}</p>}
+        {error && <Alert className="mt-3" title={error} type="error" />}
 
         <div className="mt-4">
           <ScreenPanel
@@ -291,7 +313,7 @@ function WorkflowPanel({
             onStrategyChange={onStrategyChange}
           />
         </div>
-      </section>
+      </Card>
 
       <WatchlistPanel watchlistPoolItems={watchlistPoolItems} />
     </aside>
@@ -316,24 +338,16 @@ function DataSourceStrip({
           <p className="truncate text-xs font-bold text-slate-600">数据源：{summary}</p>
           <p className="mt-1 truncate text-xs text-slate-500">TickFlow 仅用于独立选股程序。</p>
         </div>
-        <button
-          className="min-h-[32px] shrink-0 rounded-md bg-white px-3 text-xs font-bold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-100 active:translate-y-px"
-          onClick={onRefreshSources}
-          type="button"
-        >
+        <Button className="shrink-0" onClick={onRefreshSources} size="small">
           刷新
-        </button>
+        </Button>
       </div>
       {items.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-1.5">
           {items.map((item) => (
-            <span
-              className={`inline-flex h-6 items-center rounded-full px-2 text-[11px] font-bold ring-1 ${sourceTone[item.status]}`}
-              key={item.source}
-              title={item.detail}
-            >
+            <Tag color={sourceTagColor(item.status)} key={item.source} title={item.detail}>
               {item.source} {item.status}
-            </span>
+            </Tag>
           ))}
         </div>
       )}
@@ -382,87 +396,59 @@ function ScreenPanel({
   return (
     <section className="border-t border-slate-100 pt-4">
       <h3 className="text-sm font-black text-slate-950">1. 手动筛选</h3>
-      <label className="mt-3 block text-xs font-bold text-slate-600" htmlFor="trade-date">
-        交易日
-      </label>
-      <input
-        id="trade-date"
-        className="mt-2 min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-        inputMode="numeric"
-        onChange={(event) => onTradeDateChange(event.target.value)}
-        placeholder="YYYY-MM-DD"
-        value={tradeDate}
-      />
-      <div className="mt-3">
-        <p className="text-xs font-bold text-slate-600">策略模型</p>
-        <div className="mt-2 grid grid-cols-1 gap-2">
-          {strategyOptions.map((option) => {
-            const active = strategy === option.value;
-            return (
-              <button
-                aria-pressed={active}
-                className={`min-h-[36px] rounded-md px-3 text-left text-xs font-bold ring-1 transition active:translate-y-px ${
-                  active
-                    ? "bg-slate-950 text-white ring-slate-950"
-                    : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-100"
-                }`}
-                key={option.value}
-                onClick={() => onStrategyChange(option.value)}
-                type="button"
-              >
-                {option.label}
-              </button>
-            );
-          })}
-        </div>
-      </div>
-      <div className="mt-3">
-        <div className="flex items-center justify-between gap-2">
-          <label className="text-xs font-bold text-slate-600" htmlFor="scan-limit">
-            扫描候选数
-          </label>
-          <div className="flex gap-1">
-            {scanLimitOptions.map((value) => (
-              <button
-                className={`h-7 min-w-9 rounded-md px-2 text-[11px] font-bold ring-1 transition ${
-                  scanLimit === value
-                    ? "bg-slate-950 text-white ring-slate-950"
-                    : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-100"
-                }`}
-                key={value}
-                onClick={() => onScanLimitChange(value)}
-                type="button"
-              >
-                {value}
-              </button>
-            ))}
-          </div>
-        </div>
-        <input
-          id="scan-limit"
-          className="mt-2 min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-          inputMode="numeric"
-          max={300}
-          min={1}
-          onChange={(event) => onScanLimitChange(normalizeScanLimit(event.target.value))}
-          type="number"
-          value={scanLimit}
-        />
-      </div>
+      <Form className="mt-3" layout="vertical">
+        <Form.Item label="交易日">
+          <Input
+            id="trade-date"
+            inputMode="numeric"
+            onChange={(event) => onTradeDateChange(event.target.value)}
+            placeholder="YYYY-MM-DD"
+            value={tradeDate}
+          />
+        </Form.Item>
+        <Form.Item label="策略模型">
+          <Segmented
+            block
+            onChange={(value) => onStrategyChange(value as ScreenStrategy)}
+            options={strategyOptions}
+            value={strategy}
+            vertical
+          />
+        </Form.Item>
+        <Form.Item label="扫描候选数">
+          <Space className="w-full" orientation="vertical" size={8}>
+            <Segmented
+              block
+              onChange={(value) => onScanLimitChange(Number(value))}
+              options={scanLimitOptions.map((value) => ({ label: String(value), value }))}
+              value={scanLimit}
+            />
+            <InputNumber
+              className="w-full"
+              id="scan-limit"
+              max={300}
+              min={1}
+              onChange={(value) => onScanLimitChange(normalizeScanLimit(value))}
+              value={scanLimit}
+            />
+          </Space>
+        </Form.Item>
+      </Form>
       <AdvancedScreenFilters
         filters={screenFilters}
         onChange={onScreenFiltersChange}
         onSave={onSaveScreenFilters}
         saved={screenFiltersSaved}
       />
-      <button
-        className="mt-3 min-h-[42px] w-full rounded-lg bg-slate-950 px-4 py-2 text-sm font-bold text-white transition hover:bg-slate-800 active:translate-y-px disabled:cursor-not-allowed disabled:bg-slate-300"
+      <Button
+        block
         disabled={running || tradeDate.trim().length === 0}
+        loading={running}
         onClick={onRun}
-        type="button"
+        type="primary"
       >
         {running ? "筛选中..." : "运行筛选"}
-      </button>
+      </Button>
     </section>
   );
 }
@@ -479,106 +465,94 @@ function AdvancedScreenFilters({
   saved: boolean;
 }) {
   const enabledCount = activeScreenFilterCount(filters);
-  const activeMarketTypes = new Set(filters.market_types ?? []);
 
   function update(next: Partial<ScreenRunFilters>) {
     onChange(cleanScreenFilters({ ...filters, ...next }));
   }
 
   return (
-    <details className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3" open>
-      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-sm font-black text-slate-950">
-        <span>高级筛选</span>
-        <span className="rounded-full bg-white px-2 py-1 text-[11px] font-bold tabular-nums text-slate-500 ring-1 ring-slate-100">
-          已启用 {enabledCount}
-        </span>
-      </summary>
-      <div className="mt-3 grid gap-3">
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-          <FilterNumberInput
-            label="最小市值（亿元）"
-            min={0}
-            onChange={(value) => update({ min_market_cap_billion: normalizeOptionalNumber(value, 0) })}
-            placeholder="不限请留空"
-            value={filters.min_market_cap_billion}
-          />
-          <FilterNumberInput
-            label="最大市值（亿元）"
-            min={0}
-            onChange={(value) => update({ max_market_cap_billion: normalizeOptionalNumber(value, 0) })}
-            placeholder="不限请留空"
-            value={filters.max_market_cap_billion}
-          />
-          <FilterNumberInput
-            label="KDJ-J值（小于）"
-            onChange={(value) => update({ kdj_j_max: normalizeOptionalNumber(value) })}
-            placeholder="不限请留空"
-            value={filters.kdj_j_max}
-          />
-        </div>
+    <Collapse
+      className="mt-3 bg-slate-50"
+      defaultActiveKey={["advanced"]}
+      items={[
+        {
+          key: "advanced",
+          label: (
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-black text-slate-950">高级筛选</span>
+              <Tag variant="filled">已启用 {enabledCount}</Tag>
+            </div>
+          ),
+          children: (
+            <Space className="w-full" orientation="vertical" size={12}>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                <FilterNumberInput
+                  label="最小市值（亿元）"
+                  min={0}
+                  onChange={(value) => update({ min_market_cap_billion: normalizeOptionalNumber(value, 0) })}
+                  placeholder="不限请留空"
+                  value={filters.min_market_cap_billion}
+                />
+                <FilterNumberInput
+                  label="最大市值（亿元）"
+                  min={0}
+                  onChange={(value) => update({ max_market_cap_billion: normalizeOptionalNumber(value, 0) })}
+                  placeholder="不限请留空"
+                  value={filters.max_market_cap_billion}
+                />
+                <FilterNumberInput
+                  label="KDJ-J值（小于）"
+                  onChange={(value) => update({ kdj_j_max: normalizeOptionalNumber(value) })}
+                  placeholder="不限请留空"
+                  value={filters.kdj_j_max}
+                />
+              </div>
 
-        <DisabledFilterInput label="概念板块（多选）" placeholder="待接入概念成分数据" />
-        <DisabledFilterInput label="概念叠加（多选）" placeholder="待接入概念叠加数据" />
+              <DisabledFilterInput label="概念板块（多选）" placeholder="待接入概念成分数据" />
+              <DisabledFilterInput label="概念叠加（多选）" placeholder="待接入概念叠加数据" />
 
-        <label className="block">
-          <span className="text-xs font-bold text-slate-600">行业板块（多选）</span>
-          <input
-            className="mt-2 min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-            onChange={(event) => update({ industries: splitFilterValues(event.target.value) })}
-            placeholder="消费电子，半导体"
-            value={(filters.industries ?? []).join("，")}
-          />
-        </label>
+              <Form.Item className="mb-0" label="行业板块（多选）">
+                <Input
+                  onChange={(event) => update({ industries: splitFilterValues(event.target.value) })}
+                  placeholder="消费电子，半导体"
+                  value={(filters.industries ?? []).join("，")}
+                />
+              </Form.Item>
 
-        <div>
-          <p className="text-xs font-bold text-slate-600">市场类型</p>
-          <div className="mt-2 grid grid-cols-2 gap-2">
-            {marketTypeOptions.map((option) => (
-              <label
-                className="flex min-h-[34px] items-center gap-2 rounded-md border border-slate-200 bg-white px-2.5 text-xs font-bold text-slate-700"
-                key={option.value}
-              >
-                <input
-                  checked={activeMarketTypes.has(option.value)}
-                  className="size-4 rounded border-slate-300 text-slate-950"
-                  onChange={(event) =>
+              <Form.Item className="mb-0" label="市场类型">
+                <Checkbox.Group
+                  className="grid grid-cols-2 gap-2"
+                  onChange={(values) =>
                     update({
-                      market_types: toggleMarketType(filters.market_types ?? [], option.value, event.target.checked),
+                      market_types: marketTypeOptions
+                        .map((option) => option.value)
+                        .filter((option) => values.includes(option)),
                     })
                   }
-                  type="checkbox"
+                  options={marketTypeOptions}
+                  value={filters.market_types ?? []}
                 />
-                {option.label}
-              </label>
-            ))}
-          </div>
-        </div>
+              </Form.Item>
 
-        <div className="grid grid-cols-[1fr_auto] gap-2">
-          <button
-            className={`min-h-[36px] rounded-md px-3 text-xs font-bold text-white transition active:translate-y-px ${
-              saved ? "bg-emerald-600 hover:bg-emerald-700" : "bg-blue-600 hover:bg-blue-700"
-            }`}
-            onClick={onSave}
-            type="button"
-          >
-            {saved ? "已保存" : "保存筛选参数"}
-          </button>
-          <button
-            className="min-h-[36px] rounded-md bg-white px-3 text-xs font-bold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-100 active:translate-y-px"
-            onClick={() => onChange({})}
-            type="button"
-          >
-            重置
-          </button>
-        </div>
-        {saved && (
-          <p aria-live="polite" className="rounded-md bg-emerald-50 px-2.5 py-2 text-xs font-bold text-emerald-700">
-            筛选参数已保存到本机
-          </p>
-        )}
-      </div>
-    </details>
+              <div className="grid grid-cols-[1fr_auto] gap-2">
+                <Button block onClick={onSave} type={saved ? "primary" : "default"}>
+                  {saved ? "已保存" : "保存筛选参数"}
+                </Button>
+                <Button onClick={() => onChange({})}>重置</Button>
+              </div>
+              {saved && (
+                <Alert
+                  aria-live="polite"
+                  showIcon
+                  title="筛选参数已保存到本机"
+                  type="success"
+                />
+              )}
+            </Space>
+          ),
+        },
+      ]}
+    />
   );
 }
 
@@ -591,36 +565,28 @@ function FilterNumberInput({
 }: {
   label: string;
   min?: number;
-  onChange: (value: string) => void;
+  onChange: (value: number | string | null) => void;
   placeholder: string;
   value: number | null | undefined;
 }) {
   return (
-    <label className="block">
-      <span className="text-xs font-bold text-slate-600">{label}</span>
-      <input
-        className="mt-2 min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-        inputMode="decimal"
+    <Form.Item className="mb-0" label={label}>
+      <InputNumber
+        className="w-full"
         min={min}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={onChange}
         placeholder={placeholder}
-        type="number"
-        value={formatOptionalNumber(value)}
+        value={value ?? null}
       />
-    </label>
+    </Form.Item>
   );
 }
 
 function DisabledFilterInput({ label, placeholder }: { label: string; placeholder: string }) {
   return (
-    <label className="block">
-      <span className="text-xs font-bold text-slate-600">{label}</span>
-      <input
-        className="mt-2 min-h-[38px] w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-400 outline-none"
-        disabled
-        placeholder={placeholder}
-      />
-    </label>
+    <Form.Item className="mb-0" label={label}>
+      <Input disabled placeholder={placeholder} />
+    </Form.Item>
   );
 }
 
@@ -632,27 +598,24 @@ function WatchlistPanel({
   const groups = groupWatchlistPoolItems(watchlistPoolItems);
 
   return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+    <Card className="workbench-card" size="small">
       <div className="flex items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-black text-slate-950">结构化自选池</h3>
           <p className="mt-1 text-xs font-medium text-slate-500">完整分组、标签和备注在独立页面管理。</p>
         </div>
-        <a
-          className="min-h-[32px] shrink-0 whitespace-nowrap rounded-md bg-slate-950 px-3 py-2 text-xs font-bold text-white transition hover:bg-slate-800 active:translate-y-px"
-          href="/watchlist"
-        >
+        <Button className="shrink-0" href="/watchlist" size="small" type="primary">
           管理自选股
-        </a>
+        </Button>
       </div>
       <div className="mt-3 space-y-3">
         {groups.length > 0 ? (
           groups.map((group) => <WatchlistGroupSection group={group} key={group.name} />)
         ) : (
-          <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-500">暂无自选股，候选表或详情抽屉可加入。</p>
+          <Empty description="暂无自选股，候选表或详情抽屉可加入。" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         )}
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -796,8 +759,101 @@ function CandidateTable({
     clearBatchSelection();
   }
 
+  const columns = useMemo<ColumnsType<StrongStockScreeningItem>>(
+    () => [
+      {
+        title: "股票",
+        dataIndex: "name",
+        width: 220,
+        render: (_, item) => (
+          <div className="min-w-0">
+            <Link
+              className="inline-flex items-baseline gap-2 whitespace-nowrap font-black text-slate-950 transition hover:text-slate-700"
+              href={`/stock/${item.symbol}`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              {item.name}
+              <span className="text-xs font-semibold text-slate-400">{item.symbol}</span>
+            </Link>
+            <p className="mt-1 line-clamp-1 text-xs text-slate-500">{item.rule_hits[0] ?? "暂无规则说明"}</p>
+          </div>
+        ),
+      },
+      {
+        title: "决策/得分",
+        width: 160,
+        render: (_, item) => {
+          const view = statusCopy[item.status];
+          return (
+            <Space orientation="vertical" size={6}>
+              <span className={`inline-flex h-7 items-center whitespace-nowrap rounded-full px-2.5 text-xs font-bold ring-1 ${view.tone}`}>
+                {view.label}
+              </span>
+              <Typography.Text className="text-xs font-black tabular-nums text-slate-950">
+                得分 {item.score}
+              </Typography.Text>
+              {item.gsgf && <div className="flex max-w-[180px] flex-wrap gap-1"><GsgfSummaryPills gsgf={item.gsgf} /></div>}
+            </Space>
+          );
+        },
+      },
+      {
+        title: "行业/板块",
+        width: 170,
+        render: (_, item) => (
+          <div className="flex flex-wrap items-center gap-1.5">
+            <IndustryBadge industry={item.industry} />
+            <IndustryStrengthBadge item={item} />
+          </div>
+        ),
+      },
+      {
+        title: "风险",
+        width: 220,
+        render: (_, item) => {
+          const riskSummary = primaryRiskSummary(item);
+          return <p className={`line-clamp-2 text-xs leading-5 ${riskSummary.tone}`}>{riskSummary.text}</p>;
+        },
+      },
+      {
+        title: "操作",
+        align: "right",
+        fixed: "right",
+        width: 150,
+        render: (_, item) => {
+          const alreadyAdded = watchlistSymbols.has(item.symbol);
+          return (
+            <Space size={8}>
+              <Button
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSelect(item.symbol);
+                }}
+                size="small"
+              >
+                详情
+              </Button>
+              <Button
+                disabled={alreadyAdded}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onAddToWatchlist(item, "自选", []);
+                }}
+                size="small"
+                type={alreadyAdded ? "default" : "primary"}
+              >
+                {alreadyAdded ? "已在自选" : "加入自选"}
+              </Button>
+            </Space>
+          );
+        },
+      },
+    ],
+    [onAddToWatchlist, onSelect, watchlistSymbols],
+  );
+
   return (
-    <section className="min-w-0 rounded-lg border border-slate-200 bg-white shadow-sm">
+    <Card className="workbench-card min-w-0" styles={{ body: { padding: 0 } }}>
       <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-xs font-semibold uppercase text-slate-400">Candidates</p>
@@ -808,9 +864,7 @@ function CandidateTable({
         </span>
       </div>
       {watchlistMessage && (
-        <div aria-live="polite" className="border-b border-emerald-100 bg-emerald-50 px-5 py-3 text-sm font-bold text-emerald-700">
-          {watchlistMessage}
-        </div>
+        <Alert aria-live="polite" className="rounded-none border-x-0 border-t-0" showIcon title={watchlistMessage} type="success" />
       )}
       {items.length > 0 && (
         <>
@@ -839,39 +893,26 @@ function CandidateTable({
         </>
       )}
       <div className="hidden overflow-x-auto lg:block">
-        {items.length > 0 ? (
-          visibleCandidates.length > 0 ? (
-            <table className="w-full min-w-[660px] border-separate border-spacing-0 text-left text-sm">
-              <thead>
-                <tr className="border-b border-slate-100 text-xs font-bold text-slate-400">
-                  <th className="px-5 py-3">股票</th>
-                  <th className="px-3 py-3">决策/得分</th>
-                  <th className="px-4 py-3">行业/板块</th>
-                  <th className="px-4 py-3">风险</th>
-                  <th className="px-5 py-3 text-right">操作</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {visibleCandidates.map((item) => (
-                  <CandidateTableRow
-                    isBatchSelected={selectedCandidateSymbols.has(item.symbol)}
-                    isSelected={item.symbol === selectedSymbol}
-                    item={item}
-                    key={item.symbol}
-                    isInWatchlist={watchlistSymbols.has(item.symbol)}
-                    onAddToWatchlist={onAddToWatchlist}
-                    onSelect={onSelect}
-                    onToggleBatchSelect={toggleCandidateSelection}
-                  />
-                ))}
-              </tbody>
-            </table>
-          ) : (
-            <FilteredTableState />
-          )
-        ) : (
-          <EmptyTableState running={running} />
-        )}
+        <Table
+          columns={columns}
+          dataSource={visibleCandidates}
+          loading={running}
+          locale={{
+            emptyText: items.length > 0 ? <FilteredTableState /> : <EmptyTableState running={running} />,
+          }}
+          pagination={false}
+          rowClassName={(item) => (item.symbol === selectedSymbol ? "workbench-table-row-selected" : "")}
+          rowKey="symbol"
+          rowSelection={{
+            selectedRowKeys: Array.from(selectedCandidateSymbols),
+            onChange: (keys) => setSelectedCandidateSymbols(new Set(keys.map(String))),
+          }}
+          onRow={(item) => ({
+            onClick: () => onSelect(item.symbol),
+          })}
+          scroll={{ x: 920 }}
+          size="small"
+        />
       </div>
       <div className="border-t border-slate-100 p-3 lg:hidden">
         {items.length > 0 ? (
@@ -892,7 +933,7 @@ function CandidateTable({
           <EmptyTableState running={running} />
         )}
       </div>
-    </section>
+    </Card>
   );
 }
 
@@ -997,43 +1038,28 @@ function CandidateFilterBar({
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex items-center gap-2">
           <span className="text-xs font-black text-slate-700">候选筛选</span>
-          <span className="rounded-full bg-slate-100 px-2 py-1 text-[11px] font-bold tabular-nums text-slate-500">
+          <Tag className="m-0" variant="filled">
             显示 {visibleCount}
-          </span>
+          </Tag>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {candidateStatusFilters.map((filter) => {
-            const active = candidateStatusFilter === filter.value;
-            return (
-              <button
-                aria-pressed={active}
-                className={`inline-flex h-8 items-center rounded-md px-2.5 text-xs font-bold ring-1 transition active:translate-y-px ${
-                  active
-                    ? "bg-slate-950 text-white ring-slate-950"
-                    : "bg-white text-slate-600 ring-slate-200 hover:bg-slate-50 hover:text-slate-950"
-                }`}
-                key={filter.value}
-                onClick={() => onStatusFilterChange(filter.value)}
-                type="button"
-              >
-                {filter.label}
-                <span className="ml-1.5 tabular-nums opacity-75">{statusCounts[filter.value]}</span>
-              </button>
-            );
-          })}
-          <button
+          <Segmented
+            onChange={(value) => onStatusFilterChange(value as CandidateStatusFilter)}
+            options={candidateStatusFilters.map((filter) => ({
+              label: `${filter.label} ${statusCounts[filter.value]}`,
+              value: filter.value,
+            }))}
+            size="small"
+            value={candidateStatusFilter}
+          />
+          <Button
             aria-pressed={strongIndustryOnly}
-            className={`inline-flex h-8 items-center rounded-md px-2.5 text-xs font-bold ring-1 transition active:translate-y-px ${
-              strongIndustryOnly
-                ? "bg-emerald-600 text-white ring-emerald-600"
-                : "bg-emerald-50 text-emerald-700 ring-emerald-100 hover:bg-emerald-100"
-            }`}
             onClick={() => onStrongIndustryOnlyChange(!strongIndustryOnly)}
-            type="button"
+            size="small"
+            type={strongIndustryOnly ? "primary" : "default"}
           >
-            强板块
-            <span className="ml-1.5 tabular-nums opacity-80">{strongIndustryCount}</span>
-          </button>
+            强板块 {strongIndustryCount}
+          </Button>
         </div>
       </div>
     </div>
@@ -1064,39 +1090,39 @@ function BatchActionBar({
   return (
     <div className="grid gap-2 border-b border-slate-100 bg-slate-50 px-5 py-3 lg:grid-cols-[auto_minmax(90px,120px)_minmax(120px,1fr)_auto] lg:items-center">
       <div className="flex items-center gap-2 text-xs font-bold text-slate-600">
-        <span className="rounded-full bg-white px-2 py-1 ring-1 ring-slate-100">已选 {selectedCount}</span>
-        <button className="text-slate-500 transition hover:text-slate-950" onClick={onSelectAll} type="button">
+        <Tag className="m-0">已选 {selectedCount}</Tag>
+        <Button onClick={onSelectAll} size="small" type="link">
           全选 {totalCount}
-        </button>
-        <button
-          className="text-slate-500 transition hover:text-slate-950 disabled:cursor-not-allowed disabled:text-slate-300"
+        </Button>
+        <Button
           disabled={selectedCount === 0}
           onClick={onClearSelection}
-          type="button"
+          size="small"
+          type="link"
         >
           清空选择
-        </button>
+        </Button>
       </div>
-      <input
-        className="min-h-[34px] rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+      <Input
         onChange={(event) => onBatchGroupChange(event.target.value)}
         placeholder="批量分组"
+        size="small"
         value={batchGroup}
       />
-      <input
-        className="min-h-[34px] rounded-md border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+      <Input
         onChange={(event) => onBatchTagsTextChange(event.target.value)}
         placeholder="批量标签，逗号分隔"
+        size="small"
         value={batchTagsText}
       />
-      <button
-        className="min-h-[34px] min-w-[112px] whitespace-nowrap rounded-md bg-slate-950 px-3 text-xs font-bold text-white transition hover:bg-slate-800 active:translate-y-px disabled:cursor-not-allowed disabled:bg-slate-300"
+      <Button
         disabled={selectedCount === 0}
         onClick={onAddSelected}
-        type="button"
+        size="small"
+        type="primary"
       >
         批量加入自选
-      </button>
+      </Button>
     </div>
   );
 }
@@ -1204,8 +1230,16 @@ function CandidateTableRow({
 function EmptyTableState({ running }: { running: boolean }) {
   return (
     <div className="px-5 py-12 text-center">
-      <p className="text-sm font-bold text-slate-700">{running ? "筛选中..." : "未运行筛选"}</p>
-      <p className="mt-2 text-sm text-slate-500">{running ? "正在读取候选和板块强度。" : "运行筛选后显示候选。"}</p>
+      <Empty
+        description={
+          <span className="text-sm text-slate-500">
+            {running ? "正在读取候选和板块强度。" : "运行筛选后显示候选。"}
+          </span>
+        }
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+      >
+        <p className="text-sm font-bold text-slate-700">{running ? "筛选中..." : "未运行筛选"}</p>
+      </Empty>
     </div>
   );
 }
@@ -1213,8 +1247,12 @@ function EmptyTableState({ running }: { running: boolean }) {
 function FilteredTableState() {
   return (
     <div className="px-5 py-12 text-center">
-      <p className="text-sm font-bold text-slate-700">当前筛选暂无候选</p>
-      <p className="mt-2 text-sm text-slate-500">切换候选筛选后显示匹配股票。</p>
+      <Empty
+        description={<span className="text-sm text-slate-500">切换候选筛选后显示匹配股票。</span>}
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+      >
+        <p className="text-sm font-bold text-slate-700">当前筛选暂无候选</p>
+      </Empty>
     </div>
   );
 }
@@ -1246,11 +1284,11 @@ function CandidateDetailPanel({
 
   if (!item) {
     return (
-      <aside className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+      <Card className="workbench-card">
         <p className="text-xs font-semibold uppercase text-slate-400">Detail</p>
         <h2 className="mt-1 text-xl font-black text-slate-950">详情抽屉</h2>
-        <div className="mt-8 rounded-lg bg-slate-50 p-5 text-sm text-slate-500">选择候选股票后显示结论和证据。</div>
-      </aside>
+        <Empty className="mt-8" description="选择候选股票后显示结论和证据。" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+      </Card>
     );
   }
 
@@ -1318,26 +1356,24 @@ function CandidateDetailPanel({
 
         <DetailSection title="操作">
           <div className="space-y-2">
-            <input
-              className="min-h-[38px] w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+            <Input
               onChange={(event) => setWatchlistGroup(event.target.value)}
               placeholder="分组"
               value={watchlistGroup}
             />
-            <input
-              className="min-h-[38px] w-full rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+            <Input
               onChange={(event) => setWatchlistTagsText(event.target.value)}
               placeholder="标签，逗号分隔"
               value={watchlistTagsText}
             />
-            <button
-              className="min-h-[38px] w-full rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 active:translate-y-px disabled:cursor-not-allowed disabled:bg-emerald-100 disabled:text-emerald-700"
+            <Button
+              block
               disabled={alreadyAdded}
               onClick={() => onAddToWatchlist(item, watchlistGroup, splitTags(watchlistTagsText))}
-              type="button"
+              type={alreadyAdded ? "default" : "primary"}
             >
               {alreadyAdded ? "已在自选" : "加入自选"}
-            </button>
+            </Button>
           </div>
           {intradayItem && intradayView && (
             <div className="mt-3 rounded-lg bg-slate-50 p-3">
@@ -1663,29 +1699,25 @@ function splitFilterValues(value: string) {
   return output;
 }
 
-function normalizeOptionalNumber(value: string, minimum?: number) {
-  if (value.trim() === "") {
+function sourceTagColor(status: SourceStatusValue) {
+  const colors: Record<SourceStatusValue, string> = {
+    disabled: "default",
+    failed: "red",
+    missing_key: "orange",
+    success: "green",
+  };
+  return colors[status];
+}
+
+function normalizeOptionalNumber(value: number | string | null, minimum?: number) {
+  if (value === null || String(value).trim() === "") {
     return null;
   }
-  const parsed = Number.parseFloat(value);
+  const parsed = typeof value === "number" ? value : Number.parseFloat(value);
   if (!Number.isFinite(parsed)) {
     return null;
   }
   return minimum === undefined ? parsed : Math.max(minimum, parsed);
-}
-
-function formatOptionalNumber(value: number | null | undefined) {
-  return value === null || value === undefined ? "" : String(value);
-}
-
-function toggleMarketType(current: MarketType[], value: MarketType, checked: boolean) {
-  const next = new Set(current);
-  if (checked) {
-    next.add(value);
-  } else {
-    next.delete(value);
-  }
-  return marketTypeOptions.map((option) => option.value).filter((option) => next.has(option));
 }
 
 function cleanScreenFilters(filters: ScreenRunFilters): ScreenRunFilters {
@@ -1720,8 +1752,8 @@ function activeScreenFilterCount(filters: ScreenRunFilters) {
   return count;
 }
 
-function normalizeScanLimit(value: string) {
-  const parsed = Number.parseInt(value, 10);
+function normalizeScanLimit(value: number | string | null) {
+  const parsed = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
   if (!Number.isFinite(parsed)) {
     return 40;
   }

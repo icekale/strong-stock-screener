@@ -1,5 +1,21 @@
 "use client";
 
+import { ReloadOutlined, SaveOutlined } from "@ant-design/icons";
+import {
+  Alert,
+  Button,
+  Card,
+  Col,
+  Descriptions,
+  Form,
+  Input,
+  InputNumber,
+  Row,
+  Select,
+  Space,
+  Tag,
+  Typography,
+} from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { checkRuntimeSettingsHealth, getRuntimeSettings, saveRuntimeSettings } from "../../lib/api";
 import type { RuntimeSettingsConfig, RuntimeSettingsHealthProbe } from "../../lib/types";
@@ -29,6 +45,7 @@ const DEFAULT_DRAFT: SettingsDraft = {
 };
 
 export default function SettingsPage() {
+  const [form] = Form.useForm<SettingsDraft>();
   const [draft, setDraft] = useState<SettingsDraft>(DEFAULT_DRAFT);
   const [config, setConfig] = useState<RuntimeSettingsConfig | null>(null);
   const [probes, setProbes] = useState<RuntimeSettingsHealthProbe[]>([]);
@@ -48,7 +65,7 @@ export default function SettingsPage() {
     try {
       const response = await getRuntimeSettings();
       setConfig(response.config);
-      setDraft({
+      applyDraft({
         candidate_provider: response.config.candidate_provider,
         kline_provider: response.config.kline_provider,
         quote_provider: response.config.quote_provider,
@@ -84,15 +101,15 @@ export default function SettingsPage() {
         provider_timeout_seconds: draft.provider_timeout_seconds,
       });
       setConfig(response.config);
-      setDraft((current) => ({
-        ...current,
+      applyDraft({
+        ...draft,
         tickflow_api_key: "",
         tickflow_base_url: response.config.tickflow_base_url,
         ifind_api_key: "",
         ifind_base_url: response.config.ifind_base_url,
         ifind_service_id: response.config.ifind_service_id,
         provider_timeout_seconds: response.config.provider_timeout_seconds,
-      }));
+      });
       setMessage("设置已保存");
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存设置失败");
@@ -117,6 +134,15 @@ export default function SettingsPage() {
     }
   }
 
+  function applyDraft(nextDraft: SettingsDraft) {
+    setDraft(nextDraft);
+    form.setFieldsValue(nextDraft);
+  }
+
+  function updateDraft(value: Partial<SettingsDraft>) {
+    setDraft((current) => ({ ...current, ...value }));
+  }
+
   const summary = useMemo(() => {
     if (!config) {
       return "未读取";
@@ -127,150 +153,190 @@ export default function SettingsPage() {
   return (
     <main className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-[1280px] space-y-4 px-4 py-4 sm:px-6 lg:px-8">
-        <header className="rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-sm">
+        <Card className="border-slate-200 shadow-sm" loading={loading}>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase text-slate-400">Settings</p>
-              <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950">数据源配置</h1>
-              <p className="mt-1 text-sm font-medium text-slate-500">独立选股工作台的行情源、候选源和 iFinD 研究增强配置。</p>
+              <Typography.Title className="!mb-1 !text-2xl" level={1}>
+                数据源配置
+              </Typography.Title>
+              <Typography.Text type="secondary">
+                独立选股工作台的行情源、候选源和 iFinD 研究增强配置。
+              </Typography.Text>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <a className="inline-flex min-h-[36px] items-center rounded-md bg-white px-3 text-xs font-bold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-100" href="/">
-                返回工作台
-              </a>
-              <button className="min-h-[36px] rounded-md bg-white px-3 text-xs font-bold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100" disabled={loading || runningHealth} onClick={() => void loadSettings()} type="button">
+            <Space wrap>
+              <Button disabled={loading || runningHealth} icon={<ReloadOutlined />} onClick={() => void loadSettings()}>
                 重新读取
-              </button>
-              <button className="min-h-[36px] rounded-md bg-slate-950 px-3 text-xs font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300" disabled={saving} onClick={() => void handleSave()} type="button">
-                {saving ? "保存中..." : "保存设置"}
-              </button>
-            </div>
+              </Button>
+              <Button icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()} type="primary">
+                保存设置
+              </Button>
+            </Space>
           </div>
-        </header>
+        </Card>
 
-        {error && <div className="rounded-lg bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</div>}
-        {message && <div className="rounded-lg bg-emerald-50 p-3 text-sm font-semibold text-emerald-700">{message}</div>}
+        {error && <Alert showIcon title={error} type="error" />}
+        {message && <Alert showIcon title={message} type="success" />}
 
-        <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
-          <section className="space-y-4">
-            <Panel title="当前状态" subtitle={summary}>
-              <div className="grid gap-3 sm:grid-cols-3">
-                <StatusPill label="候选源" value={config?.candidate_provider ?? "未读取"} />
-                <StatusPill label="K线源" value={config?.kline_provider ?? "未读取"} />
-                <StatusPill label="行情源" value={config?.quote_provider ?? "未读取"} />
-                <StatusPill label="TickFlow Key" value={config?.tickflow_api_key_configured ? "已配置" : "未配置"} />
-                <StatusPill label="iFinD Key" value={config?.ifind_api_key_configured ? "已配置" : "未配置"} />
-                <StatusPill label="iFinD 服务" value={config?.ifind_service_id ?? "未读取"} />
-                <StatusPill label="超时" value={config ? `${config.provider_timeout_seconds}s` : "未读取"} />
-              </div>
-            </Panel>
+        <Row gutter={[16, 16]}>
+          <Col lg={16} xs={24}>
+            <Space className="w-full" orientation="vertical" size={16}>
+              <Card className="border-slate-200 shadow-sm" title="当前状态">
+                <Descriptions bordered column={{ lg: 3, md: 2, xs: 1 }} size="small">
+                  <Descriptions.Item label="状态摘要">{summary}</Descriptions.Item>
+                  <Descriptions.Item label="候选源">{config?.candidate_provider ?? "未读取"}</Descriptions.Item>
+                  <Descriptions.Item label="K线源">{config?.kline_provider ?? "未读取"}</Descriptions.Item>
+                  <Descriptions.Item label="行情源">{config?.quote_provider ?? "未读取"}</Descriptions.Item>
+                  <Descriptions.Item label="TickFlow Key">
+                    <KeyStatus configured={Boolean(config?.tickflow_api_key_configured)} />
+                  </Descriptions.Item>
+                  <Descriptions.Item label="iFinD Key">
+                    <KeyStatus configured={Boolean(config?.ifind_api_key_configured)} />
+                  </Descriptions.Item>
+                  <Descriptions.Item label="iFinD 服务">{config?.ifind_service_id ?? "未读取"}</Descriptions.Item>
+                  <Descriptions.Item label="超时">{config ? `${config.provider_timeout_seconds}s` : "未读取"}</Descriptions.Item>
+                </Descriptions>
+              </Card>
 
-            <Panel title="行情与候选源" subtitle="TickFlow 继续负责 K 线、分钟线和实时行情">
-              <div className="grid gap-3 md:grid-cols-2">
-                <Field label="候选源">
-                  <select className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" value={draft.candidate_provider} onChange={(event) => setDraft({ ...draft, candidate_provider: event.target.value as SettingsDraft["candidate_provider"] })}>
-                    <option value="recent_limit_up">recent_limit_up</option>
-                    <option value="thsdk">thsdk</option>
-                  </select>
-                </Field>
-                <Field label="K线源">
-                  <input className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm" value="tickflow" readOnly />
-                </Field>
-                <Field label="行情源">
-                  <input className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm" value="tickflow" readOnly />
-                </Field>
-                <Field label="TickFlow Base URL">
-                  <input className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" value={draft.tickflow_base_url} onChange={(event) => setDraft({ ...draft, tickflow_base_url: event.target.value })} />
-                </Field>
-                <Field label="TickFlow API Key">
-                  <input className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" placeholder={config?.tickflow_api_key_configured ? "留空表示沿用已保存 Key" : "请输入 TickFlow API Key"} value={draft.tickflow_api_key} onChange={(event) => setDraft({ ...draft, tickflow_api_key: event.target.value })} />
-                </Field>
-                <Field label="请求超时（秒）">
-                  <input className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" type="number" min={1} max={60} step={0.5} value={draft.provider_timeout_seconds} onChange={(event) => setDraft({ ...draft, provider_timeout_seconds: Number(event.target.value) || 12 })} />
-                </Field>
-              </div>
-            </Panel>
+              <Card className="border-slate-200 shadow-sm" title="行情与候选源">
+                <Form form={form} layout="vertical" onValuesChange={(_, values) => updateDraft(values)}>
+                  <Row gutter={12}>
+                    <Col md={12} xs={24}>
+                      <Form.Item label="候选源" name="candidate_provider">
+                        <Select
+                          options={[
+                            { label: "recent_limit_up", value: "recent_limit_up" },
+                            { label: "thsdk", value: "thsdk" },
+                          ]}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col md={12} xs={24}>
+                      <Form.Item label="K线源" name="kline_provider">
+                        <Input readOnly />
+                      </Form.Item>
+                    </Col>
+                    <Col md={12} xs={24}>
+                      <Form.Item label="行情源" name="quote_provider">
+                        <Input readOnly />
+                      </Form.Item>
+                    </Col>
+                    <Col md={12} xs={24}>
+                      <Form.Item label="TickFlow Base URL" name="tickflow_base_url">
+                        <Input />
+                      </Form.Item>
+                    </Col>
+                    <Col md={12} xs={24}>
+                      <Form.Item label="TickFlow API Key" name="tickflow_api_key">
+                        <Input.Password
+                          autoComplete="off"
+                          placeholder={config?.tickflow_api_key_configured ? "留空表示沿用已保存 Key" : "请输入 TickFlow API Key"}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col md={12} xs={24}>
+                      <Form.Item label="请求超时（秒）" name="provider_timeout_seconds">
+                        <InputNumber className="w-full" max={60} min={1} step={0.5} />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                </Form>
+              </Card>
 
-            <Panel title="iFinD 研究增强" subtitle="用于行业板块、公告新闻、财务估值和风险事件；不替代 TickFlow 行情">
-              <div className="grid gap-3 md:grid-cols-2">
-                <Field label="iFinD Base URL">
-                  <input className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" value={draft.ifind_base_url} onChange={(event) => setDraft({ ...draft, ifind_base_url: event.target.value })} />
-                </Field>
-                <Field label="默认 MCP 服务">
-                  <select className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" value={draft.ifind_service_id} onChange={(event) => setDraft({ ...draft, ifind_service_id: event.target.value as SettingsDraft["ifind_service_id"] })}>
-                    <option value="hexin-ifind-ds-stock-mcp">A股数据</option>
-                    <option value="hexin-ifind-ds-news-mcp">新闻公告</option>
-                    <option value="hexin-ifind-ds-index-mcp">指数板块</option>
-                  </select>
-                </Field>
-                <Field label="iFinD MCP Key">
-                  <input className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm" placeholder={config?.ifind_api_key_configured ? "留空表示沿用已保存 Key" : "请输入 iFinD MCP Key"} value={draft.ifind_api_key} onChange={(event) => setDraft({ ...draft, ifind_api_key: event.target.value })} />
-                </Field>
-                <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-                  <div className="text-xs font-semibold text-slate-500">Key 来源</div>
-                  <div className="mt-1 text-sm font-black text-slate-950">{config?.ifind_api_key_source ?? "未读取"}</div>
-                  <div className="mt-1 text-xs text-slate-500">{config?.ifind_api_key_preview || "未配置"}</div>
-                </div>
-              </div>
-            </Panel>
-          </section>
+              <Card className="border-slate-200 shadow-sm" title="iFinD 研究增强">
+                <Alert
+                  className="mb-4"
+                  showIcon
+                  title="iFinD 用于行业板块、公告新闻、财务估值和风险事件，不替代 TickFlow 行情。"
+                  type="info"
+                />
+                <Form form={form} layout="vertical" onValuesChange={(_, values) => updateDraft(values)}>
+                  <Row gutter={12}>
+                    <Col md={12} xs={24}>
+                      <Form.Item label="iFinD Base URL" name="ifind_base_url">
+                        <Input />
+                      </Form.Item>
+                    </Col>
+                    <Col md={12} xs={24}>
+                      <Form.Item label="默认 MCP 服务" name="ifind_service_id">
+                        <Select
+                          options={[
+                            { label: "A股数据", value: "hexin-ifind-ds-stock-mcp" },
+                            { label: "新闻公告", value: "hexin-ifind-ds-news-mcp" },
+                            { label: "指数板块", value: "hexin-ifind-ds-index-mcp" },
+                          ]}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col md={12} xs={24}>
+                      <Form.Item label="iFinD MCP Key" name="ifind_api_key">
+                        <Input.Password
+                          autoComplete="off"
+                          placeholder={config?.ifind_api_key_configured ? "留空表示沿用已保存 Key" : "请输入 iFinD MCP Key"}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col md={12} xs={24}>
+                      <Descriptions bordered column={1} size="small">
+                        <Descriptions.Item label="Key 来源">{config?.ifind_api_key_source ?? "未读取"}</Descriptions.Item>
+                        <Descriptions.Item label="Key 摘要">{config?.ifind_api_key_preview || "未配置"}</Descriptions.Item>
+                      </Descriptions>
+                    </Col>
+                  </Row>
+                </Form>
+              </Card>
+            </Space>
+          </Col>
 
-          <aside className="space-y-4">
-            <Panel title="手动健康检查" subtitle="不在页面加载时自动刷接口">
-              <button className="min-h-[40px] w-full rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300" disabled={runningHealth} onClick={() => void handleHealthCheck()} type="button">
-                {runningHealth ? "检查中..." : "运行健康检查"}
-              </button>
-              <div className="mt-3 space-y-2">
+          <Col lg={8} xs={24}>
+            <Card
+              className="border-slate-200 shadow-sm"
+              extra={
+                <Button loading={runningHealth} onClick={() => void handleHealthCheck()} type="primary">
+                  运行健康检查
+                </Button>
+              }
+              title="手动健康检查"
+            >
+              <Typography.Paragraph type="secondary">
+                健康检查需要手动触发，避免设置页加载时自动消耗 TickFlow 或 iFinD 请求额度。
+              </Typography.Paragraph>
+              <Space className="w-full" orientation="vertical" size={10}>
                 {probes.length === 0 ? (
-                  <p className="text-sm text-slate-500">暂无健康检查结果。</p>
+                  <Alert showIcon title="暂无健康检查结果" type="info" />
                 ) : (
                   probes.map((probe) => (
-                    <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2" key={probe.name}>
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-bold text-slate-950">{probe.name}</span>
-                        <span className={`rounded-full px-2 py-0.5 text-xs font-black ${probe.status === "success" ? "bg-emerald-50 text-emerald-700" : probe.status === "missing_key" ? "bg-amber-50 text-amber-700" : "bg-red-50 text-red-700"}`}>
-                          {probe.status}
-                        </span>
+                    <Card className="bg-slate-50" key={probe.name} size="small">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <Typography.Text strong>{probe.name}</Typography.Text>
+                          <Typography.Text className="mt-1 block text-xs" type="secondary">
+                            {probe.latency_ms} ms · {probe.detail}
+                          </Typography.Text>
+                        </div>
+                        <ProbeStatus status={probe.status} />
                       </div>
-                      <p className="mt-1 text-xs text-slate-500">{probe.latency_ms} ms · {probe.detail}</p>
-                    </div>
+                    </Card>
                   ))
                 )}
-              </div>
-            </Panel>
-          </aside>
-        </div>
+              </Space>
+            </Card>
+          </Col>
+        </Row>
       </div>
     </main>
   );
 }
 
-function Panel({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="mb-4">
-        <h2 className="text-lg font-black text-slate-950">{title}</h2>
-        {subtitle && <p className="mt-1 text-sm text-slate-500">{subtitle}</p>}
-      </div>
-      {children}
-    </section>
-  );
+function KeyStatus({ configured }: { configured: boolean }) {
+  return configured ? <Tag color="success">已配置</Tag> : <Tag color="warning">未配置</Tag>;
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="text-xs font-bold uppercase tracking-wide text-slate-500">{label}</span>
-      <div className="mt-2">{children}</div>
-    </label>
-  );
-}
-
-function StatusPill({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
-      <div className="text-xs font-semibold text-slate-500">{label}</div>
-      <div className="mt-1 text-sm font-black text-slate-950">{value}</div>
-    </div>
-  );
+function ProbeStatus({ status }: { status: RuntimeSettingsHealthProbe["status"] }) {
+  if (status === "success") {
+    return <Tag color="success">success</Tag>;
+  }
+  if (status === "missing_key") {
+    return <Tag color="warning">missing_key</Tag>;
+  }
+  return <Tag color="error">{status}</Tag>;
 }

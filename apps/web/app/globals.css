@@ -11,6 +11,26 @@ body {
   color: #0f172a;
 }
 
+.app-shell__sider .ant-layout-sider-zero-width-trigger {
+  inset-inline-start: 12px;
+  inset-block-start: 12px;
+  border-radius: 6px;
+  background: #0f172a;
+}
+
+.workbench-card {
+  border-color: #e2e8f0;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+}
+
+.workbench-table-row-selected > td {
+  background: #f1f5f9 !important;
+}
+
+.workbench-table-row-selected:hover > td {
+  background: #e2e8f0 !important;
+}
+
 .tickflow-kline-chart > div {
   height: 100% !important;
   width: 100% !important;

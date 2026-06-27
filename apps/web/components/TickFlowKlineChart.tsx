@@ -1,15 +1,18 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EChartsOption } from "echarts";
+import type { ForwardRefExoticComponent, RefAttributes } from "react";
 import type {
+  IndicatorOptions,
   KLineChartProps,
+  KLineChartRef,
   KlineData,
   KLineDataProvider,
-  PaneConfig,
   ThemeConfig,
 } from "kline-charts-react";
+import { buildKlinePanes, type KlineSubIndicator } from "../lib/klineIndicatorLayout";
 import type { GsgfChartAnnotation, KlineBar } from "../lib/types";
 
 const ReactKLineChart = dynamic(
@@ -22,7 +25,7 @@ const ReactKLineChart = dynamic(
     ),
     ssr: false,
   },
-) as React.ComponentType<KLineChartProps>;
+) as ForwardRefExoticComponent<KLineChartProps & RefAttributes<KLineChartRef>>;
 
 type MovingAverageField = "ma5" | "ma10" | "ma20" | "ma60";
 
@@ -46,10 +49,19 @@ const KLINE_THEME: ThemeConfig = {
   volumeUpColor: "#f43f5e",
 };
 
-const KLINE_PANES: PaneConfig[] = [
-  { id: "main", height: "76%", indicators: ["ma"] },
-  { id: "sub_volume_0", height: "18%", indicators: ["volume"] },
-];
+const KLINE_INDICATOR_OPTIONS: IndicatorOptions = {
+  ma: { periods: [5, 10, 20, 60], type: "sma" },
+  macd: { short: 12, long: 26, signal: 9 },
+  kdj: { dPeriod: 3, kPeriod: 3, period: 9 },
+  rsi: { periods: [6, 12, 24] },
+  wr: { periods: [6, 10] },
+  bias: { periods: [6, 12, 24] },
+  cci: { period: 14 },
+  atr: { period: 14 },
+  obv: { maPeriod: 30 },
+  roc: { period: 12, signalPeriod: 6 },
+  dmi: { adxPeriod: 6, period: 14 },
+};
 
 export function TickFlowKlineChart({
   annotations,
@@ -58,6 +70,7 @@ export function TickFlowKlineChart({
   movingAverages,
   period,
   showGsgfAnnotations,
+  subIndicators,
   symbol,
 }: {
   annotations: GsgfChartAnnotation[];
@@ -66,8 +79,14 @@ export function TickFlowKlineChart({
   movingAverages: MovingAverageField[];
   period: "daily" | "weekly";
   showGsgfAnnotations: boolean;
+  subIndicators: KlineSubIndicator[];
   symbol: string;
 }) {
+  const chartRef = useRef<KLineChartRef>(null);
+  const [chartDataVersion, setChartDataVersion] = useState(0);
+  const handleDataLoad = useCallback(() => {
+    setChartDataVersion((version) => version + 1);
+  }, []);
   const chartData = useMemo(() => convertBarsForKlineChart(bars, symbol), [bars, symbol]);
   const dataProvider = useMemo<KLineDataProvider>(
     () => ({
@@ -75,14 +94,23 @@ export function TickFlowKlineChart({
     }),
     [chartData],
   );
-  const indicators = useMemo(
-    () => (movingAverages.length > 0 ? (["ma", "volume"] as const) : (["volume"] as const)),
-    [movingAverages.length],
+  const requestOptions = useMemo(() => ({ abortOnChange: true, debounceMs: 0, dedupe: false }), []);
+  const indicatorLayout = useMemo(
+    () => buildKlinePanes(movingAverages, subIndicators),
+    [movingAverages, subIndicators],
   );
   const echartsOption = useMemo(
-    () => buildTickFlowEchartsOption(bars, movingAverages, annotations, showGsgfAnnotations),
-    [annotations, bars, movingAverages, showGsgfAnnotations],
+    () => buildTickFlowAnnotationOption(annotations, showGsgfAnnotations),
+    [annotations, showGsgfAnnotations],
   );
+
+  useEffect(() => {
+    const instance = chartRef.current?.getEchartsInstance();
+    if (!instance) {
+      return;
+    }
+    instance.setOption(echartsOption, false);
+  }, [chartDataVersion, echartsOption, indicatorLayout]);
 
   if (bars.length === 0) {
     return (
@@ -95,18 +123,18 @@ export function TickFlowKlineChart({
   return (
     <div className="tickflow-kline-chart h-full min-h-[460px] bg-white">
       <ReactKLineChart
+        ref={chartRef}
         adjust="qfq"
         dataProvider={dataProvider}
-        echartsOption={echartsOption}
-        echartsOptionMerge={{ mode: "safeMerge" }}
         height={height}
-        indicatorOptions={{ ma: { periods: [5, 10, 20, 60], type: "sma" } }}
-        indicators={[...indicators]}
+        indicatorOptions={KLINE_INDICATOR_OPTIONS}
+        indicators={indicatorLayout.chartIndicators}
         market="A"
-        maxSubPanes={1}
-        panes={KLINE_PANES}
+        maxSubPanes={subIndicators.length}
+        onDataLoad={handleDataLoad}
+        panes={indicatorLayout.panes}
         period={period}
-        requestOptions={{ abortOnChange: true, debounceMs: 0, dedupe: false }}
+        requestOptions={requestOptions}
         showIndicatorSelector={false}
         showPeriodSelector={false}
         showToolbar
@@ -139,9 +167,7 @@ export function convertBarsForKlineChart(bars: KlineBar[], symbol: string): Klin
   });
 }
 
-function buildTickFlowEchartsOption(
-  bars: KlineBar[],
-  movingAverages: MovingAverageField[],
+function buildTickFlowAnnotationOption(
   annotations: GsgfChartAnnotation[],
   showGsgfAnnotations: boolean,
 ): EChartsOption {
@@ -175,58 +201,19 @@ function buildTickFlowEchartsOption(
       },
     ]);
 
-  const series = [
-    {
-      data: bars.map((bar) => [bar.open, bar.close, bar.low, bar.high]),
-      itemStyle: {
-        borderColor: KLINE_THEME.upColor,
-        borderColor0: KLINE_THEME.downColor,
-        color: KLINE_THEME.upColor,
-        color0: KLINE_THEME.downColor,
-      },
-      markArea: ranges.length > 0 ? { data: ranges, silent: true } : undefined,
-      markPoint: points.length > 0
-        ? {
-            data: points,
-            label: { formatter: "{b}" },
-            symbol: "pin",
-            symbolSize: 52,
-          }
-        : undefined,
-      name: "K线",
-      type: "candlestick",
-      xAxisIndex: 0,
-      yAxisIndex: 0,
+  const klineSeries = {
+    markArea: { data: ranges, silent: true },
+    markPoint: {
+      data: points,
+      label: { formatter: "{b}" },
+      symbol: "pin",
+      symbolSize: 52,
     },
-    ...movingAverages.map((field, index) => ({
-      data: bars.map((bar) => bar[field]),
-      lineStyle: {
-        color: KLINE_THEME.maColors[index] ?? KLINE_THEME.maColors[0],
-        width: 1,
-      },
-      name: field.toUpperCase(),
-      smooth: true,
-      symbol: "none",
-      type: "line",
-      xAxisIndex: 0,
-      yAxisIndex: 0,
-    })),
-    {
-      data: bars.map((bar) => ({
-        itemStyle: {
-          color: bar.close >= bar.open ? KLINE_THEME.volumeUpColor : KLINE_THEME.volumeDownColor,
-        },
-        value: bar.volume,
-      })),
-      name: "成交量",
-      type: "bar",
-      xAxisIndex: 1,
-      yAxisIndex: 1,
-    },
-  ];
+    name: "K线",
+  };
 
   return {
-    series: series as EChartsOption["series"],
+    series: [klineSeries] as EChartsOption["series"],
   };
 }
 

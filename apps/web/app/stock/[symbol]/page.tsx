@@ -1,8 +1,35 @@
 "use client";
 
+import {
+  Alert,
+  Button,
+  Card,
+  Descriptions,
+  Empty,
+  Input,
+  List,
+  Segmented,
+  Select,
+  Space,
+  Spin,
+  Statistic,
+  Tag,
+  Typography,
+} from "antd";
 import { use, useEffect, useMemo, useState } from "react";
 import { TickFlowKlineChart } from "../../../components/TickFlowKlineChart";
 import { getLatestScreenRun, getStockKline, getStockResearch } from "../../../lib/api";
+import {
+  buildKlineIndicatorState,
+  KLINE_SUB_INDICATOR_OPTIONS,
+  parseStoredKlineIndicatorState,
+  updateKlineSubIndicator,
+  updateKlineSubPaneCount,
+  type KlineIndicatorState,
+  type KlineSubIndicator,
+  type KlineSubPaneCount,
+} from "../../../lib/klineIndicatorLayout";
+import { filterStockList, stockListStatusOptions, type StockListStatus } from "../../../lib/stockListFilter";
 import type { KlineBar, StockKlineResponse, StockResearchResponse, StrongStockScreeningItem } from "../../../lib/types";
 
 type ChartTab = "day" | "week" | "info" | "strategy" | "concept" | "research";
@@ -26,6 +53,7 @@ const CHART_TABS: Array<{ key: ChartTab; label: string }> = [
 ];
 
 const KLINE_CHART_HEIGHT = 680;
+const KLINE_INDICATOR_STORAGE_KEY = "strong-stock-screener:kline-indicator-layout";
 
 const MOVING_AVERAGES: Array<{ color: string; field: MovingAverageField; label: string; period: number }> = [
   { color: "#1683ff", field: "ma5", label: "MA5", period: 5 },
@@ -46,12 +74,17 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
   const [error, setError] = useState<string | null>(null);
   const [researchError, setResearchError] = useState<string | null>(null);
   const [activeChartTab, setActiveChartTab] = useState<ChartTab>("day");
+  const [candidateListCollapsed, setCandidateListCollapsed] = useState(true);
   const [showGsgfAnnotations, setShowGsgfAnnotations] = useState(true);
   const [visibleMovingAverages, setVisibleMovingAverages] = useState<MovingAverageField[]>([
     "ma5",
     "ma10",
     "ma20",
   ]);
+  const [indicatorStateLoaded, setIndicatorStateLoaded] = useState(false);
+  const [indicatorState, setIndicatorState] = useState<KlineIndicatorState>(() =>
+    buildKlineIndicatorState({ paneCount: 1, subIndicators: [] }),
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -128,6 +161,17 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
     };
   }, []);
 
+  useEffect(() => {
+    setIndicatorState(parseStoredKlineIndicatorState(window.localStorage.getItem(KLINE_INDICATOR_STORAGE_KEY)));
+    setIndicatorStateLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (indicatorStateLoaded) {
+      window.localStorage.setItem(KLINE_INDICATOR_STORAGE_KEY, JSON.stringify(indicatorState));
+    }
+  }, [indicatorState, indicatorStateLoaded]);
+
   const bars = data?.bars ?? [];
   const dailyBars = useMemo(() => buildMovingAverageBars(bars), [bars]);
   const weeklyBars = useMemo(() => buildMovingAverageBars(buildWeeklyBars(bars)), [bars]);
@@ -149,10 +193,28 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
     });
   }
 
+  function changeSubPaneCount(paneCount: KlineSubPaneCount) {
+    setIndicatorState((current) => updateKlineSubPaneCount(current, paneCount));
+  }
+
+  function changeSubIndicator(index: number, indicator: KlineSubIndicator) {
+    setIndicatorState((current) => updateKlineSubIndicator(current, index, indicator));
+  }
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950">
-      <div className="grid min-h-screen lg:grid-cols-[248px_minmax(0,1fr)]">
-        <StockListPanel currentSymbol={symbol} items={stockList} loading={listLoading} />
+      <div
+        className={`grid min-h-screen transition-[grid-template-columns] duration-200 ${
+          candidateListCollapsed ? "lg:grid-cols-[168px_minmax(0,1fr)]" : "lg:grid-cols-[248px_minmax(0,1fr)]"
+        }`}
+      >
+        <StockListPanel
+          collapsed={candidateListCollapsed}
+          currentSymbol={symbol}
+          items={stockList}
+          loading={listLoading}
+          onToggleCollapsed={() => setCandidateListCollapsed((value) => !value)}
+        />
 
         <section className="min-w-0 border-l border-slate-200">
           <QuoteSummary
@@ -166,37 +228,28 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
           />
 
           <div className="grid gap-3 p-3 sm:p-4">
-            {error && <p className="rounded-lg bg-red-50 px-4 py-3 text-sm font-bold text-red-700">{error}</p>}
+            {error && <Alert showIcon title={error} type="error" />}
 
-            <article className="min-w-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+            <Card className="workbench-card min-w-0 overflow-hidden" styles={{ body: { padding: 0 } }}>
               <ChartTabs activeTab={activeChartTab} onChange={setActiveChartTab} />
               <div className="px-3 py-3 sm:px-4">
-                <div className="mb-2 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-                  <div className="min-w-0">
-                    <h2 className="text-sm font-black text-slate-950">{activeTabLabel}</h2>
-                    <p className="mt-0.5 text-xs font-semibold text-slate-400">
-                      {loading
-                        ? "加载中"
-                        : isChartTab
-                          ? `${chartBars.length} 条数据 · ${movingAverageSummary(visibleMovingAverages)}`
-                          : `${currentStock?.industry ?? "行业待补"} · ${currentStock?.symbol ?? symbol}`}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {isChartTab && (
-                      <>
-                        <MovingAverageControl
-                          onToggle={toggleMovingAverage}
-                          visibleMovingAverages={visibleMovingAverages}
-                        />
-                        <AnnotationControl active={showGsgfAnnotations} onToggle={() => setShowGsgfAnnotations((value) => !value)} />
-                      </>
-                    )}
-                    <span className="inline-flex h-7 max-w-full items-center truncate rounded-md bg-slate-50 px-2.5 text-xs font-bold text-slate-600 ring-1 ring-slate-200">
-                      {data?.source_status.source ?? "读取中"}
-                    </span>
-                  </div>
-                </div>
+                <ChartControlBar
+                  activeTabLabel={activeTabLabel}
+                  currentStock={currentStock}
+                  dataSource={data?.source_status.source ?? "读取中"}
+                  indicatorState={indicatorState}
+                  isChartTab={isChartTab}
+                  loading={loading}
+                  movingAverageSummaryText={movingAverageSummary(visibleMovingAverages)}
+                  onAnnotationToggle={() => setShowGsgfAnnotations((value) => !value)}
+                  onMovingAverageToggle={toggleMovingAverage}
+                  onSubIndicatorChange={changeSubIndicator}
+                  onSubPaneCountChange={changeSubPaneCount}
+                  showGsgfAnnotations={showGsgfAnnotations}
+                  symbol={symbol}
+                  chartBarCount={chartBars.length}
+                  visibleMovingAverages={visibleMovingAverages}
+                />
                 <div className="overflow-hidden rounded-md border border-slate-100">
                   {isChartTab ? (
                     <div className="h-[calc(100vh-236px)] min-h-[560px] bg-white">
@@ -207,6 +260,7 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
                         movingAverages={visibleMovingAverages}
                         period={activeChartTab === "week" ? "weekly" : "daily"}
                         showGsgfAnnotations={activeChartTab === "day" && showGsgfAnnotations}
+                        subIndicators={indicatorState.subIndicators}
                         symbol={symbol}
                       />
                     </div>
@@ -227,11 +281,46 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
                   )}
                 </div>
               </div>
-            </article>
+            </Card>
           </div>
         </section>
       </div>
     </main>
+  );
+}
+
+function SubIndicatorControl({
+  indicatorState,
+  onPaneCountChange,
+  onSubIndicatorChange,
+}: {
+  indicatorState: KlineIndicatorState;
+  onPaneCountChange: (paneCount: KlineSubPaneCount) => void;
+  onSubIndicatorChange: (index: number, indicator: KlineSubIndicator) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Segmented
+        onChange={(value) => onPaneCountChange(value as KlineSubPaneCount)}
+        options={[1, 2, 3].map((count) => ({ label: `${count}图`, value: count as KlineSubPaneCount }))}
+        size="small"
+        value={indicatorState.paneCount}
+      />
+      <div className="flex flex-wrap items-center gap-1.5">
+        {indicatorState.subIndicators.map((indicator, index) => (
+          <label className="inline-flex h-[34px] items-center gap-1.5 text-xs font-bold text-slate-500" key={`${index}-${indicator}`}>
+            <span className="whitespace-nowrap">副图{index + 1}</span>
+            <Select
+              className="min-w-[96px]"
+              onChange={(value) => onSubIndicatorChange(index, value)}
+              options={KLINE_SUB_INDICATOR_OPTIONS}
+              size="small"
+              value={indicator}
+            />
+          </label>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -243,108 +332,240 @@ function MovingAverageControl({
   visibleMovingAverages: MovingAverageField[];
 }) {
   return (
-    <div className="inline-flex min-h-[34px] items-center overflow-hidden rounded-md border border-slate-200 bg-white text-xs font-black">
+    <Space.Compact>
       {MOVING_AVERAGES.map((item) => {
         const active = visibleMovingAverages.includes(item.field);
         return (
-          <button
-            aria-pressed={active}
-            className={`min-h-[34px] border-r border-slate-200 px-3 transition last:border-r-0 ${
-              active ? "bg-slate-950 text-white" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-            }`}
+          <Button
             key={item.field}
             onClick={() => onToggle(item.field)}
+            size="small"
             style={active ? undefined : { color: item.color }}
             title={`${active ? "隐藏" : "显示"}${item.label}`}
-            type="button"
+            type={active ? "primary" : "default"}
           >
             {item.label}
-          </button>
+          </Button>
         );
       })}
-    </div>
+    </Space.Compact>
   );
 }
 
 function AnnotationControl({ active, onToggle }: { active: boolean; onToggle: () => void }) {
   return (
-    <button
+    <Button
       aria-pressed={active}
-      className={`min-h-[34px] rounded-md border px-3 text-xs font-black transition ${
-        active
-          ? "border-slate-950 bg-slate-950 text-white"
-          : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-      }`}
       onClick={onToggle}
+      size="small"
       title={`${active ? "隐藏" : "显示"}股是股非图表证据`}
-      type="button"
+      type={active ? "primary" : "default"}
     >
       GSGF 证据
-    </button>
+    </Button>
+  );
+}
+
+function ChartControlBar({
+  activeTabLabel,
+  chartBarCount,
+  currentStock,
+  dataSource,
+  indicatorState,
+  isChartTab,
+  loading,
+  movingAverageSummaryText,
+  onAnnotationToggle,
+  onMovingAverageToggle,
+  onSubIndicatorChange,
+  onSubPaneCountChange,
+  showGsgfAnnotations,
+  symbol,
+  visibleMovingAverages,
+}: {
+  activeTabLabel: string;
+  chartBarCount: number;
+  currentStock: StockListItem | null;
+  dataSource: string;
+  indicatorState: KlineIndicatorState;
+  isChartTab: boolean;
+  loading: boolean;
+  movingAverageSummaryText: string;
+  onAnnotationToggle: () => void;
+  onMovingAverageToggle: (field: MovingAverageField) => void;
+  onSubIndicatorChange: (index: number, indicator: KlineSubIndicator) => void;
+  onSubPaneCountChange: (paneCount: KlineSubPaneCount) => void;
+  showGsgfAnnotations: boolean;
+  symbol: string;
+  visibleMovingAverages: MovingAverageField[];
+}) {
+  const summary = loading
+    ? "加载中"
+    : isChartTab
+      ? `${chartBarCount} 条数据 · ${movingAverageSummaryText}`
+      : `${currentStock?.industry ?? "行业待补"} · ${currentStock?.symbol ?? symbol}`;
+
+  return (
+    <div className="mb-2 flex flex-col gap-2 2xl:flex-row 2xl:items-center 2xl:justify-between">
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        <Typography.Text className="text-sm font-black text-slate-950">{activeTabLabel}</Typography.Text>
+        <Typography.Text className="text-xs font-semibold text-slate-500">{summary}</Typography.Text>
+        <Tag className="m-0 max-w-full truncate">{dataSource}</Tag>
+      </div>
+      {isChartTab && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md bg-slate-50 px-2 py-2 ring-1 ring-slate-100">
+          <MovingAverageControl
+            onToggle={onMovingAverageToggle}
+            visibleMovingAverages={visibleMovingAverages}
+          />
+          <AnnotationControl active={showGsgfAnnotations} onToggle={onAnnotationToggle} />
+          <SubIndicatorControl
+            indicatorState={indicatorState}
+            onPaneCountChange={onSubPaneCountChange}
+            onSubIndicatorChange={onSubIndicatorChange}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
 function StockListPanel({
+  collapsed,
   currentSymbol,
   items,
   loading,
+  onToggleCollapsed,
 }: {
+  collapsed: boolean;
   currentSymbol: string;
   items: StockListItem[];
   loading: boolean;
+  onToggleCollapsed: () => void;
 }) {
+  const [searchText, setSearchText] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StockListStatus>("all");
+  const visibleItems = useMemo(
+    () => filterStockList(items, searchText, statusFilter),
+    [items, searchText, statusFilter],
+  );
+
   return (
     <aside className="hidden min-h-screen bg-white lg:block">
       <div className="sticky top-0 flex h-screen flex-col border-r border-slate-200">
-        <div className="border-b border-slate-100 px-4 py-4">
-          <a className="text-xs font-bold text-slate-500 transition hover:text-slate-950" href="/">
-            返回选股工作台
-          </a>
-          <div className="mt-5 flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase text-slate-400">Candidates</p>
-              <h2 className="mt-1 text-lg font-black text-slate-950">股票列表</h2>
-            </div>
-            <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-black tabular-nums text-slate-600">
-              {items.length}
-            </span>
+        <div className={`${collapsed ? "px-3 py-3" : "px-4 py-4"} border-b border-slate-100`}>
+          <div className="flex items-center justify-between gap-2">
+            {!collapsed && (
+              <Button href="/" size="small" type="link">
+                返回选股工作台
+              </Button>
+            )}
+            {collapsed && (
+              <Typography.Text className="truncate text-xs font-black text-slate-500">
+                紧凑列表
+              </Typography.Text>
+            )}
+            <Button
+              aria-label={collapsed ? "展开股票列表" : "收起股票列表"}
+              onClick={onToggleCollapsed}
+              size="small"
+              title={collapsed ? "展开股票列表" : "收起股票列表"}
+            >
+              {collapsed ? "展开" : "收起"}
+            </Button>
+          </div>
+          <div className={collapsed ? "mt-3 flex items-center justify-between gap-2" : "mt-5 flex items-center justify-between gap-3"}>
+            {collapsed ? (
+              <>
+                <span className="truncate text-xs font-semibold text-slate-400">股票列表</span>
+                <Tag className="m-0">{visibleItems.length}/{items.length}</Tag>
+              </>
+            ) : (
+              <>
+                <div>
+                  <Typography.Text className="text-xs font-semibold uppercase text-slate-400">Candidates</Typography.Text>
+                  <Typography.Title className="mt-1 text-lg font-black text-slate-950" level={2}>
+                    股票列表
+                  </Typography.Title>
+                </div>
+                <Tag className="m-0">{visibleItems.length}/{items.length}</Tag>
+              </>
+            )}
+          </div>
+          <div className="mt-3 space-y-2">
+            <Input
+              allowClear
+              aria-label="搜索候选股票"
+              onChange={(event) => setSearchText(event.target.value)}
+              placeholder={collapsed ? "搜索" : "名称 / 代码 / 首字母"}
+              size="small"
+              value={searchText}
+            />
+            <Select
+              aria-label="候选状态筛选"
+              className="w-full"
+              onChange={(value) => setStatusFilter(value)}
+              options={stockListStatusOptions}
+              size="small"
+              value={statusFilter}
+            />
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto p-3">
+        <div className={`flex-1 overflow-y-auto ${collapsed ? "p-2" : "p-3"}`}>
           {loading ? (
-            <div className="rounded-lg bg-slate-50 px-3 py-8 text-center text-sm font-bold text-slate-500">
-              读取股票列表...
+            <div className={`rounded-lg bg-slate-50 text-center ${collapsed ? "px-2 py-5" : "px-3 py-8"}`}>
+              <Spin size="small" />
+              <p className={`${collapsed ? "mt-2 text-xs" : "mt-3 text-sm"} font-bold text-slate-500`}>
+                读取股票列表...
+              </p>
             </div>
           ) : (
             <div className="space-y-2">
-              {items.map((item) => {
+              {visibleItems.length === 0 && (
+                <Empty description="没有匹配股票" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+              )}
+              {visibleItems.map((item) => {
                 const active = item.symbol === currentSymbol;
                 return (
                   <a
-                    className={`block rounded-lg border px-3 py-3 transition ${
+                    className={`block rounded-lg border transition ${
                       active
                         ? "border-slate-950 bg-slate-100"
                         : "border-transparent bg-white hover:border-slate-200 hover:bg-slate-50"
-                    }`}
+                    } ${collapsed ? "px-2 py-2" : "px-3 py-3"}`}
                     href={`/stock/${encodeURIComponent(item.symbol)}`}
                     key={item.symbol}
+                    title={`${item.name ?? item.symbol} ${item.symbol}`}
                   >
-                    <div className="flex items-start justify-between gap-3">
+                    {collapsed ? (
                       <div className="min-w-0">
                         <p className="truncate text-sm font-black text-slate-950">{item.name ?? item.symbol}</p>
-                        <p className="mt-1 text-xs font-semibold text-slate-400">{item.symbol}</p>
+                        <p className="mt-0.5 truncate text-xs font-semibold tabular-nums text-slate-400">
+                          {item.symbol}
+                        </p>
                       </div>
-                      {item.score !== null && (
-                        <span className="rounded-md bg-red-50 px-2 py-1 text-xs font-black text-red-600 ring-1 ring-red-100">
-                          {item.score.toFixed(1)}
-                        </span>
-                      )}
-                    </div>
-                    <div className="mt-3 flex items-center justify-between gap-2 text-xs font-bold">
-                      <span className="truncate text-slate-500">{item.industry ?? "行业待补"}</span>
-                      <span className={statusTone(item.status)}>{statusLabel(item.status)}</span>
-                    </div>
+                    ) : (
+                      <>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-black text-slate-950">{item.name ?? item.symbol}</p>
+                            <p className="mt-1 text-xs font-semibold text-slate-400">{item.symbol}</p>
+                          </div>
+                          {item.score !== null && (
+                            <span className="rounded-md bg-red-50 px-2 py-1 text-xs font-black text-red-600 ring-1 ring-red-100">
+                              {item.score.toFixed(1)}
+                            </span>
+                          )}
+                        </div>
+                        <div className="mt-3 flex items-center justify-between gap-2 text-xs font-bold">
+                          <span className="truncate text-slate-500">{item.industry ?? "行业待补"}</span>
+                          <Tag className="m-0" color={statusColor(item.status)}>
+                            {statusLabel(item.status)}
+                          </Tag>
+                        </div>
+                      </>
+                    )}
                   </a>
                 );
               })}
@@ -381,11 +602,11 @@ function QuoteSummary({
       <div className="flex min-h-[112px] flex-col gap-3 px-4 py-4 xl:flex-row xl:items-center xl:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-black tracking-tight text-slate-950">{currentStock?.name ?? symbol}</h1>
-            <span className="rounded bg-red-50 px-1.5 py-0.5 text-xs font-black text-red-600 ring-1 ring-red-100">
-              {marketPrefix(symbol)}
-            </span>
-            <span className="text-sm font-bold text-slate-500">{symbol}</span>
+            <Typography.Title className="mb-0 text-xl font-black tracking-tight text-slate-950" level={1}>
+              {currentStock?.name ?? symbol}
+            </Typography.Title>
+            <Tag className="m-0" color="red">{marketPrefix(symbol)}</Tag>
+            <Typography.Text className="text-sm font-bold text-slate-500">{symbol}</Typography.Text>
           </div>
           <div className="mt-2 flex items-end gap-3">
             <div className={`text-4xl font-black leading-none tabular-nums ${tone}`}>
@@ -395,7 +616,9 @@ function QuoteSummary({
               {quote ? `${formatSigned(quote.change)} ${formatSigned(quote.changePct)}%` : loading ? "读取中" : "--"}
             </div>
           </div>
-          <p className="mt-2 text-xs font-semibold text-slate-400">行情摘要 · {source} · {status}</p>
+          <Typography.Text className="mt-2 block text-xs font-semibold text-slate-400">
+            行情摘要 · {source} · {status}
+          </Typography.Text>
         </div>
 
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6 xl:min-w-0">
@@ -414,22 +637,14 @@ function QuoteSummary({
 function ChartTabs({ activeTab, onChange }: { activeTab: ChartTab; onChange: (tab: ChartTab) => void }) {
   return (
     <div className="overflow-x-auto border-b border-slate-200 bg-slate-50">
-      <div className="grid min-w-[520px] grid-cols-6 text-center text-sm font-black text-slate-500">
-        {CHART_TABS.map((item) => (
-          <button
-            aria-pressed={activeTab === item.key}
-            className={`min-h-[42px] whitespace-nowrap border-b-2 px-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-300 focus-visible:ring-inset ${
-              activeTab === item.key
-                ? "border-slate-950 bg-white text-slate-950"
-                : "border-transparent hover:bg-white hover:text-slate-800"
-            }`}
-            key={item.key}
-            onClick={() => onChange(item.key)}
-            type="button"
-          >
-            {item.label}
-          </button>
-        ))}
+      <div className="grid min-w-[520px] grid-cols-6 p-2 text-center text-sm font-black text-slate-500">
+        <Segmented
+          block
+          className="col-span-6"
+          onChange={(value) => onChange(value as ChartTab)}
+          options={CHART_TABS.map((item) => ({ label: item.label, value: item.key }))}
+          value={activeTab}
+        />
       </div>
     </div>
   );
@@ -545,8 +760,8 @@ function ResearchPanel({
 }) {
   if (loading) {
     return (
-      <div className="flex min-h-[520px] items-center justify-center bg-white text-sm font-bold text-slate-500">
-        正在读取 iFinD 研究...
+      <div className="flex min-h-[520px] items-center justify-center bg-white">
+        <Spin tip="正在读取 iFinD 研究..." />
       </div>
     );
   }
@@ -562,19 +777,17 @@ function ResearchPanel({
 
   return (
     <div className="min-h-[520px] space-y-4 bg-white p-4">
-      <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
+      <Card className="workbench-card" size="small">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h3 className="text-sm font-black text-slate-950">iFinD 研究</h3>
-            <p className="mt-1 text-xs font-bold text-slate-500">
+            <Typography.Text className="text-sm font-black text-slate-950">iFinD 研究</Typography.Text>
+            <Typography.Text className="mt-1 block text-xs font-bold text-slate-500">
               {error ?? sourceSummary}
-            </p>
+            </Typography.Text>
           </div>
-          <span className="inline-flex w-fit rounded-md bg-white px-2.5 py-1 text-xs font-black text-slate-600 ring-1 ring-slate-200">
-            不替代 TickFlow 行情
-          </span>
+          <Tag className="m-0 w-fit">不替代 TickFlow 行情</Tag>
         </div>
-      </div>
+      </Card>
 
       <div className="grid gap-3 xl:grid-cols-2">
         <ResearchSection
@@ -609,23 +822,21 @@ function ResearchPanel({
 function ResearchSection({ payload, title }: { payload: Record<string, unknown>; title: string }) {
   const entries = Object.entries(payload).filter(([, value]) => formatResearchValue(value) !== "--").slice(0, 10);
   return (
-    <section className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-      <h3 className="mb-3 text-xs font-black text-slate-500">{title}</h3>
+    <Card className="workbench-card" size="small" title={<span className="text-xs font-black text-slate-500">{title}</span>}>
       {entries.length > 0 ? (
-        <div className="grid gap-2 sm:grid-cols-2">
-          {entries.map(([key, value]) => (
-            <div className="min-w-0 rounded-md bg-white px-3 py-2 ring-1 ring-slate-100" key={key}>
-              <div className="truncate text-sm font-black text-slate-900">{formatResearchValue(value)}</div>
-              <div className="mt-1 truncate text-xs font-bold text-slate-400">{key}</div>
-            </div>
-          ))}
-        </div>
+        <Descriptions
+          column={2}
+          items={entries.map(([key, value]) => ({
+            key,
+            label: key,
+            children: <span className="font-black text-slate-900">{formatResearchValue(value)}</span>,
+          }))}
+          size="small"
+        />
       ) : (
-        <p className="rounded-md border border-dashed border-slate-200 bg-white px-3 py-5 text-sm font-bold text-slate-400">
-          暂无{title}数据
-        </p>
+        <Empty description={`暂无${title}数据`} image={Empty.PRESENTED_IMAGE_SIMPLE} />
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -640,32 +851,26 @@ function ResearchRecordsSection({
   title: string;
   tone: "amber" | "slate";
 }) {
-  const markerClass = tone === "amber" ? "bg-amber-500" : "bg-slate-500";
   return (
-    <section className="rounded-lg border border-slate-100 bg-slate-50 p-3">
-      <h3 className="mb-3 text-xs font-black text-slate-500">{title}</h3>
+    <Card className="workbench-card" size="small" title={<span className="text-xs font-black text-slate-500">{title}</span>}>
       {records.length > 0 ? (
-        <div className="space-y-2">
-          {records.slice(0, 8).map((record, index) => (
-            <div className="rounded-md bg-white px-3 py-3 ring-1 ring-slate-100" key={`${title}-${index}`}>
-              <div className="flex items-start gap-2">
-                <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${markerClass}`} />
-                <div className="min-w-0">
-                  <p className="line-clamp-2 text-sm font-black text-slate-900">{recordTitle(record)}</p>
-                  <p className="mt-1 line-clamp-2 text-xs font-semibold leading-5 text-slate-500">
-                    {recordSummary(record)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
+        <List
+          dataSource={records.slice(0, 8)}
+          renderItem={(record, index) => (
+            <List.Item key={`${title}-${index}`}>
+              <List.Item.Meta
+                title={<span className="line-clamp-2 text-sm font-black text-slate-900">{recordTitle(record)}</span>}
+                description={<span className="line-clamp-2 text-xs font-semibold leading-5 text-slate-500">{recordSummary(record)}</span>}
+              />
+              <Tag color={tone === "amber" ? "orange" : "default"}>{title}</Tag>
+            </List.Item>
+          )}
+          size="small"
+        />
       ) : (
-        <p className="rounded-md border border-dashed border-slate-200 bg-white px-3 py-5 text-sm font-bold text-slate-400">
-          {emptyText}
-        </p>
+        <Empty description={emptyText} image={Empty.PRESENTED_IMAGE_SIMPLE} />
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -701,10 +906,14 @@ function candidateSectorLabel(value: unknown): string {
 
 function InfoCard({ label, tone = "text-slate-950", value }: { label: string; tone?: string; value: string }) {
   return (
-    <div className="min-w-0 rounded-lg border border-slate-100 bg-slate-50 px-3 py-3">
-      <div className={`truncate text-base font-black tabular-nums ${tone}`}>{value}</div>
-      <div className="mt-1 text-xs font-bold text-slate-400">{label}</div>
-    </div>
+    <Card className="workbench-card" size="small">
+      <Statistic
+        styles={{ content: { fontSize: 16, fontWeight: 900 } }}
+        title={<span className="text-xs font-bold text-slate-400">{label}</span>}
+        value={value}
+        valueRender={() => <span className={`truncate tabular-nums ${tone}`}>{value}</span>}
+      />
+    </Card>
   );
 }
 
@@ -719,27 +928,20 @@ function TagSection({
   title: string;
   tone: "amber" | "red" | "slate";
 }) {
-  const toneClass =
-    tone === "red"
-      ? "bg-red-50 text-red-600 ring-red-100"
-      : tone === "amber"
-        ? "bg-amber-50 text-amber-700 ring-amber-100"
-        : "bg-slate-100 text-slate-600 ring-slate-200";
+  const color = tone === "red" ? "red" : tone === "amber" ? "orange" : "default";
   return (
     <div>
       <h3 className="mb-2 text-xs font-black text-slate-500">{title}</h3>
       {items.length > 0 ? (
         <div className="flex flex-wrap gap-2">
           {items.map((item) => (
-            <span className={`rounded-md px-2.5 py-1 text-xs font-bold ring-1 ${toneClass}`} key={item}>
+            <Tag className="m-0" color={color} key={item}>
               {item}
-            </span>
+            </Tag>
           ))}
         </div>
       ) : (
-        <p className="rounded-lg border border-dashed border-slate-200 px-3 py-4 text-sm font-bold text-slate-400">
-          {emptyText}
-        </p>
+        <Empty description={emptyText} image={Empty.PRESENTED_IMAGE_SIMPLE} />
       )}
     </div>
   );
@@ -748,8 +950,12 @@ function TagSection({
 function HeaderMetric({ label, tone = "text-slate-950", value }: { label: string; tone?: string; value: string }) {
   return (
     <div className="min-w-0 rounded-md bg-slate-50 px-3 py-2 ring-1 ring-slate-100">
-      <div className={`truncate text-sm font-black tabular-nums ${tone}`}>{value}</div>
-      <div className="mt-1 text-xs font-bold text-slate-400">{label}</div>
+      <Statistic
+        styles={{ content: { fontSize: 14, fontWeight: 900, lineHeight: "18px" } }}
+        title={<span className="text-xs font-bold text-slate-400">{label}</span>}
+        value={value}
+        valueRender={() => <span className={`truncate tabular-nums ${tone}`}>{value}</span>}
+      />
     </div>
   );
 }
@@ -985,20 +1191,17 @@ function statusLabel(status: StockListItem["status"]): string {
   return "当前";
 }
 
-function statusTone(status: StockListItem["status"]): string {
+function statusColor(status: StockListItem["status"]): string {
   if (status === "focus") {
-    return "text-red-600";
+    return "red";
   }
   if (status === "wait_pullback") {
-    return "text-sky-600";
+    return "blue";
   }
   if (status === "reduce_risk") {
-    return "text-amber-600";
+    return "orange";
   }
-  if (status === "data_incomplete") {
-    return "text-slate-400";
-  }
-  return "text-slate-500";
+  return "default";
 }
 
 function marketPrefix(symbol: string): string {

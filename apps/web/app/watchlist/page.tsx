@@ -1,5 +1,20 @@
 "use client";
 
+import type { ColumnsType } from "antd/es/table";
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Empty,
+  Form,
+  Input,
+  Segmented,
+  Space,
+  Table,
+  Tag,
+  Typography,
+} from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { addWatchlistPoolItem, getWatchlistGsgfStatus, getWatchlistPool, saveWatchlistPool } from "../../lib/api";
 import type { GsgfAnalysis, WatchlistPoolItem } from "../../lib/types";
@@ -24,6 +39,7 @@ const structureFilters: Array<{ label: string; value: StructureFilter }> = [
 ];
 
 export default function WatchlistPage() {
+  const { message } = App.useApp();
   const [items, setItems] = useState<WatchlistPoolItem[]>([]);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(() => new Set());
@@ -130,6 +146,7 @@ export default function WatchlistPage() {
       });
       setItems(response.items);
       setSelectedSymbol(response.items.find((item) => item.symbol === draft.symbol)?.symbol ?? response.items[0]?.symbol ?? null);
+      void message.success("自选股已保存");
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存自选股失败");
     } finally {
@@ -145,6 +162,7 @@ export default function WatchlistPage() {
       items.map((item) =>
         selectedSymbols.has(item.symbol) ? { ...item, group: batchGroup.trim() } : item,
       ),
+      `已移动 ${selectedSymbols.size} 只自选股`,
     );
     setBatchGroup("");
     setSelectedSymbols(new Set());
@@ -154,17 +172,19 @@ export default function WatchlistPage() {
     if (selectedSymbols.size === 0) {
       return;
     }
-    await persistItems(items.filter((item) => !selectedSymbols.has(item.symbol)));
+    const deletedCount = selectedSymbols.size;
+    await persistItems(items.filter((item) => !selectedSymbols.has(item.symbol)), `已删除 ${deletedCount} 只自选股`);
     setSelectedSymbols(new Set());
   }
 
-  async function persistItems(nextItems: WatchlistPoolItem[]) {
+  async function persistItems(nextItems: WatchlistPoolItem[], successText = "自选股已保存") {
     setSaving(true);
     setError(null);
     try {
       const response = await saveWatchlistPool(formatWatchlistContent(nextItems));
       setItems(response.items);
       setSelectedSymbol(response.items[0]?.symbol ?? null);
+      void message.success(successText);
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存自选股失败");
     } finally {
@@ -172,60 +192,102 @@ export default function WatchlistPage() {
     }
   }
 
-  function toggleSelected(symbol: string, checked: boolean) {
-    setSelectedSymbols((current) => {
-      const next = new Set(current);
-      if (checked) {
-        next.add(symbol);
-      } else {
-        next.delete(symbol);
-      }
-      return next;
-    });
-  }
-
   function selectAllVisible() {
     setSelectedSymbols(new Set(visibleItems.map((item) => item.symbol)));
   }
 
+  const columns = useMemo<ColumnsType<WatchlistPoolItem>>(
+    () => [
+      {
+        title: "股票",
+        dataIndex: "name",
+        width: 170,
+        render: (_, item) => (
+          <button
+            className="text-left"
+            onClick={(event) => {
+              event.stopPropagation();
+              setSelectedSymbol(item.symbol);
+            }}
+            type="button"
+          >
+            <span className="block font-black text-slate-950">{item.name ?? item.symbol}</span>
+            <span className="mt-1 block text-xs font-semibold text-slate-400">{item.symbol}</span>
+          </button>
+        ),
+      },
+      {
+        title: "分组",
+        dataIndex: "group",
+        width: 120,
+        render: (_, item) => <Typography.Text strong>{item.group || "自选"}</Typography.Text>,
+      },
+      {
+        title: "行业",
+        dataIndex: "industry",
+        width: 130,
+        render: (_, item) => <Typography.Text type={item.industry ? undefined : "secondary"}>{item.industry || "--"}</Typography.Text>,
+      },
+      {
+        title: "结构触发",
+        width: 210,
+        render: (_, item) => <StructureTriggerBadge analysis={gsgfBySymbol[item.symbol]} />,
+      },
+      {
+        title: "标签",
+        dataIndex: "tags",
+        width: 180,
+        render: (_, item) => <TagList tags={item.tags} />,
+      },
+      {
+        title: "备注",
+        dataIndex: "note",
+        render: (_, item) => (
+          <Typography.Paragraph className="mb-0 max-w-[280px]" ellipsis={{ rows: 2 }}>
+            {item.note || "无备注"}
+          </Typography.Paragraph>
+        ),
+      },
+    ],
+    [gsgfBySymbol],
+  );
+
   return (
-    <main className="min-h-screen bg-slate-50">
+    <main className="bg-slate-50">
       <div className="mx-auto max-w-[1680px] space-y-4 px-4 py-4 sm:px-6 lg:px-8">
-        <header className="rounded-lg border border-slate-200 bg-white px-5 py-4 shadow-sm">
+        <Card className="workbench-card" styles={{ body: { padding: 18 } }}>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <p className="text-xs font-semibold uppercase text-slate-400">Watchlist</p>
-              <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950">自选股管理</h1>
-              <p className="mt-1 text-sm font-medium text-slate-500">管理分组、标签、行业和备注。</p>
+              <Typography.Text className="text-xs font-semibold uppercase text-slate-400">Watchlist</Typography.Text>
+              <Typography.Title className="mt-1 text-2xl font-black tracking-tight text-slate-950" level={1}>
+                自选股管理
+              </Typography.Title>
+              <Typography.Text className="mt-1 block text-sm font-medium text-slate-500">
+                管理分组、标签、行业和备注。
+              </Typography.Text>
             </div>
-            <div className="flex flex-wrap gap-2">
-              <a
-                className="inline-flex min-h-[36px] items-center rounded-md bg-white px-3 text-xs font-bold text-slate-700 ring-1 ring-slate-200 transition hover:bg-slate-100"
-                href="/"
-              >
-                返回选股
-              </a>
-              <button
-                className="min-h-[36px] rounded-md bg-slate-950 px-3 text-xs font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+            <Space wrap>
+              <Button href="/">返回选股</Button>
+              <Button
                 disabled={saving}
                 onClick={() => {
                   setSelectedSymbol(null);
                   setDraft(emptyDraft());
                 }}
-                type="button"
+                type="primary"
               >
                 新增股票
-              </button>
-            </div>
+              </Button>
+            </Space>
           </div>
-        </header>
+        </Card>
 
-        {error && <p className="rounded-lg bg-red-50 p-3 text-sm font-bold text-red-700">{error}</p>}
+        {error && <Alert showIcon title={error} type="error" />}
 
         <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)_320px]">
-          <aside className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+          <Card className="workbench-card" size="small">
             <SectionTitle title="分组" />
-            <div className="space-y-2">
+            <Space className="w-full" orientation="vertical" size={8}>
               <GroupButton
                 active={activeGroup === "all"}
                 count={items.length}
@@ -241,7 +303,7 @@ export default function WatchlistPage() {
                   onClick={() => setActiveGroup(group.name)}
                 />
               ))}
-            </div>
+            </Space>
 
             <div className="mt-5">
               <SectionTitle title="标签" />
@@ -255,166 +317,112 @@ export default function WatchlistPage() {
 
             <div className="mt-5">
               <SectionTitle title="结构触发" />
-              <div className="flex flex-wrap gap-2">
-                {structureFilters.map((filter) => (
-                  <TagButton
-                    active={structureFilter === filter.value}
-                    key={filter.value}
-                    label={filter.label}
-                    onClick={() => setStructureFilter(filter.value)}
-                  />
-                ))}
-              </div>
+              <Segmented
+                block
+                onChange={(value) => setStructureFilter(value as StructureFilter)}
+                options={structureFilters}
+                value={structureFilter}
+                vertical
+              />
             </div>
-          </aside>
+          </Card>
 
-          <section className="min-w-0 rounded-lg border border-slate-200 bg-white shadow-sm">
+          <Card className="workbench-card min-w-0" styles={{ body: { padding: 0 } }}>
             <div className="grid gap-3 border-b border-slate-100 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
-              <input
-                className="min-h-[38px] rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+              <Input
                 onChange={(event) => setSearchText(event.target.value)}
                 placeholder="搜索代码 / 名称 / 行业 / 标签 / 备注"
                 value={searchText}
               />
-              <span className="text-xs font-bold text-slate-500">
+              <Tag className="m-0" variant="filled">
                 显示 {visibleItems.length} / {items.length}
-              </span>
+              </Tag>
             </div>
 
             {selectedCount > 0 && (
               <div className="grid gap-2 border-b border-slate-100 bg-sky-50 p-3 lg:grid-cols-[auto_minmax(120px,180px)_auto] lg:items-center">
-                <span className="text-xs font-black text-sky-700">已选 {selectedCount}</span>
-                <input
-                  className="min-h-[34px] rounded-md border border-sky-100 bg-white px-2.5 text-xs font-semibold text-slate-950 outline-none focus:ring-2 focus:ring-sky-100"
+                <Tag className="m-0" color="blue">
+                  已选 {selectedCount}
+                </Tag>
+                <Input
                   onChange={(event) => setBatchGroup(event.target.value)}
                   placeholder="批量移动到分组"
+                  size="small"
                   value={batchGroup}
                 />
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    className="min-h-[34px] rounded-md bg-sky-700 px-3 text-xs font-bold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+                <Space wrap size={8}>
+                  <Button
                     disabled={!batchGroup.trim() || saving}
                     onClick={() => void moveSelectedToGroup()}
-                    type="button"
+                    size="small"
+                    type="primary"
                   >
                     批量移动
-                  </button>
-                  <button
-                    className="min-h-[34px] rounded-md bg-red-50 px-3 text-xs font-bold text-red-700 ring-1 ring-red-100 disabled:cursor-not-allowed disabled:text-slate-300"
-                    disabled={saving}
-                    onClick={() => void deleteSelected()}
-                    type="button"
-                  >
+                  </Button>
+                  <Button danger disabled={saving} onClick={() => void deleteSelected()} size="small">
                     删除
-                  </button>
-                  <button
-                    className="min-h-[34px] rounded-md bg-white px-3 text-xs font-bold text-slate-600 ring-1 ring-slate-200"
-                    onClick={() => setSelectedSymbols(new Set())}
-                    type="button"
-                  >
+                  </Button>
+                  <Button onClick={() => setSelectedSymbols(new Set())} size="small">
                     清空选择
-                  </button>
-                </div>
+                  </Button>
+                  <Button onClick={selectAllVisible} size="small" type="link">
+                    全选
+                  </Button>
+                </Space>
               </div>
             )}
 
-            <div className="overflow-x-auto">
-              {loading ? (
-                <EmptyState text="读取自选股中..." />
-              ) : visibleItems.length === 0 ? (
-                <EmptyState text="当前筛选暂无自选股" />
-              ) : (
-                <table className="w-full min-w-[780px] border-separate border-spacing-0 text-left text-sm">
-                  <thead>
-                    <tr className="text-xs font-bold text-slate-400">
-                      <th className="px-4 py-3">
-                        <button className="text-slate-500" onClick={selectAllVisible} type="button">
-                          全选
-                        </button>
-                      </th>
-                      <th className="px-3 py-3">股票</th>
-                      <th className="px-3 py-3">分组</th>
-                      <th className="px-3 py-3">行业</th>
-                      <th className="px-3 py-3">结构触发</th>
-                      <th className="px-3 py-3">标签</th>
-                      <th className="px-4 py-3">备注</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {visibleItems.map((item) => (
-                      <tr
-                        aria-selected={item.symbol === selectedItem?.symbol}
-                        className={`cursor-pointer transition ${
-                          item.symbol === selectedItem?.symbol ? "bg-slate-100" : "bg-white hover:bg-slate-50"
-                        }`}
-                        key={item.symbol}
-                        onClick={() => setSelectedSymbol(item.symbol)}
-                      >
-                        <td className="px-4 py-3 align-top">
-                          <input
-                            aria-label={`选择 ${item.name ?? item.symbol}`}
-                            checked={selectedSymbols.has(item.symbol)}
-                            className="size-4 rounded border-slate-300"
-                            onChange={(event) => toggleSelected(item.symbol, event.target.checked)}
-                            onClick={(event) => event.stopPropagation()}
-                            type="checkbox"
-                          />
-                        </td>
-                        <td className="px-3 py-3 align-top">
-                          <p className="font-black text-slate-950">{item.name ?? item.symbol}</p>
-                          <p className="mt-1 text-xs font-semibold text-slate-400">{item.symbol}</p>
-                        </td>
-                        <td className="px-3 py-3 align-top text-sm font-semibold text-slate-600">
-                          {item.group || "自选"}
-                        </td>
-                        <td className="px-3 py-3 align-top text-sm text-slate-500">{item.industry || "--"}</td>
-                        <td className="px-3 py-3 align-top">
-                          <StructureTriggerBadge analysis={gsgfBySymbol[item.symbol]} />
-                        </td>
-                        <td className="px-3 py-3 align-top">
-                          <TagList tags={item.tags} />
-                        </td>
-                        <td className="max-w-[240px] px-4 py-3 align-top text-sm leading-6 text-slate-500">
-                          <span className="line-clamp-2">{item.note || "无备注"}</span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </section>
+            <Table
+              columns={columns}
+              dataSource={visibleItems}
+              loading={loading}
+              locale={{
+                emptyText: loading ? "读取自选股中..." : <EmptyState text="当前筛选暂无自选股" />,
+              }}
+              pagination={false}
+              rowClassName={(item) => (item.symbol === selectedItem?.symbol ? "workbench-table-row-selected" : "")}
+              rowKey="symbol"
+              rowSelection={{
+                selectedRowKeys: Array.from(selectedSymbols),
+                onChange: (keys) => setSelectedSymbols(new Set(keys.map(String))),
+              }}
+              onRow={(item) => ({
+                onClick: () => setSelectedSymbol(item.symbol),
+              })}
+              scroll={{ x: 880 }}
+              size="small"
+            />
+          </Card>
 
-          <aside className="rounded-lg border border-slate-200 bg-white shadow-sm xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto">
+          <Card
+            className="workbench-card xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto"
+            styles={{ body: { padding: 0 } }}
+          >
             <div className="border-b border-slate-100 px-5 py-4">
-              <p className="text-xs font-semibold uppercase text-slate-400">Edit</p>
-              <h2 className="mt-1 text-xl font-black text-slate-950">{selectedItem ? "编辑自选股" : "新增自选股"}</h2>
+              <Typography.Text className="text-xs font-semibold uppercase text-slate-400">Edit</Typography.Text>
+              <Typography.Title className="mt-1 text-xl font-black text-slate-950" level={2}>
+                {selectedItem ? "编辑自选股" : "新增自选股"}
+              </Typography.Title>
             </div>
-            <div className="space-y-3 p-5">
+            <Form className="p-5" layout="vertical">
               <EditorInput label="股票代码" onChange={(value) => setDraft({ ...draft, symbol: value })} value={draft.symbol} />
               <EditorInput label="名称" onChange={(value) => setDraft({ ...draft, name: value })} value={draft.name} />
               <EditorInput label="分组" onChange={(value) => setDraft({ ...draft, group: value })} value={draft.group} />
               <EditorInput label="行业" onChange={(value) => setDraft({ ...draft, industry: value })} value={draft.industry} />
               <EditorInput label="标签" onChange={(value) => setDraft({ ...draft, tagsText: value })} value={draft.tagsText} />
-              <label className="block">
-                <span className="text-xs font-bold text-slate-600">备注</span>
-                <textarea
-                  className="mt-2 min-h-[96px] w-full resize-y rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm leading-6 text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
+              <Form.Item label="备注">
+                <Input.TextArea
+                  autoSize={{ minRows: 4, maxRows: 8 }}
                   onChange={(event) => setDraft({ ...draft, note: event.target.value })}
                   placeholder="记录买入观察理由、关键均线、风险点"
                   value={draft.note}
                 />
-              </label>
-              <button
-                className="min-h-[40px] w-full rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-                disabled={saving}
-                onClick={() => void saveDraft()}
-                type="button"
-              >
-                {saving ? "保存中..." : "保存"}
-              </button>
-            </div>
-          </aside>
+              </Form.Item>
+              <Button block disabled={saving} loading={saving} onClick={() => void saveDraft()} type="primary">
+                保存
+              </Button>
+            </Form>
+          </Card>
         </div>
       </div>
     </main>
@@ -452,16 +460,10 @@ function GroupButton({
 
 function TagButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return (
-    <button
-      className={`inline-flex h-7 items-center rounded-full px-2.5 text-xs font-bold ring-1 transition ${
-        active
-          ? "bg-indigo-600 text-white ring-indigo-600"
-          : "bg-indigo-50 text-indigo-700 ring-indigo-100 hover:bg-indigo-100"
-      }`}
-      onClick={onClick}
-      type="button"
-    >
-      {label}
+    <button onClick={onClick} type="button">
+      <Tag className="m-0" color={active ? "blue" : "default"}>
+        {label}
+      </Tag>
     </button>
   );
 }
@@ -473,9 +475,9 @@ function TagList({ tags }: { tags: string[] }) {
   return (
     <div className="flex flex-wrap gap-1">
       {tags.map((tag) => (
-        <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-bold text-indigo-700" key={tag}>
+        <Tag className="m-0" color="blue" key={tag}>
           {tag}
-        </span>
+        </Tag>
       ))}
     </div>
   );
@@ -483,25 +485,19 @@ function TagList({ tags }: { tags: string[] }) {
 
 function StructureTriggerBadge({ analysis }: { analysis: GsgfAnalysis | undefined }) {
   if (!analysis) {
-    return <span className="text-sm text-slate-400">等待检测</span>;
+    return <Typography.Text type="secondary">等待检测</Typography.Text>;
   }
   const avoid = analysis.action === "avoid" || analysis.zone === "c_zone";
-  const tone = avoid
-    ? "bg-red-50 text-red-700 ring-red-100"
-    : analysis.risk_flags.length > 0
-      ? "bg-amber-50 text-amber-700 ring-amber-100"
-      : "bg-violet-50 text-violet-700 ring-violet-100";
+  const color = avoid ? "red" : analysis.risk_flags.length > 0 ? "orange" : "purple";
   const tags = [...analysis.trigger_tags, ...analysis.pattern_tags, ...analysis.risk_flags].slice(0, 2);
 
   return (
     <div className="max-w-[220px] space-y-1.5">
       <div className="flex flex-wrap gap-1">
-        <span className={`inline-flex h-6 items-center rounded-full px-2 text-[11px] font-bold ring-1 ${tone}`}>
+        <Tag className="m-0" color={color}>
           {gsgfLabel(analysis.action)} {analysis.total_score}
-        </span>
-        <span className="inline-flex h-6 items-center rounded-full bg-slate-100 px-2 text-[11px] font-bold text-slate-700 ring-1 ring-slate-200">
-          {gsgfLabel(analysis.zone)}
-        </span>
+        </Tag>
+        <Tag className="m-0">{gsgfLabel(analysis.zone)}</Tag>
       </div>
       {tags.length > 0 && <p className="line-clamp-2 text-xs leading-5 text-slate-500">{tags.join(" / ")}</p>}
     </div>
@@ -518,19 +514,14 @@ function EditorInput({
   value: string;
 }) {
   return (
-    <label className="block">
-      <span className="text-xs font-bold text-slate-600">{label}</span>
-      <input
-        className="mt-2 min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-slate-400 focus:ring-2 focus:ring-slate-200"
-        onChange={(event) => onChange(event.target.value)}
-        value={value}
-      />
-    </label>
+    <Form.Item label={label}>
+      <Input onChange={(event) => onChange(event.target.value)} value={value} />
+    </Form.Item>
   );
 }
 
 function EmptyState({ text }: { text: string }) {
-  return <div className="px-5 py-12 text-center text-sm font-bold text-slate-500">{text}</div>;
+  return <Empty description={text} image={Empty.PRESENTED_IMAGE_SIMPLE} />;
 }
 
 function matchesStructureFilter(analysis: GsgfAnalysis | undefined, filter: StructureFilter) {

@@ -12,6 +12,7 @@ import {
 import type {
   DataSourceStatusResponse,
   ScreenRunFilters,
+  ScreenStrategy,
   StrongStockIntradaySnapshot,
   StrongStockScreeningItem,
   StrongStockScreeningResponse,
@@ -25,6 +26,7 @@ export default function HomePage() {
   const [sources, setSources] = useState<DataSourceStatusResponse | null>(null);
   const [result, setResult] = useState<StrongStockScreeningResponse | null>(null);
   const [intraday, setIntraday] = useState<StrongStockIntradaySnapshot | null>(null);
+  const [strategy, setStrategy] = useState<ScreenStrategy>("combined");
   const [scanLimit, setScanLimit] = useState(40);
   const [screenFilters, setScreenFilters] = useState<ScreenRunFilters>({});
   const [screenFiltersSaved, setScreenFiltersSaved] = useState(false);
@@ -69,7 +71,7 @@ export default function HomePage() {
     setRunning(true);
     setError(null);
     try {
-      const response = await createScreenRun(tradeDate, 30, scanLimit, screenFilters);
+      const response = await createScreenRun(tradeDate, 30, scanLimit, screenFilters, { strategy });
       setResult(response);
       setIntraday(null);
       await refreshSources();
@@ -150,9 +152,11 @@ export default function HomePage() {
       screenFilters={screenFilters}
       screenFiltersSaved={screenFiltersSaved}
       sources={sources}
+      strategy={strategy}
       tradeDate={tradeDate}
       onScanLimitChange={setScanLimit}
       onScreenFiltersChange={handleScreenFiltersChange}
+      onStrategyChange={setStrategy}
       onTradeDateChange={setTradeDate}
       watchlistPoolItems={watchlistPoolItems}
       watchlistMessage={watchlistMessage}

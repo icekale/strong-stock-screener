@@ -1,6 +1,8 @@
 import type {
   DataSourceStatusResponse,
+  GsgfAnalysis,
   ScreenRunFilters,
+  ScreenStrategy,
   SourceStatusValue,
   StrongStockIntradayItem,
   StrongStockIntradaySnapshot,
@@ -19,6 +21,7 @@ type ScreenerWorkbenchProps = {
   running: boolean;
   watchlistPoolItems: WatchlistPoolItem[];
   watchlistMessage: string | null;
+  strategy: ScreenStrategy;
   scanLimit: number;
   screenFilters: ScreenRunFilters;
   screenFiltersSaved: boolean;
@@ -26,6 +29,7 @@ type ScreenerWorkbenchProps = {
   onScanLimitChange: (value: number) => void;
   onScreenFiltersChange: (value: ScreenRunFilters) => void;
   onSaveScreenFilters: () => void;
+  onStrategyChange: (value: ScreenStrategy) => void;
   onTradeDateChange: (value: string) => void;
   onAddToWatchlist: (item: StrongStockScreeningItem, group: string, tags: string[]) => void;
   onAddManyToWatchlist: (items: StrongStockScreeningItem[], group: string, tags: string[]) => void;
@@ -55,6 +59,12 @@ const candidateStatusFilters: Array<{ label: string; value: CandidateStatusFilte
   { label: statusCopy.wait_pullback.label, value: "wait_pullback" },
   { label: statusCopy.reduce_risk.label, value: "reduce_risk" },
   { label: statusCopy.data_incomplete.label, value: "data_incomplete" },
+];
+
+const strategyOptions: Array<{ label: string; value: ScreenStrategy }> = [
+  { label: "强势股模型", value: "strong_stock" },
+  { label: "股是股非模型", value: "gsgf" },
+  { label: "综合模型", value: "combined" },
 ];
 
 const riskCopy: Record<WatchlistRiskItem["risk_action"], { label: string; tone: string }> = {
@@ -97,6 +107,7 @@ export function ScreenerWorkbench({
   running,
   watchlistPoolItems,
   watchlistMessage,
+  strategy,
   scanLimit,
   screenFilters,
   screenFiltersSaved,
@@ -104,6 +115,7 @@ export function ScreenerWorkbench({
   onScanLimitChange,
   onScreenFiltersChange,
   onSaveScreenFilters,
+  onStrategyChange,
   onTradeDateChange,
   onAddToWatchlist,
   onAddManyToWatchlist,
@@ -175,10 +187,12 @@ export function ScreenerWorkbench({
             screenFilters={screenFilters}
             screenFiltersSaved={screenFiltersSaved}
             sources={sources}
+            strategy={strategy}
             tradeDate={tradeDate}
             onScanLimitChange={onScanLimitChange}
             onScreenFiltersChange={onScreenFiltersChange}
             onSaveScreenFilters={onSaveScreenFilters}
+            onStrategyChange={onStrategyChange}
             watchlistPoolItems={watchlistPoolItems}
           />
           <CandidateTable
@@ -218,6 +232,7 @@ function WorkflowPanel({
   error,
   onRefreshSources,
   onRun,
+  onStrategyChange,
   onTradeDateChange,
   result,
   running,
@@ -225,6 +240,7 @@ function WorkflowPanel({
   screenFilters,
   screenFiltersSaved,
   sources,
+  strategy,
   tradeDate,
   onScanLimitChange,
   onScreenFiltersChange,
@@ -234,6 +250,7 @@ function WorkflowPanel({
   error: string | null;
   onRefreshSources: () => void;
   onRun: () => void;
+  onStrategyChange: (value: ScreenStrategy) => void;
   onTradeDateChange: (value: string) => void;
   result: StrongStockScreeningResponse | null;
   running: boolean;
@@ -241,6 +258,7 @@ function WorkflowPanel({
   screenFilters: ScreenRunFilters;
   screenFiltersSaved: boolean;
   sources: DataSourceStatusResponse | null;
+  strategy: ScreenStrategy;
   tradeDate: string;
   onScanLimitChange: (value: number) => void;
   onScreenFiltersChange: (value: ScreenRunFilters) => void;
@@ -268,7 +286,9 @@ function WorkflowPanel({
             scanLimit={scanLimit}
             screenFilters={screenFilters}
             screenFiltersSaved={screenFiltersSaved}
+            strategy={strategy}
             tradeDate={tradeDate}
+            onStrategyChange={onStrategyChange}
           />
         </div>
       </section>
@@ -335,22 +355,26 @@ function ScreenPanel({
   onScanLimitChange,
   onScreenFiltersChange,
   onSaveScreenFilters,
+  onStrategyChange,
   onTradeDateChange,
   running,
   scanLimit,
   screenFilters,
   screenFiltersSaved,
+  strategy,
   tradeDate,
 }: {
   onRun: () => void;
   onScanLimitChange: (value: number) => void;
   onScreenFiltersChange: (value: ScreenRunFilters) => void;
   onSaveScreenFilters: () => void;
+  onStrategyChange: (value: ScreenStrategy) => void;
   onTradeDateChange: (value: string) => void;
   running: boolean;
   scanLimit: number;
   screenFilters: ScreenRunFilters;
   screenFiltersSaved: boolean;
+  strategy: ScreenStrategy;
   tradeDate: string;
 }) {
   const scanLimitOptions = [40, 160, 300];
@@ -369,6 +393,29 @@ function ScreenPanel({
         placeholder="YYYY-MM-DD"
         value={tradeDate}
       />
+      <div className="mt-3">
+        <p className="text-xs font-bold text-slate-600">策略模型</p>
+        <div className="mt-2 grid grid-cols-1 gap-2">
+          {strategyOptions.map((option) => {
+            const active = strategy === option.value;
+            return (
+              <button
+                aria-pressed={active}
+                className={`min-h-[36px] rounded-md px-3 text-left text-xs font-bold ring-1 transition active:translate-y-px ${
+                  active
+                    ? "bg-slate-950 text-white ring-slate-950"
+                    : "bg-white text-slate-700 ring-slate-200 hover:bg-slate-100"
+                }`}
+                key={option.value}
+                onClick={() => onStrategyChange(option.value)}
+                type="button"
+              >
+                {option.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <div className="mt-3">
         <div className="flex items-center justify-between gap-2">
           <label className="text-xs font-bold text-slate-600" htmlFor="scan-limit">
@@ -900,6 +947,7 @@ function CandidateCardList({
               <span className="inline-flex h-6 items-center rounded-full bg-slate-100 px-2 text-[11px] font-bold text-slate-700">
                 得分 {item.score}
               </span>
+              <GsgfSummaryPills gsgf={item.gsgf} />
               <IndustryBadge industry={item.industry} />
               <IndustryStrengthBadge item={item} />
             </div>
@@ -1107,6 +1155,11 @@ function CandidateTableRow({
           {view.label}
         </span>
         <p className="mt-2 text-xs font-black tabular-nums text-slate-950">得分 {item.score}</p>
+        {item.gsgf && (
+          <div className="mt-2 flex max-w-[180px] flex-wrap gap-1">
+            <GsgfSummaryPills gsgf={item.gsgf} />
+          </div>
+        )}
       </td>
       <td className="px-4 py-4 align-top">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -1228,10 +1281,19 @@ function CandidateDetailPanel({
             <span className="inline-flex h-6 items-center rounded-full bg-slate-100 px-2 text-xs font-bold text-slate-700">
               得分 {item.score}
             </span>
+            <GsgfSummaryPills gsgf={item.gsgf} />
             <IndustryBadge industry={item.industry} />
             <IndustryStrengthBadge item={item} />
           </div>
         </section>
+
+        <DetailSection title="股是股非结构">
+          {item.gsgf ? (
+            <GsgfDetail analysis={item.gsgf} />
+          ) : (
+            <p className="text-sm leading-6 text-slate-500">暂无股是股非结构评分。</p>
+          )}
+        </DetailSection>
 
         <DetailSection title="关键证据">
           <EvidenceList items={item.rule_hits} fallback="暂无规则说明" />
@@ -1421,6 +1483,88 @@ function RiskCheckNotice({
     return <p className="rounded-lg bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700">{clearText}</p>;
   }
   return <p className="rounded-lg bg-slate-50 px-3 py-2 text-xs font-bold text-slate-500">{unknownText}</p>;
+}
+
+function GsgfSummaryPills({ gsgf }: { gsgf: GsgfAnalysis | null }) {
+  if (!gsgf) {
+    return null;
+  }
+  const riskTone =
+    gsgf.action === "avoid" || gsgf.zone === "c_zone"
+      ? "bg-red-50 text-red-700 ring-red-100"
+      : "bg-violet-50 text-violet-700 ring-violet-100";
+  return (
+    <>
+      <span className={`inline-flex h-6 items-center rounded-full px-2 text-[11px] font-bold ring-1 ${riskTone}`}>
+        股是股非 {gsgf.total_score}
+      </span>
+      <span className="inline-flex h-6 items-center rounded-full bg-slate-100 px-2 text-[11px] font-bold text-slate-700 ring-1 ring-slate-200">
+        {gsgfLabel(gsgf.zone)}
+      </span>
+      <span className="inline-flex h-6 items-center rounded-full bg-white px-2 text-[11px] font-bold text-slate-600 ring-1 ring-slate-200">
+        {gsgfLabel(gsgf.action)}
+      </span>
+    </>
+  );
+}
+
+function GsgfDetail({ analysis }: { analysis: GsgfAnalysis }) {
+  const tags = [
+    ...analysis.pattern_tags.map((tag) => `形态：${tag}`),
+    ...analysis.trigger_tags.map((tag) => `触发：${tag}`),
+    ...analysis.pressure_flags.map((flag) => `压力：${flag}`),
+    ...analysis.risk_flags.map((flag) => `风险：${flag}`),
+  ];
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-3 gap-2">
+        <GsgfMetric label="总分" value={analysis.total_score} />
+        <GsgfMetric label="区位" value={gsgfLabel(analysis.zone)} />
+        <GsgfMetric label="动作" value={gsgfLabel(analysis.action)} />
+      </div>
+      <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-100">
+        <p className="text-xs font-bold text-slate-500">量能结构</p>
+        <p className="mt-1 text-sm font-black text-slate-900">{gsgfLabel(analysis.volume_structure)}</p>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <ValuePill label="量时空" value={String(analysis.scores.safety_pressure)} />
+        <ValuePill label="量厚度" value={String(analysis.scores.volume_thickness)} />
+        <ValuePill label="均线" value={String(analysis.scores.ma_alignment)} />
+        <ValuePill label="空间" value={String(analysis.scores.pattern_space)} />
+        <ValuePill label="星线" value={String(analysis.scores.star_trigger)} />
+        <ValuePill label="题材" value={String(analysis.scores.sector_theme)} />
+      </div>
+      <EvidenceList fallback="暂无结构标签" items={tags.length > 0 ? tags : analysis.explanation} />
+    </div>
+  );
+}
+
+function GsgfMetric({ label, value }: { label: string; value: number | string }) {
+  return (
+    <div className="rounded-lg bg-white p-2 ring-1 ring-slate-100">
+      <p className="text-[11px] font-bold text-slate-400">{label}</p>
+      <p className="mt-1 truncate text-sm font-black tabular-nums text-slate-950">{value}</p>
+    </div>
+  );
+}
+
+function gsgfLabel(value: string | null | undefined): string {
+  const labels: Record<string, string> = {
+    strong_candidate: "强势候选",
+    watch_candidate: "观察候选",
+    wait_trigger: "等触发",
+    avoid: "回避",
+    a_zone: "A区",
+    b_zone_a_point: "B区A点",
+    c_zone: "C区",
+    unformed: "未成型",
+    unknown: "未知",
+    three_yang_controls_three_yin: "三阳控三阴",
+    neutral: "量形态中性",
+    three_yin_controls_three_yang: "三阴控三阳",
+  };
+  return value ? labels[value] ?? value : "--";
 }
 
 function primaryRiskSummary(item: StrongStockScreeningItem) {

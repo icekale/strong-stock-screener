@@ -60,6 +60,11 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(apiSource, /strategy\?: ScreenStrategy/);
   assert.match(apiSource, /getWatchlistGsgfStatus/);
   assert.match(componentSource, /scanLimit/);
+  assert.match(componentSource, /strategy/);
+  assert.match(componentSource, /股是股非模型/);
+  assert.match(componentSource, /综合模型/);
+  assert.match(componentSource, /股是股非结构/);
+  assert.match(componentSource, /gsgfLabel/);
   assert.match(componentSource, /扫描候选数/);
   assert.match(componentSource, /高级筛选/);
   assert.match(componentSource, /最小市值/);

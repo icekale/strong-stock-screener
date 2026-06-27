@@ -11,3 +11,7 @@ body {
   color: #0f172a;
 }
 
+.tickflow-kline-chart > div {
+  height: 100% !important;
+  width: 100% !important;
+}

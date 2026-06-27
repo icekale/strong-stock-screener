@@ -16,7 +16,7 @@ from app.models import (
     StrongStockDataUnavailable,
     StrongStockSourceStatus,
 )
-from app.gsgf_rules import analyze_gsgf
+from app.gsgf_rules import analyze_gsgf, build_gsgf_chart_annotations
 from app.providers.ifind import IfindMcpProvider
 from app.providers.news_risk import EastmoneyNewsRiskProvider
 from app.providers.recent_limit_up_candidates import RecentLimitUpCandidateProvider
@@ -259,6 +259,7 @@ def get_stock_kline(symbol: str, count: int = 220) -> dict[str, object]:
             detail=f"返回 {len(bars)} 条日K",
         ),
         bars=bars,
+        gsgf_annotations=build_gsgf_chart_annotations(bars),
     ).model_dump(mode="json")
 
 

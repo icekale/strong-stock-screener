@@ -9,6 +9,8 @@
     "test": "tsc --noEmit && node --experimental-strip-types --test lib/*.test.ts"
   },
   "dependencies": {
+    "echarts": "^5.4.0",
+    "kline-charts-react": "0.0.6",
     "next": "15.1.0",
     "react": "19.0.0",
     "react-dom": "19.0.0"
@@ -23,4 +25,3 @@
     "typescript": "5.7.2"
   }
 }
-

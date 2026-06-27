@@ -20,6 +20,8 @@ GsgfVolumeStructure = Literal[
     "three_yin_controls_three_yang",
     "unknown",
 ]
+GsgfChartAnnotationType = Literal["volume_structure", "zone", "trigger", "pressure", "risk"]
+GsgfChartAnnotationSeverity = Literal["positive", "neutral", "warning", "danger"]
 ScreenStrategy = Literal["strong_stock", "gsgf", "combined"]
 
 
@@ -44,6 +46,17 @@ class GsgfAnalysis(BaseModel):
     pressure_flags: list[str] = Field(default_factory=list)
     risk_flags: list[str] = Field(default_factory=list)
     explanation: list[str] = Field(default_factory=list)
+
+
+class GsgfChartAnnotation(BaseModel):
+    type: GsgfChartAnnotationType
+    label: str
+    description: str
+    severity: GsgfChartAnnotationSeverity = "neutral"
+    date: str | None = None
+    start_date: str | None = None
+    end_date: str | None = None
+    price: float | None = None
 
 
 class StrongStockCandidate(BaseModel):
@@ -136,6 +149,7 @@ class StockKlineResponse(BaseModel):
     symbol: str
     source_status: StrongStockSourceStatus
     bars: list[KlineBar] = Field(default_factory=list)
+    gsgf_annotations: list[GsgfChartAnnotation] = Field(default_factory=list)
 
 
 class StockResearchResponse(BaseModel):

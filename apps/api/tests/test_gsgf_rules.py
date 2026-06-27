@@ -1,5 +1,5 @@
 from app.models import GsgfAnalysis, GsgfScoreBreakdown
-from app.gsgf_rules import analyze_gsgf
+from app.gsgf_rules import analyze_gsgf, build_gsgf_chart_annotations
 from app.models import KlineBar
 
 
@@ -65,6 +65,21 @@ def test_gsgf_detects_three_yang_controls_three_yin() -> None:
     assert analysis.total_score >= 65
 
 
+def test_gsgf_chart_annotations_include_volume_structure_and_zone_evidence() -> None:
+    closes = [10 + index * 0.03 for index in range(220)]
+    volumes = [2_000_000 if index % 4 != 0 else 700_000 for index in range(220)]
+    bars = _bars(closes, volumes)
+
+    annotations = build_gsgf_chart_annotations(bars, industry_strength="strong")
+
+    volume_annotation = next(item for item in annotations if item.type == "volume_structure")
+    assert volume_annotation.label == "三阳控三阴"
+    assert volume_annotation.severity == "positive"
+    assert volume_annotation.start_date == bars[-40].date
+    assert volume_annotation.end_date == bars[-1].date
+    assert any(item.type == "zone" and item.date == bars[-1].date for item in annotations)
+
+
 def test_gsgf_marks_c_zone_and_avoid_for_downtrend() -> None:
     closes = [20 - index * 0.04 for index in range(220)]
 
@@ -84,3 +99,16 @@ def test_gsgf_detects_high_volume_upper_shadow_pressure() -> None:
 
     assert "高位巨量长上影" in analysis.risk_flags
     assert analysis.action == "avoid"
+
+
+def test_gsgf_chart_annotations_mark_high_volume_upper_shadow_risk() -> None:
+    closes = [10 + index * 0.05 for index in range(219)] + [20.1]
+    bars = _bars(closes, [1_000_000 for _ in range(219)] + [5_000_000])
+    bars[-1] = bars[-1].model_copy(update={"high": 24.0, "open": 20.0, "close": 20.1, "low": 19.8})
+
+    annotations = build_gsgf_chart_annotations(bars)
+
+    risk_annotation = next(item for item in annotations if item.type == "risk" and item.label == "高位巨量长上影")
+    assert risk_annotation.label == "高位巨量长上影"
+    assert risk_annotation.severity == "danger"
+    assert risk_annotation.price == bars[-1].high

@@ -8,6 +8,8 @@ export type GsgfVolumeStructure =
   | "neutral"
   | "three_yin_controls_three_yang"
   | "unknown";
+export type GsgfChartAnnotationType = "volume_structure" | "zone" | "trigger" | "pressure" | "risk";
+export type GsgfChartAnnotationSeverity = "positive" | "neutral" | "warning" | "danger";
 
 export type GsgfAnalysis = {
   model_version: string;
@@ -28,6 +30,17 @@ export type GsgfAnalysis = {
   pressure_flags: string[];
   risk_flags: string[];
   explanation: string[];
+};
+
+export type GsgfChartAnnotation = {
+  type: GsgfChartAnnotationType;
+  label: string;
+  description: string;
+  severity: GsgfChartAnnotationSeverity;
+  date: string | null;
+  start_date: string | null;
+  end_date: string | null;
+  price: number | null;
 };
 
 export type StrongStockSourceStatus = {
@@ -129,6 +142,7 @@ export type StockKlineResponse = {
   symbol: string;
   source_status: StrongStockSourceStatus;
   bars: KlineBar[];
+  gsgf_annotations: GsgfChartAnnotation[];
 };
 
 export type StockResearchResponse = {

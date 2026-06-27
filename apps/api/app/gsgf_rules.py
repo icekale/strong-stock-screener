@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from statistics import mean
 
-from app.models import GsgfAnalysis, GsgfScoreBreakdown, IndustryStrength, KlineBar
+from app.models import GsgfAnalysis, GsgfChartAnnotation, GsgfScoreBreakdown, IndustryStrength, KlineBar
 
 GSGF_MODEL_VERSION = "gsgf-v1"
 
@@ -51,6 +51,99 @@ def analyze_gsgf(
         risk_flags=risk_flags,
         explanation=_dedupe(volume_notes + ma_notes + pattern_tags + trigger_tags + pressure_flags + risk_flags),
     )
+
+
+def build_gsgf_chart_annotations(
+    bars: list[KlineBar],
+    *,
+    industry_strength: IndustryStrength | None = None,
+) -> list[GsgfChartAnnotation]:
+    if len(bars) < 60:
+        return []
+    enriched = _with_ma(bars)
+    latest = enriched[-1]
+    annotations: list[GsgfChartAnnotation] = []
+    analysis = analyze_gsgf(enriched, industry_strength=industry_strength)
+
+    if analysis.volume_structure == "three_yang_controls_three_yin":
+        annotations.append(
+            GsgfChartAnnotation(
+                type="volume_structure",
+                label="三阳控三阴",
+                description="近40日红K数量、红K量能占优，量能结构偏强。",
+                severity="positive",
+                start_date=enriched[-40].date,
+                end_date=latest.date,
+            )
+        )
+    elif analysis.volume_structure == "three_yin_controls_three_yang":
+        annotations.append(
+            GsgfChartAnnotation(
+                type="volume_structure",
+                label="三阴控三阳",
+                description="近40日绿K量能占优，量能结构偏弱。",
+                severity="danger",
+                start_date=enriched[-40].date,
+                end_date=latest.date,
+            )
+        )
+
+    zone_label_map = {
+        "a_zone": ("A区均线归位", "均线收敛后价格站上主要均线，结构偏主动。", "positive"),
+        "b_zone_a_point": ("B区A点", "中期趋势仍向上，价格靠近均线支撑区域。", "positive"),
+        "c_zone": ("C区风险", "价格跌破关键均线且均线斜率转弱，结构进入回避区。", "danger"),
+        "unformed": ("结构未成型", "均线和趋势结构尚未满足强势模型确认条件。", "warning"),
+        "unknown": ("结构未知", "K线结构暂不能稳定识别。", "neutral"),
+    }
+    zone_label, zone_description, zone_severity = zone_label_map[analysis.zone]
+    annotations.append(
+        GsgfChartAnnotation(
+            type="zone",
+            label=zone_label,
+            description=zone_description,
+            severity=zone_severity,
+            date=latest.date,
+            price=latest.close,
+        )
+    )
+
+    for trigger in analysis.trigger_tags:
+        annotations.append(
+            GsgfChartAnnotation(
+                type="trigger",
+                label=trigger,
+                description="股是股非模型识别到的触发或待确认信号。",
+                severity="positive" if trigger == "星线蓄势" else "warning",
+                date=latest.date,
+                price=latest.close,
+            )
+        )
+
+    for flag in analysis.pressure_flags:
+        annotations.append(
+            GsgfChartAnnotation(
+                type="pressure",
+                label=flag,
+                description="上方压力或量价配合不足，需要等待确认。",
+                severity="warning",
+                date=latest.date,
+                price=latest.high,
+            )
+        )
+
+    for flag in analysis.risk_flags:
+        annotations.append(
+            GsgfChartAnnotation(
+                type="risk",
+                label=flag,
+                description="股是股非模型识别到的结构风险。",
+                severity="danger",
+                date=latest.date,
+                price=latest.high if flag == "高位巨量长上影" else latest.close,
+            )
+        )
+
+    return _dedupe_annotations(annotations)
 
 
 def _with_ma(bars: list[KlineBar]) -> list[KlineBar]:
@@ -228,4 +321,22 @@ def _dedupe(values: list[str]) -> list[str]:
         if value and value not in seen:
             seen.add(value)
             output.append(value)
+    return output
+
+
+def _dedupe_annotations(annotations: list[GsgfChartAnnotation]) -> list[GsgfChartAnnotation]:
+    output: list[GsgfChartAnnotation] = []
+    seen: set[tuple[str, str, str | None, str | None, str | None]] = set()
+    for annotation in annotations:
+        key = (
+            annotation.type,
+            annotation.label,
+            annotation.date,
+            annotation.start_date,
+            annotation.end_date,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        output.append(annotation)
     return output

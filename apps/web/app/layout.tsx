@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import "kline-charts-react/style.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -13,4 +14,3 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     </html>
   );
 }
-

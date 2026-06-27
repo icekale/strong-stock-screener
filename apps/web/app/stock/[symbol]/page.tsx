@@ -1,9 +1,8 @@
 "use client";
 
 import { use, useEffect, useMemo, useState } from "react";
+import { TickFlowKlineChart } from "../../../components/TickFlowKlineChart";
 import { getLatestScreenRun, getStockKline, getStockResearch } from "../../../lib/api";
-import { defaultKlineWindowSize, nextKlineWindowSize, sliceKlineWindow } from "../../../lib/klineWindow";
-import { formatKlineHoverDate, resolveCurrentPriceLabelX, resolveKlineHoverIndex } from "../../../lib/klineHover";
 import type { KlineBar, StockKlineResponse, StockResearchResponse, StrongStockScreeningItem } from "../../../lib/types";
 
 type ChartTab = "day" | "week" | "info" | "strategy" | "concept" | "research";
@@ -17,13 +16,6 @@ type StockListItem = {
   symbol: string;
 };
 
-type KdjPoint = {
-  date: string;
-  d: number;
-  j: number;
-  k: number;
-};
-
 const CHART_TABS: Array<{ key: ChartTab; label: string }> = [
   { key: "day", label: "日 K 线" },
   { key: "week", label: "周线图" },
@@ -32,6 +24,8 @@ const CHART_TABS: Array<{ key: ChartTab; label: string }> = [
   { key: "concept", label: "概念" },
   { key: "research", label: "研究" },
 ];
+
+const KLINE_CHART_HEIGHT = 680;
 
 const MOVING_AVERAGES: Array<{ color: string; field: MovingAverageField; label: string; period: number }> = [
   { color: "#1683ff", field: "ma5", label: "MA5", period: 5 },
@@ -51,8 +45,8 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
   const [listLoading, setListLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [researchError, setResearchError] = useState<string | null>(null);
-  const [chartWindowSize, setChartWindowSize] = useState(120);
   const [activeChartTab, setActiveChartTab] = useState<ChartTab>("day");
+  const [showGsgfAnnotations, setShowGsgfAnnotations] = useState(true);
   const [visibleMovingAverages, setVisibleMovingAverages] = useState<MovingAverageField[]>([
     "ma5",
     "ma10",
@@ -138,7 +132,6 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
   const dailyBars = useMemo(() => buildMovingAverageBars(bars), [bars]);
   const weeklyBars = useMemo(() => buildMovingAverageBars(buildWeeklyBars(bars)), [bars]);
   const chartBars = activeChartTab === "week" ? weeklyBars : dailyBars;
-  const visibleBars = useMemo(() => sliceKlineWindow(chartBars, chartWindowSize), [chartBars, chartWindowSize]);
   const stockList = useMemo(() => buildStockList(symbol, screenItems), [screenItems, symbol]);
   const currentStock = stockList.find((item) => item.symbol === symbol) ?? stockList[0] ?? null;
   const currentCandidate = useMemo(
@@ -148,22 +141,6 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
   const quote = useMemo(() => buildQuote(dailyBars), [dailyBars]);
   const isChartTab = activeChartTab === "day" || activeChartTab === "week";
   const activeTabLabel = CHART_TABS.find((item) => item.key === activeChartTab)?.label ?? "日 K 线";
-
-  useEffect(() => {
-    setChartWindowSize(defaultKlineWindowSize(chartBars.length));
-  }, [activeChartTab, chartBars.length]);
-
-  function changeChartWindow(action: "all" | "in" | "out") {
-    setChartWindowSize((current) => nextKlineWindowSize(current, action, chartBars.length));
-  }
-
-  function handleChartWheel(event: React.WheelEvent<HTMLElement>) {
-    if (!isChartTab) {
-      return;
-    }
-    event.preventDefault();
-    changeChartWindow(event.deltaY < 0 ? "in" : "out");
-  }
 
   function toggleMovingAverage(field: MovingAverageField) {
     setVisibleMovingAverages((current) => {
@@ -201,7 +178,7 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
                       {loading
                         ? "加载中"
                         : isChartTab
-                          ? `${visibleBars.length}/${chartBars.length} 条数据 · ${movingAverageSummary(visibleMovingAverages)}`
+                          ? `${chartBars.length} 条数据 · ${movingAverageSummary(visibleMovingAverages)}`
                           : `${currentStock?.industry ?? "行业待补"} · ${currentStock?.symbol ?? symbol}`}
                     </p>
                   </div>
@@ -212,14 +189,7 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
                           onToggle={toggleMovingAverage}
                           visibleMovingAverages={visibleMovingAverages}
                         />
-                        <KlineZoomControl
-                          disabled={chartBars.length === 0}
-                          onZoomAll={() => changeChartWindow("all")}
-                          onZoomIn={() => changeChartWindow("in")}
-                          onZoomOut={() => changeChartWindow("out")}
-                          totalCount={chartBars.length}
-                          visibleCount={visibleBars.length}
-                        />
+                        <AnnotationControl active={showGsgfAnnotations} onToggle={() => setShowGsgfAnnotations((value) => !value)} />
                       </>
                     )}
                     <span className="inline-flex h-7 max-w-full items-center truncate rounded-md bg-slate-50 px-2.5 text-xs font-bold text-slate-600 ring-1 ring-slate-200">
@@ -227,13 +197,19 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
                     </span>
                   </div>
                 </div>
-                <div className="overflow-hidden rounded-md border border-slate-100" onWheel={handleChartWheel}>
+                <div className="overflow-hidden rounded-md border border-slate-100">
                   {isChartTab ? (
-                    <>
-                      <KLineChart bars={visibleBars} movingAverages={visibleMovingAverages} />
-                      <VolumeChart bars={visibleBars} />
-                      <KdjChart bars={visibleBars} />
-                    </>
+                    <div className="h-[calc(100vh-236px)] min-h-[560px] bg-white">
+                      <TickFlowKlineChart
+                        annotations={activeChartTab === "day" ? data?.gsgf_annotations ?? [] : []}
+                        bars={chartBars}
+                        height={KLINE_CHART_HEIGHT}
+                        movingAverages={visibleMovingAverages}
+                        period={activeChartTab === "week" ? "weekly" : "daily"}
+                        showGsgfAnnotations={activeChartTab === "day" && showGsgfAnnotations}
+                        symbol={symbol}
+                      />
+                    </div>
                   ) : (
                     <StockDetailPanel
                       activeTab={activeChartTab}
@@ -256,57 +232,6 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
         </section>
       </div>
     </main>
-  );
-}
-
-function KlineZoomControl({
-  disabled,
-  onZoomAll,
-  onZoomIn,
-  onZoomOut,
-  totalCount,
-  visibleCount,
-}: {
-  disabled: boolean;
-  onZoomAll: () => void;
-  onZoomIn: () => void;
-  onZoomOut: () => void;
-  totalCount: number;
-  visibleCount: number;
-}) {
-  return (
-    <div className="inline-flex min-h-[34px] items-center overflow-hidden rounded-md border border-slate-200 bg-white text-xs font-black text-slate-600">
-      <button
-        className="min-h-[34px] min-w-[34px] px-2.5 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
-        disabled={disabled}
-        onClick={onZoomIn}
-        title="放大 K 线"
-        type="button"
-      >
-        +
-      </button>
-      <span className="min-h-[34px] border-x border-slate-200 px-2.5 leading-[34px] tabular-nums text-slate-500">
-        {visibleCount || "--"}/{totalCount || "--"}
-      </span>
-      <button
-        className="min-h-[34px] min-w-[34px] px-2.5 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
-        disabled={disabled}
-        onClick={onZoomOut}
-        title="缩小 K 线"
-        type="button"
-      >
-        -
-      </button>
-      <button
-        className="min-h-[34px] border-l border-slate-200 px-3 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-300"
-        disabled={disabled}
-        onClick={onZoomAll}
-        title="显示全部 K 线"
-        type="button"
-      >
-        全部
-      </button>
-    </div>
   );
 }
 
@@ -338,6 +263,24 @@ function MovingAverageControl({
         );
       })}
     </div>
+  );
+}
+
+function AnnotationControl({ active, onToggle }: { active: boolean; onToggle: () => void }) {
+  return (
+    <button
+      aria-pressed={active}
+      className={`min-h-[34px] rounded-md border px-3 text-xs font-black transition ${
+        active
+          ? "border-slate-950 bg-slate-950 text-white"
+          : "border-slate-200 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+      }`}
+      onClick={onToggle}
+      title={`${active ? "隐藏" : "显示"}股是股非图表证据`}
+      type="button"
+    >
+      GSGF 证据
+    </button>
   );
 }
 
@@ -489,191 +432,6 @@ function ChartTabs({ activeTab, onChange }: { activeTab: ChartTab; onChange: (ta
         ))}
       </div>
     </div>
-  );
-}
-
-const CHART_WIDTH = 1120;
-const PRICE_CHART_HEIGHT = 560;
-const INDICATOR_CHART_HEIGHT = 126;
-const PRICE_CHART_HEIGHT_CLASS = "h-[clamp(360px,56vh,560px)]";
-const INDICATOR_CHART_HEIGHT_CLASS = "h-[clamp(88px,13vh,126px)]";
-
-function KLineChart({ bars, movingAverages }: { bars: KlineBar[]; movingAverages: MovingAverageField[] }) {
-  const chart = buildPriceChartModel(bars, CHART_WIDTH, PRICE_CHART_HEIGHT, movingAverages);
-  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-
-  if (bars.length === 0 || !chart) {
-    return (
-      <div className={`flex ${PRICE_CHART_HEIGHT_CLASS} items-center justify-center bg-slate-50 text-sm font-bold text-slate-500`}>
-        暂无 K 线数据
-      </div>
-    );
-  }
-
-  const latest = bars[bars.length - 1];
-  const chartModel = chart;
-  const hoveredBar = hoveredIndex !== null ? bars[hoveredIndex] ?? null : null;
-
-  function handlePointerMove(event: { clientX: number; currentTarget: HTMLDivElement }) {
-    const bounds = event.currentTarget.getBoundingClientRect();
-    setHoveredIndex(
-      resolveKlineHoverIndex(
-        event.clientX - bounds.left,
-        bounds.width,
-        chartModel.width,
-        chartModel.plotLeft,
-        chartModel.plotRight,
-        bars.length,
-      ),
-    );
-  }
-
-  function handlePointerLeave() {
-    setHoveredIndex(null);
-  }
-
-  return (
-    <div
-      className={`${PRICE_CHART_HEIGHT_CLASS} relative w-full overflow-hidden bg-white`}
-      onMouseLeave={handlePointerLeave}
-      onMouseMove={handlePointerMove}
-    >
-      <svg
-        className="absolute inset-0 h-full w-full"
-        preserveAspectRatio="none"
-        role="img"
-        viewBox={`0 0 ${chartModel.width} ${chartModel.height}`}
-      >
-        <ChartGrid chart={chartModel} />
-        {bars.map((bar, index) => {
-          const x = chartModel.x(index);
-          const isUp = bar.close >= bar.open;
-          const candleTop = chartModel.y(Math.max(bar.open, bar.close));
-          const candleBottom = chartModel.y(Math.min(bar.open, bar.close));
-          const bodyHeight = Math.max(2, candleBottom - candleTop);
-          return (
-            <g key={`${bar.date}-${index}`}>
-              <line
-                stroke={isUp ? "#f43f5e" : "#10b981"}
-                strokeWidth="1.4"
-                x1={x}
-                x2={x}
-                y1={chartModel.y(bar.high)}
-                y2={chartModel.y(bar.low)}
-              />
-              <rect
-                fill={isUp ? "#f43f5e" : "#10b981"}
-                height={bodyHeight}
-                rx="1"
-                width={chartModel.candleWidth}
-                x={x - chartModel.candleWidth / 2}
-                y={candleTop}
-              />
-            </g>
-          );
-        })}
-        {MOVING_AVERAGES.filter((item) => movingAverages.includes(item.field)).map((item) => (
-          <Polyline bars={bars} chart={chartModel} color={item.color} field={item.field} key={item.field} />
-        ))}
-        <CurrentPriceLine chart={chartModel} value={latest.close} />
-        {hoveredBar && hoveredIndex !== null && <CrosshairOverlay bar={hoveredBar} chart={chartModel} index={hoveredIndex} />}
-        {hoveredBar && hoveredIndex !== null && <HoverDateBadge bar={hoveredBar} chart={chartModel} index={hoveredIndex} />}
-      </svg>
-      <PriceChartLegend latest={latest} movingAverages={movingAverages} />
-    </div>
-  );
-}
-
-function VolumeChart({ bars }: { bars: KlineBar[] }) {
-  const volumeAverages = useMemo(() => buildVolumeAverages(bars), [bars]);
-  const chart = buildIndicatorChartModel(
-    bars.map((bar) => bar.volume),
-    CHART_WIDTH,
-    INDICATOR_CHART_HEIGHT,
-    { bottom: 16, left: 12, right: 12, top: 18 },
-    bars.length,
-  );
-
-  if (bars.length === 0 || !chart) {
-    return <div className={`${INDICATOR_CHART_HEIGHT_CLASS} border-t border-slate-100 bg-slate-50`} />;
-  }
-
-  return (
-    <svg
-      className={`${INDICATOR_CHART_HEIGHT_CLASS} w-full border-t border-slate-100 bg-white`}
-      preserveAspectRatio="none"
-      role="img"
-      viewBox={`0 0 ${chart.width} ${chart.height}`}
-    >
-      <IndicatorGrid chart={chart} labels={[0, chart.max / 2, chart.max]} formatter={formatCompactNumber} />
-      <text fill="#64748b" fontSize="12" fontWeight="700" x="18" y="18">
-        VOL(5,10,20)
-      </text>
-      {bars.map((bar, index) => {
-        const valueHeight = chart.plotBottom - chart.y(bar.volume);
-        const isUp = bar.close >= bar.open;
-        return (
-          <rect
-            fill={isUp ? "#f43f5e" : "#10b981"}
-            height={Math.max(1, valueHeight)}
-            key={`${bar.date}-volume-${index}`}
-            opacity="0.9"
-            width={chart.barWidth}
-            x={chart.x(index) - chart.barWidth / 2}
-            y={chart.y(bar.volume)}
-          />
-        );
-      })}
-      <IndicatorPolyline chart={chart} color="#f59e0b" points={volumeAverages.ma5} totalPoints={bars.length} />
-      <IndicatorPolyline chart={chart} color="#8b5cf6" points={volumeAverages.ma10} totalPoints={bars.length} />
-      <IndicatorPolyline chart={chart} color="#1683ff" points={volumeAverages.ma20} totalPoints={bars.length} />
-    </svg>
-  );
-}
-
-function KdjChart({ bars }: { bars: KlineBar[] }) {
-  const kdjPoints = useMemo(() => computeKdj(bars), [bars]);
-  const values = kdjPoints.flatMap((point) => [point.k, point.d, point.j]);
-  const chart = buildIndicatorChartModel(
-    values,
-    CHART_WIDTH,
-    INDICATOR_CHART_HEIGHT,
-    { bottom: 16, left: 12, right: 12, top: 18 },
-    kdjPoints.length,
-    0,
-    120,
-  );
-
-  if (kdjPoints.length === 0 || !chart) {
-    return <div className={`${INDICATOR_CHART_HEIGHT_CLASS} border-t border-slate-100 bg-slate-50`} />;
-  }
-
-  const latest = kdjPoints[kdjPoints.length - 1];
-
-  return (
-    <svg
-      className={`${INDICATOR_CHART_HEIGHT_CLASS} w-full border-t border-slate-100 bg-white`}
-      preserveAspectRatio="none"
-      role="img"
-      viewBox={`0 0 ${chart.width} ${chart.height}`}
-    >
-      <IndicatorGrid chart={chart} labels={[0, 40, 80, 120]} formatter={(value) => value.toFixed(0)} />
-      <text fill="#64748b" fontSize="12" fontWeight="700" x="18" y="18">
-        KDJ(9,3,3)
-      </text>
-      <text fill="#f59e0b" fontSize="12" fontWeight="700" x="104" y="18">
-        K: {latest.k.toFixed(4)}
-      </text>
-      <text fill="#8b5cf6" fontSize="12" fontWeight="700" x="188" y="18">
-        D: {latest.d.toFixed(4)}
-      </text>
-      <text fill="#1683ff" fontSize="12" fontWeight="700" x="272" y="18">
-        J: {latest.j.toFixed(4)}
-      </text>
-      <IndicatorPolyline chart={chart} color="#f59e0b" points={kdjPoints.map((point) => point.k)} totalPoints={bars.length} />
-      <IndicatorPolyline chart={chart} color="#8b5cf6" points={kdjPoints.map((point) => point.d)} totalPoints={bars.length} />
-      <IndicatorPolyline chart={chart} color="#1683ff" points={kdjPoints.map((point) => point.j)} totalPoints={bars.length} />
-    </svg>
   );
 }
 
@@ -996,178 +754,6 @@ function HeaderMetric({ label, tone = "text-slate-950", value }: { label: string
   );
 }
 
-function Polyline({
-  bars,
-  chart,
-  color,
-  field,
-}: {
-  bars: KlineBar[];
-  chart: PriceChartModel;
-  color: string;
-  field: MovingAverageField;
-}) {
-  const points = bars
-    .map((bar, index) => {
-      const value = bar[field];
-      return value ? `${chart.x(index)},${chart.y(value)}` : null;
-    })
-    .filter((value): value is string => Boolean(value))
-    .join(" ");
-  return points ? <polyline fill="none" points={points} stroke={color} strokeWidth="1.8" /> : null;
-}
-
-function IndicatorPolyline({
-  chart,
-  color,
-  points,
-  totalPoints,
-}: {
-  chart: IndicatorChartModel;
-  color: string;
-  points: number[];
-  totalPoints: number;
-}) {
-  const slot = totalPoints > 0 ? (chart.plotRight - chart.plotLeft) / totalPoints : 0;
-  const path = points.map((value, index) => `${chart.plotLeft + slot * index + slot / 2},${chart.y(value)}`).join(" ");
-  return path ? <polyline fill="none" points={path} stroke={color} strokeWidth="1.4" /> : null;
-}
-
-function ChartGrid({ chart }: { chart: PriceChartModel }) {
-  return (
-    <g>
-      <rect fill="#ffffff" height={chart.height} width={chart.width} />
-      {chart.yTicks.map((tick) => {
-        const y = chart.y(tick);
-        return (
-          <g key={tick}>
-            <line stroke="#e5e7eb" strokeDasharray="2 4" x1={chart.plotLeft} x2={chart.plotRight} y1={y} y2={y} />
-            <text fill="#64748b" fontSize="12" fontWeight="700" textAnchor="end" x={chart.width - 4} y={y + 4}>
-              {tick.toFixed(2)}
-            </text>
-          </g>
-        );
-      })}
-      {chart.xTicks.map((index) => (
-        <line
-          key={index}
-          stroke="#f1f5f9"
-          x1={chart.x(index)}
-          x2={chart.x(index)}
-          y1={chart.plotTop}
-          y2={chart.plotBottom}
-        />
-      ))}
-    </g>
-  );
-}
-
-function IndicatorGrid({
-  chart,
-  formatter,
-  labels,
-}: {
-  chart: IndicatorChartModel;
-  formatter: (value: number) => string;
-  labels: number[];
-}) {
-  return (
-    <g>
-      {labels.map((value) => {
-        const y = chart.y(value);
-        return (
-          <g key={value}>
-            <line stroke="#e5e7eb" strokeDasharray="2 4" x1={chart.plotLeft} x2={chart.plotRight} y1={y} y2={y} />
-            <text fill="#64748b" fontSize="12" fontWeight="700" textAnchor="end" x={chart.width - 4} y={y + 4}>
-              {formatter(value)}
-            </text>
-          </g>
-        );
-      })}
-    </g>
-  );
-}
-
-function CurrentPriceLine({ chart, value }: { chart: PriceChartModel; value: number }) {
-  const y = chart.y(value);
-  const x = resolveCurrentPriceLabelX(chart.width, chart.plotRight, 48);
-  return (
-    <g>
-      <line
-        stroke="#10b981"
-        strokeDasharray="4 4"
-        strokeWidth="1"
-        x1={chart.plotLeft}
-        x2={chart.plotRight}
-        y1={y}
-        y2={y}
-      />
-      <rect fill="#10b981" height="20" rx="3" width="48" x={x} y={y - 10} />
-      <text fill="#ffffff" fontSize="12" fontWeight="800" x={x + 5} y={y + 4}>
-        {formatPrice(value)}
-      </text>
-    </g>
-  );
-}
-
-function PriceChartLegend({ latest, movingAverages }: { latest: KlineBar; movingAverages: MovingAverageField[] }) {
-  const activeItems = MOVING_AVERAGES.filter((item) => movingAverages.includes(item.field));
-
-  return (
-    <div className="pointer-events-none absolute left-3 top-2 z-10 max-w-[calc(100%-1.5rem)] pr-2">
-      <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[12px] font-black leading-none">
-        <span className="text-slate-500">均线</span>
-        {activeItems.map((item) => (
-          <span className="inline-flex items-center gap-1.5 whitespace-nowrap" key={item.field} style={{ color: item.color }}>
-            <span className="h-1.5 w-3 rounded-full bg-current" />
-            <span>
-              {item.label}: {formatNullablePrice(latest[item.field])}
-            </span>
-          </span>
-        ))}
-        {movingAverages.length === 0 && <span className="text-slate-400">已隐藏</span>}
-      </div>
-    </div>
-  );
-}
-
-function CrosshairOverlay({ bar, chart, index }: { bar: KlineBar; chart: PriceChartModel; index: number }) {
-  const x = chart.x(index);
-  const y = chart.y(bar.close);
-  return (
-    <g pointerEvents="none">
-      <line stroke="#94a3b8" strokeDasharray="4 4" strokeWidth="1" x1={x} x2={x} y1={chart.plotTop} y2={chart.plotBottom} />
-      <line stroke="#cbd5e1" strokeDasharray="4 4" strokeWidth="1" x1={chart.plotLeft} x2={chart.plotRight} y1={y} y2={y} />
-    </g>
-  );
-}
-
-function HoverDateBadge({ bar, chart, index }: { bar: KlineBar; chart: PriceChartModel; index: number }) {
-  const x = chart.x(index);
-  const label = formatKlineHoverDate(bar.date);
-  const badgeWidth = Math.max(72, label.length * 7 + 18);
-  const badgeX = Math.max(chart.plotLeft, Math.min(chart.width - badgeWidth - 4, x - badgeWidth / 2));
-  return (
-    <g pointerEvents="none">
-      <rect fill="#334155" height="18" rx="3" width={badgeWidth} x={badgeX} y={chart.height - 21} />
-      <text
-        fill="#ffffff"
-        fontSize="11"
-        fontWeight="800"
-        textAnchor="middle"
-        x={badgeX + badgeWidth / 2}
-        y={chart.height - 9}
-      >
-        {label}
-      </text>
-    </g>
-  );
-}
-
-function formatNullablePrice(value: number | null | undefined): string {
-  return value === null || value === undefined ? "--" : formatPrice(value);
-}
-
 function formatResearchValue(value: unknown): string {
   if (value === null || value === undefined) {
     return "--";
@@ -1230,41 +816,6 @@ function recordSummary(record: Record<string, unknown>): string {
   return fallback.length > 0 ? fallback.join(" · ") : "暂无摘要";
 }
 
-type PriceChartModel = {
-  candleWidth: number;
-  height: number;
-  plotBottom: number;
-  plotLeft: number;
-  plotRight: number;
-  plotTop: number;
-  width: number;
-  x: (index: number) => number;
-  xTicks: number[];
-  y: (value: number) => number;
-  yTicks: number[];
-};
-
-type IndicatorChartModel = {
-  barWidth: number;
-  height: number;
-  max: number;
-  min: number;
-  plotBottom: number;
-  plotLeft: number;
-  plotRight: number;
-  plotTop: number;
-  width: number;
-  x: (index: number) => number;
-  y: (value: number) => number;
-};
-
-type ChartPadding = {
-  bottom: number;
-  left: number;
-  right: number;
-  top: number;
-};
-
 type QuoteSnapshot = {
   change: number;
   changePct: number;
@@ -1274,81 +825,6 @@ type QuoteSnapshot = {
   open: number;
   volume: number;
 };
-
-function buildPriceChartModel(
-  bars: KlineBar[],
-  width: number,
-  height: number,
-  movingAverages: MovingAverageField[],
-): PriceChartModel | null {
-  if (bars.length === 0) {
-    return null;
-  }
-  const values = bars.flatMap((bar) => [
-    bar.high,
-    bar.low,
-    ...movingAverages.map((field) => bar[field]),
-  ]).filter(isNumber);
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const padding = Math.max((max - min) * 0.08, 0.01);
-  const low = min - padding;
-  const high = max + padding;
-  const plotLeft = 12;
-  const plotRight = width - 64;
-  const plotTop = 36;
-  const plotBottom = height - 24;
-  const slot = (plotRight - plotLeft) / bars.length;
-  return {
-    candleWidth: Math.max(3, Math.min(9, slot * 0.56)),
-    height,
-    plotBottom,
-    plotLeft,
-    plotRight,
-    plotTop,
-    width,
-    x: (index) => plotLeft + slot * index + slot / 2,
-    xTicks: buildIndexTicks(bars.length, 6),
-    y: (value) => plotBottom - ((value - low) / Math.max(high - low, 0.01)) * (plotBottom - plotTop),
-    yTicks: buildLinearTicks(low, high, 6),
-  };
-}
-
-function buildIndicatorChartModel(
-  values: number[],
-  width: number,
-  height: number,
-  padding: ChartPadding,
-  pointCount = values.length,
-  minBound?: number,
-  maxBound?: number,
-): IndicatorChartModel | null {
-  if (values.length === 0) {
-    return null;
-  }
-  const rawMin = Math.min(...values);
-  const rawMax = Math.max(...values);
-  const min = minBound ?? Math.min(0, rawMin);
-  const max = maxBound ?? Math.max(rawMax, 1);
-  const plotLeft = padding.left;
-  const plotRight = width - padding.right;
-  const plotTop = padding.top;
-  const plotBottom = height - padding.bottom;
-  const slot = (plotRight - plotLeft) / Math.max(pointCount, 1);
-  return {
-    barWidth: Math.max(2, Math.min(8, slot * 0.56)),
-    height,
-    max,
-    min,
-    plotBottom,
-    plotLeft,
-    plotRight,
-    plotTop,
-    width,
-    x: (index) => plotLeft + slot * index + slot / 2,
-    y: (value) => plotBottom - ((value - min) / Math.max(max - min, 0.01)) * (plotBottom - plotTop),
-  };
-}
 
 function buildQuote(bars: KlineBar[]): QuoteSnapshot | null {
   const latest = bars[bars.length - 1];
@@ -1455,40 +931,11 @@ function buildWeeklyBars(bars: KlineBar[]): KlineBar[] {
   return weekly;
 }
 
-function buildVolumeAverages(bars: KlineBar[]) {
-  const volumes = bars.map((bar) => bar.volume);
-  return {
-    ma5: movingAverage(volumes, 5),
-    ma10: movingAverage(volumes, 10),
-    ma20: movingAverage(volumes, 20),
-  };
-}
-
 function movingAverage(values: number[], windowSize: number): number[] {
   return values.map((_, index) => {
     const start = Math.max(0, index - windowSize + 1);
     const window = values.slice(start, index + 1);
     return window.reduce((sum, value) => sum + value, 0) / window.length;
-  });
-}
-
-function computeKdj(bars: KlineBar[]): KdjPoint[] {
-  let k = 50;
-  let d = 50;
-  return bars.map((bar, index) => {
-    const start = Math.max(0, index - 8);
-    const window = bars.slice(start, index + 1);
-    const low = Math.min(...window.map((item) => item.low));
-    const high = Math.max(...window.map((item) => item.high));
-    const rsv = high === low ? 50 : ((bar.close - low) / (high - low)) * 100;
-    k = (2 * k + rsv) / 3;
-    d = (2 * d + k) / 3;
-    return {
-      d,
-      date: bar.date,
-      j: 3 * k - 2 * d,
-      k,
-    };
   });
 }
 
@@ -1505,25 +952,6 @@ function weekKey(value: string): string {
   const monday = new Date(date);
   monday.setUTCDate(date.getUTCDate() - day + 1);
   return `${monday.getUTCFullYear()}-${monday.getUTCMonth() + 1}-${monday.getUTCDate()}`;
-}
-
-function buildLinearTicks(min: number, max: number, count: number): number[] {
-  if (count <= 1) {
-    return [max];
-  }
-  return Array.from({ length: count }, (_, index) => min + ((max - min) / (count - 1)) * index).reverse();
-}
-
-function buildIndexTicks(length: number, count: number): number[] {
-  if (length <= 1) {
-    return [0];
-  }
-  const step = Math.max(1, Math.floor(length / count));
-  const ticks: number[] = [];
-  for (let index = step; index < length; index += step) {
-    ticks.push(index);
-  }
-  return ticks;
 }
 
 function movingAverageSummary(fields: MovingAverageField[]): string {
@@ -1586,10 +1014,6 @@ function marketPrefix(symbol: string): string {
   return "A";
 }
 
-function isNumber(value: unknown): value is number {
-  return typeof value === "number" && Number.isFinite(value);
-}
-
 function formatPrice(value: number): string {
   return value.toFixed(2);
 }
@@ -1605,16 +1029,6 @@ function formatVolume(value: number): string {
   }
   if (value >= 10_000) {
     return `${(value / 10_000).toFixed(1)}万`;
-  }
-  return `${Math.round(value)}`;
-}
-
-function formatCompactNumber(value: number): string {
-  if (value >= 100_000_000) {
-    return `${(value / 100_000_000).toFixed(1)}亿`;
-  }
-  if (value >= 10_000) {
-    return `${(value / 10_000).toFixed(0)}万`;
   }
   return `${Math.round(value)}`;
 }

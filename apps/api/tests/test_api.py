@@ -536,6 +536,18 @@ def test_stock_kline_endpoint_returns_daily_bars(tmp_path: Path) -> None:
     assert payload["source_status"]["source"] == "fake K线"
     assert len(payload["bars"]) == 5
     assert payload["bars"][-1]["close"] > payload["bars"][0]["close"]
+    assert payload["gsgf_annotations"] == []
+
+
+def test_stock_kline_endpoint_returns_gsgf_chart_annotations(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.get("/api/stocks/603890.SH/kline?count=220")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert any(item["type"] == "volume_structure" for item in payload["gsgf_annotations"])
+    assert any(item["type"] == "zone" for item in payload["gsgf_annotations"])
 
 
 def test_stock_research_reports_missing_ifind_key_without_breaking(tmp_path: Path) -> None:

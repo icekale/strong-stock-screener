@@ -149,6 +149,10 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(watchlistPageSource, /删除/);
   assert.match(watchlistPageSource, /saveWatchlistPool/);
   assert.match(watchlistPageSource, /addWatchlistPoolItem/);
+  assert.match(watchlistPageSource, /getWatchlistGsgfStatus/);
+  assert.match(watchlistPageSource, /结构触发/);
+  assert.match(watchlistPageSource, /机会触发/);
+  assert.match(watchlistPageSource, /C区\/回避/);
   assert.match(stockPageSource, /getStockKline/);
   assert.match(stockPageSource, /getStockResearch/);
   assert.match(stockPageSource, /StockResearchResponse/);

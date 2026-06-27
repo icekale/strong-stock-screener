@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { addWatchlistPoolItem, getWatchlistPool, saveWatchlistPool } from "../../lib/api";
-import type { WatchlistPoolItem } from "../../lib/types";
+import { addWatchlistPoolItem, getWatchlistGsgfStatus, getWatchlistPool, saveWatchlistPool } from "../../lib/api";
+import type { GsgfAnalysis, WatchlistPoolItem } from "../../lib/types";
 
 type DraftItem = {
   symbol: string;
@@ -13,12 +13,24 @@ type DraftItem = {
   note: string;
 };
 
+type StructureFilter = "all" | "opportunity" | "wait" | "risk" | "avoid";
+
+const structureFilters: Array<{ label: string; value: StructureFilter }> = [
+  { label: "全部", value: "all" },
+  { label: "机会触发", value: "opportunity" },
+  { label: "等确认", value: "wait" },
+  { label: "风险预警", value: "risk" },
+  { label: "C区/回避", value: "avoid" },
+];
+
 export default function WatchlistPage() {
   const [items, setItems] = useState<WatchlistPoolItem[]>([]);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [selectedSymbols, setSelectedSymbols] = useState<Set<string>>(() => new Set());
   const [activeGroup, setActiveGroup] = useState("all");
   const [activeTag, setActiveTag] = useState("all");
+  const [structureFilter, setStructureFilter] = useState<StructureFilter>("all");
+  const [gsgfBySymbol, setGsgfBySymbol] = useState<Record<string, GsgfAnalysis>>({});
   const [searchText, setSearchText] = useState("");
   const [batchGroup, setBatchGroup] = useState("");
   const [draft, setDraft] = useState<DraftItem>(emptyDraft());
@@ -43,10 +55,11 @@ export default function WatchlistPage() {
         return (
           (activeGroup === "all" || group === activeGroup) &&
           (activeTag === "all" || item.tags.includes(activeTag)) &&
+          matchesStructureFilter(gsgfBySymbol[item.symbol], structureFilter) &&
           (!searchText.trim() || searchable.includes(searchText.trim().toLowerCase()))
         );
       }),
-    [activeGroup, activeTag, items, searchText],
+    [activeGroup, activeTag, gsgfBySymbol, items, searchText, structureFilter],
   );
   const selectedItem = items.find((item) => item.symbol === selectedSymbol) ?? visibleItems[0] ?? null;
   const selectedCount = selectedSymbols.size;
@@ -82,10 +95,20 @@ export default function WatchlistPage() {
       const response = await getWatchlistPool();
       setItems(response.items);
       setSelectedSymbol(response.items[0]?.symbol ?? null);
+      void refreshStructureStatus();
     } catch (err) {
       setError(err instanceof Error ? err.message : "读取自选股失败");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function refreshStructureStatus() {
+    try {
+      const response = await getWatchlistGsgfStatus();
+      setGsgfBySymbol(Object.fromEntries(response.items.map((item) => [item.symbol, item.gsgf])));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "读取结构触发失败");
     }
   }
 
@@ -229,6 +252,20 @@ export default function WatchlistPage() {
                 ))}
               </div>
             </div>
+
+            <div className="mt-5">
+              <SectionTitle title="结构触发" />
+              <div className="flex flex-wrap gap-2">
+                {structureFilters.map((filter) => (
+                  <TagButton
+                    active={structureFilter === filter.value}
+                    key={filter.value}
+                    label={filter.label}
+                    onClick={() => setStructureFilter(filter.value)}
+                  />
+                ))}
+              </div>
+            </div>
           </aside>
 
           <section className="min-w-0 rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -298,6 +335,7 @@ export default function WatchlistPage() {
                       <th className="px-3 py-3">股票</th>
                       <th className="px-3 py-3">分组</th>
                       <th className="px-3 py-3">行业</th>
+                      <th className="px-3 py-3">结构触发</th>
                       <th className="px-3 py-3">标签</th>
                       <th className="px-4 py-3">备注</th>
                     </tr>
@@ -330,6 +368,9 @@ export default function WatchlistPage() {
                           {item.group || "自选"}
                         </td>
                         <td className="px-3 py-3 align-top text-sm text-slate-500">{item.industry || "--"}</td>
+                        <td className="px-3 py-3 align-top">
+                          <StructureTriggerBadge analysis={gsgfBySymbol[item.symbol]} />
+                        </td>
                         <td className="px-3 py-3 align-top">
                           <TagList tags={item.tags} />
                         </td>
@@ -440,6 +481,33 @@ function TagList({ tags }: { tags: string[] }) {
   );
 }
 
+function StructureTriggerBadge({ analysis }: { analysis: GsgfAnalysis | undefined }) {
+  if (!analysis) {
+    return <span className="text-sm text-slate-400">等待检测</span>;
+  }
+  const avoid = analysis.action === "avoid" || analysis.zone === "c_zone";
+  const tone = avoid
+    ? "bg-red-50 text-red-700 ring-red-100"
+    : analysis.risk_flags.length > 0
+      ? "bg-amber-50 text-amber-700 ring-amber-100"
+      : "bg-violet-50 text-violet-700 ring-violet-100";
+  const tags = [...analysis.trigger_tags, ...analysis.pattern_tags, ...analysis.risk_flags].slice(0, 2);
+
+  return (
+    <div className="max-w-[220px] space-y-1.5">
+      <div className="flex flex-wrap gap-1">
+        <span className={`inline-flex h-6 items-center rounded-full px-2 text-[11px] font-bold ring-1 ${tone}`}>
+          {gsgfLabel(analysis.action)} {analysis.total_score}
+        </span>
+        <span className="inline-flex h-6 items-center rounded-full bg-slate-100 px-2 text-[11px] font-bold text-slate-700 ring-1 ring-slate-200">
+          {gsgfLabel(analysis.zone)}
+        </span>
+      </div>
+      {tags.length > 0 && <p className="line-clamp-2 text-xs leading-5 text-slate-500">{tags.join(" / ")}</p>}
+    </div>
+  );
+}
+
 function EditorInput({
   label,
   onChange,
@@ -463,6 +531,40 @@ function EditorInput({
 
 function EmptyState({ text }: { text: string }) {
   return <div className="px-5 py-12 text-center text-sm font-bold text-slate-500">{text}</div>;
+}
+
+function matchesStructureFilter(analysis: GsgfAnalysis | undefined, filter: StructureFilter) {
+  if (filter === "all") {
+    return true;
+  }
+  if (!analysis) {
+    return false;
+  }
+  if (filter === "opportunity") {
+    return ["strong_candidate", "watch_candidate"].includes(analysis.action) && analysis.risk_flags.length === 0;
+  }
+  if (filter === "wait") {
+    return analysis.action === "wait_trigger";
+  }
+  if (filter === "risk") {
+    return analysis.risk_flags.length > 0;
+  }
+  return analysis.action === "avoid" || analysis.zone === "c_zone";
+}
+
+function gsgfLabel(value: string | null | undefined): string {
+  const labels: Record<string, string> = {
+    strong_candidate: "强势候选",
+    watch_candidate: "观察候选",
+    wait_trigger: "等触发",
+    avoid: "回避",
+    a_zone: "A区",
+    b_zone_a_point: "B区A点",
+    c_zone: "C区",
+    unformed: "未成型",
+    unknown: "未知",
+  };
+  return value ? labels[value] ?? value : "--";
 }
 
 function groupItems(items: WatchlistPoolItem[]) {

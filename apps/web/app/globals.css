@@ -3,12 +3,12 @@
 @tailwind utilities;
 
 html {
-  background: #f8fafc;
+  background: #f5f3f0;
 }
 
 body {
   margin: 0;
-  color: #0f172a;
+  color: #11100e;
 }
 
 .app-shell__sider .ant-layout-sider-zero-width-trigger {
@@ -18,17 +18,47 @@ body {
   background: #0f172a;
 }
 
+.workbench-page {
+  min-height: 100vh;
+  background: #f5f3f0;
+  color: #11100e;
+}
+
+.workbench-panel,
 .workbench-card {
-  border-color: #e2e8f0;
-  box-shadow: 0 1px 2px rgb(15 23 42 / 0.04);
+  border-color: #ddd8d0 !important;
+  background: #f8f7f4 !important;
+  box-shadow: none !important;
+}
+
+.workbench-panel .ant-card-head,
+.workbench-card .ant-card-head {
+  border-color: #ddd8d0;
+}
+
+.workbench-panel .ant-card-body,
+.workbench-card .ant-card-body {
+  background: #f8f7f4;
+}
+
+.workbench-panel-divider {
+  border-color: #ddd8d0;
+}
+
+.workbench-muted {
+  color: #7b756d;
+}
+
+.workbench-ink {
+  color: #11100e;
 }
 
 .workbench-table-row-selected > td {
-  background: #f1f5f9 !important;
+  background: #eee9df !important;
 }
 
 .workbench-table-row-selected:hover > td {
-  background: #e2e8f0 !important;
+  background: #e6dfd3 !important;
 }
 
 .tickflow-kline-chart > div {

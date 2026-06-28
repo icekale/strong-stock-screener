@@ -162,30 +162,61 @@ class TickFlowQuoteProvider:
             return {}
         if not self.api_key:
             raise StrongStockDataUnavailable("STRONG_STOCK_TICKFLOW_API_KEY 或 TICKFLOW_API_KEY 未配置")
-        bars_by_symbol: dict[str, list[TickFlowIntradayBar]] = {}
+        unique_symbols = _dedupe_symbols(symbols)
         try:
-            for symbol in symbols:
-                response = self.http_client.get(
-                    f"{self.base_url}/v1/klines/intraday",
-                    headers={"x-api-key": self.api_key},
-                    params={
-                        "symbol": symbol,
-                        "period": period,
-                        "count": count,
-                    },
-                    timeout=self.timeout_seconds,
-                )
-                response.raise_for_status()
-                bars_by_symbol[symbol] = parse_tickflow_intraday_bars(response.json())
-            return bars_by_symbol
+            return self._get_intraday_bars_batch(unique_symbols, period=period, count=count)
         except StrongStockDataUnavailable:
             raise
         except httpx.HTTPStatusError as exc:
+            code = _payload_code(exc.response)
+            if exc.response.status_code == 403 and "NO_INTRADAY_BATCH_PERMISSION" in code:
+                return self._get_intraday_bars_one_by_one(unique_symbols, period=period, count=count)
             raise StrongStockDataUnavailable(
                 f"TickFlow 分钟线请求失败: HTTP {exc.response.status_code}"
             ) from exc
         except Exception as exc:
             raise StrongStockDataUnavailable(f"TickFlow 分钟线请求失败: {exc.__class__.__name__}") from exc
+
+    def _get_intraday_bars_batch(
+        self,
+        symbols: list[str],
+        period: str,
+        count: int,
+    ) -> dict[str, list[TickFlowIntradayBar]]:
+        response = self.http_client.get(
+            f"{self.base_url}/v1/klines/intraday/batch",
+            headers={"x-api-key": self.api_key},
+            params={
+                "symbols": ",".join(symbols),
+                "period": period,
+                "count": count,
+            },
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        return parse_tickflow_intraday_payload(response.json())
+
+    def _get_intraday_bars_one_by_one(
+        self,
+        symbols: list[str],
+        period: str,
+        count: int,
+    ) -> dict[str, list[TickFlowIntradayBar]]:
+        bars_by_symbol: dict[str, list[TickFlowIntradayBar]] = {}
+        for symbol in symbols:
+            response = self.http_client.get(
+                f"{self.base_url}/v1/klines/intraday",
+                headers={"x-api-key": self.api_key},
+                params={
+                    "symbol": symbol,
+                    "period": period,
+                    "count": count,
+                },
+                timeout=self.timeout_seconds,
+            )
+            response.raise_for_status()
+            bars_by_symbol[symbol] = parse_tickflow_intraday_bars(response.json())
+        return bars_by_symbol
 
 
 def parse_tickflow_quote_payload(payload: object) -> list[TickFlowQuote]:
@@ -358,6 +389,27 @@ def _first_present(*values: object) -> object | None:
         if value is not None:
             return value
     return None
+
+
+def _dedupe_symbols(symbols: list[str]) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for symbol in symbols:
+        normalized = symbol.strip().upper()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            output.append(normalized)
+    return output
+
+
+def _payload_code(response: object) -> str:
+    try:
+        payload = response.json()
+    except Exception:
+        return ""
+    if isinstance(payload, dict):
+        return str(payload.get("code") or payload.get("error") or "")
+    return ""
 
 
 def _optional_float(value: object) -> float | None:

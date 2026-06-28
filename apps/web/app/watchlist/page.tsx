@@ -211,8 +211,8 @@ export default function WatchlistPage() {
             }}
             type="button"
           >
-            <span className="block font-black text-slate-950">{item.name ?? item.symbol}</span>
-            <span className="mt-1 block text-xs font-semibold text-slate-400">{item.symbol}</span>
+            <span className="block font-black text-[#11100e]">{item.name ?? item.symbol}</span>
+            <span className="mt-1 block text-xs font-semibold text-[#7b756d]">{item.symbol}</span>
           </button>
         ),
       },
@@ -253,16 +253,16 @@ export default function WatchlistPage() {
   );
 
   return (
-    <main className="bg-slate-50">
-      <div className="mx-auto max-w-[1680px] space-y-4 px-4 py-4 sm:px-6 lg:px-8">
-        <Card className="workbench-card" styles={{ body: { padding: 18 } }}>
+    <main className="workbench-page">
+      <div className="mx-auto max-w-none space-y-4 px-5 py-4">
+        <Card className="workbench-panel" styles={{ body: { padding: 18 } }}>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <Typography.Text className="text-xs font-semibold uppercase text-slate-400">Watchlist</Typography.Text>
-              <Typography.Title className="mt-1 text-2xl font-black tracking-tight text-slate-950" level={1}>
+              <Typography.Text className="workbench-muted text-xs font-semibold uppercase">Watchlist</Typography.Text>
+              <Typography.Title className="workbench-ink mt-1 text-2xl font-black tracking-tight" level={1}>
                 自选股管理
               </Typography.Title>
-              <Typography.Text className="mt-1 block text-sm font-medium text-slate-500">
+              <Typography.Text className="workbench-muted mt-1 block text-sm font-medium">
                 管理分组、标签、行业和备注。
               </Typography.Text>
             </div>
@@ -285,7 +285,7 @@ export default function WatchlistPage() {
         {error && <Alert showIcon title={error} type="error" />}
 
         <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)_320px]">
-          <Card className="workbench-card" size="small">
+          <Card className="workbench-panel" size="small">
             <SectionTitle title="分组" />
             <Space className="w-full" orientation="vertical" size={8}>
               <GroupButton
@@ -327,8 +327,8 @@ export default function WatchlistPage() {
             </div>
           </Card>
 
-          <Card className="workbench-card min-w-0" styles={{ body: { padding: 0 } }}>
-            <div className="grid gap-3 border-b border-slate-100 p-4 lg:grid-cols-[1fr_auto] lg:items-center">
+          <Card className="workbench-panel min-w-0" styles={{ body: { padding: 0 } }}>
+            <div className="workbench-panel-divider grid gap-3 border-b p-4 lg:grid-cols-[1fr_auto] lg:items-center">
               <Input
                 onChange={(event) => setSearchText(event.target.value)}
                 placeholder="搜索代码 / 名称 / 行业 / 标签 / 备注"
@@ -340,7 +340,7 @@ export default function WatchlistPage() {
             </div>
 
             {selectedCount > 0 && (
-              <div className="grid gap-2 border-b border-slate-100 bg-sky-50 p-3 lg:grid-cols-[auto_minmax(120px,180px)_auto] lg:items-center">
+              <div className="workbench-panel-divider grid gap-2 border-b bg-[#eee9df] p-3 lg:grid-cols-[auto_minmax(120px,180px)_auto] lg:items-center">
                 <Tag className="m-0" color="blue">
                   已选 {selectedCount}
                 </Tag>
@@ -395,12 +395,12 @@ export default function WatchlistPage() {
           </Card>
 
           <Card
-            className="workbench-card xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto"
+            className="workbench-panel xl:sticky xl:top-4 xl:max-h-[calc(100vh-2rem)] xl:overflow-y-auto"
             styles={{ body: { padding: 0 } }}
           >
-            <div className="border-b border-slate-100 px-5 py-4">
-              <Typography.Text className="text-xs font-semibold uppercase text-slate-400">Edit</Typography.Text>
-              <Typography.Title className="mt-1 text-xl font-black text-slate-950" level={2}>
+            <div className="workbench-panel-divider border-b px-5 py-4">
+              <Typography.Text className="workbench-muted text-xs font-semibold uppercase">Edit</Typography.Text>
+              <Typography.Title className="workbench-ink mt-1 text-xl font-black" level={2}>
                 {selectedItem ? "编辑自选股" : "新增自选股"}
               </Typography.Title>
             </div>
@@ -430,7 +430,7 @@ export default function WatchlistPage() {
 }
 
 function SectionTitle({ title }: { title: string }) {
-  return <h2 className="mb-3 text-xs font-black uppercase text-slate-400">{title}</h2>;
+  return <h2 className="mb-3 text-xs font-black uppercase text-[#7b756d]">{title}</h2>;
 }
 
 function GroupButton({
@@ -447,7 +447,7 @@ function GroupButton({
   return (
     <button
       className={`flex min-h-[34px] w-full items-center justify-between rounded-md px-3 text-xs font-black transition ${
-        active ? "bg-slate-950 text-white" : "bg-slate-50 text-slate-700 hover:bg-slate-100"
+        active ? "bg-[#11100e] text-white" : "bg-[#f5f3f0] text-[#11100e] hover:bg-[#eee9df]"
       }`}
       onClick={onClick}
       type="button"
@@ -470,7 +470,7 @@ function TagButton({ active, label, onClick }: { active: boolean; label: string;
 
 function TagList({ tags }: { tags: string[] }) {
   if (tags.length === 0) {
-    return <span className="text-sm text-slate-400">--</span>;
+    return <span className="text-sm text-[#7b756d]">--</span>;
   }
   return (
     <div className="flex flex-wrap gap-1">
@@ -499,7 +499,7 @@ function StructureTriggerBadge({ analysis }: { analysis: GsgfAnalysis | undefine
         </Tag>
         <Tag className="m-0">{gsgfLabel(analysis.zone)}</Tag>
       </div>
-      {tags.length > 0 && <p className="line-clamp-2 text-xs leading-5 text-slate-500">{tags.join(" / ")}</p>}
+      {tags.length > 0 && <p className="line-clamp-2 text-xs leading-5 text-[#7b756d]">{tags.join(" / ")}</p>}
     </div>
   );
 }

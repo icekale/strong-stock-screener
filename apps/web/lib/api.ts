@@ -1,9 +1,16 @@
 import type {
   DataSourceStatusResponse,
+  GsgfAnalysis,
+  GsgfBacktestSummary,
+  GsgfReviewSnapshotResponse,
+  GsgfReviewSummary,
+  GsgfTradePlan,
+  MarketOverviewResponse,
   RuntimeSettingsHealthResponse,
   RuntimeSettingsResponse,
   ScreenRunFilters,
   ScreenStrategy,
+  SectorRadarResponse,
   StockKlineResponse,
   StockResearchResponse,
   StrongStockIntradaySnapshot,
@@ -28,6 +35,22 @@ export async function getDataSourceStatus(): Promise<DataSourceStatusResponse> {
     throw new Error(`读取数据源状态失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<DataSourceStatusResponse>;
+}
+
+export async function getMarketOverview(): Promise<MarketOverviewResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/market/overview`);
+  if (!response.ok) {
+    throw new Error(`读取全A市场概览失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<MarketOverviewResponse>;
+}
+
+export async function getSectorRadar(limit = 20): Promise<SectorRadarResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/sectors/radar?limit=${encodeURIComponent(limit)}`);
+  if (!response.ok) {
+    throw new Error(`读取板块资金流失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SectorRadarResponse>;
 }
 
 export async function getRuntimeSettings(): Promise<RuntimeSettingsResponse> {
@@ -107,11 +130,81 @@ export async function getLatestScreenRun(): Promise<StrongStockScreeningResponse
   return response.json() as Promise<StrongStockScreeningResponse>;
 }
 
+export async function runGsgfBacktest({
+  symbols,
+  windows = [1, 3, 5, 10],
+  minHistory = 60,
+  count = 180,
+}: {
+  symbols: string[];
+  windows?: number[];
+  minHistory?: number;
+  count?: number;
+}): Promise<GsgfBacktestSummary> {
+  const response = await fetch(`${API_BASE_URL}/api/gsgf/backtest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      symbols,
+      windows,
+      min_history: minHistory,
+      count,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`运行股是股非回测失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<GsgfBacktestSummary>;
+}
+
+export async function buildGsgfTradePlan(analysis: GsgfAnalysis): Promise<GsgfTradePlan> {
+  const response = await fetch(`${API_BASE_URL}/api/gsgf/trade-plan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ analysis }),
+  });
+  if (!response.ok) {
+    throw new Error(`生成股是股非交易计划失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<GsgfTradePlan>;
+}
+
+export async function saveLatestGsgfReviewSnapshot(): Promise<GsgfReviewSnapshotResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/gsgf/review/snapshots/latest`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) {
+    throw new Error(`保存股是股非复盘快照失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<GsgfReviewSnapshotResponse>;
+}
+
+export async function recheckGsgfReview({
+  windows = [1, 3, 5, 10],
+  count = 180,
+}: {
+  windows?: number[];
+  count?: number;
+} = {}): Promise<GsgfReviewSummary> {
+  const response = await fetch(`${API_BASE_URL}/api/gsgf/review/recheck`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ windows, count }),
+  });
+  if (!response.ok) {
+    throw new Error(`复查股是股非信号失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<GsgfReviewSummary>;
+}
+
 export async function createIntradaySnapshot({
+  gsgfContext = {},
   limit = 30,
   watchlistText = "",
   useWatchlistPool = false,
 }: {
+  gsgfContext?: Record<string, { final_status?: string; confirm_type?: string | null; setup_type?: string | null; risk_flags?: string[] }>;
   limit?: number;
   watchlistText?: string;
   useWatchlistPool?: boolean;
@@ -120,6 +213,7 @@ export async function createIntradaySnapshot({
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      gsgf_context: gsgfContext,
       limit,
       watchlist_text: watchlistText,
       use_watchlist_pool: useWatchlistPool,

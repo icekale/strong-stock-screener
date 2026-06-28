@@ -8,8 +8,13 @@ def test_gsgf_analysis_serializes_business_fields() -> None:
         model_version="gsgf-v1",
         total_score=78,
         action="watch_candidate",
+        final_status="候选",
         zone="b_zone_a_point",
         volume_structure="three_yang_controls_three_yin",
+        setup_type="B区A点",
+        setup_score=18,
+        confirm_type=None,
+        confirm_score=0,
         scores=GsgfScoreBreakdown(
             safety_pressure=15,
             volume_thickness=22,
@@ -30,7 +35,10 @@ def test_gsgf_analysis_serializes_business_fields() -> None:
     assert payload["model_version"] == "gsgf-v1"
     assert payload["total_score"] == 78
     assert payload["action"] == "watch_candidate"
+    assert payload["final_status"] == "候选"
     assert payload["zone"] == "b_zone_a_point"
+    assert payload["setup_type"] == "B区A点"
+    assert payload["setup_score"] == 18
     assert payload["scores"]["volume_thickness"] == 22
 
 
@@ -63,6 +71,45 @@ def test_gsgf_detects_three_yang_controls_three_yin() -> None:
     assert analysis.volume_structure == "three_yang_controls_three_yin"
     assert analysis.scores.volume_thickness >= 18
     assert analysis.total_score >= 65
+
+
+def test_gsgf_detects_volume_breakout_confirmation() -> None:
+    closes = [10 + index * 0.02 for index in range(219)]
+    bars = _bars(closes + [15.2], [1_000_000 for _ in range(219)] + [3_200_000])
+    previous = bars[-2].close
+    bars[-1] = bars[-1].model_copy(
+        update={
+            "open": round(previous * 1.02, 2),
+            "close": round(previous * 1.082, 2),
+            "high": round(previous * 1.09, 2),
+            "low": round(previous * 1.01, 2),
+            "volume": 3_200_000,
+        }
+    )
+
+    analysis = analyze_gsgf(bars)
+
+    assert analysis.confirm_type == "放量突破确认"
+    assert analysis.confirm_score >= 30
+    assert analysis.final_status == "确认买点"
+    assert "放量突破确认" in analysis.trigger_tags
+    assert analysis.trade_plan is not None
+    assert any("持有优于追涨" in item for item in analysis.trade_plan.holder_guidance)
+
+
+def test_gsgf_negative_sample_flags_global_distribution_risk() -> None:
+    closes = [8 + index * 0.01 for index in range(160)]
+    closes += [9.6, 9.2, 9.1, 8.9, 8.8, 8.75, 8.65, 8.6, 8.55, 8.5]
+    closes += [8.45 + index * 0.01 for index in range(49)]
+    bars = _bars(closes + [9.0], [1_000_000 for _ in range(220)])
+    for idx in range(160, 170):
+        bars[idx] = bars[idx].model_copy(update={"open": bars[idx].close * 1.03, "volume": 4_000_000})
+    bars[-1] = bars[-1].model_copy(update={"open": 8.65, "close": 9.0, "high": 9.05, "low": 8.6, "volume": 4_500_000})
+
+    analysis = analyze_gsgf(bars)
+
+    assert "全局阴量压制" in analysis.risk_flags
+    assert analysis.final_status in {"减仓", "回避"}
 
 
 def test_gsgf_chart_annotations_include_volume_structure_and_zone_evidence() -> None:

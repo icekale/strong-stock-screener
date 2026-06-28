@@ -7,10 +7,15 @@ import {
   createScreenRun,
   getDataSourceStatus,
   getLatestScreenRun,
+  getMarketOverview,
   getWatchlistPool,
+  recheckGsgfReview,
+  saveLatestGsgfReviewSnapshot,
 } from "../lib/api";
 import type {
   DataSourceStatusResponse,
+  GsgfReviewSummary,
+  MarketOverviewResponse,
   ScreenRunFilters,
   ScreenStrategy,
   StrongStockIntradaySnapshot,
@@ -24,6 +29,7 @@ const SCREEN_FILTERS_STORAGE_KEY = "strong-stock-screen-filters";
 export default function HomePage() {
   const [tradeDate, setTradeDate] = useState(defaultTradeDate());
   const [sources, setSources] = useState<DataSourceStatusResponse | null>(null);
+  const [marketOverview, setMarketOverview] = useState<MarketOverviewResponse | null>(null);
   const [result, setResult] = useState<StrongStockScreeningResponse | null>(null);
   const [intraday, setIntraday] = useState<StrongStockIntradaySnapshot | null>(null);
   const [strategy, setStrategy] = useState<ScreenStrategy>("combined");
@@ -31,6 +37,8 @@ export default function HomePage() {
   const [screenFilters, setScreenFilters] = useState<ScreenRunFilters>({});
   const [screenFiltersSaved, setScreenFiltersSaved] = useState(false);
   const [watchlistPoolItems, setWatchlistPoolItems] = useState<WatchlistPoolItem[]>([]);
+  const [reviewSummary, setReviewSummary] = useState<GsgfReviewSummary | null>(null);
+  const [reviewRunning, setReviewRunning] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [watchlistMessage, setWatchlistMessage] = useState<string | null>(null);
@@ -38,6 +46,7 @@ export default function HomePage() {
   useEffect(() => {
     setScreenFilters(loadSavedScreenFilters());
     void refreshSources();
+    void refreshMarketOverview();
     void refreshLatest();
     void refreshWatchlistPool();
   }, []);
@@ -47,6 +56,15 @@ export default function HomePage() {
       setSources(await getDataSourceStatus());
     } catch (err) {
       setError(err instanceof Error ? err.message : "读取数据源状态失败");
+    }
+  }
+
+  async function refreshMarketOverview() {
+    try {
+      setMarketOverview(await getMarketOverview());
+    } catch (err) {
+      setMarketOverview(null);
+      setError(err instanceof Error ? err.message : "读取全A市场概览失败");
     }
   }
 
@@ -74,7 +92,7 @@ export default function HomePage() {
       const response = await createScreenRun(tradeDate, 30, scanLimit, screenFilters, { strategy });
       setResult(response);
       setIntraday(null);
-      await refreshSources();
+      await Promise.all([refreshSources(), refreshMarketOverview()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "运行筛选失败");
     } finally {
@@ -137,16 +155,46 @@ export default function HomePage() {
     }
   }
 
+  async function handleSaveGsgfReviewSnapshot() {
+    setReviewRunning(true);
+    setError(null);
+    try {
+      await saveLatestGsgfReviewSnapshot();
+      setReviewSummary(await recheckGsgfReview({ windows: [1, 3, 5, 10], count: 180 }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "保存股是股非复盘快照失败");
+    } finally {
+      setReviewRunning(false);
+    }
+  }
+
+  async function handleRecheckGsgfReview() {
+    setReviewRunning(true);
+    setError(null);
+    try {
+      setReviewSummary(await recheckGsgfReview({ windows: [1, 3, 5, 10], count: 180 }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "复查股是股非信号失败");
+    } finally {
+      setReviewRunning(false);
+    }
+  }
+
   return (
     <ScreenerWorkbench
       error={error}
       intraday={intraday}
-      onRefreshSources={() => void refreshSources()}
+      marketOverview={marketOverview}
+      onRefreshSources={() => void Promise.all([refreshSources(), refreshMarketOverview()])}
       onRun={() => void handleRun()}
+      onRecheckGsgfReview={() => void handleRecheckGsgfReview()}
       onAddToWatchlist={(item, group, tags) => void handleAddToWatchlist(item, group, tags)}
       onAddManyToWatchlist={(items, group, tags) => void handleAddManyToWatchlist(items, group, tags)}
       onSaveScreenFilters={handleSaveScreenFilters}
+      onSaveGsgfReviewSnapshot={() => void handleSaveGsgfReviewSnapshot()}
       result={result}
+      reviewRunning={reviewRunning}
+      reviewSummary={reviewSummary}
       running={running}
       scanLimit={scanLimit}
       screenFilters={screenFilters}

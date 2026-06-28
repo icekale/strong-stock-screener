@@ -10,7 +10,16 @@ from pydantic import BaseModel, Field
 from app.config import get_settings
 from app.models import (
     GsgfAnalysis,
+    GsgfBacktestSummary,
+    GsgfReviewSnapshotResponse,
+    GsgfReviewSummary,
+    GsgfTradePlan,
+    KlineBar,
+    MarketOverviewResponse,
+    MarketSectorStrengthItem,
     ScreenStrategy,
+    SectorRadarItem,
+    SectorRadarResponse,
     StockKlineResponse,
     StockResearchResponse,
     StrongStockDataUnavailable,
@@ -18,6 +27,7 @@ from app.models import (
 )
 from app.gsgf_rules import analyze_gsgf, build_gsgf_chart_annotations
 from app.providers.ifind import IfindMcpProvider
+from app.providers.market_overview import EastmoneyMarketOverviewProvider
 from app.providers.news_risk import EastmoneyNewsRiskProvider
 from app.providers.recent_limit_up_candidates import RecentLimitUpCandidateProvider
 from app.providers.thsdk_candidates import ThsdkCandidateProvider
@@ -29,6 +39,9 @@ from app.providers.watchlist import (
     upsert_watchlist_item,
 )
 from app.services.intraday import IntradayMonitor
+from app.services.gsgf_backtest import summarize_gsgf_backtest
+from app.services.gsgf_review import GsgfReviewStore
+from app.services.gsgf_trade_plan import build_gsgf_trade_plan
 from app.services.runs import RunStore
 from app.services.runtime_settings import (
     SettingsUpdate,
@@ -58,10 +71,27 @@ class ScreenRunRequest(BaseModel):
     exclude_gsgf_hard_risk: bool = False
 
 
+class GsgfBacktestRequest(BaseModel):
+    symbols: list[str] = Field(default_factory=list, min_length=1, max_length=50)
+    windows: list[int] = Field(default_factory=lambda: [1, 3, 5, 10], max_length=8)
+    min_history: int = Field(default=60, ge=60, le=220)
+    count: int = Field(default=180, ge=70, le=260)
+
+
+class GsgfTradePlanRequest(BaseModel):
+    analysis: GsgfAnalysis
+
+
+class GsgfReviewRecheckRequest(BaseModel):
+    windows: list[int] = Field(default_factory=lambda: [1, 3, 5, 10], max_length=8)
+    count: int = Field(default=180, ge=20, le=260)
+
+
 class IntradaySnapshotRequest(BaseModel):
     symbols: list[str] = Field(default_factory=list, max_length=100)
     watchlist_text: str = ""
     use_watchlist_pool: bool = False
+    gsgf_context: dict[str, dict[str, object]] = Field(default_factory=dict)
     limit: int = Field(default=30, ge=1, le=100)
     period: str = Field(default="1m", pattern=r"^(1m|5m|10m|15m|30m|60m)$")
     count: int = Field(default=120, ge=1, le=240)
@@ -241,6 +271,82 @@ def get_latest_screen_run() -> dict[str, object]:
     return result.model_dump(mode="json")
 
 
+@app.post("/api/gsgf/backtest")
+def create_gsgf_backtest(request: GsgfBacktestRequest) -> dict[str, object]:
+    kline_provider = _kline_provider()
+    bars_by_symbol: dict[str, list[KlineBar]] = {}
+    failures = 0
+    for symbol in _dedupe_symbols(request.symbols):
+        try:
+            bars_by_symbol[symbol] = kline_provider.get_klines(symbol, count=request.count)
+        except Exception:
+            failures += 1
+    if not bars_by_symbol:
+        raise HTTPException(status_code=503, detail="回测K线获取失败")
+    result: GsgfBacktestSummary = summarize_gsgf_backtest(
+        bars_by_symbol,
+        windows=request.windows,
+        min_history=request.min_history,
+    )
+    if failures:
+        result.source_status.append(
+            StrongStockSourceStatus(
+                source=getattr(kline_provider, "source_name", "K线源"),
+                status="failed",
+                detail=f"{failures} 只股票K线获取失败",
+            )
+        )
+    return result.model_dump(mode="json")
+
+
+@app.post("/api/gsgf/trade-plan")
+def create_gsgf_trade_plan(request: GsgfTradePlanRequest) -> dict[str, object]:
+    plan: GsgfTradePlan = build_gsgf_trade_plan(request.analysis)
+    return plan.model_dump(mode="json")
+
+
+@app.post("/api/gsgf/review/snapshots/latest")
+def create_gsgf_review_snapshot_from_latest() -> dict[str, object]:
+    result = _run_store().load_latest()
+    if result is None:
+        raise HTTPException(status_code=404, detail="no screen run")
+    snapshot: GsgfReviewSnapshotResponse = _gsgf_review_store().persist_snapshot(result)
+    return snapshot.model_dump(mode="json")
+
+
+@app.post("/api/gsgf/review/recheck")
+def recheck_gsgf_review(request: GsgfReviewRecheckRequest) -> dict[str, object]:
+    store = _gsgf_review_store()
+    records = store.load_records()
+    kline_provider = _kline_provider()
+    bars_by_symbol: dict[str, list[KlineBar]] = {}
+    for symbol in _dedupe_symbols([record.symbol for record in records]):
+        try:
+            bars_by_symbol[symbol] = kline_provider.get_klines(symbol, count=request.count)
+        except Exception:
+            bars_by_symbol[symbol] = []
+    summary: GsgfReviewSummary = store.recheck_snapshots(bars_by_symbol, windows=request.windows)
+    return summary.model_dump(mode="json")
+
+
+@app.get("/api/market/overview")
+def get_market_overview() -> dict[str, object]:
+    provider = _market_overview_provider()
+    result: MarketOverviewResponse = provider.get_overview()
+    return result.model_dump(mode="json")
+
+
+@app.get("/api/sectors/radar")
+def get_sector_radar(limit: int = 20) -> dict[str, object]:
+    provider = _market_overview_provider()
+    bounded_limit = max(1, min(limit, 50))
+    if hasattr(provider, "get_sector_radar"):
+        result: SectorRadarResponse = provider.get_sector_radar(limit=bounded_limit)
+        return result.model_dump(mode="json")
+    overview: MarketOverviewResponse = provider.get_overview()
+    return _estimated_sector_radar(overview, bounded_limit).model_dump(mode="json")
+
+
 @app.get("/api/stocks/{symbol}/kline")
 def get_stock_kline(symbol: str, count: int = 220) -> dict[str, object]:
     kline_provider = _kline_provider()
@@ -312,6 +418,7 @@ def create_intraday_snapshot(request: IntradaySnapshotRequest) -> dict[str, obje
             industry_map=industry_map,
             group_map=group_map,
             tag_map=tag_map,
+            gsgf_context={symbol.strip().upper(): value for symbol, value in request.gsgf_context.items()},
             limit=request.limit,
             period=request.period,
             count=request.count,
@@ -438,6 +545,18 @@ def _ifind_provider() -> IfindMcpProvider:
     )
 
 
+def _market_overview_provider() -> object:
+    injected = getattr(app.state, "market_overview_provider", None)
+    if injected is not None:
+        return injected
+    settings = _effective_settings()
+    return EastmoneyMarketOverviewProvider(
+        timeout_seconds=settings.provider_timeout_seconds,
+        realtime_quote_provider=_quote_provider(),
+        ifind_index_provider=_ifind_provider(),
+    )
+
+
 def _watchlist_snapshot() -> WatchlistSnapshot | None:
     return getattr(app.state, "watchlist_snapshot", None)
 
@@ -461,6 +580,13 @@ def _run_store() -> RunStore:
     return RunStore(get_settings().runs_dir)
 
 
+def _gsgf_review_store() -> GsgfReviewStore:
+    data_dir = getattr(app.state, "runs_dir", None)
+    if data_dir is not None:
+        return GsgfReviewStore(Path(data_dir))
+    return GsgfReviewStore(get_settings().data_dir)
+
+
 def _watchlist_path() -> Path:
     injected = getattr(app.state, "watchlist_path", None)
     if injected is not None:
@@ -479,6 +605,53 @@ def _effective_settings():
     return effective_runtime_settings(get_settings(), _runtime_config_path())
 
 
+def _estimated_sector_radar(overview: MarketOverviewResponse, limit: int) -> SectorRadarResponse:
+    items = [_estimated_sector_radar_item(sector) for sector in overview.sectors if sector.turnover_cny is not None]
+    inflow = sorted(
+        [item for item in items if item.net_flow_cny is not None and item.net_flow_cny > 0],
+        key=lambda item: item.net_flow_cny or 0,
+        reverse=True,
+    )[:limit]
+    outflow = sorted(
+        [item for item in items if item.net_flow_cny is not None and item.net_flow_cny < 0],
+        key=lambda item: item.net_flow_cny or 0,
+    )[:limit]
+    return SectorRadarResponse(
+        trade_date=overview.trade_date,
+        capital_flow_status="estimated",
+        flow_source="东方财富行业板块涨跌额估算",
+        inflow=inflow,
+        outflow=outflow,
+        source_status=overview.source_status,
+    )
+
+
+def _estimated_sector_radar_item(sector: MarketSectorStrengthItem) -> SectorRadarItem:
+    net_flow_cny = None
+    if sector.turnover_cny is not None and sector.change_pct is not None:
+        net_flow_cny = round(sector.turnover_cny * sector.change_pct / 100, 2)
+
+    breadth_score = 0.0
+    if sector.advance_count is not None and sector.decline_count is not None:
+        total = sector.advance_count + sector.decline_count
+        if total > 0:
+            breadth_score = (sector.advance_count - sector.decline_count) / total * 10
+
+    turnover_score = min((sector.turnover_cny or 0) / 10_000_000_000, 20)
+    change_score = (sector.change_pct or 0) * 10
+    return SectorRadarItem(
+        name=sector.name,
+        source=sector.source,
+        change_pct=sector.change_pct,
+        turnover_cny=sector.turnover_cny,
+        advance_count=sector.advance_count,
+        decline_count=sector.decline_count,
+        leader=sector.leader,
+        net_flow_cny=net_flow_cny,
+        strength_score=round(change_score + breadth_score + turnover_score, 2),
+    )
+
+
 def _public_saved_settings() -> dict[str, object]:
     return load_runtime_settings(_runtime_config_path()).model_dump(
         mode="json",
@@ -492,6 +665,17 @@ def _read_watchlist_pool() -> str:
     if not path.exists():
         return ""
     return path.read_text(encoding="utf-8").strip()
+
+
+def _dedupe_symbols(symbols: list[str]) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for symbol in symbols:
+        normalized = symbol.strip().upper()
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            output.append(normalized)
+    return output
 
 
 def _probe(name: str, action) -> HealthProbe:

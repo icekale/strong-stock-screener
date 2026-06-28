@@ -1,6 +1,10 @@
 import type {
   DataSourceStatusResponse,
   GsgfAnalysis,
+  GsgfReviewSummary,
+  GsgfTradePlan,
+  MarketOverviewResponse,
+  MarketSectorStrengthItem,
   ScreenRunFilters,
   ScreenStrategy,
   SourceStatusValue,
@@ -12,6 +16,7 @@ import type {
   WatchlistRiskItem,
 } from "../lib/types";
 import type { ColumnsType } from "antd/es/table";
+import { DownloadOutlined, SearchOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import {
   Alert,
   App,
@@ -32,13 +37,21 @@ import {
 } from "antd";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import {
+  filterStockListByGsgf,
+  type GsgfSignalFilter,
+  gsgfSignalFilterOptions,
+} from "../lib/stockListFilter";
 
 type ScreenerWorkbenchProps = {
   tradeDate: string;
   sources: DataSourceStatusResponse | null;
   result: StrongStockScreeningResponse | null;
   intraday: StrongStockIntradaySnapshot | null;
+  marketOverview: MarketOverviewResponse | null;
+  reviewSummary: GsgfReviewSummary | null;
   running: boolean;
+  reviewRunning: boolean;
   watchlistPoolItems: WatchlistPoolItem[];
   watchlistMessage: string | null;
   strategy: ScreenStrategy;
@@ -54,7 +67,9 @@ type ScreenerWorkbenchProps = {
   onAddToWatchlist: (item: StrongStockScreeningItem, group: string, tags: string[]) => void;
   onAddManyToWatchlist: (items: StrongStockScreeningItem[], group: string, tags: string[]) => void;
   onRun: () => void;
+  onRecheckGsgfReview: () => void;
   onRefreshSources: () => void;
+  onSaveGsgfReviewSnapshot: () => void;
 };
 
 const statusCopy: Record<StrongStockScreeningItem["status"], { label: string; tone: string }> = {
@@ -112,12 +127,31 @@ const marketTypeOptions: Array<{ label: string; value: MarketType }> = [
   { label: "北交所", value: "bj" },
 ];
 
+const realtimeTurnoverSubtitles: Record<string, string> = {
+  "iFinD 实时口径": "iFinD 实时口径 · 今日相对昨日",
+  "TickFlow 实时口径": "TickFlow 实时口径 · 今日相对昨日",
+};
+
+type MarketDashboardStats = {
+  dataIncompleteCount: number;
+  focusCount: number;
+  negativeNewsCount: number;
+  reduceRiskCount: number;
+  riskEmptyCount: number;
+  severeWarningCount: number;
+  totalCount: number;
+  waitPullbackCount: number;
+};
+
 export function ScreenerWorkbench({
   tradeDate,
   sources,
   result,
   intraday,
+  marketOverview,
+  reviewSummary,
   running,
+  reviewRunning,
   watchlistPoolItems,
   watchlistMessage,
   strategy,
@@ -133,7 +167,9 @@ export function ScreenerWorkbench({
   onAddToWatchlist,
   onAddManyToWatchlist,
   onRun,
+  onRecheckGsgfReview,
   onRefreshSources,
+  onSaveGsgfReviewSnapshot,
 }: ScreenerWorkbenchProps) {
   const candidates = result?.items ?? [];
   const { message } = App.useApp();
@@ -150,11 +186,7 @@ export function ScreenerWorkbench({
   }, [result, selectedSymbol, candidates]);
 
   const selectedItem = candidates.find((item) => item.symbol === selectedSymbol) ?? candidates[0] ?? null;
-  const selectedRiskItem =
-    result?.watchlist_risk_items.find((item) => item.symbol === selectedItem?.symbol) ?? null;
-  const selectedIntradayItem = intraday?.items.find((item) => item.symbol === selectedItem?.symbol) ?? null;
-  const focusCount = candidates.filter((item) => item.status === "focus").length;
-  const riskEmptyCount = result?.watchlist_risk_items.filter((item) => item.risk_action === "empty").length ?? 0;
+  const dashboardStats = useMemo(() => buildMarketDashboardStats(candidates, result), [candidates, result]);
 
   useEffect(() => {
     if (watchlistMessage) {
@@ -163,74 +195,72 @@ export function ScreenerWorkbench({
   }, [message, watchlistMessage]);
 
   return (
-    <main className="bg-slate-50">
-      <div className="mx-auto max-w-[1680px] space-y-4 px-4 py-4 sm:px-6 lg:px-8">
-        <Card className="workbench-card" styles={{ body: { padding: 18 } }}>
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-            <div className="min-w-0">
-              <Typography.Text className="text-xs font-semibold uppercase text-slate-400">
-                Strong Stock Screener
-              </Typography.Text>
-              <Typography.Title className="mt-1 text-2xl font-black tracking-tight text-slate-950" level={1}>
-                强势股选股工作台
-              </Typography.Title>
-            </div>
-            <div className="grid gap-3 sm:min-w-[520px] sm:grid-cols-[1fr_auto] sm:items-center">
-              <div className="grid grid-cols-3 gap-2">
-                <Metric label="候选" value={candidates.length} />
-                <Metric label="可关注" value={focusCount} />
-                <Metric label="空仓风控" value={riskEmptyCount} />
-              </div>
-              <Space className="sm:justify-end" orientation="vertical" size={8}>
-                <Button aria-label="打开自选股管理页" href="/watchlist" type="primary">
-                  管理自选股
-                </Button>
-                <Button aria-label="打开数据源设置页" href="/settings">
-                  数据源设置
-                </Button>
-              </Space>
-            </div>
-          </div>
-        </Card>
+    <main className="min-h-screen bg-[#f5f3f0] text-[#11100e]">
+      <div className="mx-auto max-w-none px-5 py-4">
+        <MarketTickerBar
+          candidates={candidates}
+          generatedAt={marketOverview?.generated_at ?? result?.generated_at ?? null}
+          onRun={onRun}
+          running={running}
+          sources={sources}
+        />
 
-        <div className="grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
-          <WorkflowPanel
-            error={error}
-            onRefreshSources={onRefreshSources}
-            onRun={onRun}
-            onTradeDateChange={onTradeDateChange}
-            result={result}
-            running={running}
-            scanLimit={scanLimit}
-            screenFilters={screenFilters}
-            screenFiltersSaved={screenFiltersSaved}
-            sources={sources}
-            strategy={strategy}
-            tradeDate={tradeDate}
-            onScanLimitChange={onScanLimitChange}
-            onScreenFiltersChange={onScreenFiltersChange}
-            onSaveScreenFilters={onSaveScreenFilters}
-            onStrategyChange={onStrategyChange}
-            watchlistPoolItems={watchlistPoolItems}
-          />
-          <CandidateTable
-            generatedAt={result?.generated_at ?? null}
-            items={candidates}
-            onAddManyToWatchlist={onAddManyToWatchlist}
-            onAddToWatchlist={onAddToWatchlist}
-            onSelect={setSelectedSymbol}
-            running={running}
-            selectedSymbol={selectedItem?.symbol ?? null}
-            watchlistMessage={watchlistMessage}
-            watchlistPoolItems={watchlistPoolItems}
-          />
-          <CandidateDetailPanel
-            intradayItem={selectedIntradayItem}
-            item={selectedItem}
-            onAddToWatchlist={onAddToWatchlist}
-            riskItem={selectedRiskItem}
-            watchlistPoolItems={watchlistPoolItems}
-          />
+        <MarketEnvironmentPanel
+          marketOverview={marketOverview}
+          result={result}
+          sources={sources}
+          stats={dashboardStats}
+        />
+
+        <div className="mt-4 grid items-stretch gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(360px,1fr)]">
+          <TurnoverTrendPanel marketOverview={marketOverview} />
+          <SectorStrengthPanel sectors={marketOverview?.sectors ?? []} />
+        </div>
+
+        <FilterLogicRail
+          filters={screenFilters}
+          onRefreshSources={onRefreshSources}
+          onRun={onRun}
+          onScanLimitChange={onScanLimitChange}
+          onScreenFiltersChange={onScreenFiltersChange}
+          onSaveScreenFilters={onSaveScreenFilters}
+          onStrategyChange={onStrategyChange}
+          onTradeDateChange={onTradeDateChange}
+          running={running}
+          scanLimit={scanLimit}
+          screenFiltersSaved={screenFiltersSaved}
+          sources={sources}
+          strategy={strategy}
+          tradeDate={tradeDate}
+          visibleCount={candidates.length}
+        />
+
+        <GsgfReviewPanel
+          onRecheck={onRecheckGsgfReview}
+          onSaveSnapshot={onSaveGsgfReviewSnapshot}
+          reviewRunning={reviewRunning}
+          reviewSummary={reviewSummary}
+        />
+
+        {error && <Alert className="mt-4" showIcon title={error} type="error" />}
+
+        <DesignScreenerResultsTable
+          generatedAt={result?.generated_at ?? null}
+          items={candidates}
+          onAddManyToWatchlist={onAddManyToWatchlist}
+          onAddToWatchlist={onAddToWatchlist}
+          onSelect={setSelectedSymbol}
+          running={running}
+          selectedSymbol={selectedItem?.symbol ?? null}
+          watchlistMessage={watchlistMessage}
+          watchlistPoolItems={watchlistPoolItems}
+        />
+      </div>
+
+      <div className="border-t border-[#ddd8d0] bg-[#f5f3f0] px-5 py-3 text-xs text-[#7b756d]">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <span className="font-black text-[#11100e]">StockMaster · A股选股工作台</span>
+          <span>Data: TickFlow / iFinD / 东方财富 · Delayed 15min · 仅作规则辅助，不构成投资建议</span>
         </div>
       </div>
     </main>
@@ -239,13 +269,466 @@ export function ScreenerWorkbench({
 
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border border-slate-100 bg-slate-50 px-4 py-3">
+    <div className="rounded-lg border border-slate-200 bg-white px-4 py-3">
       <Statistic
         styles={{ content: { color: "#0f172a", fontSize: 24, fontWeight: 900, lineHeight: "28px" } }}
         title={<span className="text-xs font-semibold text-slate-500">{label}</span>}
         value={value}
       />
     </div>
+  );
+}
+
+function MarketTickerBar({
+  candidates,
+  generatedAt,
+  onRun,
+  running,
+  sources,
+}: {
+  candidates: StrongStockScreeningItem[];
+  generatedAt: string | null;
+  onRun: () => void;
+  running: boolean;
+  sources: DataSourceStatusResponse | null;
+}) {
+  const sourceState = sourceSummary(sources);
+
+  return (
+    <header className="rounded-lg border border-[#ddd8d0] bg-[#f8f7f4]">
+      <div className="flex flex-col gap-3 px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <MarketIndexPill label="上证" status="待接入" />
+          <MarketIndexPill label="深证" status="待接入" />
+          <MarketIndexPill label="创业板" status="待接入" negative />
+          <span className="mx-2 hidden h-7 w-px bg-[#d6d0c7] xl:block" />
+          <span className="inline-flex h-8 items-center gap-2 rounded-full px-3 text-xs font-semibold text-[#7b756d]">
+            <span className={`size-2 rounded-full ${sourceState.ok ? "bg-emerald-500" : "bg-amber-500"}`} />
+            LIVE · {generatedAt ? formatDateTime(generatedAt) : "等待筛选"}
+          </span>
+          <Tag className="m-0" color={sourceState.ok ? "green" : "orange"}>
+            数据源 {sourceState.label}
+          </Tag>
+        </div>
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          <Input
+            className="w-full min-w-[220px] max-w-[360px] xl:w-[300px]"
+            disabled
+            prefix={<SearchOutlined />}
+            placeholder="Search stock, code..."
+          />
+          <Button
+            icon={<ThunderboltOutlined />}
+            loading={running}
+            onClick={onRun}
+            type="primary"
+          >
+            {running ? "筛选中" : "运行 AI 筛选"}
+          </Button>
+          <Button
+            disabled={candidates.length === 0}
+            icon={<DownloadOutlined />}
+            onClick={() => exportCandidatesCsv(candidates)}
+          >
+            导出 CSV
+          </Button>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function MarketIndexPill({
+  label,
+  negative = false,
+  status,
+}: {
+  label: string;
+  negative?: boolean;
+  status: string;
+}) {
+  return (
+    <span
+      className={`inline-flex h-9 items-center gap-2 rounded-full border px-4 text-xs font-bold ${
+        negative
+          ? "border-red-200 bg-red-50 text-red-700"
+          : "border-emerald-200 bg-emerald-50 text-emerald-700"
+      }`}
+      title="顶部指数将在市场概览 API 接入后显示实时数值"
+    >
+      <span className="text-[#7b756d]">{label}</span>
+      <span>{status}</span>
+    </span>
+  );
+}
+
+function MarketEnvironmentPanel({
+  marketOverview,
+  result,
+  sources,
+  stats,
+}: {
+  marketOverview: MarketOverviewResponse | null;
+  result: StrongStockScreeningResponse | null;
+  sources: DataSourceStatusResponse | null;
+  stats: MarketDashboardStats;
+}) {
+  const sourceState = sourceSummary(sources);
+  const sentiment = stats.totalCount > 0 ? Math.round((stats.focusCount / stats.totalCount) * 100) : null;
+  const turnover = marketOverview?.turnover ?? null;
+  const advanceDecline = marketOverview?.advance_decline ?? null;
+  const advanceCount = advanceDecline?.advance_count ?? null;
+  const declineCount = advanceDecline?.decline_count ?? null;
+  const unchangedCount = advanceDecline?.unchanged_count ?? null;
+  const breadthTotal = (advanceCount ?? 0) + (declineCount ?? 0) + (unchangedCount ?? 0);
+  const advanceWidth = breadthTotal > 0 && advanceCount !== null ? Math.round((advanceCount / breadthTotal) * 100) : 0;
+
+  return (
+    <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <TerminalMetricCard
+        label="总成交额 TOTAL TURNOVER"
+        value={formatCnyCompact(turnover?.total_cny)}
+        subValue={formatTurnoverChange(turnover)}
+        footerLabel="Trade Date"
+        footerValue={marketOverview?.trade_date ?? result?.trade_date ?? "--"}
+        tone={turnover?.change_cny === null || turnover?.change_cny === undefined ? "neutral" : turnover.change_cny >= 0 ? "positive" : "warning"}
+      />
+      <TerminalMetricCard
+        label="情绪指数 SENTIMENT"
+        value={sentiment === null ? "--" : String(sentiment)}
+        suffix="/100"
+        subValue={`候选池 ${stats.totalCount} 只，强势 ${stats.focusCount} 只`}
+        footerLabel="Risk Watch"
+        footerValue={`${stats.reduceRiskCount + stats.riskEmptyCount}`}
+        tone={stats.focusCount >= stats.reduceRiskCount ? "positive" : "warning"}
+      />
+      <TerminalMetricCard
+        label="涨跌比 ADVANCE/DECLINE"
+        value={advanceCount === null || declineCount === null ? "--" : `${advanceCount}/${declineCount}`}
+        subValue={unchangedCount === null ? "全A市场口径，等待数据" : `上涨/下跌 · 平盘 ${unchangedCount}`}
+        footerLabel="Market Breadth"
+        footerValue={marketOverview?.trade_date ?? "--"}
+        progress={advanceWidth}
+        tone={advanceCount !== null && declineCount !== null && advanceCount >= declineCount ? "positive" : "warning"}
+      />
+      <TerminalMetricCard
+        label="数据可信 SOURCE"
+        value={marketOverview ? "全A" : "--"}
+        subValue={marketOverviewSourceSummary(marketOverview) || (sourceState.ok ? "数据源可用" : "数据源待配置")}
+        footerLabel="Source"
+        footerValue={`${marketOverview?.sectors.length ?? 0} 板块`}
+        tone={marketOverview && marketOverview.source_status.some((item) => item.status === "success") ? "positive" : "warning"}
+      />
+    </section>
+  );
+}
+
+function TerminalMetricCard({
+  footerLabel,
+  footerValue,
+  helper,
+  label,
+  progress,
+  suffix,
+  subValue,
+  tone,
+  value,
+}: {
+  footerLabel: string;
+  footerValue: string;
+  helper?: string;
+  label: string;
+  progress?: number;
+  suffix?: string;
+  subValue: string;
+  tone: "positive" | "neutral" | "warning";
+  value: string;
+}) {
+  const toneClass = tone === "positive" ? "text-[#28c840]" : tone === "warning" ? "text-[#f04438]" : "text-[#11100e]";
+  return (
+    <article className="rounded-xl border border-[#ddd8d0] bg-[#f8f7f4] p-4">
+      <p className="text-xs font-semibold uppercase text-[#7b756d]">{label}</p>
+      <div className={`mt-2 text-3xl font-black leading-none tabular-nums ${toneClass}`}>
+        {value}
+        {suffix && <span className="ml-1 text-base text-[#7b756d]">{suffix}</span>}
+      </div>
+      <p className="mt-3 text-xs font-medium text-[#7b756d]">{subValue}</p>
+      {progress !== undefined && (
+        <div className="mt-3 h-1.5 rounded-full bg-[#d9d4cb]">
+          <div className="h-1.5 rounded-full bg-[#28c840]" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
+        </div>
+      )}
+      <div className="mt-4 flex items-center justify-between border-t border-[#ddd8d0] pt-3 text-xs">
+        <span className="text-[#7b756d]">{helper ?? footerLabel}</span>
+        <span className={toneClass}>{footerValue}</span>
+      </div>
+    </article>
+  );
+}
+
+function TurnoverTrendPanel({ marketOverview }: { marketOverview: MarketOverviewResponse | null }) {
+  const turnover = marketOverview?.turnover ?? null;
+  const trendPoints = buildTurnoverSeries(turnover);
+  const realtimeSource = realtimeTurnoverSourceLabel(marketOverview);
+  const subtitle = realtimeSource ? realtimeTurnoverSubtitles[realtimeSource] : "全A市场口径 · 今日相对昨日";
+  const points = trendPoints
+    .map((value, index) => {
+      const x = trendPoints.length <= 1 ? 0 : (index / (trendPoints.length - 1)) * 100;
+      const y = 88 - value * 0.68;
+      return `${x.toFixed(2)},${Math.max(8, Math.min(88, y)).toFixed(2)}`;
+    })
+    .join(" ");
+
+  return (
+    <section className="rounded-xl border border-[#ddd8d0] bg-[#f8f7f4] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-black text-[#11100e]">全A成交额趋势 · A-share Turnover</h2>
+          <p className="mt-1 text-xs font-medium text-[#7b756d]">{subtitle}</p>
+        </div>
+        <div className="flex gap-2">
+          {["昨日", "今日"].map((period, index) => (
+            <span
+              className={`inline-flex h-8 items-center rounded-lg px-3 text-xs font-bold ${
+                index === 1 ? "bg-[#11100e] text-white" : "border border-[#ddd8d0] bg-[#f5f3f0] text-[#7b756d]"
+              }`}
+              key={period}
+            >
+              {period}
+            </span>
+          ))}
+          {realtimeSource && (
+            <span className="inline-flex h-8 items-center rounded-lg bg-[#28c840] px-3 text-xs font-bold text-white">
+              实时
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="mt-4 h-[210px] overflow-hidden rounded-lg bg-[#edf6e9]">
+        {trendPoints.length > 1 ? (
+          <svg className="h-full w-full" preserveAspectRatio="none" viewBox="0 0 100 100" role="img" aria-label="候选池强度趋势">
+            <defs>
+              <linearGradient id="candidateTrendFill" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor="#28c840" stopOpacity="0.22" />
+                <stop offset="100%" stopColor="#28c840" stopOpacity="0.03" />
+              </linearGradient>
+            </defs>
+            <polygon points={`0,100 ${points} 100,100`} fill="url(#candidateTrendFill)" />
+            <polyline points={points} fill="none" stroke="#28c840" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" />
+            <line x1="0" x2="100" y1="66" y2="66" stroke="#cfd8c9" strokeWidth="0.4" />
+            <line x1="0" x2="100" y1="38" y2="38" stroke="#cfd8c9" strokeWidth="0.4" />
+          </svg>
+        ) : (
+          <div className="flex h-full items-center justify-center text-sm font-bold text-[#7b756d]">
+            全A成交额暂不可用，检查市场概览数据源
+          </div>
+        )}
+      </div>
+      <div className="mt-2 flex justify-between text-[11px] font-semibold text-[#9a948c]">
+        <span>{formatCnyCompact(turnover?.previous_total_cny)}</span>
+        <span>{formatTurnoverChange(turnover)}</span>
+        <span>{formatCnyCompact(turnover?.total_cny)}</span>
+      </div>
+    </section>
+  );
+}
+
+function SectorStrengthPanel({ sectors }: { sectors: MarketSectorStrengthItem[] }) {
+  const visible = sectors.length > 0 ? sectors.slice(0, 7) : [];
+
+  return (
+    <section className="rounded-xl border border-[#ddd8d0] bg-[#f8f7f4] p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-black text-[#11100e]">板块强度 · Sector Strength</h2>
+          <p className="mt-1 text-xs font-medium text-[#7b756d]">全A行业板块涨跌幅排名</p>
+        </div>
+        <Tag className="m-0">{visible.length || "待数据"}</Tag>
+      </div>
+      <div className="mt-4 space-y-3">
+        {visible.length > 0 ? (
+          visible.map((sector) => <SectorStrengthRow item={sector} key={sector.name} />)
+        ) : (
+          <Empty description="全A板块强度暂不可用。" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function SectorStrengthRow({ item }: { item: MarketSectorStrengthItem }) {
+  const changePct = item.change_pct ?? 0;
+  const width = Math.max(12, Math.min(100, Math.abs(changePct) * 14 + 18));
+  const barClass = changePct < 0 ? "bg-[#f04438]" : changePct === 0 ? "bg-[#a19a91]" : "bg-[#28c840]";
+
+  return (
+    <div className="grid grid-cols-[88px_minmax(0,1fr)_86px] items-center gap-3 text-sm">
+      <span className="truncate font-bold text-[#3b3833]" title={item.name}>
+        {item.name}
+      </span>
+      <div className="h-1.5 rounded-full bg-[#d9d4cb]">
+        <div className={`h-1.5 rounded-full ${barClass}`} style={{ width: `${width}%` }} />
+      </div>
+      <span className={changePct < 0 ? "text-right font-black text-[#f04438]" : "text-right font-black text-[#28c840]"}>
+        {formatSignedPercent(item.change_pct)}
+      </span>
+    </div>
+  );
+}
+
+function FilterLogicRail({
+  filters,
+  onRefreshSources,
+  onRun,
+  onSaveScreenFilters,
+  onScanLimitChange,
+  onScreenFiltersChange,
+  onStrategyChange,
+  onTradeDateChange,
+  running,
+  scanLimit,
+  screenFiltersSaved,
+  sources,
+  strategy,
+  tradeDate,
+  visibleCount,
+}: {
+  filters: ScreenRunFilters;
+  onRefreshSources: () => void;
+  onRun: () => void;
+  onSaveScreenFilters: () => void;
+  onScanLimitChange: (value: number) => void;
+  onScreenFiltersChange: (value: ScreenRunFilters) => void;
+  onStrategyChange: (value: ScreenStrategy) => void;
+  onTradeDateChange: (value: string) => void;
+  running: boolean;
+  scanLimit: number;
+  screenFiltersSaved: boolean;
+  sources: DataSourceStatusResponse | null;
+  strategy: ScreenStrategy;
+  tradeDate: string;
+  visibleCount: number;
+}) {
+  return (
+    <section className="mt-4 rounded-xl border border-[#ddd8d0] bg-[#f8f7f4] px-4 py-3">
+      <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <span className="mr-2 border-r border-[#d6d0c7] pr-4 text-xs font-black uppercase text-[#11100e]">FILTER LOGIC</span>
+          <FilterChip active label="20日内涨停" />
+          <FilterChip active label={strategyName(strategy)} />
+          <FilterChip active label={`扫描 ${scanLimit}`} />
+          <FilterChip active={Boolean(filters.kdj_j_max)} label={filters.kdj_j_max ? `KDJ-J < ${filters.kdj_j_max}` : "KDJ-J 不限"} />
+          <FilterChip active={Boolean(filters.min_market_cap_billion || filters.max_market_cap_billion)} label={marketCapFilterLabel(filters)} />
+          {(filters.market_types ?? []).map((market) => <FilterChip active key={market} label={marketTypeLabel(market)} />)}
+          {(filters.industries ?? []).map((industry) => <FilterChip active key={industry} label={industry} />)}
+        </div>
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-[#7b756d]">Matched: <b className="text-[#11100e]">{visibleCount}</b> stocks</span>
+          <Button onClick={onRefreshSources} size="small">刷新源</Button>
+          <Button loading={running} onClick={onRun} size="small" type="primary">运行筛选</Button>
+          <Button onClick={() => onScreenFiltersChange({})} size="small">Reset</Button>
+        </div>
+      </div>
+
+      <details className="mt-3 border-t border-[#ddd8d0] pt-3">
+        <summary className="cursor-pointer text-xs font-bold text-[#7b756d]">编辑筛选参数</summary>
+        <div className="mt-3 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+          <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
+            <label className="text-xs font-bold text-[#7b756d]">
+              交易日
+              <Input className="mt-1" onChange={(event) => onTradeDateChange(event.target.value)} value={tradeDate} />
+            </label>
+            <label className="text-xs font-bold text-[#7b756d]">
+              策略模型
+              <Segmented
+                className="mt-1 w-full"
+                onChange={(value) => onStrategyChange(value as ScreenStrategy)}
+                options={strategyOptions}
+                value={strategy}
+              />
+            </label>
+            <label className="text-xs font-bold text-[#7b756d]">
+              扫描候选数
+              <InputNumber className="mt-1 w-full" max={300} min={1} onChange={(value) => onScanLimitChange(normalizeScanLimit(value))} value={scanLimit} />
+            </label>
+            <DataSourceStrip onRefreshSources={onRefreshSources} sources={sources} />
+          </div>
+          <AdvancedScreenFilters
+            filters={filters}
+            onChange={onScreenFiltersChange}
+            onSave={onSaveScreenFilters}
+            saved={screenFiltersSaved}
+          />
+        </div>
+      </details>
+    </section>
+  );
+}
+
+function FilterChip({ active, label }: { active: boolean; label: string }) {
+  return (
+    <span className={`inline-flex h-8 items-center rounded-md border px-3 text-xs font-bold ${
+      active ? "border-[#11100e] bg-[#11100e] text-white" : "border-[#ddd8d0] bg-[#f5f3f0] text-[#7b756d]"
+    }`}>
+      {active ? "✓ " : ""}{label}
+    </span>
+  );
+}
+
+function GsgfReviewPanel({
+  onRecheck,
+  onSaveSnapshot,
+  reviewRunning,
+  reviewSummary,
+}: {
+  onRecheck: () => void;
+  onSaveSnapshot: () => void;
+  reviewRunning: boolean;
+  reviewSummary: GsgfReviewSummary | null;
+}) {
+  const buckets = reviewSummary?.buckets.slice(0, 4) ?? [];
+
+  return (
+    <section className="mt-4 rounded-xl border border-[#ddd8d0] bg-[#f8f7f4] px-4 py-3">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h2 className="text-base font-black text-[#11100e]">信号复盘</h2>
+          <p className="mt-1 text-xs font-medium text-[#7b756d]">
+            样本 {reviewSummary?.record_count ?? 0} 条 · 窗口 {(reviewSummary?.windows ?? [1, 3, 5, 10]).join("/")} 日
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button loading={reviewRunning} onClick={onSaveSnapshot} size="small">
+            保存复盘快照
+          </Button>
+          <Button loading={reviewRunning} onClick={onRecheck} size="small" type="primary">
+            复查信号
+          </Button>
+        </div>
+      </div>
+      {buckets.length > 0 ? (
+        <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+          {buckets.map((bucket) => (
+            <div className="rounded-lg border border-[#ddd8d0] bg-[#f5f3f0] p-3" key={`${bucket.signal_type}-${bucket.status}`}>
+              <p className="truncate text-xs font-black text-[#11100e]" title={bucket.signal_type}>
+                {bucket.signal_type}
+              </p>
+              <p className="mt-1 text-[11px] font-semibold text-[#7b756d]">
+                {bucket.status} · 确认 {bucket.confirmed_count}/{bucket.sample_count}
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+                <ValuePill label="收益" value={formatReviewPercent(bucket.avg_return_pct)} />
+                <ValuePill label="回撤" value={formatReviewPercent(bucket.avg_max_drawdown_pct)} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 rounded-lg bg-[#f5f3f0] px-3 py-2 text-sm text-[#7b756d]">
+          暂无复盘样本。先运行筛选，再保存复盘快照。
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -604,7 +1087,7 @@ function WatchlistPanel({
           <h3 className="text-sm font-black text-slate-950">结构化自选池</h3>
           <p className="mt-1 text-xs font-medium text-slate-500">完整分组、标签和备注在独立页面管理。</p>
         </div>
-        <Button className="shrink-0" href="/watchlist" size="small" type="primary">
+        <Button aria-label="打开自选股管理页" className="shrink-0" href="/watchlist" size="small" type="primary">
           管理自选股
         </Button>
       </div>
@@ -668,6 +1151,22 @@ function WatchlistGroupSection({
   );
 }
 
+type CandidateTableProps = {
+  generatedAt: string | null;
+  items: StrongStockScreeningItem[];
+  onAddManyToWatchlist: (items: StrongStockScreeningItem[], group: string, tags: string[]) => void;
+  onAddToWatchlist: (item: StrongStockScreeningItem, group: string, tags: string[]) => void;
+  onSelect: (symbol: string) => void;
+  running: boolean;
+  selectedSymbol: string | null;
+  watchlistMessage: string | null;
+  watchlistPoolItems: WatchlistPoolItem[];
+};
+
+function DesignScreenerResultsTable(props: CandidateTableProps) {
+  return <CandidateTable {...props} />;
+}
+
 function CandidateTable({
   generatedAt,
   items,
@@ -678,21 +1177,13 @@ function CandidateTable({
   selectedSymbol,
   watchlistMessage,
   watchlistPoolItems,
-}: {
-  generatedAt: string | null;
-  items: StrongStockScreeningItem[];
-  onAddManyToWatchlist: (items: StrongStockScreeningItem[], group: string, tags: string[]) => void;
-  onAddToWatchlist: (item: StrongStockScreeningItem, group: string, tags: string[]) => void;
-  onSelect: (symbol: string) => void;
-  running: boolean;
-  selectedSymbol: string | null;
-  watchlistMessage: string | null;
-  watchlistPoolItems: WatchlistPoolItem[];
-}) {
+}: CandidateTableProps) {
   const [selectedCandidateSymbols, setSelectedCandidateSymbols] = useState<Set<string>>(() => new Set());
   const [batchGroup, setBatchGroup] = useState("");
   const [batchTagsText, setBatchTagsText] = useState("");
   const [candidateStatusFilter, setCandidateStatusFilter] = useState<CandidateStatusFilter>("all");
+  const [gsgfSignalFilter, setGsgfSignalFilter] = useState<GsgfSignalFilter>("all");
+  const [excludeGsgfGlobalRisk, setExcludeGsgfGlobalRisk] = useState(false);
   const [strongIndustryOnly, setStrongIndustryOnly] = useState(false);
   const statusCounts = useMemo(() => {
     const counts: Record<CandidateStatusFilter, number> = {
@@ -713,12 +1204,16 @@ function CandidateTable({
   );
   const visibleCandidates = useMemo(
     () =>
-      items.filter(
-        (item) =>
-          (candidateStatusFilter === "all" || item.status === candidateStatusFilter) &&
-          (!strongIndustryOnly || item.industry_strength === "strong"),
+      filterStockListByGsgf(
+        items.filter(
+          (item) =>
+            (candidateStatusFilter === "all" || item.status === candidateStatusFilter) &&
+            (!strongIndustryOnly || item.industry_strength === "strong"),
+        ),
+        gsgfSignalFilter,
+        excludeGsgfGlobalRisk,
       ),
-    [candidateStatusFilter, items, strongIndustryOnly],
+    [candidateStatusFilter, excludeGsgfGlobalRisk, gsgfSignalFilter, items, strongIndustryOnly],
   );
   const selectedCandidateItems = visibleCandidates.filter((item) => selectedCandidateSymbols.has(item.symbol));
   const watchlistSymbols = useMemo(
@@ -762,26 +1257,25 @@ function CandidateTable({
   const columns = useMemo<ColumnsType<StrongStockScreeningItem>>(
     () => [
       {
-        title: "股票",
+        title: "股票 STOCK",
         dataIndex: "name",
-        width: 220,
+        width: 260,
         render: (_, item) => (
           <div className="min-w-0">
             <Link
-              className="inline-flex items-baseline gap-2 whitespace-nowrap font-black text-slate-950 transition hover:text-slate-700"
+              className="block font-black text-[#11100e] transition hover:text-[#f04438]"
               href={`/stock/${item.symbol}`}
               onClick={(event) => event.stopPropagation()}
             >
               {item.name}
-              <span className="text-xs font-semibold text-slate-400">{item.symbol}</span>
             </Link>
-            <p className="mt-1 line-clamp-1 text-xs text-slate-500">{item.rule_hits[0] ?? "暂无规则说明"}</p>
+            <p className="mt-1 text-xs font-medium text-[#7b756d]">{item.symbol}</p>
           </div>
         ),
       },
       {
-        title: "决策/得分",
-        width: 160,
+        title: "决策 SCORE",
+        width: 150,
         render: (_, item) => {
           const view = statusCopy[item.status];
           return (
@@ -789,7 +1283,7 @@ function CandidateTable({
               <span className={`inline-flex h-7 items-center whitespace-nowrap rounded-full px-2.5 text-xs font-bold ring-1 ${view.tone}`}>
                 {view.label}
               </span>
-              <Typography.Text className="text-xs font-black tabular-nums text-slate-950">
+              <Typography.Text className="text-xs font-black tabular-nums text-[#11100e]">
                 得分 {item.score}
               </Typography.Text>
               {item.gsgf && <div className="flex max-w-[180px] flex-wrap gap-1"><GsgfSummaryPills gsgf={item.gsgf} /></div>}
@@ -798,7 +1292,7 @@ function CandidateTable({
         },
       },
       {
-        title: "行业/板块",
+        title: "板块 SECTOR",
         width: 170,
         render: (_, item) => (
           <div className="flex flex-wrap items-center gap-1.5">
@@ -808,7 +1302,7 @@ function CandidateTable({
         ),
       },
       {
-        title: "风险",
+        title: "风险 RISK",
         width: 220,
         render: (_, item) => {
           const riskSummary = primaryRiskSummary(item);
@@ -816,10 +1310,10 @@ function CandidateTable({
         },
       },
       {
-        title: "操作",
+        title: "操作 ACTION",
         align: "right",
         fixed: "right",
-        width: 150,
+        width: 180,
         render: (_, item) => {
           const alreadyAdded = watchlistSymbols.has(item.symbol);
           return (
@@ -831,7 +1325,14 @@ function CandidateTable({
                 }}
                 size="small"
               >
-                详情
+                高亮
+              </Button>
+              <Button
+                href={`/stock/${item.symbol}`}
+                onClick={(event) => event.stopPropagation()}
+                size="small"
+              >
+                K线
               </Button>
               <Button
                 disabled={alreadyAdded}
@@ -853,14 +1354,19 @@ function CandidateTable({
   );
 
   return (
-    <Card className="workbench-card min-w-0" styles={{ body: { padding: 0 } }}>
-      <div className="flex flex-col gap-2 border-b border-slate-100 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+    <Card className="mt-4 min-w-0 overflow-hidden rounded-xl border-[#ddd8d0] bg-[#f8f7f4]" styles={{ body: { padding: 0 } }}>
+      <div className="flex flex-col gap-3 border-b border-[#ddd8d0] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <p className="text-xs font-semibold uppercase text-slate-400">Candidates</p>
-          <h2 className="mt-1 text-xl font-black text-slate-950">候选决策表</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-base font-black text-[#11100e]">选股结果 · Screener Results</h2>
+            <span className="rounded-md border border-[#ddd8d0] px-2 py-0.5 text-xs font-bold text-[#7b756d]">{items.length}</span>
+          </div>
+          <p className="mt-1 text-xs font-medium text-[#7b756d]">
+            {generatedAt ? new Date(generatedAt).toLocaleString("zh-CN") : "暂无运行结果"}
+          </p>
         </div>
-        <span className="text-xs font-semibold text-slate-400">
-          {generatedAt ? new Date(generatedAt).toLocaleString("zh-CN") : "暂无运行结果"}
+        <span className="rounded-lg border border-[#ddd8d0] bg-[#f5f3f0] px-3 py-1.5 text-xs font-bold text-[#7b756d]">
+          点击股票名称查看 K 线详情
         </span>
       </div>
       {watchlistMessage && (
@@ -870,6 +1376,10 @@ function CandidateTable({
         <>
           <CandidateFilterBar
             candidateStatusFilter={candidateStatusFilter}
+            excludeGsgfGlobalRisk={excludeGsgfGlobalRisk}
+            gsgfSignalFilter={gsgfSignalFilter}
+            onExcludeGsgfGlobalRiskChange={setExcludeGsgfGlobalRisk}
+            onGsgfSignalFilterChange={setGsgfSignalFilter}
             onStatusFilterChange={setCandidateStatusFilter}
             onStrongIndustryOnlyChange={setStrongIndustryOnly}
             statusCounts={statusCounts}
@@ -910,7 +1420,7 @@ function CandidateTable({
           onRow={(item) => ({
             onClick: () => onSelect(item.symbol),
           })}
-          scroll={{ x: 920 }}
+          scroll={{ x: 900 }}
           size="small"
         />
       </div>
@@ -1018,6 +1528,10 @@ function CandidateCardList({
 
 function CandidateFilterBar({
   candidateStatusFilter,
+  excludeGsgfGlobalRisk,
+  gsgfSignalFilter,
+  onExcludeGsgfGlobalRiskChange,
+  onGsgfSignalFilterChange,
   onStatusFilterChange,
   onStrongIndustryOnlyChange,
   statusCounts,
@@ -1026,6 +1540,10 @@ function CandidateFilterBar({
   visibleCount,
 }: {
   candidateStatusFilter: CandidateStatusFilter;
+  excludeGsgfGlobalRisk: boolean;
+  gsgfSignalFilter: GsgfSignalFilter;
+  onExcludeGsgfGlobalRiskChange: (value: boolean) => void;
+  onGsgfSignalFilterChange: (value: GsgfSignalFilter) => void;
   onStatusFilterChange: (value: CandidateStatusFilter) => void;
   onStrongIndustryOnlyChange: (value: boolean) => void;
   statusCounts: Record<CandidateStatusFilter, number>;
@@ -1061,6 +1579,20 @@ function CandidateFilterBar({
             强板块 {strongIndustryCount}
           </Button>
         </div>
+      </div>
+      <div className="mt-3 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
+        <Segmented
+          onChange={(value) => onGsgfSignalFilterChange(value as GsgfSignalFilter)}
+          options={gsgfSignalFilterOptions}
+          size="small"
+          value={gsgfSignalFilter}
+        />
+        <Checkbox
+          checked={excludeGsgfGlobalRisk}
+          onChange={(event) => onExcludeGsgfGlobalRiskChange(event.target.checked)}
+        >
+          排除全局阴量压制
+        </Checkbox>
       </div>
     </div>
   );
@@ -1529,10 +2061,14 @@ function GsgfSummaryPills({ gsgf }: { gsgf: GsgfAnalysis | null }) {
     gsgf.action === "avoid" || gsgf.zone === "c_zone"
       ? "bg-red-50 text-red-700 ring-red-100"
       : "bg-violet-50 text-violet-700 ring-violet-100";
+  const statusTone = gsgfFinalStatusTone(gsgf.final_status);
   return (
     <>
       <span className={`inline-flex h-6 items-center rounded-full px-2 text-[11px] font-bold ring-1 ${riskTone}`}>
         股是股非 {gsgf.total_score}
+      </span>
+      <span className={`inline-flex h-6 items-center rounded-full px-2 text-[11px] font-bold ring-1 ${statusTone}`}>
+        {gsgf.final_status}
       </span>
       <span className="inline-flex h-6 items-center rounded-full bg-slate-100 px-2 text-[11px] font-bold text-slate-700 ring-1 ring-slate-200">
         {gsgfLabel(gsgf.zone)}
@@ -1540,11 +2076,22 @@ function GsgfSummaryPills({ gsgf }: { gsgf: GsgfAnalysis | null }) {
       <span className="inline-flex h-6 items-center rounded-full bg-white px-2 text-[11px] font-bold text-slate-600 ring-1 ring-slate-200">
         {gsgfLabel(gsgf.action)}
       </span>
+      {gsgf.setup_type && (
+        <span className="inline-flex h-6 items-center rounded-full bg-emerald-50 px-2 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-100">
+          setup {gsgfLabel(gsgf.setup_type)}
+        </span>
+      )}
+      {gsgf.confirm_type && (
+        <span className="inline-flex h-6 items-center rounded-full bg-sky-50 px-2 text-[11px] font-bold text-sky-700 ring-1 ring-sky-100">
+          确认信号 {gsgfLabel(gsgf.confirm_type)}
+        </span>
+      )}
     </>
   );
 }
 
 function GsgfDetail({ analysis }: { analysis: GsgfAnalysis }) {
+  const plan = analysis.trade_plan ?? fallbackGsgfTradePlan(analysis);
   const tags = [
     ...analysis.pattern_tags.map((tag) => `形态：${tag}`),
     ...analysis.trigger_tags.map((tag) => `触发：${tag}`),
@@ -1556,14 +2103,19 @@ function GsgfDetail({ analysis }: { analysis: GsgfAnalysis }) {
     <div className="space-y-3">
       <div className="grid grid-cols-3 gap-2">
         <GsgfMetric label="总分" value={analysis.total_score} />
+        <GsgfMetric label="状态" value={analysis.final_status} />
         <GsgfMetric label="区位" value={gsgfLabel(analysis.zone)} />
         <GsgfMetric label="动作" value={gsgfLabel(analysis.action)} />
+        <GsgfMetric label="setup" value={gsgfLabel(analysis.setup_type)} />
+        <GsgfMetric label="确认信号" value={gsgfLabel(analysis.confirm_type)} />
       </div>
       <div className="rounded-lg bg-slate-50 p-3 ring-1 ring-slate-100">
         <p className="text-xs font-bold text-slate-500">量能结构</p>
         <p className="mt-1 text-sm font-black text-slate-900">{gsgfLabel(analysis.volume_structure)}</p>
       </div>
       <div className="grid grid-cols-2 gap-2">
+        <ValuePill label="setup分" value={String(analysis.setup_score)} />
+        <ValuePill label="确认分" value={String(analysis.confirm_score)} />
         <ValuePill label="量时空" value={String(analysis.scores.safety_pressure)} />
         <ValuePill label="量厚度" value={String(analysis.scores.volume_thickness)} />
         <ValuePill label="均线" value={String(analysis.scores.ma_alignment)} />
@@ -1572,6 +2124,29 @@ function GsgfDetail({ analysis }: { analysis: GsgfAnalysis }) {
         <ValuePill label="题材" value={String(analysis.scores.sector_theme)} />
       </div>
       <EvidenceList fallback="暂无结构标签" items={tags.length > 0 ? tags : analysis.explanation} />
+      <GsgfTradePlanPanel plan={plan} />
+    </div>
+  );
+}
+
+function GsgfTradePlanPanel({ plan }: { plan: GsgfTradePlan }) {
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="grid gap-3 md:grid-cols-3">
+        <GsgfTradePlanColumn items={plan.holder_guidance} title="持仓计划" />
+        <GsgfTradePlanColumn items={plan.empty_position_guidance} title="空仓计划" />
+        <GsgfTradePlanColumn items={plan.risk_invalidation} title="失效条件" />
+      </div>
+      <p className="mt-3 border-t border-slate-100 pt-2 text-xs leading-5 text-slate-500">{plan.research_note}</p>
+    </div>
+  );
+}
+
+function GsgfTradePlanColumn({ items, title }: { items: string[]; title: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs font-black text-slate-500">{title}</p>
+      <EvidenceList fallback="暂无计划" items={items} />
     </div>
   );
 }
@@ -1599,8 +2174,31 @@ function gsgfLabel(value: string | null | undefined): string {
     three_yang_controls_three_yin: "三阳控三阴",
     neutral: "量形态中性",
     three_yin_controls_three_yang: "三阴控三阳",
+    volume_breakout_confirmation: "放量突破确认",
   };
   return value ? labels[value] ?? value : "--";
+}
+
+function fallbackGsgfTradePlan(analysis: GsgfAnalysis): GsgfTradePlan {
+  return {
+    status: analysis.final_status,
+    holder_guidance: ["当前数据未返回后端交易计划，请重新运行筛选刷新。"],
+    empty_position_guidance: ["空仓先等待后端计划刷新，不依据旧结构文本追涨。"],
+    risk_invalidation: ["后端计划缺失时，以风险 flags 和盘中确认状态为先。"],
+    research_note: "规则解释仅作研究辅助，不构成收益承诺或投资建议。",
+  };
+}
+
+function gsgfFinalStatusTone(status: GsgfAnalysis["final_status"]) {
+  const tones: Record<GsgfAnalysis["final_status"], string> = {
+    候选: "bg-sky-50 text-sky-700 ring-sky-100",
+    低吸观察: "bg-emerald-50 text-emerald-700 ring-emerald-100",
+    减仓: "bg-amber-50 text-amber-700 ring-amber-100",
+    回避: "bg-red-50 text-red-700 ring-red-100",
+    确认买点: "bg-emerald-50 text-emerald-700 ring-emerald-100",
+    观察: "bg-slate-100 text-slate-600 ring-slate-200",
+  };
+  return tones[status];
 }
 
 function primaryRiskSummary(item: StrongStockScreeningItem) {
@@ -1671,6 +2269,166 @@ function groupWatchlistPoolItems(items: WatchlistPoolItem[]) {
     groups[index].items.push(item);
   }
   return groups;
+}
+
+function buildMarketDashboardStats(
+  items: StrongStockScreeningItem[],
+  result: StrongStockScreeningResponse | null,
+): MarketDashboardStats {
+  return {
+    dataIncompleteCount: items.filter((item) => item.status === "data_incomplete").length,
+    focusCount: items.filter((item) => item.status === "focus").length,
+    negativeNewsCount: items.filter((item) => item.negative_news_status === "triggered").length,
+    reduceRiskCount: items.filter((item) => item.status === "reduce_risk").length,
+    riskEmptyCount: result?.watchlist_risk_items.filter((item) => item.risk_action === "empty").length ?? 0,
+    severeWarningCount: items.filter((item) => item.severe_abnormal_warning === "triggered").length,
+    totalCount: items.length,
+    waitPullbackCount: items.filter((item) => item.status === "wait_pullback").length,
+  };
+}
+
+function buildTurnoverSeries(turnover: MarketOverviewResponse["turnover"] | null) {
+  const previous = turnover?.previous_total_cny ?? null;
+  const current = turnover?.total_cny ?? null;
+  if (previous === null || current === null || previous <= 0 || current <= 0) {
+    return [];
+  }
+  const max = Math.max(previous, current);
+  return [previous, current].map((value) => Math.max(18, Math.min(96, (value / max) * 86)));
+}
+
+function formatCnyCompact(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "--";
+  }
+  const absValue = Math.abs(value);
+  if (absValue >= 1_000_000_000_000) {
+    return `${(value / 1_000_000_000_000).toFixed(2)}万亿`;
+  }
+  if (absValue >= 100_000_000) {
+    return `${(value / 100_000_000).toFixed(0)}亿`;
+  }
+  if (absValue >= 10_000) {
+    return `${(value / 10_000).toFixed(0)}万`;
+  }
+  return value.toFixed(0);
+}
+
+function formatSignedCny(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "--";
+  }
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${formatCnyCompact(value)}`;
+}
+
+function formatSignedPercent(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "--";
+  }
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${value.toFixed(2)}%`;
+}
+
+function formatReviewPercent(value: number | null | undefined): string {
+  return formatSignedPercent(value);
+}
+
+function formatTurnoverChange(turnover: MarketOverviewResponse["turnover"] | null): string {
+  if (!turnover || turnover.change_cny === null || turnover.change_pct === null) {
+    return "昨日对比待确认";
+  }
+  return `较昨日 ${formatSignedCny(turnover.change_cny)} (${formatSignedPercent(turnover.change_pct)})`;
+}
+
+function marketOverviewSourceSummary(marketOverview: MarketOverviewResponse | null): string {
+  const items = marketOverview?.source_status ?? [];
+  if (items.length === 0) {
+    return "";
+  }
+  const successCount = items.filter((item) => item.status === "success").length;
+  return `${successCount}/${items.length} 市场源可用`;
+}
+
+function realtimeTurnoverSourceLabel(marketOverview: MarketOverviewResponse | null): string | null {
+  const statuses = marketOverview?.source_status ?? [];
+  if (statuses.some((item) => item.source === "iFinD 实时指数" && item.status === "success")) {
+    return "iFinD 实时口径";
+  }
+  if (statuses.some((item) => item.source === "TickFlow 实时指数" && item.status === "success")) {
+    return "TickFlow 实时口径";
+  }
+  return null;
+}
+
+function sourceSummary(sources: DataSourceStatusResponse | null): { label: string; ok: boolean } {
+  if (!sources || sources.items.length === 0) {
+    return { label: "读取中", ok: false };
+  }
+  const successCount = sources.items.filter((item) => item.status === "success").length;
+  return {
+    label: `${successCount}/${sources.items.length} 可用`,
+    ok: successCount === sources.items.length,
+  };
+}
+
+function exportCandidatesCsv(items: StrongStockScreeningItem[]) {
+  if (typeof window === "undefined" || items.length === 0) {
+    return;
+  }
+  const headers = ["代码", "名称", "行业", "状态", "得分", "板块强度", "风险"];
+  const rows = items.map((item) => [
+    item.symbol,
+    item.name,
+    item.industry ?? "",
+    statusCopy[item.status].label,
+    String(item.score),
+    item.industry_strength ? industryStrengthCopy[item.industry_strength].label : "",
+    primaryRiskSummary(item).text,
+  ]);
+  const csv = [headers, ...rows].map((row) => row.map(csvCell).join(",")).join("\n");
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `strong-stock-candidates-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvCell(value: string) {
+  return `"${value.replaceAll("\"", "\"\"")}"`;
+}
+
+function formatDateTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return date.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function strategyName(strategy: ScreenStrategy): string {
+  return strategyOptions.find((option) => option.value === strategy)?.label ?? strategy;
+}
+
+function marketTypeLabel(value: MarketType): string {
+  return marketTypeOptions.find((option) => option.value === value)?.label ?? value;
+}
+
+function marketCapFilterLabel(filters: ScreenRunFilters): string {
+  const min = filters.min_market_cap_billion;
+  const max = filters.max_market_cap_billion;
+  if (min !== null && min !== undefined && max !== null && max !== undefined) {
+    return `市值 ${min}-${max}亿`;
+  }
+  if (min !== null && min !== undefined) {
+    return `市值 > ${min}亿`;
+  }
+  if (max !== null && max !== undefined) {
+    return `市值 < ${max}亿`;
+  }
+  return "市值不限";
 }
 
 function splitTags(value: string) {

@@ -2,6 +2,7 @@ from app.models import KlineBar, StrongStockDataUnavailable
 from app.providers.baidu_kline import parse_baidu_kline_payload
 from app.providers.kline_fallback import FallbackKlineProvider
 from app.providers.ifind import IfindMcpProvider
+from app.providers.market_overview import EastmoneyMarketOverviewProvider
 from app.providers.recent_limit_up_candidates import (
     RecentLimitUpCandidateProvider,
     parse_recent_limit_up_rows,
@@ -67,6 +68,128 @@ class FakeThsClient:
         return FakeThsResponse()
 
 
+class FakeMarketOverviewHttpClient:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, object]] = []
+
+    def get(self, url: str, **kwargs: object) -> FakeResponse:
+        self.requests.append({"url": url, **kwargs})
+        if "stock/kline/get" in url:
+            return FakeResponse(
+                {
+                    "data": {
+                        "klines": [
+                            "2026-06-25,1,1,1,1,1,1000000000000,0,0,0,0",
+                            "2026-06-26,1,1,1,1,1,1100000000000,0,0,0,0",
+                        ]
+                    }
+                }
+            )
+        if "ulist.np/get" in url:
+            return FakeResponse(
+                {
+                    "data": {
+                        "diff": [
+                            {"f6": 10, "f104": 100, "f105": 200, "f106": 10},
+                            {"f6": 20, "f104": 300, "f105": 400, "f106": 20},
+                            {"f6": 30, "f104": 20, "f105": 30, "f106": 5},
+                        ]
+                    }
+                }
+            )
+        if "clist/get" in url:
+            params = kwargs.get("params", {})
+            if isinstance(params, dict) and params.get("fid") == "f62":
+                if params.get("po") == "0":
+                    return FakeResponse(
+                        {
+                            "data": {
+                                "diff": [
+                                    {
+                                        "f14": "电子",
+                                        "f3": -1.44,
+                                        "f6": 1_239_812_025_923,
+                                        "f62": -49_914_335_232,
+                                        "f104": 160,
+                                        "f105": 345,
+                                    },
+                                    {
+                                        "f14": "通信",
+                                        "f3": -4.62,
+                                        "f6": 291_176_504_093,
+                                        "f62": -41_346_885_376,
+                                        "f104": 10,
+                                        "f105": 119,
+                                    },
+                                ]
+                            }
+                        }
+                    )
+                return FakeResponse(
+                    {
+                        "data": {
+                            "diff": [
+                                {
+                                    "f14": "面板",
+                                    "f3": 0.15,
+                                    "f6": 97_305_368_868,
+                                    "f62": 4_025_548_032,
+                                    "f104": 18,
+                                    "f105": 25,
+                                },
+                                {
+                                    "f14": "光学光电子",
+                                    "f3": 0.35,
+                                    "f6": 162_376_940_331,
+                                    "f62": 3_776_760_832,
+                                    "f104": 43,
+                                    "f105": 54,
+                                },
+                            ]
+                        }
+                    }
+                )
+            return FakeResponse(
+                {
+                    "data": {
+                        "diff": [
+                            {"f14": "有机硅", "f3": 4.72, "f6": 6_700_000_000, "f104": 8, "f105": 2},
+                            {"f14": "橡胶助剂", "f3": 5.41, "f6": 3_300_000_000, "f104": 2, "f105": 0},
+                        ]
+                    }
+                }
+            )
+        raise AssertionError(f"unexpected url: {url}")
+
+
+class FakeTickFlowIndexQuoteProvider:
+    def __init__(self, quotes: list[TickFlowQuote] | None = None, error: Exception | None = None) -> None:
+        self.quotes = quotes or []
+        self.error = error
+        self.symbols: list[str] = []
+
+    def get_quotes(self, symbols: list[str]) -> list[TickFlowQuote]:
+        self.symbols = symbols
+        if self.error is not None:
+            raise self.error
+        return self.quotes
+
+
+class FakeIfindIndexProvider:
+    def __init__(self, payload: object | None = None, error: Exception | None = None) -> None:
+        self.payload = payload
+        self.error = error
+        self.calls: list[dict[str, object]] = []
+
+    def call_tool(self, service_id: str, tool_name: str, arguments: dict[str, object]) -> object:
+        self.calls.append(
+            {"service_id": service_id, "tool_name": tool_name, "arguments": arguments}
+        )
+        if self.error is not None:
+            raise self.error
+        return self.payload
+
+
 def test_tickflow_status_reports_missing_key_without_fake_quotes() -> None:
     provider = TickFlowQuoteProvider(api_key="", base_url="https://api.tickflow.org")
 
@@ -75,6 +198,122 @@ def test_tickflow_status_reports_missing_key_without_fake_quotes() -> None:
     assert status.source == "TickFlow"
     assert status.status == "missing_key"
     assert "TICKFLOW_API_KEY" in status.detail
+
+
+def test_market_overview_prefers_ifind_realtime_index_snapshot() -> None:
+    ifind_provider = FakeIfindIndexProvider(
+        payload={
+            "code": 1,
+            "msg": "success",
+            "data": (
+                '{"tables":[["证券代码","证券简称","time","最新价","涨跌幅","成交额","上涨家数","下跌家数"],'
+                '["000001.SH","上证指数","2026-06-26 16:01:19","4027.26","-2.25","1600000000000","369","1947"],'
+                '["399001.SZ","深证成指","2026-06-26 16:00:57","15782.223","-3.43","1900000000000","396","2507"],'
+                '["899050.BJ","北证50","2026-06-26 15:37:00","1266.903","-0.84","20000000000","37","284"]]}'
+            ),
+        }
+    )
+    tickflow_provider = FakeTickFlowIndexQuoteProvider(
+        quotes=[TickFlowQuote(symbol="000001.SH", turnover_cny=1)]
+    )
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FakeMarketOverviewHttpClient(),
+        realtime_quote_provider=tickflow_provider,
+        ifind_index_provider=ifind_provider,
+    )
+
+    overview = provider.get_overview()
+
+    assert ifind_provider.calls == [
+        {
+            "service_id": "hexin-ifind-ds-index-mcp",
+            "tool_name": "index_highfreq_quotes",
+            "arguments": {
+                "symbols": "000001.SH,399001.SZ,899050.BJ",
+                "indicators": "最新价,涨跌幅,成交额,上涨家数,下跌家数",
+                "data_mode": "real_time",
+            },
+        }
+    ]
+    assert tickflow_provider.symbols == []
+    assert overview.turnover.total_cny == 3_520_000_000_000
+    assert overview.turnover.previous_total_cny == 3_000_000_000_000
+    assert overview.turnover.change_cny == 520_000_000_000
+    assert overview.turnover.change_pct == 17.33
+    assert overview.trade_date == "2026-06-26"
+    assert overview.advance_decline.advance_count == 802
+    assert overview.advance_decline.decline_count == 4738
+    assert overview.sectors[0].name == "橡胶助剂"
+    assert overview.source_status[0].source == "iFinD 实时指数"
+    assert overview.source_status[0].status == "success"
+
+
+def test_market_overview_falls_back_to_tickflow_realtime_turnover() -> None:
+    quote_provider = FakeTickFlowIndexQuoteProvider(
+        quotes=[
+            TickFlowQuote(symbol="000001.SH", turnover_cny=1_600_000_000_000, quote_time="1782457209000"),
+            TickFlowQuote(symbol="399001.SZ", turnover_cny=1_900_000_000_000, quote_time="1782457203000"),
+            TickFlowQuote(symbol="899050.BJ", turnover_cny=20_000_000_000, quote_time="1782457212000"),
+        ]
+    )
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FakeMarketOverviewHttpClient(),
+        realtime_quote_provider=quote_provider,
+        ifind_index_provider=FakeIfindIndexProvider(error=RuntimeError("ifind down")),
+    )
+
+    overview = provider.get_overview()
+
+    assert quote_provider.symbols == ["000001.SH", "399001.SZ", "899050.BJ"]
+    assert overview.turnover.total_cny == 3_520_000_000_000
+    assert overview.turnover.previous_total_cny == 3_000_000_000_000
+    assert overview.turnover.change_cny == 520_000_000_000
+    assert overview.turnover.change_pct == 17.33
+    assert overview.trade_date == "2026-06-26"
+    assert overview.advance_decline.advance_count == 420
+    assert overview.advance_decline.decline_count == 630
+    assert overview.sectors[0].name == "橡胶助剂"
+    assert overview.source_status[0].source == "iFinD 实时指数"
+    assert overview.source_status[0].status == "failed"
+    assert overview.source_status[1].source == "TickFlow 实时指数"
+    assert overview.source_status[1].status == "success"
+
+
+def test_market_overview_falls_back_to_eastmoney_when_tickflow_unavailable() -> None:
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FakeMarketOverviewHttpClient(),
+        realtime_quote_provider=FakeTickFlowIndexQuoteProvider(error=RuntimeError("boom")),
+        ifind_index_provider=FakeIfindIndexProvider(error=RuntimeError("ifind down")),
+    )
+
+    overview = provider.get_overview()
+
+    assert overview.turnover.total_cny == 60
+    assert overview.source_status[0].source == "iFinD 实时指数"
+    assert overview.source_status[0].status == "failed"
+    assert overview.source_status[1].source == "TickFlow 实时指数"
+    assert overview.source_status[1].status == "failed"
+    assert overview.source_status[2].source == "东方财富全A指数"
+    assert "fallback" in overview.source_status[2].detail
+
+
+def test_market_overview_provider_returns_direct_sector_capital_flow() -> None:
+    provider = EastmoneyMarketOverviewProvider(http_client=FakeMarketOverviewHttpClient())
+
+    radar = provider.get_sector_radar(limit=2)
+
+    assert radar.capital_flow_status == "direct"
+    assert radar.flow_source == "东方财富行业板块资金净额"
+    assert radar.inflow[0].name == "面板"
+    assert radar.inflow[0].net_flow_cny == 4_025_548_032
+    assert radar.outflow[0].name == "电子"
+    assert radar.outflow[0].net_flow_cny == -49_914_335_232
+    capital_flow_requests = [
+        request
+        for request in provider.http_client.requests
+        if request["params"].get("fid") == "f62"
+    ]
+    assert [request["params"].get("po") for request in capital_flow_requests] == ["1", "0"]
 
 
 def test_ifind_status_reports_missing_key() -> None:
@@ -314,18 +553,47 @@ class FakeSequentialHttpClient:
         return FakeResponse(self.payloads.pop(0))
 
 
+class FakeStatusResponse(FakeResponse):
+    def __init__(self, payload: object, status_code: int = 200) -> None:
+        super().__init__(payload)
+        self.status_code = status_code
+
+    def raise_for_status(self) -> None:
+        if self.status_code >= 400:
+            import httpx
+
+            request = httpx.Request("GET", "https://api.tickflow.org/test")
+            response = httpx.Response(self.status_code, request=request, json=self.payload)
+            raise httpx.HTTPStatusError("boom", request=request, response=response)
+
+
+class FakeIntradayBatchHttpClient:
+    def __init__(self, batch_response: FakeStatusResponse, single_payloads: list[object] | None = None) -> None:
+        self.batch_response = batch_response
+        self.single_payloads = single_payloads or []
+        self.requests: list[dict[str, object]] = []
+
+    def get(self, url: str, **kwargs: object) -> FakeResponse:
+        self.requests.append({"url": url, **kwargs})
+        if url.endswith("/v1/klines/intraday/batch"):
+            return self.batch_response
+        return FakeResponse(self.single_payloads.pop(0))
+
+
 def test_tickflow_provider_maps_intraday_payload_by_symbol_requests() -> None:
     client = FakeHttpClient(
         {
             "data": {
-                "timestamp": [1781141400000, 1781141460000],
-                "open": [16.1, 16.3],
-                "high": [16.4, 16.6],
-                "low": [16.0, 16.2],
-                "close": [16.3, 16.55],
-                "volume": [12000, 15000],
-                "amount": [19560000, 24825000],
-                "prev_close": [15.26, 15.26],
+                "603890.SH": {
+                    "timestamp": [1781141400000, 1781141460000],
+                    "open": [16.1, 16.3],
+                    "high": [16.4, 16.6],
+                    "low": [16.0, 16.2],
+                    "close": [16.3, 16.55],
+                    "volume": [12000, 15000],
+                    "amount": [19560000, 24825000],
+                    "prev_close": [15.26, 15.26],
+                }
             }
         }
     )
@@ -362,17 +630,64 @@ def test_tickflow_provider_maps_intraday_payload_by_symbol_requests() -> None:
         ]
     }
     assert client.last_request is not None
-    assert client.last_request["url"] == "https://api.tickflow.org/v1/klines/intraday"
+    assert client.last_request["url"] == "https://api.tickflow.org/v1/klines/intraday/batch"
     assert client.last_request["params"] == {
-        "symbol": "603890.SH",
+        "symbols": "603890.SH",
         "period": "1m",
         "count": 120,
     }
 
 
-def test_tickflow_provider_requests_intraday_one_symbol_at_a_time() -> None:
-    client = FakeSequentialHttpClient(
-        [
+def test_tickflow_provider_prefers_intraday_batch_endpoint() -> None:
+    client = FakeIntradayBatchHttpClient(
+        FakeStatusResponse(
+            {
+                "data": {
+                    "603890.SH": {
+                        "timestamp": [1781141400000],
+                        "open": [16.1],
+                        "high": [16.4],
+                        "low": [16.0],
+                        "close": [16.3],
+                        "volume": [12000],
+                        "amount": [19560000],
+                    },
+                    "002000.SZ": {
+                        "timestamp": [1781141400000],
+                        "open": [18.1],
+                        "high": [18.4],
+                        "low": [18.0],
+                        "close": [18.3],
+                        "volume": [22000],
+                        "amount": [39560000],
+                    },
+                }
+            }
+        )
+    )
+    provider = TickFlowQuoteProvider(
+        api_key="tk-test",
+        base_url="https://api.tickflow.org",
+        http_client=client,
+    )
+
+    bars_by_symbol = provider.get_intraday_bars(["603890.SH", "002000.SZ"], period="1m", count=5)
+
+    assert sorted(bars_by_symbol) == ["002000.SZ", "603890.SH"]
+    assert [request["url"] for request in client.requests] == [
+        "https://api.tickflow.org/v1/klines/intraday/batch",
+    ]
+    assert client.requests[0]["params"] == {
+        "symbols": "603890.SH,002000.SZ",
+        "period": "1m",
+        "count": 5,
+    }
+
+
+def test_tickflow_provider_falls_back_to_single_intraday_when_batch_not_allowed() -> None:
+    client = FakeIntradayBatchHttpClient(
+        FakeStatusResponse({"code": "NO_INTRADAY_BATCH_PERMISSION"}, status_code=403),
+        single_payloads=[
             {
                 "data": {
                     "timestamp": [1781141400000],
@@ -395,7 +710,7 @@ def test_tickflow_provider_requests_intraday_one_symbol_at_a_time() -> None:
                     "amount": [39560000],
                 }
             },
-        ]
+        ],
     )
     provider = TickFlowQuoteProvider(
         api_key="tk-test",
@@ -407,10 +722,11 @@ def test_tickflow_provider_requests_intraday_one_symbol_at_a_time() -> None:
 
     assert sorted(bars_by_symbol) == ["002000.SZ", "603890.SH"]
     assert [request["url"] for request in client.requests] == [
+        "https://api.tickflow.org/v1/klines/intraday/batch",
         "https://api.tickflow.org/v1/klines/intraday",
         "https://api.tickflow.org/v1/klines/intraday",
     ]
-    assert [request["params"]["symbol"] for request in client.requests] == ["603890.SH", "002000.SZ"]
+    assert [request["params"].get("symbol") for request in client.requests[1:]] == ["603890.SH", "002000.SZ"]
 
 
 def test_tickflow_daily_kline_provider_maps_1d_payload() -> None:

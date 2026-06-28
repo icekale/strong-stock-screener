@@ -1,7 +1,9 @@
 export type SourceStatusValue = "success" | "failed" | "disabled" | "missing_key";
 export type RiskCheckStatus = "triggered" | "clear" | "unknown";
 export type ScreenStrategy = "strong_stock" | "gsgf" | "combined";
+export type GsgfIntradayConfirmation = "盘中确认" | "等待确认" | "低吸确认" | "减仓确认" | "风险失效" | "无GSGF上下文";
 export type GsgfAction = "strong_candidate" | "watch_candidate" | "wait_trigger" | "avoid";
+export type GsgfFinalStatus = "确认买点" | "候选" | "低吸观察" | "观察" | "减仓" | "回避";
 export type GsgfZone = "a_zone" | "b_zone_a_point" | "c_zone" | "unformed" | "unknown";
 export type GsgfVolumeStructure =
   | "three_yang_controls_three_yin"
@@ -15,8 +17,13 @@ export type GsgfAnalysis = {
   model_version: string;
   total_score: number;
   action: GsgfAction;
+  final_status: GsgfFinalStatus;
   zone: GsgfZone;
   volume_structure: GsgfVolumeStructure;
+  setup_type: string | null;
+  setup_score: number;
+  confirm_type: string | null;
+  confirm_score: number;
   scores: {
     safety_pressure: number;
     volume_thickness: number;
@@ -30,6 +37,7 @@ export type GsgfAnalysis = {
   pressure_flags: string[];
   risk_flags: string[];
   explanation: string[];
+  trade_plan: GsgfTradePlan | null;
 };
 
 export type GsgfChartAnnotation = {
@@ -43,14 +51,148 @@ export type GsgfChartAnnotation = {
   price: number | null;
 };
 
+export type GsgfBacktestWindowStat = {
+  window_days: number;
+  sample_count: number;
+  win_rate: number | null;
+  avg_return_pct: number | null;
+  median_return_pct: number | null;
+  avg_max_drawdown_pct: number | null;
+};
+
+export type GsgfBacktestBucket = {
+  status: GsgfFinalStatus;
+  sample_count: number;
+  avg_score: number | null;
+  windows: GsgfBacktestWindowStat[];
+};
+
 export type StrongStockSourceStatus = {
   source: string;
   status: SourceStatusValue;
   detail: string;
 };
 
+export type GsgfBacktestSummary = {
+  windows: number[];
+  sample_count: number;
+  buckets: GsgfBacktestBucket[];
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
+export type GsgfTradePlan = {
+  status: GsgfFinalStatus;
+  holder_guidance: string[];
+  empty_position_guidance: string[];
+  risk_invalidation: string[];
+  research_note: string;
+};
+
+export type GsgfReviewRecord = {
+  trade_date: string;
+  symbol: string;
+  name: string;
+  signal_type: string;
+  status: GsgfFinalStatus;
+  score: number;
+  setup_type: string | null;
+  confirm_type: string | null;
+};
+
+export type GsgfReviewSnapshotResponse = {
+  saved_count: number;
+  records: GsgfReviewRecord[];
+  generated_at: string;
+};
+
+export type GsgfReviewWindowResult = {
+  window_days: number;
+  realized_return_pct: number | null;
+  max_drawdown_pct: number | null;
+};
+
+export type GsgfReviewItem = {
+  record: GsgfReviewRecord;
+  confirmed: boolean;
+  windows: GsgfReviewWindowResult[];
+};
+
+export type GsgfReviewBucket = {
+  signal_type: string;
+  status: GsgfFinalStatus;
+  sample_count: number;
+  confirmed_count: number;
+  avg_return_pct: number | null;
+  avg_max_drawdown_pct: number | null;
+};
+
+export type GsgfReviewSummary = {
+  windows: number[];
+  record_count: number;
+  items: GsgfReviewItem[];
+  buckets: GsgfReviewBucket[];
+  generated_at: string;
+};
+
 export type DataSourceStatusResponse = {
   items: StrongStockSourceStatus[];
+};
+
+export type MarketTurnoverSummary = {
+  total_cny: number | null;
+  previous_total_cny: number | null;
+  change_cny: number | null;
+  change_pct: number | null;
+};
+
+export type MarketAdvanceDeclineSummary = {
+  advance_count: number | null;
+  decline_count: number | null;
+  unchanged_count: number | null;
+  limit_up_count: number | null;
+  limit_down_count: number | null;
+};
+
+export type MarketSectorStrengthItem = {
+  name: string;
+  change_pct: number | null;
+  turnover_cny: number | null;
+  advance_count: number | null;
+  decline_count: number | null;
+  leader: string | null;
+  source: string;
+};
+
+export type MarketOverviewResponse = {
+  trade_date: string | null;
+  turnover: MarketTurnoverSummary;
+  advance_decline: MarketAdvanceDeclineSummary;
+  sectors: MarketSectorStrengthItem[];
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
+export type SectorRadarItem = {
+  name: string;
+  source: string;
+  change_pct: number | null;
+  turnover_cny: number | null;
+  advance_count: number | null;
+  decline_count: number | null;
+  leader: string | null;
+  net_flow_cny: number | null;
+  strength_score: number;
+};
+
+export type SectorRadarResponse = {
+  trade_date: string | null;
+  capital_flow_status: "direct" | "estimated" | "unavailable";
+  flow_source: string;
+  inflow: SectorRadarItem[];
+  outflow: SectorRadarItem[];
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
 };
 
 export type RuntimeSettingsConfig = {
@@ -187,6 +329,7 @@ export type StrongStockIntradayItem = {
   latest_vs_intraday_ma_pct: number | null;
   volume: number | null;
   turnover_cny: number | null;
+  gsgf_intraday_confirmation: GsgfIntradayConfirmation;
   signals: string[];
   source_trace: string[];
 };

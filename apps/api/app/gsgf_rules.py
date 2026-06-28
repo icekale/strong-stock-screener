@@ -3,6 +3,7 @@ from __future__ import annotations
 from statistics import mean
 
 from app.models import GsgfAnalysis, GsgfChartAnnotation, GsgfScoreBreakdown, IndustryStrength, KlineBar
+from app.services.gsgf_trade_plan import build_gsgf_trade_plan
 
 GSGF_MODEL_VERSION = "gsgf-v1"
 
@@ -13,44 +14,62 @@ def analyze_gsgf(
     industry_strength: IndustryStrength | None = None,
 ) -> GsgfAnalysis:
     if len(bars) < 60:
-        return GsgfAnalysis(
+        return _with_trade_plan(GsgfAnalysis(
             model_version=GSGF_MODEL_VERSION,
             zone="unknown",
             action="wait_trigger",
             risk_flags=["K线不足60日"],
             explanation=["股是股非模型需要至少60日K线"],
-        )
+        ))
     enriched = _with_ma(bars)
     pressure_flags, pressure_risks, safety_score = _pressure(enriched)
     volume_structure, volume_score, volume_notes = _volume_structure(enriched[-40:])
     zone, ma_score, ma_notes, ma_risks = _zone_and_ma(enriched)
     pattern_score, pattern_tags = _patterns(enriched)
     star_score, trigger_tags, star_risks = _stars(enriched, zone)
+    setup_type, setup_score, setup_tags = _setup_signal(enriched, zone)
+    confirm_type, confirm_score, confirm_tags = _confirm_signal(enriched)
     sector_score = _sector_score(industry_strength)
     scores = GsgfScoreBreakdown(
         safety_pressure=safety_score,
         volume_thickness=volume_score,
         ma_alignment=ma_score,
         pattern_space=pattern_score,
-        star_trigger=star_score,
+        star_trigger=max(star_score, setup_score, confirm_score),
         sector_theme=sector_score,
     )
-    risk_flags = _dedupe(pressure_risks + ma_risks + star_risks)
+    global_risks = _global_distribution_risks(enriched)
+    risk_flags = _dedupe(pressure_risks + ma_risks + star_risks + global_risks)
     total_score = max(0, min(100, sum(scores.model_dump().values()) - _risk_penalty(risk_flags)))
     action = _action(total_score, zone, risk_flags, trigger_tags)
-    return GsgfAnalysis(
+    final_status = _final_status(total_score, setup_type, confirm_type, risk_flags)
+    return _with_trade_plan(GsgfAnalysis(
         model_version=GSGF_MODEL_VERSION,
         total_score=round(total_score),
         action=action,
+        final_status=final_status,
         zone=zone,
         volume_structure=volume_structure,
+        setup_type=setup_type,
+        setup_score=setup_score,
+        confirm_type=confirm_type,
+        confirm_score=confirm_score,
         scores=scores,
         pattern_tags=pattern_tags,
-        trigger_tags=trigger_tags,
+        trigger_tags=_dedupe(trigger_tags + setup_tags + confirm_tags),
         pressure_flags=pressure_flags,
         risk_flags=risk_flags,
-        explanation=_dedupe(volume_notes + ma_notes + pattern_tags + trigger_tags + pressure_flags + risk_flags),
-    )
+        explanation=_dedupe(
+            volume_notes
+            + ma_notes
+            + pattern_tags
+            + trigger_tags
+            + setup_tags
+            + confirm_tags
+            + pressure_flags
+            + risk_flags
+        ),
+    ))
 
 
 def build_gsgf_chart_annotations(
@@ -262,6 +281,65 @@ def _stars(bars: list[KlineBar], zone: str) -> tuple[int, list[str], list[str]]:
     return (8 if "星线蓄势" in trigger_tags else 4 if trigger_tags else 0), trigger_tags, risks
 
 
+def _setup_signal(bars: list[KlineBar], zone: str) -> tuple[str | None, int, list[str]]:
+    latest = bars[-1]
+    previous = bars[-2]
+    avg_volume7 = mean(bar.volume for bar in bars[-7:])
+    avg_volume20 = mean(bar.volume for bar in bars[-20:])
+    star = _is_star(latest)
+    prev_star = _is_star(previous)
+    if star and prev_star and latest.volume <= avg_volume7 * 1.05 and zone in {"a_zone", "b_zone_a_point"}:
+        return "双星止跌", 22, ["双星止跌"]
+    if star and latest.low <= (latest.ma20 or latest.low) * 1.03 and latest.close >= (latest.ma20 or latest.close) * 0.96:
+        return "补仓星线", 20, ["补仓星线"]
+    if star and zone == "b_zone_a_point":
+        return "B区A点", 18, ["B区A点"]
+    if star and latest.volume <= avg_volume20 * 1.10 and zone == "a_zone":
+        return "星线蓄势", 14, ["星线蓄势"]
+    return None, 0, []
+
+
+def _confirm_signal(bars: list[KlineBar]) -> tuple[str | None, int, list[str]]:
+    latest = bars[-1]
+    previous = bars[-2]
+    avg_volume35 = mean(bar.volume for bar in bars[-35:])
+    daily_pct = (latest.close / previous.close - 1) * 100 if previous.close else 0.0
+    previous_high20 = max(bar.high for bar in bars[-21:-1])
+    vol_ratio = latest.volume / max(avg_volume35, 1)
+    if latest.close >= previous_high20 * 0.995 and daily_pct >= 5 and vol_ratio >= 1.15:
+        score = 34
+        if vol_ratio >= 1.8:
+            score += 4
+        if daily_pct >= 9.5:
+            score += 5
+        return "放量突破确认", score, ["放量突破确认"]
+    if daily_pct >= 4.5 and vol_ratio >= 1.15 and any(_is_star(bar) for bar in bars[-4:-1]):
+        return "星线后确认", 30, ["星线后确认"]
+    return None, 0, []
+
+
+def _global_distribution_risks(bars: list[KlineBar]) -> list[str]:
+    latest = bars[-1]
+    previous = bars[-2]
+    window = bars[-120:]
+    recent60 = bars[-60:-1]
+    avg_volume35 = mean(bar.volume for bar in bars[-35:])
+    daily_pct = (latest.close / previous.close - 1) * 100 if previous.close else 0.0
+    big_down = [
+        bar
+        for bar in window[:-1]
+        if bar.close < bar.open and bar.volume >= avg_volume35 * 1.8 and _long_upper_shadow_or_down(bar)
+    ]
+    recent_big_down = [
+        bar
+        for bar in recent60
+        if bar.close < bar.open and bar.volume >= avg_volume35 * 1.4
+    ]
+    if latest.volume >= avg_volume35 * 3.0 and daily_pct < 9.5 and (len(big_down) >= 4 or len(recent_big_down) >= 3):
+        return ["全局阴量压制"]
+    return []
+
+
 def _sector_score(industry_strength: IndustryStrength | None) -> int:
     if industry_strength == "strong":
         return 10
@@ -271,7 +349,7 @@ def _sector_score(industry_strength: IndustryStrength | None) -> int:
 
 
 def _action(total_score: int, zone: str, risk_flags: list[str], trigger_tags: list[str]) -> str:
-    if "C区风险" in risk_flags or "高位巨量长上影" in risk_flags:
+    if "C区风险" in risk_flags or "高位巨量长上影" in risk_flags or "全局阴量压制" in risk_flags:
         return "avoid"
     if total_score >= 80 and zone in {"a_zone", "b_zone_a_point"}:
         return "strong_candidate"
@@ -288,7 +366,27 @@ def _risk_penalty(risk_flags: list[str]) -> int:
         penalty += 20
     if "高位巨量长上影" in risk_flags:
         penalty += 25
+    if "全局阴量压制" in risk_flags:
+        penalty += 18
     return penalty
+
+
+def _final_status(
+    total_score: int,
+    setup_type: str | None,
+    confirm_type: str | None,
+    risk_flags: list[str],
+) -> str:
+    hard_risks = {"C区风险", "高位巨量长上影", "全局阴量压制"}
+    if any(flag in hard_risks for flag in risk_flags):
+        return "减仓" if total_score >= 35 else "回避"
+    if confirm_type and total_score >= 70:
+        return "确认买点"
+    if setup_type in {"双星止跌", "补仓星线", "星线蓄势"}:
+        return "低吸观察"
+    if setup_type:
+        return "候选"
+    return "观察" if total_score >= 45 else "回避"
 
 
 def _is_star(bar: KlineBar) -> bool:
@@ -304,6 +402,10 @@ def _long_upper_shadow(bar: KlineBar) -> bool:
         return False
     upper = bar.high - max(bar.open, bar.close)
     return upper / spread > 0.45
+
+
+def _long_upper_shadow_or_down(bar: KlineBar) -> bool:
+    return _long_upper_shadow(bar) or (bar.open > bar.close and (bar.open / max(bar.close, 1) - 1) >= 0.015)
 
 
 def _higher_lows(bars: list[KlineBar]) -> bool:
@@ -322,6 +424,10 @@ def _dedupe(values: list[str]) -> list[str]:
             seen.add(value)
             output.append(value)
     return output
+
+
+def _with_trade_plan(analysis: GsgfAnalysis) -> GsgfAnalysis:
+    return analysis.model_copy(update={"trade_plan": build_gsgf_trade_plan(analysis)})
 
 
 def _dedupe_annotations(annotations: list[GsgfChartAnnotation]) -> list[GsgfChartAnnotation]:

@@ -12,6 +12,7 @@ import {
   InputNumber,
   Row,
   Select,
+  Skeleton,
   Space,
   Tag,
   Typography,
@@ -150,16 +151,38 @@ export default function SettingsPage() {
     return `${config.candidate_provider} / ${config.kline_provider} / ${config.quote_provider}`;
   }, [config]);
 
+  if (loading && !config) {
+    return (
+      <main className="workbench-page">
+        <div className="mx-auto max-w-none space-y-4 px-5 py-4">
+          <Card className="workbench-panel">
+            <Typography.Text className="workbench-muted text-xs font-semibold uppercase">Settings</Typography.Text>
+            <Typography.Title className="workbench-ink !mb-1 !mt-1 !text-2xl !font-black" level={1}>
+              数据源配置
+            </Typography.Title>
+            <Typography.Text className="workbench-muted">
+              正在读取独立选股工作台的数据源、模型和健康检查配置。
+            </Typography.Text>
+          </Card>
+          <Card className="workbench-panel">
+            <Skeleton active paragraph={{ rows: 8 }} title={false} />
+          </Card>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-slate-50">
-      <div className="mx-auto max-w-[1280px] space-y-4 px-4 py-4 sm:px-6 lg:px-8">
-        <Card className="border-slate-200 shadow-sm" loading={loading}>
+    <main className="workbench-page">
+      <div className="mx-auto max-w-none space-y-4 px-5 py-4">
+        <Card className="workbench-panel">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <Typography.Title className="!mb-1 !text-2xl" level={1}>
+              <Typography.Text className="workbench-muted text-xs font-semibold uppercase">Settings</Typography.Text>
+              <Typography.Title className="workbench-ink !mb-1 !mt-1 !text-2xl !font-black" level={1}>
                 数据源配置
               </Typography.Title>
-              <Typography.Text type="secondary">
+              <Typography.Text className="workbench-muted">
                 独立选股工作台的行情源、候选源和 iFinD 研究增强配置。
               </Typography.Text>
             </div>
@@ -180,7 +203,7 @@ export default function SettingsPage() {
         <Row gutter={[16, 16]}>
           <Col lg={16} xs={24}>
             <Space className="w-full" orientation="vertical" size={16}>
-              <Card className="border-slate-200 shadow-sm" title="当前状态">
+              <Card className="workbench-panel" title="当前状态">
                 <Descriptions bordered column={{ lg: 3, md: 2, xs: 1 }} size="small">
                   <Descriptions.Item label="状态摘要">{summary}</Descriptions.Item>
                   <Descriptions.Item label="候选源">{config?.candidate_provider ?? "未读取"}</Descriptions.Item>
@@ -197,7 +220,7 @@ export default function SettingsPage() {
                 </Descriptions>
               </Card>
 
-              <Card className="border-slate-200 shadow-sm" title="行情与候选源">
+              <Card className="workbench-panel" title="行情与候选源">
                 <Form form={form} layout="vertical" onValuesChange={(_, values) => updateDraft(values)}>
                   <Row gutter={12}>
                     <Col md={12} xs={24}>
@@ -242,7 +265,7 @@ export default function SettingsPage() {
                 </Form>
               </Card>
 
-              <Card className="border-slate-200 shadow-sm" title="iFinD 研究增强">
+              <Card className="workbench-panel" title="iFinD 研究增强">
                 <Alert
                   className="mb-4"
                   showIcon
@@ -289,7 +312,7 @@ export default function SettingsPage() {
 
           <Col lg={8} xs={24}>
             <Card
-              className="border-slate-200 shadow-sm"
+              className="workbench-panel"
               extra={
                 <Button loading={runningHealth} onClick={() => void handleHealthCheck()} type="primary">
                   运行健康检查
@@ -297,7 +320,7 @@ export default function SettingsPage() {
               }
               title="手动健康检查"
             >
-              <Typography.Paragraph type="secondary">
+              <Typography.Paragraph className="workbench-muted">
                 健康检查需要手动触发，避免设置页加载时自动消耗 TickFlow 或 iFinD 请求额度。
               </Typography.Paragraph>
               <Space className="w-full" orientation="vertical" size={10}>
@@ -305,11 +328,11 @@ export default function SettingsPage() {
                   <Alert showIcon title="暂无健康检查结果" type="info" />
                 ) : (
                   probes.map((probe) => (
-                    <Card className="bg-slate-50" key={probe.name} size="small">
+                    <Card className="workbench-panel" key={probe.name} size="small">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <Typography.Text strong>{probe.name}</Typography.Text>
-                          <Typography.Text className="mt-1 block text-xs" type="secondary">
+                          <Typography.Text className="workbench-muted mt-1 block text-xs">
                             {probe.latency_ms} ms · {probe.detail}
                           </Typography.Text>
                         </div>

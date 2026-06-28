@@ -5,6 +5,10 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.models import (
     KlineBar,
+    MarketAdvanceDeclineSummary,
+    MarketOverviewResponse,
+    MarketSectorStrengthItem,
+    MarketTurnoverSummary,
     StrongStockCandidate,
     StrongStockDataUnavailable,
     StrongStockSourceStatus,
@@ -322,6 +326,78 @@ class FakeLiveQuoteProvider:
         }
 
 
+class FakeGsgfConfirmQuoteProvider(FakeLiveQuoteProvider):
+    def get_quotes(self, symbols: list[str]) -> list[TickFlowQuote]:
+        return [
+            TickFlowQuote(
+                symbol=symbol,
+                name="春秋电子",
+                last_price=16.55,
+                prev_close=15.26,
+                open_price=16.2,
+                high_price=16.56,
+                low_price=16.0,
+                pct_change=5.7,
+                turnover_cny=360_000_000,
+                volume=220_000,
+                quote_time="2026-06-11T10:05:00+08:00",
+            )
+            for symbol in symbols
+        ]
+
+
+class FakeGsgfLowBuyQuoteProvider(FakeLiveQuoteProvider):
+    def get_quotes(self, symbols: list[str]) -> list[TickFlowQuote]:
+        return [
+            TickFlowQuote(
+                symbol=symbol,
+                name="春秋电子",
+                last_price=15.15,
+                prev_close=15.26,
+                open_price=14.5,
+                high_price=15.2,
+                low_price=14.4,
+                pct_change=-0.72,
+                turnover_cny=220_000_000,
+                volume=180_000,
+                quote_time="2026-06-11T10:05:00+08:00",
+            )
+            for symbol in symbols
+        ]
+
+    def get_intraday_bars(
+        self,
+        symbols: list[str],
+        period: str = "1m",
+        count: int = 120,
+    ) -> dict[str, list[TickFlowIntradayBar]]:
+        return {
+            symbol: [
+                TickFlowIntradayBar(
+                    timestamp=1781141400000,
+                    open=14.8,
+                    high=14.9,
+                    low=14.4,
+                    close=14.6,
+                    volume=12000,
+                    amount=17_520_000,
+                    prev_close=15.26,
+                ),
+                TickFlowIntradayBar(
+                    timestamp=1781141460000,
+                    open=14.6,
+                    high=15.2,
+                    low=14.6,
+                    close=15.15,
+                    volume=15000,
+                    amount=22_725_000,
+                    prev_close=15.26,
+                ),
+            ]
+            for symbol in symbols
+        }
+
+
 class FakeIfindHealthClient:
     def __init__(self) -> None:
         self.calls: list[dict[str, object]] = []
@@ -370,17 +446,80 @@ class FakeIfindResearchProvider:
         )
 
 
+class FakeMarketOverviewProvider:
+    def get_overview(self) -> MarketOverviewResponse:
+        return MarketOverviewResponse(
+            trade_date="2026-06-26",
+            turnover=MarketTurnoverSummary(
+                total_cny=3_575_720_000_000,
+                previous_total_cny=3_618_100_000_000,
+                change_cny=-42_380_000_000,
+                change_pct=-1.17,
+            ),
+            advance_decline=MarketAdvanceDeclineSummary(
+                advance_count=802,
+                decline_count=4738,
+                unchanged_count=51,
+                limit_up_count=None,
+                limit_down_count=None,
+            ),
+            sectors=[
+                MarketSectorStrengthItem(
+                    name="存储芯片",
+                    change_pct=3.26,
+                    turnover_cny=86_500_000_000,
+                    advance_count=38,
+                    decline_count=6,
+                    leader="香农芯创",
+                    source="东方财富行业板块",
+                ),
+                MarketSectorStrengthItem(
+                    name="电力",
+                    change_pct=1.42,
+                    turnover_cny=54_200_000_000,
+                    advance_count=42,
+                    decline_count=18,
+                    leader="豫能控股",
+                    source="东方财富行业板块",
+                ),
+                MarketSectorStrengthItem(
+                    name="消费电子",
+                    change_pct=-2.18,
+                    turnover_cny=61_400_000_000,
+                    advance_count=9,
+                    decline_count=58,
+                    leader="春秋电子",
+                    source="东方财富行业板块",
+                ),
+            ],
+            source_status=[
+                StrongStockSourceStatus(
+                    source="东方财富全A指数",
+                    status="success",
+                    detail="沪深北指数成交额和涨跌家数",
+                ),
+                StrongStockSourceStatus(
+                    source="东方财富行业板块",
+                    status="success",
+                    detail="返回 2 个板块",
+                ),
+            ],
+        )
+
+
 def _client(
     tmp_path: Path,
     candidate_provider: object | None = None,
     kline_provider: object | None = None,
     quote_provider: object | None = None,
     news_risk_provider: object | None = None,
+    market_overview_provider: object | None = None,
 ) -> TestClient:
     app.state.candidate_provider = candidate_provider or FakeCandidateProvider()
     app.state.kline_provider = kline_provider or FakeKlineProvider()
     app.state.quote_provider = quote_provider or FakeQuoteProvider()
     app.state.news_risk_provider = news_risk_provider or FakeNewsRiskProvider()
+    app.state.market_overview_provider = market_overview_provider or FakeMarketOverviewProvider()
     app.state.watchlist_snapshot = WatchlistSnapshot(
         items=[WatchlistItem(symbol="002000.SZ", name="示例股份")]
     )
@@ -584,6 +723,43 @@ def test_stock_research_returns_ifind_payload_from_provider(tmp_path: Path) -> N
     assert payload["sector"]["强度"] == "strong"
 
 
+def test_market_overview_returns_full_a_share_metrics(tmp_path: Path) -> None:
+    client = _client(tmp_path, market_overview_provider=FakeMarketOverviewProvider())
+
+    response = client.get("/api/market/overview")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trade_date"] == "2026-06-26"
+    assert payload["turnover"]["total_cny"] == 3_575_720_000_000
+    assert payload["turnover"]["previous_total_cny"] == 3_618_100_000_000
+    assert payload["turnover"]["change_cny"] == -42_380_000_000
+    assert payload["turnover"]["change_pct"] == -1.17
+    assert payload["advance_decline"]["advance_count"] == 802
+    assert payload["advance_decline"]["decline_count"] == 4738
+    assert payload["advance_decline"]["unchanged_count"] == 51
+    assert payload["sectors"][0]["name"] == "存储芯片"
+    assert payload["sectors"][0]["source"] == "东方财富行业板块"
+    assert payload["source_status"][0]["source"] == "东方财富全A指数"
+
+
+def test_sector_radar_returns_inflow_and_outflow_rankings(tmp_path: Path) -> None:
+    client = _client(tmp_path, market_overview_provider=FakeMarketOverviewProvider())
+
+    response = client.get("/api/sectors/radar")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trade_date"] == "2026-06-26"
+    assert payload["capital_flow_status"] == "estimated"
+    assert payload["flow_source"] == "东方财富行业板块涨跌额估算"
+    assert payload["inflow"][0]["name"] == "存储芯片"
+    assert payload["inflow"][0]["net_flow_cny"] > 0
+    assert payload["outflow"][0]["name"] == "消费电子"
+    assert payload["outflow"][0]["net_flow_cny"] < 0
+    assert payload["source_status"][0]["source"] == "东方财富全A指数"
+
+
 def test_screen_run_returns_items_and_persists_latest_without_empty_status(tmp_path: Path) -> None:
     client = _client(tmp_path)
 
@@ -751,6 +927,82 @@ def test_screen_run_accepts_gsgf_strategy_and_returns_metadata(tmp_path: Path) -
     assert payload["gsgf_model_version"] == "gsgf-v1"
     assert payload["sort_version"] == "gsgf-sort-v1"
     assert payload["items"][0]["gsgf"]["total_score"] >= 0
+    assert payload["items"][0]["gsgf"]["final_status"] in {"确认买点", "候选", "低吸观察", "观察", "减仓", "回避"}
+    assert "setup_score" in payload["items"][0]["gsgf"]
+    assert "confirm_score" in payload["items"][0]["gsgf"]
+
+
+def test_gsgf_backtest_returns_bucketed_forward_stats(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.post(
+        "/api/gsgf/backtest",
+        json={"symbols": ["603890.SH"], "windows": [1, 3], "min_history": 60, "count": 90},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["windows"] == [1, 3]
+    assert payload["sample_count"] > 0
+    assert payload["source_status"][0]["source"] == "股是股非回测"
+    assert payload["buckets"][0]["status"] in {"确认买点", "候选", "低吸观察", "观察", "减仓", "回避"}
+    assert payload["buckets"][0]["windows"][0]["window_days"] == 1
+    assert payload["buckets"][0]["windows"][0]["sample_count"] > 0
+    assert "avg_return_pct" in payload["buckets"][0]["windows"][0]
+
+
+def test_gsgf_trade_plan_endpoint_returns_operational_guidance(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.post(
+        "/api/gsgf/trade-plan",
+        json={
+            "analysis": {
+                "total_score": 76,
+                "action": "strong_candidate",
+                "final_status": "确认买点",
+                "zone": "a_zone",
+                "volume_structure": "three_yang_controls_three_yin",
+                "setup_type": "B区A点",
+                "setup_score": 20,
+                "confirm_type": "放量突破确认",
+                "confirm_score": 35,
+                "risk_flags": [],
+            }
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "确认买点"
+    assert any("持有优于追涨" in item for item in payload["holder_guidance"])
+    assert any("等分歧低吸" in item for item in payload["empty_position_guidance"])
+    assert payload["holder_guidance"] != payload["empty_position_guidance"]
+    assert "不构成收益承诺" in payload["research_note"]
+
+
+def test_gsgf_review_endpoints_persist_and_recheck_latest_screen_run(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    screen_response = client.post(
+        "/api/screen/runs",
+        json={"trade_date": "2026-06-11", "limit": 10, "scan_limit": 10, "strategy": "gsgf"},
+    )
+    assert screen_response.status_code == 200
+
+    snapshot_response = client.post("/api/gsgf/review/snapshots/latest")
+    assert snapshot_response.status_code == 200
+    snapshot_payload = snapshot_response.json()
+    assert snapshot_payload["saved_count"] > 0
+    assert snapshot_payload["records"][0]["trade_date"] == "2026-06-11"
+
+    summary_response = client.post("/api/gsgf/review/recheck", json={"windows": [1, 3], "count": 90})
+    assert summary_response.status_code == 200
+    summary_payload = summary_response.json()
+    assert summary_payload["record_count"] > 0
+    assert summary_payload["windows"] == [1, 3]
+    assert summary_payload["buckets"][0]["sample_count"] > 0
+    assert "realized_return_pct" in summary_payload["items"][0]["windows"][0]
+    assert (tmp_path / "gsgf_review" / "snapshots.jsonl").exists()
 
 
 def test_screen_run_accepts_combined_strategy(tmp_path: Path) -> None:
@@ -815,6 +1067,80 @@ def test_intraday_snapshot_uses_latest_screen_run_symbols_without_empty_status(t
     assert payload["items"][0]["action"] == "reduce"
     assert "早盘涨幅超过7%" in payload["items"][0]["signals"]
     assert all(item["action"] != "empty" for item in payload["items"])
+
+
+def test_intraday_snapshot_confirms_gsgf_buy_point_with_intraday_ma(tmp_path: Path) -> None:
+    client = _client(tmp_path, quote_provider=FakeGsgfConfirmQuoteProvider())
+
+    response = client.post(
+        "/api/intraday/snapshot",
+        json={
+            "symbols": ["603890.SH"],
+            "limit": 10,
+            "gsgf_context": {
+                "603890.SH": {
+                    "final_status": "确认买点",
+                    "confirm_type": "放量突破确认",
+                    "risk_flags": [],
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["gsgf_intraday_confirmation"] == "盘中确认"
+    assert "GSGF确认买点：站稳日内均线" in item["signals"]
+    assert "GSGF确认信号：放量突破确认" in item["signals"]
+
+
+def test_intraday_snapshot_confirms_gsgf_low_buy_after_recovery(tmp_path: Path) -> None:
+    client = _client(tmp_path, quote_provider=FakeGsgfLowBuyQuoteProvider())
+
+    response = client.post(
+        "/api/intraday/snapshot",
+        json={
+            "symbols": ["603890.SH"],
+            "limit": 10,
+            "gsgf_context": {
+                "603890.SH": {
+                    "final_status": "低吸观察",
+                    "setup_type": "双星止跌",
+                    "risk_flags": [],
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["gsgf_intraday_confirmation"] == "低吸确认"
+    assert item["action"] == "low_buy_watch"
+    assert "GSGF低吸观察：急跌后收回日内均线" in item["signals"]
+
+
+def test_intraday_snapshot_confirms_gsgf_reduce_when_strength_fades(tmp_path: Path) -> None:
+    client = _client(tmp_path, quote_provider=FakeLiveQuoteProvider())
+
+    response = client.post(
+        "/api/intraday/snapshot",
+        json={
+            "symbols": ["603890.SH"],
+            "limit": 10,
+            "gsgf_context": {
+                "603890.SH": {
+                    "final_status": "减仓",
+                    "risk_flags": ["高位巨量长上影"],
+                }
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    item = response.json()["items"][0]
+    assert item["gsgf_intraday_confirmation"] in {"减仓确认", "风险失效"}
+    assert item["action"] in {"reduce", "avoid_chase"}
+    assert any("GSGF" in signal for signal in item["signals"])
 
 
 def test_intraday_snapshot_requires_symbols_or_latest_screen_run(tmp_path: Path) -> None:

@@ -290,14 +290,16 @@ def _strong_rank_key(item: StrongStockScreeningItem) -> tuple[int, int, str]:
     return (focus_rank, -item.score, item.symbol)
 
 
-def _gsgf_rank_key(item: StrongStockScreeningItem) -> tuple[int, int, int, int, str]:
+def _gsgf_rank_key(item: StrongStockScreeningItem) -> tuple[int, int, int, int, int, str]:
     gsgf = item.gsgf
     if gsgf is None:
-        return (1, 0, 1, 1, item.symbol)
+        return (1, 99, 99, 99, 99, item.symbol)
     hard_risk = 1 if _has_gsgf_hard_risk(item) else 0
-    zone_rank = 0 if gsgf.zone in {"a_zone", "b_zone_a_point"} else 1
+    status_rank = _gsgf_status_rank(gsgf.final_status)
+    confirm_rank = 0 if gsgf.confirm_type == "放量突破确认" else 1 if gsgf.confirm_type else 2
+    zone_rank = 0 if gsgf.zone == "a_zone" else 1 if gsgf.zone == "b_zone_a_point" else 2
     volume_rank = 0 if gsgf.volume_structure == "three_yang_controls_three_yin" else 1
-    return (hard_risk, -gsgf.total_score, zone_rank, volume_rank, item.symbol)
+    return (hard_risk, status_rank, confirm_rank, zone_rank, volume_rank, -gsgf.total_score, item.symbol)
 
 
 def _combined_rank_key(item: StrongStockScreeningItem) -> tuple[int, float, str]:
@@ -308,6 +310,20 @@ def _combined_rank_key(item: StrongStockScreeningItem) -> tuple[int, float, str]
         combined -= 30
     focus_rank = 0 if item.status == "focus" else 1
     return (hard_risk, focus_rank, -combined, item.symbol)
+
+
+def _gsgf_status_rank(status: str) -> int:
+    if status == "确认买点":
+        return 0
+    if status == "低吸观察":
+        return 1
+    if status == "候选":
+        return 2
+    if status == "观察":
+        return 3
+    if status == "减仓":
+        return 4
+    return 5
 
 
 def _has_gsgf_hard_risk(item: StrongStockScreeningItem) -> bool:

@@ -2,6 +2,7 @@ import type {
   DataSourceStatusResponse,
   GsgfAnalysis,
   GsgfBacktestSummary,
+  GsgfRealCalibrationSummary,
   GsgfReviewSnapshotResponse,
   GsgfReviewSummary,
   GsgfTradePlan,
@@ -155,6 +156,33 @@ export async function runGsgfBacktest({
     throw new Error(`运行股是股非回测失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<GsgfBacktestSummary>;
+}
+
+export async function runGsgfCalibration({
+  tradeDates,
+  windows = [1, 3, 5, 10],
+  scanLimit = 80,
+  count = 260,
+}: {
+  tradeDates: string[];
+  windows?: number[];
+  scanLimit?: number;
+  count?: number;
+}): Promise<GsgfRealCalibrationSummary> {
+  const response = await fetch(`${API_BASE_URL}/api/gsgf/calibration`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      trade_dates: tradeDates,
+      windows,
+      scan_limit: scanLimit,
+      count,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`运行股是股非真实样本校准失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<GsgfRealCalibrationSummary>;
 }
 
 export async function buildGsgfTradePlan(analysis: GsgfAnalysis): Promise<GsgfTradePlan> {

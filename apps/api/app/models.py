@@ -239,6 +239,68 @@ class GsgfReviewSummary(BaseModel):
     )
 
 
+class GsgfCalibrationExample(BaseModel):
+    trade_date: str
+    symbol: str
+    name: str
+    status: GsgfFinalStatus
+    score: int
+    setup_type: str | None = None
+    confirm_type: str | None = None
+    entry_close: float | None = None
+
+
+class GsgfCalibrationWindowStat(BaseModel):
+    window_days: int
+    sample_count: int = 0
+    hit_count: int = 0
+    hit_rate: float | None = None
+    avg_return_pct: float | None = None
+    avg_max_drawdown_pct: float | None = None
+
+
+class GsgfCalibrationSampleWindow(BaseModel):
+    window_days: int
+    realized_return_pct: float | None = None
+    max_drawdown_pct: float | None = None
+
+
+class GsgfCalibrationSample(BaseModel):
+    trade_date: str
+    symbol: str
+    name: str
+    status: GsgfFinalStatus
+    score: int
+    setup_type: str | None = None
+    confirm_type: str | None = None
+    zone: GsgfZone = "unknown"
+    bucket_names: list[str] = Field(default_factory=list)
+    entry_close: float | None = None
+    windows: list[GsgfCalibrationSampleWindow] = Field(default_factory=list)
+
+
+class GsgfCalibrationBucket(BaseModel):
+    name: str
+    sample_count: int = 0
+    windows: list[GsgfCalibrationWindowStat] = Field(default_factory=list)
+    examples: list[GsgfCalibrationExample] = Field(default_factory=list)
+
+
+class GsgfRealCalibrationSummary(BaseModel):
+    trade_dates: list[str] = Field(default_factory=list)
+    windows: list[int] = Field(default_factory=list)
+    scanned_count: int = 0
+    target_sample_count: int = 0
+    skipped_count: int = 0
+    buckets: list[GsgfCalibrationBucket] = Field(default_factory=list)
+    unique_symbol_buckets: list[GsgfCalibrationBucket] = Field(default_factory=list)
+    samples: list[GsgfCalibrationSample] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
 class MarketTurnoverSummary(BaseModel):
     total_cny: float | None = None
     previous_total_cny: float | None = None

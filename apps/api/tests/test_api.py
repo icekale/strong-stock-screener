@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
 
@@ -226,6 +227,34 @@ class FakeKlineProvider:
         if symbol == "002000.SZ":
             return _bars([20 - index * 0.05 for index in range(220)])
         return _bars([10 + index * 0.05 for index in range(220)])
+
+
+class FakeCalibrationKlineProvider:
+    source_name = "fake校准K线"
+
+    def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
+        entry_close = 20 if symbol == "002000.SZ" else 10
+        future_closes = [19, 19.4, 19.2, 18.8] if symbol == "002000.SZ" else [11, 10.5, 11.2, 11.6]
+        return _calibration_bars(entry_close=entry_close, future_closes=future_closes)
+
+
+def _calibration_bars(entry_close: float, future_closes: list[float]) -> list[KlineBar]:
+    start = datetime(2025, 11, 24)
+    closes = [entry_close for _ in range(66)] + future_closes
+    bars: list[KlineBar] = []
+    for index, close in enumerate(closes):
+        bars.append(
+            KlineBar(
+                date=(start + timedelta(days=index)).strftime("%Y%m%d"),
+                open=close,
+                close=close,
+                high=round(close * 1.02, 2),
+                low=round(close * 0.98, 2),
+                volume=1_000_000 + index,
+            )
+        )
+    assert bars[65].date == "20260128"
+    return bars
 
 
 class IndustryClusterKlineProvider(FakeKlineProvider):
@@ -949,6 +978,26 @@ def test_gsgf_backtest_returns_bucketed_forward_stats(tmp_path: Path) -> None:
     assert payload["buckets"][0]["windows"][0]["window_days"] == 1
     assert payload["buckets"][0]["windows"][0]["sample_count"] > 0
     assert "avg_return_pct" in payload["buckets"][0]["windows"][0]
+
+
+def test_gsgf_calibration_returns_real_data_bucket_summary(tmp_path: Path) -> None:
+    client = _client(tmp_path, kline_provider=FakeCalibrationKlineProvider())
+
+    response = client.post(
+        "/api/gsgf/calibration",
+        json={"trade_dates": ["2026-01-28"], "windows": [1, 3], "scan_limit": 2, "count": 90},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trade_dates"] == ["2026-01-28"]
+    assert payload["windows"] == [1, 3]
+    assert payload["scanned_count"] == 2
+    assert payload["target_sample_count"] > 0
+    assert payload["buckets"][0]["sample_count"] > 0
+    assert payload["unique_symbol_buckets"][0]["sample_count"] > 0
+    assert payload["samples"][0]["symbol"] in {"603890.SH", "002000.SZ"}
+    assert "realized_return_pct" in payload["samples"][0]["windows"][0]
 
 
 def test_gsgf_trade_plan_endpoint_returns_operational_guidance(tmp_path: Path) -> None:

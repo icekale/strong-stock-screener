@@ -11,6 +11,7 @@ from app.config import get_settings
 from app.models import (
     GsgfAnalysis,
     GsgfBacktestSummary,
+    GsgfRealCalibrationSummary,
     GsgfReviewSnapshotResponse,
     GsgfReviewSummary,
     GsgfTradePlan,
@@ -40,6 +41,7 @@ from app.providers.watchlist import (
 )
 from app.services.intraday import IntradayMonitor
 from app.services.gsgf_backtest import summarize_gsgf_backtest
+from app.services.gsgf_real_calibration import summarize_gsgf_real_calibration
 from app.services.gsgf_review import GsgfReviewStore
 from app.services.gsgf_trade_plan import build_gsgf_trade_plan
 from app.services.runs import RunStore
@@ -76,6 +78,13 @@ class GsgfBacktestRequest(BaseModel):
     windows: list[int] = Field(default_factory=lambda: [1, 3, 5, 10], max_length=8)
     min_history: int = Field(default=60, ge=60, le=220)
     count: int = Field(default=180, ge=70, le=260)
+
+
+class GsgfCalibrationRequest(BaseModel):
+    trade_dates: list[str] = Field(default_factory=list, min_length=1, max_length=20)
+    windows: list[int] = Field(default_factory=lambda: [1, 3, 5, 10], max_length=8)
+    scan_limit: int = Field(default=80, ge=1, le=300)
+    count: int = Field(default=260, ge=70, le=260)
 
 
 class GsgfTradePlanRequest(BaseModel):
@@ -296,6 +305,24 @@ def create_gsgf_backtest(request: GsgfBacktestRequest) -> dict[str, object]:
                 detail=f"{failures} 只股票K线获取失败",
             )
         )
+    return result.model_dump(mode="json")
+
+
+@app.post("/api/gsgf/calibration")
+def create_gsgf_calibration(request: GsgfCalibrationRequest) -> dict[str, object]:
+    try:
+        result: GsgfRealCalibrationSummary = summarize_gsgf_real_calibration(
+            candidate_provider=_candidate_provider(),
+            kline_provider=_kline_provider(),
+            trade_dates=request.trade_dates,
+            windows=request.windows,
+            scan_limit=request.scan_limit,
+            kline_count=request.count,
+        )
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if result.scanned_count == 0:
+        raise HTTPException(status_code=503, detail="校准候选池为空")
     return result.model_dump(mode="json")
 
 

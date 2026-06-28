@@ -10,10 +10,12 @@ import {
   getMarketOverview,
   getWatchlistPool,
   recheckGsgfReview,
+  runGsgfCalibration,
   saveLatestGsgfReviewSnapshot,
 } from "../lib/api";
 import type {
   DataSourceStatusResponse,
+  GsgfRealCalibrationSummary,
   GsgfReviewSummary,
   MarketOverviewResponse,
   ScreenRunFilters,
@@ -39,6 +41,8 @@ export default function HomePage() {
   const [watchlistPoolItems, setWatchlistPoolItems] = useState<WatchlistPoolItem[]>([]);
   const [reviewSummary, setReviewSummary] = useState<GsgfReviewSummary | null>(null);
   const [reviewRunning, setReviewRunning] = useState(false);
+  const [calibrationSummary, setCalibrationSummary] = useState<GsgfRealCalibrationSummary | null>(null);
+  const [calibrationRunning, setCalibrationRunning] = useState(false);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [watchlistMessage, setWatchlistMessage] = useState<string | null>(null);
@@ -180,13 +184,45 @@ export default function HomePage() {
     }
   }
 
+  async function handleRunGsgfCalibration(options: {
+    tradeDatesText: string;
+    windowsText: string;
+    scanLimit: number;
+    count: number;
+  }) {
+    const tradeDates = splitInputList(options.tradeDatesText || tradeDate);
+    if (tradeDates.length === 0) {
+      setError("请输入至少一个校准样本日");
+      return;
+    }
+    setCalibrationRunning(true);
+    setError(null);
+    try {
+      setCalibrationSummary(
+        await runGsgfCalibration({
+          tradeDates,
+          windows: splitNumberList(options.windowsText, [1, 3, 5, 10]),
+          scanLimit: options.scanLimit,
+          count: options.count,
+        }),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "运行股是股非真实样本校准失败");
+    } finally {
+      setCalibrationRunning(false);
+    }
+  }
+
   return (
     <ScreenerWorkbench
+      calibrationRunning={calibrationRunning}
+      calibrationSummary={calibrationSummary}
       error={error}
       intraday={intraday}
       marketOverview={marketOverview}
       onRefreshSources={() => void Promise.all([refreshSources(), refreshMarketOverview()])}
       onRun={() => void handleRun()}
+      onRunGsgfCalibration={(options) => void handleRunGsgfCalibration(options)}
       onRecheckGsgfReview={() => void handleRecheckGsgfReview()}
       onAddToWatchlist={(item, group, tags) => void handleAddToWatchlist(item, group, tags)}
       onAddManyToWatchlist={(items, group, tags) => void handleAddManyToWatchlist(items, group, tags)}
@@ -210,6 +246,32 @@ export default function HomePage() {
       watchlistMessage={watchlistMessage}
     />
   );
+}
+
+function splitInputList(value: string): string[] {
+  const output: string[] = [];
+  const seen = new Set<string>();
+  for (const chunk of value.split(/[,，\s]+/)) {
+    const item = chunk.trim();
+    if (item && !seen.has(item)) {
+      seen.add(item);
+      output.push(item);
+    }
+  }
+  return output;
+}
+
+function splitNumberList(value: string, fallback: number[]): number[] {
+  const output: number[] = [];
+  const seen = new Set<number>();
+  for (const item of splitInputList(value)) {
+    const parsed = Number(item);
+    if (Number.isInteger(parsed) && parsed > 0 && !seen.has(parsed)) {
+      seen.add(parsed);
+      output.push(parsed);
+    }
+  }
+  return output.length > 0 ? output : fallback;
 }
 
 function loadSavedScreenFilters(): ScreenRunFilters {

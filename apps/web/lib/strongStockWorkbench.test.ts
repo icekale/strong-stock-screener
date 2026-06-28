@@ -36,6 +36,9 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(typesSource, /GsgfReviewSummary/);
   assert.match(typesSource, /GsgfReviewSnapshotResponse/);
   assert.match(typesSource, /realized_return_pct: number \| null/);
+  assert.match(typesSource, /GsgfRealCalibrationSummary/);
+  assert.match(typesSource, /GsgfCalibrationBucket/);
+  assert.match(typesSource, /unique_symbol_buckets: GsgfCalibrationBucket\[\]/);
   assert.match(typesSource, /GsgfChartAnnotation/);
   assert.match(typesSource, /ScreenStrategy = "strong_stock" \| "gsgf" \| "combined"/);
   assert.match(typesSource, /ScreenRunFilters/);
@@ -93,6 +96,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(apiSource, /recheckGsgfReview/);
   assert.match(apiSource, /\/api\/gsgf\/review\/snapshots\/latest/);
   assert.match(apiSource, /\/api\/gsgf\/review\/recheck/);
+  assert.match(apiSource, /runGsgfCalibration/);
+  assert.match(apiSource, /\/api\/gsgf\/calibration/);
   assert.match(componentSource, /scanLimit/);
   assert.match(componentSource, /strategy/);
   assert.match(componentSource, /股是股非模型/);
@@ -161,6 +166,14 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(componentSource, /保存复盘快照/);
   assert.match(componentSource, /复查信号/);
   assert.match(componentSource, /reviewSummary/);
+  assert.match(componentSource, /GsgfCalibrationPanel/);
+  assert.match(componentSource, /真实样本校准/);
+  assert.match(componentSource, /运行校准/);
+  assert.match(componentSource, /去重股票/);
+  assert.match(componentSource, /hit_rate/);
+  assert.match(pageSource, /calibrationSummary/);
+  assert.match(pageSource, /runGsgfCalibration/);
+  assert.match(pageSource, /handleRunGsgfCalibration/);
   assert.match(componentSource, /strongIndustryOnly/);
   assert.match(componentSource, /visibleCandidates/);
   assert.match(componentSource, /候选筛选/);

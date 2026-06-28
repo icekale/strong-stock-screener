@@ -135,6 +135,66 @@ export type GsgfReviewSummary = {
   generated_at: string;
 };
 
+export type GsgfCalibrationExample = {
+  trade_date: string;
+  symbol: string;
+  name: string;
+  status: GsgfFinalStatus;
+  score: number;
+  setup_type: string | null;
+  confirm_type: string | null;
+  entry_close: number | null;
+};
+
+export type GsgfCalibrationWindowStat = {
+  window_days: number;
+  sample_count: number;
+  hit_count: number;
+  hit_rate: number | null;
+  avg_return_pct: number | null;
+  avg_max_drawdown_pct: number | null;
+};
+
+export type GsgfCalibrationSampleWindow = {
+  window_days: number;
+  realized_return_pct: number | null;
+  max_drawdown_pct: number | null;
+};
+
+export type GsgfCalibrationSample = {
+  trade_date: string;
+  symbol: string;
+  name: string;
+  status: GsgfFinalStatus;
+  score: number;
+  setup_type: string | null;
+  confirm_type: string | null;
+  zone: GsgfZone;
+  bucket_names: string[];
+  entry_close: number | null;
+  windows: GsgfCalibrationSampleWindow[];
+};
+
+export type GsgfCalibrationBucket = {
+  name: string;
+  sample_count: number;
+  windows: GsgfCalibrationWindowStat[];
+  examples: GsgfCalibrationExample[];
+};
+
+export type GsgfRealCalibrationSummary = {
+  trade_dates: string[];
+  windows: number[];
+  scanned_count: number;
+  target_sample_count: number;
+  skipped_count: number;
+  buckets: GsgfCalibrationBucket[];
+  unique_symbol_buckets: GsgfCalibrationBucket[];
+  samples: GsgfCalibrationSample[];
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
 export type DataSourceStatusResponse = {
   items: StrongStockSourceStatus[];
 };

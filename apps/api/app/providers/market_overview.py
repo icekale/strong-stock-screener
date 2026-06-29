@@ -45,6 +45,7 @@ class EastmoneyMarketOverviewProvider:
         self.ifind_index_provider = ifind_index_provider
         self._owns_client = http_client is None
         self.http_client = http_client or httpx.Client()
+        self._a_share_realtime_rows_cache: list[dict[str, Any]] | None = None
 
     def close(self) -> None:
         if self._owns_client:
@@ -53,6 +54,7 @@ class EastmoneyMarketOverviewProvider:
     def get_overview(self) -> MarketOverviewResponse:
         source_status: list[StrongStockSourceStatus] = []
         trade_date = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
+        eastmoney_trade_date = trade_date.replace("-", "")
         turnover = MarketTurnoverSummary()
         advance_decline = MarketAdvanceDeclineSummary()
         sectors: list[MarketSectorStrengthItem] = []
@@ -160,6 +162,7 @@ class EastmoneyMarketOverviewProvider:
             history = self._fetch_index_amount_history()
             if history["trade_date"]:
                 trade_date = str(history["trade_date"])
+                eastmoney_trade_date = trade_date.replace("-", "")
             previous_total = _number(history.get("previous_total_cny"))
             if previous_total is not None:
                 turnover.previous_total_cny = round(previous_total, 2)
@@ -202,6 +205,43 @@ class EastmoneyMarketOverviewProvider:
                     detail=f"板块强度获取失败: {exc.__class__.__name__}",
                 )
             )
+
+        try:
+            limit_down_count = self._fetch_direct_limit_down_count(eastmoney_trade_date)
+            advance_decline.limit_down_count = limit_down_count
+            source_status.append(
+                StrongStockSourceStatus(
+                    source="东方财富跌停池",
+                    status="success",
+                    detail=f"直接跌停池返回，跌停 {limit_down_count} 只",
+                )
+            )
+        except Exception as exc:
+            source_status.append(
+                StrongStockSourceStatus(
+                    source="东方财富跌停池",
+                    status="failed",
+                    detail=f"直接跌停池获取失败: {exc.__class__.__name__}; fallback 到全A实时涨跌幅估算",
+                )
+            )
+            try:
+                limit_down_count = self._fetch_limit_down_count_from_realtime_rows()
+                advance_decline.limit_down_count = limit_down_count
+                source_status.append(
+                    StrongStockSourceStatus(
+                        source="东方财富全A跌停估算",
+                        status="success",
+                        detail=f"基于全A实时涨跌幅按交易所规则估算，跌停 {limit_down_count} 只",
+                    )
+                )
+            except Exception as fallback_exc:
+                source_status.append(
+                    StrongStockSourceStatus(
+                        source="东方财富全A跌停估算",
+                        status="failed",
+                        detail=f"跌停家数估算失败: {fallback_exc.__class__.__name__}",
+                    )
+                )
 
         return MarketOverviewResponse(
             trade_date=trade_date,
@@ -276,6 +316,28 @@ class EastmoneyMarketOverviewProvider:
                 status="failed",
                 detail=f"全A涨跌幅分布获取失败: {exc.__class__.__name__}",
             )
+
+    def _fetch_direct_limit_down_count(self, date: str) -> int:
+        response = self.http_client.get(
+            "https://push2ex.eastmoney.com/getTopicDTPool",
+            params={
+                "ut": "7eea3edcaed734bea9cbfc24409ed989",
+                "dpt": "wz.ztzt",
+                "Pageindex": "0",
+                "pagesize": "10000",
+                "sort": "fund:asc",
+                "date": date,
+            },
+            headers={"User-Agent": USER_AGENT},
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        rows = _extract_pool_rows(response.json())
+        return len(rows)
+
+    def _fetch_limit_down_count_from_realtime_rows(self) -> int:
+        rows = self._fetch_a_share_realtime_rows()
+        return sum(1 for row in rows if _is_limit_down_row(row))
 
     def _fetch_ifind_realtime_overview(self) -> dict[str, Any]:
         payload = self.ifind_index_provider.call_tool(
@@ -434,6 +496,8 @@ class EastmoneyMarketOverviewProvider:
         )
 
     def _fetch_a_share_realtime_rows(self) -> list[dict[str, Any]]:
+        if self._a_share_realtime_rows_cache is not None:
+            return self._a_share_realtime_rows_cache
         rows: list[dict[str, Any]] = []
         total: int | None = None
         page_size = 100
@@ -466,6 +530,7 @@ class EastmoneyMarketOverviewProvider:
                 break
         if not rows:
             raise ValueError("empty a-share realtime rows")
+        self._a_share_realtime_rows_cache = rows
         return rows
 
     def _fetch_sector_capital_flow(self, limit: int, direction: str) -> list[SectorRadarItem]:
@@ -528,6 +593,21 @@ def _extract_total(payload: object) -> int | None:
         return None
     total = _integer(data.get("total"))
     return total if total and total > 0 else None
+
+
+def _extract_pool_rows(payload: object) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        raise ValueError("invalid payload")
+    data = payload.get("data")
+    if isinstance(data, list):
+        return [row for row in data if isinstance(row, dict)]
+    if not isinstance(data, dict):
+        raise ValueError("missing data")
+    for key in ("pool", "diff", "list"):
+        rows = data.get(key)
+        if isinstance(rows, list):
+            return [row for row in rows if isinstance(row, dict)]
+    raise ValueError("missing pool")
 
 
 def _sector_radar_item(
@@ -598,6 +678,26 @@ def _pct_in_bucket(value: float, min_pct: float | None, max_pct: float | None) -
     if max_pct is None:
         return value > min_pct
     return min_pct <= value < max_pct
+
+
+def _is_limit_down_row(row: dict[str, Any]) -> bool:
+    pct_change = _number(row.get("f3"))
+    if pct_change is None:
+        return False
+    code = str(row.get("f12") or "").strip()
+    name = str(row.get("f14") or "").strip().upper()
+    threshold = _limit_down_threshold_pct(code, name)
+    return pct_change <= threshold + 0.05
+
+
+def _limit_down_threshold_pct(code: str, name: str) -> float:
+    if "ST" in name:
+        return -5.0
+    if code.startswith(("300", "301", "688")):
+        return -20.0
+    if code.startswith(("8", "4", "920")):
+        return -30.0
+    return -10.0
 
 
 def _parse_kline_amount(value: str) -> dict[str, Any]:

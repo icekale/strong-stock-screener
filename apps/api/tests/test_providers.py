@@ -69,11 +69,25 @@ class FakeThsClient:
 
 
 class FakeMarketOverviewHttpClient:
-    def __init__(self) -> None:
+    def __init__(self, limit_down_pool_error: Exception | None = None) -> None:
         self.requests: list[dict[str, object]] = []
+        self.limit_down_pool_error = limit_down_pool_error
 
     def get(self, url: str, **kwargs: object) -> FakeResponse:
         self.requests.append({"url": url, **kwargs})
+        if "getTopicDTPool" in url:
+            if self.limit_down_pool_error is not None:
+                raise self.limit_down_pool_error
+            return FakeResponse(
+                {
+                    "data": {
+                        "pool": [
+                            {"c": "600010", "n": "跌停一号", "zdp": -10.02},
+                            {"c": "002011", "n": "跌停二号", "zdp": -10.01},
+                        ],
+                    }
+                }
+            )
         if "stock/kline/get" in url:
             return FakeResponse(
                 {
@@ -266,9 +280,11 @@ def test_market_overview_prefers_ifind_realtime_index_snapshot() -> None:
     assert overview.trade_date == "2026-06-26"
     assert overview.advance_decline.advance_count == 802
     assert overview.advance_decline.decline_count == 4738
+    assert overview.advance_decline.limit_down_count == 2
     assert overview.sectors[0].name == "橡胶助剂"
     assert overview.source_status[0].source == "iFinD 实时指数"
     assert overview.source_status[0].status == "success"
+    assert any(status.source == "东方财富跌停池" for status in overview.source_status)
 
 
 def test_market_overview_falls_back_to_tickflow_realtime_turnover() -> None:
@@ -360,6 +376,59 @@ def test_market_overview_provider_returns_realtime_pct_change_distribution() -> 
     ]
     assert sum(bucket.count or 0 for bucket in buckets) == 10
     assert [bucket.count for bucket in buckets] == [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+
+
+def test_market_overview_provider_uses_direct_limit_down_pool() -> None:
+    provider = EastmoneyMarketOverviewProvider(http_client=FakeMarketOverviewHttpClient())
+
+    overview = provider.get_overview()
+
+    assert overview.advance_decline.limit_down_count == 2
+    assert any(
+        status.source == "东方财富跌停池"
+        and status.status == "success"
+        and "跌停 2 只" in status.detail
+        for status in overview.source_status
+    )
+
+
+def test_market_overview_provider_falls_back_to_estimated_limit_down_count() -> None:
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FakeMarketOverviewHttpClient(limit_down_pool_error=RuntimeError("pool down"))
+    )
+
+    overview = provider.get_overview()
+
+    assert overview.advance_decline.limit_down_count == 1
+    assert any(
+        status.source == "东方财富跌停池"
+        and status.status == "failed"
+        and "fallback 到全A实时涨跌幅估算" in status.detail
+        for status in overview.source_status
+    )
+    assert any(
+        status.source == "东方财富全A跌停估算"
+        and status.status == "success"
+        and "跌停 1 只" in status.detail
+        for status in overview.source_status
+    )
+
+
+def test_market_overview_provider_reuses_realtime_rows_for_fallback_limit_down_and_distribution() -> None:
+    http_client = FakeMarketOverviewHttpClient()
+    provider = EastmoneyMarketOverviewProvider(http_client=http_client)
+
+    provider._fetch_limit_down_count_from_realtime_rows()
+    provider.get_overview()
+    provider.get_pct_change_distribution()
+
+    realtime_requests = [
+        request
+        for request in http_client.requests
+        if request["url"].endswith("/api/qt/clist/get")
+        and request["params"].get("fs") == "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
+    ]
+    assert len(realtime_requests) == 1
 
 
 def test_ifind_status_reports_missing_key() -> None:

@@ -508,6 +508,46 @@ def test_sentiment_summary_api_builds_and_persists_snapshot_when_missing(tmp_pat
     assert market_provider.overview_calls == 1
 
 
+def test_sentiment_summary_refresh_rebuilds_existing_snapshot(tmp_path: Path) -> None:
+    old_sentiment = build_short_term_sentiment(
+        FakeSentimentCandidateProvider(),
+        trade_date="2026-06-26",
+        limit=20,
+    )
+    old_emotion = build_market_emotion_snapshot(
+        FakeSentimentCandidateProvider(),
+        FakeEmotionMarketOverviewProvider(),
+        trade_date="2026-06-26",
+        limit=20,
+    )
+    old_emotion.metrics.limit_down_count = None
+    SentimentSnapshotStore(tmp_path).save(sentiment=old_sentiment, market_emotion=old_emotion)
+
+    candidate_provider = FakeSentimentCandidateProvider()
+    market_provider = FakeEmotionMarketOverviewProvider()
+    app.state.candidate_provider = candidate_provider
+    app.state.market_overview_provider = market_provider
+    app.state.runs_dir = tmp_path
+    try:
+        response = TestClient(app).get(
+            "/api/short-term/sentiment/summary?trade_date=2026-06-26&limit=20&refresh=true"
+        )
+        loaded = SentimentSnapshotStore(tmp_path).load_summary("2026-06-26")
+    finally:
+        delattr(app.state, "candidate_provider")
+        delattr(app.state, "market_overview_provider")
+        delattr(app.state, "runs_dir")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["snapshot_status"] == "fresh"
+    assert payload["metrics"]["limit_down_count"] == 30
+    assert loaded is not None
+    assert loaded.metrics.limit_down_count == 30
+    assert candidate_provider.calls == 1
+    assert market_provider.overview_calls == 1
+
+
 def test_sentiment_detail_api_reads_persisted_snapshot_without_provider_calls(tmp_path: Path) -> None:
     sentiment = build_short_term_sentiment(
         FakeSentimentCandidateProvider(),

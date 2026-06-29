@@ -492,12 +492,16 @@ def get_short_term_sentiment_summary(
 ) -> dict[str, object]:
     bounded_limit = max(1, min(limit, 100))
     cached = _sentiment_snapshot_store().load_summary(trade_date)
-    if cached is not None:
+    if cached is not None and not refresh:
         return cached.model_dump(mode="json")
     if not refresh:
         return build_missing_sentiment_summary(trade_date).model_dump(mode="json")
     try:
-        sentiment, market_emotion = _build_and_persist_sentiment_snapshots(trade_date, bounded_limit)
+        sentiment, market_emotion = _build_and_persist_sentiment_snapshots(
+            trade_date,
+            bounded_limit,
+            refresh=True,
+        )
         result = build_sentiment_summary(sentiment, market_emotion, snapshot_status="fresh")
     except StrongStockDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -514,7 +518,7 @@ def get_short_term_sentiment_detail(
     store = _sentiment_snapshot_store()
     sentiment = store.load_sentiment(trade_date)
     market_emotion = store.load_market_emotion(trade_date)
-    if sentiment is not None and market_emotion is not None:
+    if sentiment is not None and market_emotion is not None and not refresh:
         return SentimentDetailResponse(
             trade_date=trade_date,
             snapshot_status="cached",
@@ -839,7 +843,11 @@ def _clear_data_source_caches() -> None:
 def _build_and_persist_sentiment_snapshots(
     trade_date: str,
     limit: int,
+    refresh: bool = False,
 ) -> tuple[ShortTermSentimentResponse, MarketEmotionSnapshotResponse]:
+    if refresh:
+        SHORT_TERM_SENTIMENT_CACHE.clear()
+        MARKET_EMOTION_CACHE.clear()
     sentiment = _cached_short_term_sentiment(trade_date, limit)
     candidate_provider = _candidate_provider()
     market_overview_provider = _market_overview_provider()

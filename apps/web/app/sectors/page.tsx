@@ -62,7 +62,7 @@ export default function SectorsPage() {
         </Space>
       </div>
 
-      {error && <Alert className="mb-4" message={error} showIcon type="error" />}
+      {error && <Alert className="mb-4" showIcon title={error} type="error" />}
 
       <section className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
         <aside className="workbench-panel overflow-hidden">

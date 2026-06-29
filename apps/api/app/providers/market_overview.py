@@ -9,6 +9,7 @@ import httpx
 
 from app.models import (
     MarketAdvanceDeclineSummary,
+    MarketEmotionBucket,
     MarketOverviewResponse,
     MarketSectorStrengthItem,
     MarketTurnoverSummary,
@@ -22,6 +23,7 @@ INDEX_SECIDS = ("1.000001", "0.399001", "0.899050")
 TICKFLOW_INDEX_SYMBOLS = ["000001.SH", "399001.SZ", "899050.BJ"]
 IFIND_INDEX_SYMBOLS = "000001.SH,399001.SZ,899050.BJ"
 IFIND_INDEX_INDICATORS = "最新价,涨跌幅,成交额,上涨家数,下跌家数"
+A_SHARE_STOCK_LIST_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
@@ -259,6 +261,22 @@ class EastmoneyMarketOverviewProvider:
                 source_status=[*source_status, *overview.source_status],
             )
 
+    def get_pct_change_distribution(self) -> tuple[list[MarketEmotionBucket], StrongStockSourceStatus]:
+        try:
+            rows = self._fetch_a_share_realtime_rows()
+            buckets = _pct_change_buckets([_number(row.get("f3")) for row in rows])
+            return buckets, StrongStockSourceStatus(
+                source="东方财富全A实时涨跌幅",
+                status="success",
+                detail=f"全A实时列表返回 {sum(bucket.count or 0 for bucket in buckets)} 只股票",
+            )
+        except Exception as exc:
+            return _pct_change_buckets([]), StrongStockSourceStatus(
+                source="东方财富全A实时涨跌幅",
+                status="failed",
+                detail=f"全A涨跌幅分布获取失败: {exc.__class__.__name__}",
+            )
+
     def _fetch_ifind_realtime_overview(self) -> dict[str, Any]:
         payload = self.ifind_index_provider.call_tool(
             "hexin-ifind-ds-index-mcp",
@@ -415,6 +433,41 @@ class EastmoneyMarketOverviewProvider:
             reverse=True,
         )
 
+    def _fetch_a_share_realtime_rows(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        total: int | None = None
+        page_size = 100
+        for page in range(1, 61):
+            response = self.http_client.get(
+                "https://push2.eastmoney.com/api/qt/clist/get",
+                params={
+                    "pn": str(page),
+                    "pz": str(page_size),
+                    "po": "1",
+                    "fid": "f3",
+                    "np": "1",
+                    "fltt": "2",
+                    "invt": "2",
+                    "fs": A_SHARE_STOCK_LIST_FS,
+                    "fields": "f3,f12,f14",
+                },
+                headers={"User-Agent": USER_AGENT},
+                timeout=self.timeout_seconds,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if total is None:
+                total = _extract_total(payload)
+            page_rows = _extract_diff(payload)
+            if not page_rows:
+                break
+            rows.extend(page_rows)
+            if total is not None and len(rows) >= total:
+                break
+        if not rows:
+            raise ValueError("empty a-share realtime rows")
+        return rows
+
     def _fetch_sector_capital_flow(self, limit: int, direction: str) -> list[SectorRadarItem]:
         response = self.http_client.get(
             "https://push2.eastmoney.com/api/qt/clist/get",
@@ -467,6 +520,16 @@ def _extract_diff(payload: object) -> list[dict[str, Any]]:
     return [row for row in diff if isinstance(row, dict)]
 
 
+def _extract_total(payload: object) -> int | None:
+    if not isinstance(payload, dict):
+        return None
+    data = payload.get("data")
+    if not isinstance(data, dict):
+        return None
+    total = _integer(data.get("total"))
+    return total if total and total > 0 else None
+
+
 def _sector_radar_item(
     sector: MarketSectorStrengthItem,
     net_flow_cny: float | None = None,
@@ -494,6 +557,47 @@ def _sector_radar_item(
         net_flow_cny=resolved_net_flow_cny,
         strength_score=round(change_score + breadth_score + turnover_score, 2),
     )
+
+
+def _pct_change_buckets(values: list[float | None]) -> list[MarketEmotionBucket]:
+    bucket_defs = [
+        (">10%", 10.0, None),
+        ("7-10%", 7.0, 10.0),
+        ("5-7%", 5.0, 7.0),
+        ("3-5%", 3.0, 5.0),
+        ("0-3%", 0.0, 3.0),
+        ("-3-0%", -3.0, 0.0),
+        ("-5--3%", -5.0, -3.0),
+        ("-7--5%", -7.0, -5.0),
+        ("-10--7%", -10.0, -7.0),
+        ("<-10%", None, -10.0),
+    ]
+    buckets = [
+        MarketEmotionBucket(
+            label=label,
+            min_pct=min_pct,
+            max_pct=max_pct,
+            count=0,
+            source="东方财富全A实时涨跌幅",
+        )
+        for label, min_pct, max_pct in bucket_defs
+    ]
+    for value in values:
+        if value is None:
+            continue
+        for bucket in buckets:
+            if _pct_in_bucket(value, bucket.min_pct, bucket.max_pct):
+                bucket.count = (bucket.count or 0) + 1
+                break
+    return buckets
+
+
+def _pct_in_bucket(value: float, min_pct: float | None, max_pct: float | None) -> bool:
+    if min_pct is None:
+        return value < (max_pct or 0)
+    if max_pct is None:
+        return value > min_pct
+    return min_pct <= value < max_pct
 
 
 def _parse_kline_amount(value: str) -> dict[str, Any]:

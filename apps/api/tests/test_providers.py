@@ -99,6 +99,29 @@ class FakeMarketOverviewHttpClient:
             )
         if "clist/get" in url:
             params = kwargs.get("params", {})
+            if isinstance(params, dict) and params.get("fs") == "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23":
+                page = int(str(params.get("pn", "1")))
+                if page > 1:
+                    return FakeResponse({"data": {"diff": [], "total": 10}})
+                return FakeResponse(
+                    {
+                        "data": {
+                            "total": 10,
+                            "diff": [
+                                {"f3": 11.2, "f12": "300001", "f14": "超强科技"},
+                                {"f3": 8.1, "f12": "300002", "f14": "强势股份"},
+                                {"f3": 5.5, "f12": "600003", "f14": "上涨股份"},
+                                {"f3": 3.2, "f12": "600004", "f14": "温和上涨"},
+                                {"f3": 1.1, "f12": "600005", "f14": "微涨股份"},
+                                {"f3": -1.2, "f12": "600006", "f14": "微跌股份"},
+                                {"f3": -4.4, "f12": "600007", "f14": "弱势股份"},
+                                {"f3": -6.6, "f12": "600008", "f14": "大跌股份"},
+                                {"f3": -8.8, "f12": "600009", "f14": "深跌股份"},
+                                {"f3": -10.5, "f12": "600010", "f14": "跌停附近"},
+                            ]
+                        }
+                    }
+                )
             if isinstance(params, dict) and params.get("fid") == "f62":
                 if params.get("po") == "0":
                     return FakeResponse(
@@ -316,6 +339,29 @@ def test_market_overview_provider_returns_direct_sector_capital_flow() -> None:
     assert [request["params"].get("po") for request in capital_flow_requests] == ["1", "0"]
 
 
+def test_market_overview_provider_returns_realtime_pct_change_distribution() -> None:
+    provider = EastmoneyMarketOverviewProvider(http_client=FakeMarketOverviewHttpClient())
+
+    buckets, status = provider.get_pct_change_distribution()
+
+    assert status.source == "东方财富全A实时涨跌幅"
+    assert status.status == "success"
+    assert [bucket.label for bucket in buckets] == [
+        ">10%",
+        "7-10%",
+        "5-7%",
+        "3-5%",
+        "0-3%",
+        "-3-0%",
+        "-5--3%",
+        "-7--5%",
+        "-10--7%",
+        "<-10%",
+    ]
+    assert sum(bucket.count or 0 for bucket in buckets) == 10
+    assert [bucket.count for bucket in buckets] == [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+
+
 def test_ifind_status_reports_missing_key() -> None:
     provider = IfindMcpProvider(api_key="", base_url="https://api-mcp.51ifind.com:8643")
 
@@ -409,6 +455,55 @@ def test_ifind_call_tool_uses_jsonrpc_tools_call_and_parses_text_json() -> None:
             "arguments": {"query": "603890.SH 的公司简称和所属行业"},
         },
     }
+
+
+class FakeIfindResearchHttpClient:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, object]] = []
+
+    def post(self, url: str, **kwargs: object) -> FakeResponse:
+        self.requests.append({"url": url, **kwargs})
+        payload = kwargs.get("json", {})
+        params = payload.get("params", {}) if isinstance(payload, dict) else {}
+        tool_name = params.get("name") if isinstance(params, dict) else None
+        if tool_name == "get_stock_financials":
+            return FakeResponse(
+                {
+                    "result": {
+                        "structuredContent": {
+                            "总市值": 12_000_000_000,
+                            "动态市盈率": 28.5,
+                            "静态市盈率": 24.2,
+                            "市净率": 3.2,
+                        }
+                    }
+                }
+            )
+        return FakeResponse({"result": {"structuredContent": {}}})
+
+
+def test_ifind_stock_research_keeps_market_cap_and_dynamic_static_pe() -> None:
+    client = FakeIfindResearchHttpClient()
+    provider = IfindMcpProvider(
+        api_key="ifind-test",
+        base_url="https://api-mcp.51ifind.com:8643",
+        http_client=client,
+    )
+
+    research = provider.get_stock_research("603890.SH")
+
+    assert research.valuation["总市值"] == 12_000_000_000
+    assert research.valuation["动态市盈率"] == 28.5
+    assert research.valuation["静态市盈率"] == 24.2
+    financial_request = next(
+        request
+        for request in client.requests
+        if request["json"]["params"]["name"] == "get_stock_financials"
+    )
+    query = financial_request["json"]["params"]["arguments"]["query"]
+    assert "总市值" in query
+    assert "动态市盈率" in query
+    assert "静态市盈率" in query
 
 
 def test_analyze_negative_news_rows_flags_regulatory_and_loss_keywords() -> None:

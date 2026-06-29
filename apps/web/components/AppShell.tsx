@@ -5,6 +5,7 @@ import {
   DatabaseOutlined,
   FolderOpenOutlined,
   FundProjectionScreenOutlined,
+  ThunderboltOutlined,
   LineChartOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
@@ -41,6 +42,13 @@ const NAV_ITEMS: NavItem[] = [
     icon: <FundProjectionScreenOutlined />,
     label: "板块",
     title: "板块资金流",
+  },
+  {
+    href: "/sentiment",
+    key: "/sentiment",
+    icon: <ThunderboltOutlined />,
+    label: "情绪",
+    title: "短线情绪",
   },
   {
     href: "/settings",
@@ -146,6 +154,9 @@ function selectedNavKey(pathname: string): string {
   }
   if (pathname.startsWith("/sectors")) {
     return "/sectors";
+  }
+  if (pathname.startsWith("/sentiment")) {
+    return "/sentiment";
   }
   if (pathname.startsWith("/settings")) {
     return "/settings";

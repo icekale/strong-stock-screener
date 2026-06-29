@@ -6,12 +6,22 @@ import type {
   GsgfReviewSnapshotResponse,
   GsgfReviewSummary,
   GsgfTradePlan,
+  MarketEmotionSnapshotResponse,
   MarketOverviewResponse,
+  NotificationChannelConfig,
+  NotificationSendResult,
   RuntimeSettingsHealthResponse,
   RuntimeSettingsResponse,
   ScreenRunFilters,
   ScreenStrategy,
   SectorRadarResponse,
+  SentimentDetailResponse,
+  SentimentSummaryResponse,
+  SentimentMonitorConfig,
+  SentimentMonitorStatus,
+  ShortTermIntradaySentimentResponse,
+  ShortTermIntradaySignalDigest,
+  ShortTermSentimentResponse,
   StockKlineResponse,
   StockResearchResponse,
   StrongStockIntradaySnapshot,
@@ -54,6 +64,155 @@ export async function getSectorRadar(limit = 20): Promise<SectorRadarResponse> {
   return response.json() as Promise<SectorRadarResponse>;
 }
 
+export async function getShortTermSentiment(tradeDate: string, limit = 50): Promise<ShortTermSentimentResponse> {
+  const params = new URLSearchParams({
+    trade_date: tradeDate,
+    limit: String(limit),
+  });
+  const response = await fetch(`${API_BASE_URL}/api/short-term/sentiment?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取短线情绪失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ShortTermSentimentResponse>;
+}
+
+export async function getSentimentSummary(
+  tradeDate: string,
+  limit = 80,
+  refresh = false,
+): Promise<SentimentSummaryResponse> {
+  const params = new URLSearchParams({
+    trade_date: tradeDate,
+    limit: String(limit),
+    refresh: String(refresh),
+  });
+  const response = await fetch(`${API_BASE_URL}/api/short-term/sentiment/summary?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取短线情绪概览失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SentimentSummaryResponse>;
+}
+
+export async function getSentimentDetail(
+  tradeDate: string,
+  limit = 80,
+  refresh = false,
+): Promise<SentimentDetailResponse> {
+  const params = new URLSearchParams({
+    trade_date: tradeDate,
+    limit: String(limit),
+    refresh: String(refresh),
+  });
+  const response = await fetch(`${API_BASE_URL}/api/short-term/sentiment/detail?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取短线情绪详情失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SentimentDetailResponse>;
+}
+
+export async function getMarketEmotionSnapshot(tradeDate: string, limit = 80): Promise<MarketEmotionSnapshotResponse> {
+  const params = new URLSearchParams({
+    trade_date: tradeDate,
+    limit: String(limit),
+  });
+  const response = await fetch(`${API_BASE_URL}/api/short-term/market-emotion?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取市场情绪仪表盘失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<MarketEmotionSnapshotResponse>;
+}
+
+export async function getShortTermIntradaySentiment(
+  tradeDate: string,
+  limit = 80,
+  period = "1m",
+  count = 120,
+): Promise<ShortTermIntradaySentimentResponse> {
+  const params = new URLSearchParams({
+    trade_date: tradeDate,
+    limit: String(limit),
+    period,
+    count: String(count),
+  });
+  const response = await fetch(`${API_BASE_URL}/api/short-term/sentiment/intraday?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取盘中情绪失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ShortTermIntradaySentimentResponse>;
+}
+
+export async function getShortTermIntradaySignalDigest(
+  tradeDate: string,
+  limit = 80,
+  period = "1m",
+  count = 120,
+): Promise<ShortTermIntradaySignalDigest> {
+  const params = new URLSearchParams({
+    trade_date: tradeDate,
+    limit: String(limit),
+    period,
+    count: String(count),
+  });
+  const response = await fetch(`${API_BASE_URL}/api/short-term/sentiment/intraday/digest?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`生成短线提醒草稿失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ShortTermIntradaySignalDigest>;
+}
+
+export async function getSentimentMonitorStatus(): Promise<SentimentMonitorStatus> {
+  const response = await fetch(`${API_BASE_URL}/api/short-term/sentiment/monitor/status`);
+  if (!response.ok) {
+    throw new Error(`读取后台监控状态失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SentimentMonitorStatus>;
+}
+
+export async function saveSentimentMonitorConfig(
+  payload: SentimentMonitorConfig,
+): Promise<SentimentMonitorStatus> {
+  const response = await fetch(`${API_BASE_URL}/api/short-term/sentiment/monitor/config`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(`保存后台监控配置失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SentimentMonitorStatus>;
+}
+
+export async function startSentimentMonitor(): Promise<SentimentMonitorStatus> {
+  const response = await fetch(`${API_BASE_URL}/api/short-term/sentiment/monitor/start`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`启动后台监控失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SentimentMonitorStatus>;
+}
+
+export async function stopSentimentMonitor(): Promise<SentimentMonitorStatus> {
+  const response = await fetch(`${API_BASE_URL}/api/short-term/sentiment/monitor/stop`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`停止后台监控失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SentimentMonitorStatus>;
+}
+
+export async function runSentimentMonitorOnce(tradeDate?: string): Promise<SentimentMonitorStatus> {
+  const suffix = tradeDate ? `?trade_date=${encodeURIComponent(tradeDate)}` : "";
+  const response = await fetch(`${API_BASE_URL}/api/short-term/sentiment/monitor/run-once${suffix}`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`手动采样失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SentimentMonitorStatus>;
+}
+
 export async function getRuntimeSettings(): Promise<RuntimeSettingsResponse> {
   const response = await fetch(`${API_BASE_URL}/api/settings`);
   if (!response.ok) {
@@ -72,6 +231,8 @@ export async function saveRuntimeSettings(payload: {
   ifind_base_url: string;
   ifind_service_id: "hexin-ifind-ds-stock-mcp" | "hexin-ifind-ds-news-mcp" | "hexin-ifind-ds-index-mcp";
   provider_timeout_seconds: number;
+  notification_channels?: NotificationChannelConfig[];
+  sentiment_monitor?: SentimentMonitorConfig;
 }): Promise<RuntimeSettingsResponse> {
   const response = await fetch(`${API_BASE_URL}/api/settings`, {
     method: "PUT",
@@ -82,6 +243,22 @@ export async function saveRuntimeSettings(payload: {
     throw new Error(`保存设置失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<RuntimeSettingsResponse>;
+}
+
+export async function sendNotificationMessage(payload: {
+  title: string;
+  message_text: string;
+  channel_ids?: string[];
+}): Promise<NotificationSendResult> {
+  const response = await fetch(`${API_BASE_URL}/api/notifications/send`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(`发送通知失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<NotificationSendResult>;
 }
 
 export async function checkRuntimeSettingsHealth(symbol = "605289.SH"): Promise<RuntimeSettingsHealthResponse> {

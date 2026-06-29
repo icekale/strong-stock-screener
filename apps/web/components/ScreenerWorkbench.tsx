@@ -6,9 +6,10 @@ import type {
   GsgfReviewSummary,
   GsgfTradePlan,
   MarketOverviewResponse,
-  MarketSectorStrengthItem,
   ScreenRunFilters,
   ScreenStrategy,
+  SectorRadarItem,
+  SectorRadarResponse,
   SourceStatusValue,
   StrongStockIntradayItem,
   StrongStockIntradaySnapshot,
@@ -51,6 +52,7 @@ type ScreenerWorkbenchProps = {
   result: StrongStockScreeningResponse | null;
   intraday: StrongStockIntradaySnapshot | null;
   marketOverview: MarketOverviewResponse | null;
+  sectorRadar: SectorRadarResponse | null;
   reviewSummary: GsgfReviewSummary | null;
   calibrationSummary: GsgfRealCalibrationSummary | null;
   running: boolean;
@@ -159,6 +161,7 @@ export function ScreenerWorkbench({
   result,
   intraday,
   marketOverview,
+  sectorRadar,
   reviewSummary,
   calibrationSummary,
   running,
@@ -221,13 +224,14 @@ export function ScreenerWorkbench({
         <MarketEnvironmentPanel
           marketOverview={marketOverview}
           result={result}
+          sectorRadar={sectorRadar}
           sources={sources}
           stats={dashboardStats}
         />
 
         <div className="mt-4 grid items-stretch gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(360px,1fr)]">
-          <TurnoverTrendPanel marketOverview={marketOverview} />
-          <SectorStrengthPanel sectors={marketOverview?.sectors ?? []} />
+          <SectorFlowHeatmapPanel sectorRadar={sectorRadar} />
+          <SectorStrengthPanel />
         </div>
 
         <FilterLogicRail
@@ -385,16 +389,18 @@ function MarketIndexPill({
 function MarketEnvironmentPanel({
   marketOverview,
   result,
+  sectorRadar,
   sources,
   stats,
 }: {
   marketOverview: MarketOverviewResponse | null;
   result: StrongStockScreeningResponse | null;
+  sectorRadar: SectorRadarResponse | null;
   sources: DataSourceStatusResponse | null;
   stats: MarketDashboardStats;
 }) {
   const sourceState = sourceSummary(sources);
-  const sentiment = stats.totalCount > 0 ? Math.round((stats.focusCount / stats.totalCount) * 100) : null;
+  const sectorSentiment = buildSectorRadarSentiment(sectorRadar);
   const turnover = marketOverview?.turnover ?? null;
   const advanceDecline = marketOverview?.advance_decline ?? null;
   const advanceCount = advanceDecline?.advance_count ?? null;
@@ -415,12 +421,12 @@ function MarketEnvironmentPanel({
       />
       <TerminalMetricCard
         label="情绪指数 SENTIMENT"
-        value={sentiment === null ? "--" : String(sentiment)}
+        value={sectorSentiment.score === null ? "--" : String(sectorSentiment.score)}
         suffix="/100"
-        subValue={`候选池 ${stats.totalCount} 只，强势 ${stats.focusCount} 只`}
-        footerLabel="Risk Watch"
-        footerValue={`${stats.reduceRiskCount + stats.riskEmptyCount}`}
-        tone={stats.focusCount >= stats.reduceRiskCount ? "positive" : "warning"}
+        subValue={sectorSentiment.subValue}
+        footerLabel="Sector Flow"
+        footerValue={sectorSentiment.footerValue}
+        tone={sectorSentiment.tone}
       />
       <TerminalMetricCard
         label="涨跌比 ADVANCE/DECLINE"
@@ -433,11 +439,16 @@ function MarketEnvironmentPanel({
       />
       <TerminalMetricCard
         label="数据可信 SOURCE"
-        value={marketOverview ? "全A" : "--"}
-        subValue={marketOverviewSourceSummary(marketOverview) || (sourceState.ok ? "数据源可用" : "数据源待配置")}
+        value={marketOverview || sectorRadar ? "全A" : "--"}
+        subValue={sectorRadarSourceSummary(sectorRadar) || marketOverviewSourceSummary(marketOverview) || (sourceState.ok ? "数据源可用" : "数据源待配置")}
         footerLabel="Source"
-        footerValue={`${marketOverview?.sectors.length ?? 0} 板块`}
-        tone={marketOverview && marketOverview.source_status.some((item) => item.status === "success") ? "positive" : "warning"}
+        footerValue={`${sectorRadar ? sectorRadar.inflow.length + sectorRadar.outflow.length : marketOverview?.sectors.length ?? 0} 板块`}
+        tone={
+          (sectorRadar && sectorRadar.source_status.some((item) => item.status === "success")) ||
+          (marketOverview && marketOverview.source_status.some((item) => item.status === "success"))
+            ? "positive"
+            : "warning"
+        }
       />
     </section>
   );
@@ -486,112 +497,145 @@ function TerminalMetricCard({
   );
 }
 
-function TurnoverTrendPanel({ marketOverview }: { marketOverview: MarketOverviewResponse | null }) {
-  const turnover = marketOverview?.turnover ?? null;
-  const trendPoints = buildTurnoverSeries(turnover);
-  const realtimeSource = realtimeTurnoverSourceLabel(marketOverview);
-  const subtitle = realtimeSource ? realtimeTurnoverSubtitles[realtimeSource] : "全A市场口径 · 今日相对昨日";
-  const points = trendPoints
-    .map((value, index) => {
-      const x = trendPoints.length <= 1 ? 0 : (index / (trendPoints.length - 1)) * 100;
-      const y = 88 - value * 0.68;
-      return `${x.toFixed(2)},${Math.max(8, Math.min(88, y)).toFixed(2)}`;
-    })
-    .join(" ");
-
-  return (
-    <section className="rounded-xl border border-[#ddd8d0] bg-[#f8f7f4] p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-base font-black text-[#11100e]">全A成交额趋势 · A-share Turnover</h2>
-          <p className="mt-1 text-xs font-medium text-[#7b756d]">{subtitle}</p>
-        </div>
-        <div className="flex gap-2">
-          {["昨日", "今日"].map((period, index) => (
-            <span
-              className={`inline-flex h-8 items-center rounded-lg px-3 text-xs font-bold ${
-                index === 1 ? "bg-[#11100e] text-white" : "border border-[#ddd8d0] bg-[#f5f3f0] text-[#7b756d]"
-              }`}
-              key={period}
-            >
-              {period}
-            </span>
-          ))}
-          {realtimeSource && (
-            <span className="inline-flex h-8 items-center rounded-lg bg-[#28c840] px-3 text-xs font-bold text-white">
-              实时
-            </span>
-          )}
-        </div>
-      </div>
-      <div className="mt-4 h-[210px] overflow-hidden rounded-lg bg-[#edf6e9]">
-        {trendPoints.length > 1 ? (
-          <svg className="h-full w-full" preserveAspectRatio="none" viewBox="0 0 100 100" role="img" aria-label="候选池强度趋势">
-            <defs>
-              <linearGradient id="candidateTrendFill" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor="#28c840" stopOpacity="0.22" />
-                <stop offset="100%" stopColor="#28c840" stopOpacity="0.03" />
-              </linearGradient>
-            </defs>
-            <polygon points={`0,100 ${points} 100,100`} fill="url(#candidateTrendFill)" />
-            <polyline points={points} fill="none" stroke="#28c840" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.6" />
-            <line x1="0" x2="100" y1="66" y2="66" stroke="#cfd8c9" strokeWidth="0.4" />
-            <line x1="0" x2="100" y1="38" y2="38" stroke="#cfd8c9" strokeWidth="0.4" />
-          </svg>
-        ) : (
-          <div className="flex h-full items-center justify-center text-sm font-bold text-[#7b756d]">
-            全A成交额暂不可用，检查市场概览数据源
-          </div>
-        )}
-      </div>
-      <div className="mt-2 flex justify-between text-[11px] font-semibold text-[#9a948c]">
-        <span>{formatCnyCompact(turnover?.previous_total_cny)}</span>
-        <span>{formatTurnoverChange(turnover)}</span>
-        <span>{formatCnyCompact(turnover?.total_cny)}</span>
-      </div>
-    </section>
-  );
-}
-
-function SectorStrengthPanel({ sectors }: { sectors: MarketSectorStrengthItem[] }) {
-  const visible = sectors.length > 0 ? sectors.slice(0, 7) : [];
-
+function SectorStrengthPanel() {
   return (
     <section className="rounded-xl border border-[#ddd8d0] bg-[#f8f7f4] p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-black text-[#11100e]">板块强度 · Sector Strength</h2>
-          <p className="mt-1 text-xs font-medium text-[#7b756d]">全A行业板块涨跌幅排名</p>
+          <p className="mt-1 text-xs font-medium text-[#7b756d]">等待非资金流口径模型</p>
         </div>
-        <Tag className="m-0">{visible.length || "待数据"}</Tag>
+        <Tag className="m-0">规划中</Tag>
       </div>
-      <div className="mt-4 space-y-3">
-        {visible.length > 0 ? (
-          visible.map((sector) => <SectorStrengthRow item={sector} key={sector.name} />)
-        ) : (
-          <Empty description="全A板块强度暂不可用。" image={Empty.PRESENTED_IMAGE_SIMPLE} />
-        )}
+      <div className="mt-4 flex min-h-[214px] items-center justify-center rounded-lg border border-dashed border-[#ddd8d0] bg-white/55 px-5 text-center">
+        <div>
+          <div className="text-sm font-black text-[#11100e]">板块强度待接入</div>
+          <p className="mt-2 max-w-[280px] text-xs leading-5 text-[#7b756d]">
+            后续将接入非资金流口径的板块强度模型，避免和左侧资金流热力重复。
+          </p>
+        </div>
       </div>
     </section>
   );
 }
 
-function SectorStrengthRow({ item }: { item: MarketSectorStrengthItem }) {
-  const changePct = item.change_pct ?? 0;
-  const width = Math.max(12, Math.min(100, Math.abs(changePct) * 14 + 18));
-  const barClass = changePct < 0 ? "bg-[#f04438]" : changePct === 0 ? "bg-[#a19a91]" : "bg-[#28c840]";
+function SectorFlowHeatmapPanel({ sectorRadar }: { sectorRadar: SectorRadarResponse | null }) {
+  const inflow = sectorRadar?.inflow.slice(0, 5) ?? [];
+  const outflow = sectorRadar?.outflow.slice(0, 5) ?? [];
+  const inflowTotal = sumPositiveSectorFlow(sectorRadar?.inflow ?? []);
+  const outflowTotal = sumNegativeSectorFlow(sectorRadar?.outflow ?? []);
+  const top3Inflow = sumPositiveSectorFlow(inflow.slice(0, 3));
+  const concentration = inflowTotal > 0 ? Math.round((top3Inflow / inflowTotal) * 100) : null;
+  const maxFlow = Math.max(
+    ...inflow.map((item) => Math.abs(item.net_flow_cny ?? 0)),
+    ...outflow.map((item) => Math.abs(item.net_flow_cny ?? 0)),
+    1,
+  );
 
   return (
-    <div className="grid grid-cols-[88px_minmax(0,1fr)_86px] items-center gap-3 text-sm">
-      <span className="truncate font-bold text-[#3b3833]" title={item.name}>
+    <section className="rounded-xl border border-[#ddd8d0] bg-[#f8f7f4] p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-black text-[#11100e]">板块资金流热力 · Sector Flow</h2>
+          <p className="mt-1 text-xs font-medium text-[#7b756d]">
+            {sectorRadar ? `资金流口径：${sectorRadar.flow_source}` : "读取 /sectors 同源板块资金流"}
+          </p>
+        </div>
+        <Tag className="m-0" color={sectorRadar?.capital_flow_status === "direct" ? "green" : "orange"}>
+          {sectorRadar?.capital_flow_status === "direct" ? "实时资金流" : sectorRadar ? "估算资金流" : "待数据"}
+        </Tag>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <SectorFlowStat label="净流入合计" tone="red" value={formatSignedCny(inflowTotal)} />
+        <SectorFlowStat label="净流出合计" tone="green" value={formatSignedCny(-outflowTotal)} />
+        <SectorFlowStat label="主线集中度" tone="neutral" value={concentration === null ? "--" : `${concentration}%`} />
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <SectorFlowColumn items={inflow} maxFlow={maxFlow} title="净流入 Top5" tone="red" />
+        <SectorFlowColumn items={outflow} maxFlow={maxFlow} title="净流出 Top5" tone="green" />
+      </div>
+    </section>
+  );
+}
+
+function SectorFlowStat({
+  label,
+  tone,
+  value,
+}: {
+  label: string;
+  tone: "green" | "neutral" | "red";
+  value: string;
+}) {
+  const toneClass = tone === "red" ? "text-[#d92d20]" : tone === "green" ? "text-[#0f7a3b]" : "text-[#11100e]";
+  return (
+    <div className="rounded-lg border border-[#e3ddd3] bg-white px-3 py-2">
+      <div className="text-[11px] font-black text-[#7b756d]">{label}</div>
+      <div className={`mt-1 text-lg font-black tabular-nums ${toneClass}`}>{value}</div>
+    </div>
+  );
+}
+
+function SectorFlowColumn({
+  items,
+  maxFlow,
+  title,
+  tone,
+}: {
+  items: SectorRadarItem[];
+  maxFlow: number;
+  title: string;
+  tone: "green" | "red";
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="mb-2 flex items-center justify-between text-xs">
+        <span className="font-black text-[#11100e]">{title}</span>
+        <span className="font-semibold text-[#7b756d]">{items.length || "待数据"}</span>
+      </div>
+      <div className="space-y-2">
+        {items.length > 0 ? (
+          items.map((item) => <SectorFlowRow item={item} key={`${title}-${item.name}`} maxFlow={maxFlow} tone={tone} />)
+        ) : (
+          <div className="rounded-lg border border-dashed border-[#ddd8d0] px-3 py-6 text-center text-xs font-bold text-[#7b756d]">
+            板块资金流暂不可用
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SectorFlowRow({
+  item,
+  maxFlow,
+  tone,
+}: {
+  item: SectorRadarItem;
+  maxFlow: number;
+  tone: "green" | "red";
+}) {
+  const flow = item.net_flow_cny ?? 0;
+  const width = Math.max(8, Math.min(100, (Math.abs(flow) / maxFlow) * 100));
+  const barClass = tone === "red" ? "bg-[#d92d20]" : "bg-[#0f7a3b]";
+  const valueClass = tone === "red" ? "text-[#d92d20]" : "text-[#0f7a3b]";
+
+  return (
+    <div className="grid grid-cols-[96px_minmax(0,1fr)_80px] items-center gap-3 text-sm">
+      <span className="truncate font-bold text-[#3b3833]" title={`${item.name} · ${item.leader ?? "暂无领涨股"}`}>
         {item.name}
       </span>
-      <div className="h-1.5 rounded-full bg-[#d9d4cb]">
-        <div className={`h-1.5 rounded-full ${barClass}`} style={{ width: `${width}%` }} />
+      <div className="min-w-0">
+        <div className="h-2 rounded-full bg-[#e6e0d7]">
+          <div className={`h-2 rounded-full ${barClass}`} style={{ width: `${width}%` }} />
+        </div>
+        <div className="mt-1 truncate text-[10px] font-semibold text-[#9a948c]">
+          {formatSignedPercent(item.change_pct)} · {item.leader ?? "暂无领涨股"}
+        </div>
       </div>
-      <span className={changePct < 0 ? "text-right font-black text-[#f04438]" : "text-right font-black text-[#28c840]"}>
-        {formatSignedPercent(item.change_pct)}
-      </span>
+      <span className={`text-right font-black tabular-nums ${valueClass}`}>{formatSignedCny(item.net_flow_cny)}</span>
     </div>
   );
 }
@@ -2485,6 +2529,14 @@ function buildMarketDashboardStats(
   };
 }
 
+function sumPositiveSectorFlow(items: SectorRadarItem[]): number {
+  return items.reduce((sum, item) => sum + Math.max(0, item.net_flow_cny ?? 0), 0);
+}
+
+function sumNegativeSectorFlow(items: SectorRadarItem[]): number {
+  return items.reduce((sum, item) => sum + Math.abs(Math.min(0, item.net_flow_cny ?? 0)), 0);
+}
+
 function buildTurnoverSeries(turnover: MarketOverviewResponse["turnover"] | null) {
   const previous = turnover?.previous_total_cny ?? null;
   const current = turnover?.total_cny ?? null;
@@ -2553,6 +2605,44 @@ function marketOverviewSourceSummary(marketOverview: MarketOverviewResponse | nu
   }
   const successCount = items.filter((item) => item.status === "success").length;
   return `${successCount}/${items.length} 市场源可用`;
+}
+
+function sectorRadarSourceSummary(sectorRadar: SectorRadarResponse | null): string {
+  const items = sectorRadar?.source_status ?? [];
+  if (items.length === 0) {
+    return "";
+  }
+  const successCount = items.filter((item) => item.status === "success").length;
+  const flowLabel = sectorRadar?.capital_flow_status === "direct" ? "直接资金流" : "估算资金流";
+  return `${successCount}/${items.length} 板块源可用 · ${flowLabel}`;
+}
+
+function buildSectorRadarSentiment(sectorRadar: SectorRadarResponse | null): {
+  footerValue: string;
+  score: number | null;
+  subValue: string;
+  tone: "positive" | "neutral" | "warning";
+} {
+  const inflow = sectorRadar?.inflow ?? [];
+  const outflow = sectorRadar?.outflow ?? [];
+  const inflowTotal = inflow.reduce((sum, item) => sum + Math.max(0, item.net_flow_cny ?? 0), 0);
+  const outflowTotal = outflow.reduce((sum, item) => sum + Math.abs(Math.min(0, item.net_flow_cny ?? 0)), 0);
+  const total = inflowTotal + outflowTotal;
+  if (total <= 0) {
+    return {
+      footerValue: "等待板块资金流",
+      score: null,
+      subValue: "读取 /sectors 同源数据中",
+      tone: "neutral",
+    };
+  }
+  const score = Math.round((inflowTotal / total) * 100);
+  return {
+    footerValue: `${inflow.length}/${outflow.length}`,
+    score,
+    subValue: `流入 ${formatCnyCompact(inflowTotal)} · 流出 ${formatCnyCompact(outflowTotal)}`,
+    tone: score >= 55 ? "positive" : score >= 45 ? "neutral" : "warning",
+  };
 }
 
 function realtimeTurnoverSourceLabel(marketOverview: MarketOverviewResponse | null): string | null {
@@ -2667,6 +2757,7 @@ function sourceTagColor(status: SourceStatusValue) {
     disabled: "default",
     failed: "red",
     missing_key: "orange",
+    stale: "blue",
     success: "green",
   };
   return colors[status];

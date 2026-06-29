@@ -10,7 +10,7 @@ ScreenStatus = Literal["focus", "wait_pullback", "reduce_risk", "data_incomplete
 RiskAction = Literal["hold_watch", "reduce", "empty"]
 IntradayAction = Literal["watch", "low_buy_watch", "reduce", "avoid_chase", "data_incomplete"]
 GsgfIntradayConfirmation = Literal["盘中确认", "等待确认", "低吸确认", "减仓确认", "风险失效", "无GSGF上下文"]
-SourceStatusValue = Literal["success", "failed", "disabled", "missing_key"]
+SourceStatusValue = Literal["success", "failed", "disabled", "missing_key", "stale"]
 CapitalFlowStatus = Literal["direct", "estimated", "unavailable"]
 IndustryStrength = Literal["strong", "neutral", "weak"]
 RiskCheckStatus = Literal["triggered", "clear", "unknown"]
@@ -26,6 +26,9 @@ GsgfVolumeStructure = Literal[
 GsgfChartAnnotationType = Literal["volume_structure", "zone", "trigger", "pressure", "risk"]
 GsgfChartAnnotationSeverity = Literal["positive", "neutral", "warning", "danger"]
 ScreenStrategy = Literal["strong_stock", "gsgf", "combined"]
+ShortTermAlertSeverity = Literal["high", "medium", "low"]
+MarketEmotionLevel = Literal["冰点", "一般", "良好", "火爆"]
+SentimentSnapshotStatus = Literal["fresh", "cached", "missing"]
 
 
 class GsgfScoreBreakdown(BaseModel):
@@ -361,6 +364,208 @@ class SectorRadarResponse(BaseModel):
     generated_at: str = Field(
         default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
     )
+
+
+class ShortTermSentimentStockItem(BaseModel):
+    symbol: str
+    name: str
+    industry: str | None = None
+    board_count: int = 1
+    limit_up_hits_20d: int = 0
+    break_board_count: int = 0
+    last_limit_up_date: str | None = None
+    first_seal_time: str | None = None
+    last_seal_time: str | None = None
+    board_note: str | None = None
+    limit_up_evidence: list[str] = Field(default_factory=list)
+
+
+class ShortTermSentimentLadderGroup(BaseModel):
+    board_count: int
+    label: str
+    items: list[ShortTermSentimentStockItem] = Field(default_factory=list)
+
+
+class ShortTermSentimentIndustryItem(BaseModel):
+    name: str
+    limit_up_count: int = 0
+    break_board_count: int = 0
+    max_consecutive_boards: int = 0
+    leader: str | None = None
+    symbols: list[str] = Field(default_factory=list)
+    strength_score: float = 0
+
+
+class ShortTermSentimentMetrics(BaseModel):
+    limit_up_count: int = 0
+    break_board_count: int = 0
+    max_consecutive_boards: int = 0
+    hot_industry_count: int = 0
+
+
+class ShortTermSentimentResponse(BaseModel):
+    trade_date: str
+    metrics: ShortTermSentimentMetrics = Field(default_factory=ShortTermSentimentMetrics)
+    limit_up_pool: list[ShortTermSentimentStockItem] = Field(default_factory=list)
+    break_board_pool: list[ShortTermSentimentStockItem] = Field(default_factory=list)
+    ladder: list[ShortTermSentimentLadderGroup] = Field(default_factory=list)
+    hot_industries: list[ShortTermSentimentIndustryItem] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
+class ShortTermIntradaySentimentItem(BaseModel):
+    symbol: str
+    name: str
+    industry: str | None = None
+    pool_tags: list[str] = Field(default_factory=list)
+    action: IntradayAction
+    last_price: float | None = None
+    pct_change: float | None = None
+    open_gap_pct: float | None = None
+    intraday_ma: float | None = None
+    latest_vs_intraday_ma_pct: float | None = None
+    turnover_cny: float | None = None
+    signals: list[str] = Field(default_factory=list)
+
+
+class ShortTermIntradaySentimentMetrics(BaseModel):
+    watched_count: int = 0
+    alert_count: int = 0
+    reduce_count: int = 0
+    low_buy_watch_count: int = 0
+    avoid_chase_count: int = 0
+
+
+class ShortTermIntradaySentimentResponse(BaseModel):
+    trade_date: str
+    metrics: ShortTermIntradaySentimentMetrics = Field(
+        default_factory=ShortTermIntradaySentimentMetrics
+    )
+    items: list[ShortTermIntradaySentimentItem] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
+class ShortTermIntradaySignalAlert(BaseModel):
+    symbol: str
+    name: str
+    industry: str | None = None
+    action: IntradayAction
+    severity: ShortTermAlertSeverity
+    pool_tags: list[str] = Field(default_factory=list)
+    pct_change: float | None = None
+    turnover_cny: float | None = None
+    reasons: list[str] = Field(default_factory=list)
+
+
+class ShortTermIntradaySignalDigest(BaseModel):
+    title: str
+    trade_date: str
+    alert_count: int = 0
+    alerts: list[ShortTermIntradaySignalAlert] = Field(default_factory=list)
+    message_text: str
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
+class MarketEmotionBucket(BaseModel):
+    label: str
+    min_pct: float | None = None
+    max_pct: float | None = None
+    count: int | None = None
+    source: str = "待接入全市场实时涨跌幅分布"
+
+
+class MarketEmotionMetrics(BaseModel):
+    emotion_score: float = 0
+    emotion_level: MarketEmotionLevel = "冰点"
+    limit_up_count: int = 0
+    break_board_count: int = 0
+    limit_down_count: int | None = None
+    losing_effect_score: float | None = None
+    max_consecutive_boards: int = 0
+    advance_count: int | None = None
+    decline_count: int | None = None
+    seal_rate_pct: float | None = None
+    turnover_cny: float | None = None
+    turnover_change_cny: float | None = None
+    turnover_change_pct: float | None = None
+    main_flow_cny: float | None = None
+    yesterday_limit_up_performance_pct: float | None = None
+    yesterday_ladder_performance_pct: float | None = None
+
+
+class MarketEmotionSample(BaseModel):
+    trade_date: str
+    sampled_at: str
+    emotion_score: float = 0
+    emotion_level: MarketEmotionLevel = "冰点"
+    limit_up_count: int = 0
+    break_board_count: int = 0
+    limit_down_count: int | None = None
+    losing_effect_score: float | None = None
+    max_consecutive_boards: int = 0
+    advance_count: int | None = None
+    decline_count: int | None = None
+    seal_rate_pct: float | None = None
+    turnover_cny: float | None = None
+    turnover_change_pct: float | None = None
+
+
+class MarketEmotionSnapshotResponse(BaseModel):
+    trade_date: str
+    metrics: MarketEmotionMetrics = Field(default_factory=MarketEmotionMetrics)
+    buckets: list[MarketEmotionBucket] = Field(default_factory=list)
+    samples: list[MarketEmotionSample] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
+class SentimentSummaryMetrics(BaseModel):
+    emotion_score: float = 0
+    emotion_level: MarketEmotionLevel = "冰点"
+    limit_up_count: int = 0
+    break_board_count: int = 0
+    limit_down_count: int | None = None
+    losing_effect_score: float | None = None
+    max_consecutive_boards: int = 0
+    advance_count: int | None = None
+    decline_count: int | None = None
+    seal_rate_pct: float | None = None
+    turnover_cny: float | None = None
+    turnover_change_cny: float | None = None
+    turnover_change_pct: float | None = None
+
+
+class SentimentSummaryResponse(BaseModel):
+    trade_date: str
+    snapshot_status: SentimentSnapshotStatus = "fresh"
+    cached_at: str | None = None
+    metrics: SentimentSummaryMetrics = Field(default_factory=SentimentSummaryMetrics)
+    hot_industries: list[ShortTermSentimentIndustryItem] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    notes: list[str] = Field(default_factory=list)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
+class SentimentDetailResponse(BaseModel):
+    trade_date: str
+    snapshot_status: SentimentSnapshotStatus = "fresh"
+    cached_at: str | None = None
+    sentiment: ShortTermSentimentResponse
+    market_emotion: MarketEmotionSnapshotResponse
 
 
 class StockKlineResponse(BaseModel):

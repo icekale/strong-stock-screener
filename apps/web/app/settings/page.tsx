@@ -14,6 +14,7 @@ import {
   Select,
   Skeleton,
   Space,
+  Switch,
   Tag,
   Typography,
 } from "antd";
@@ -31,6 +32,21 @@ type SettingsDraft = {
   ifind_base_url: string;
   ifind_service_id: "hexin-ifind-ds-stock-mcp" | "hexin-ifind-ds-news-mcp" | "hexin-ifind-ds-index-mcp";
   provider_timeout_seconds: number;
+  notification_wechat_enabled: boolean;
+  notification_wechat_webhook: string;
+  notification_feishu_enabled: boolean;
+  notification_feishu_webhook: string;
+  notification_telegram_enabled: boolean;
+  notification_telegram_bot_token: string;
+  notification_telegram_chat_id: string;
+  notification_email_enabled: boolean;
+  notification_email_host: string;
+  notification_email_port: number;
+  notification_email_username: string;
+  notification_email_password: string;
+  notification_email_sender: string;
+  notification_email_recipients: string;
+  notification_email_tls: boolean;
 };
 
 const DEFAULT_DRAFT: SettingsDraft = {
@@ -43,6 +59,21 @@ const DEFAULT_DRAFT: SettingsDraft = {
   ifind_base_url: "https://api-mcp.51ifind.com:8643",
   ifind_service_id: "hexin-ifind-ds-stock-mcp",
   provider_timeout_seconds: 12,
+  notification_wechat_enabled: false,
+  notification_wechat_webhook: "",
+  notification_feishu_enabled: false,
+  notification_feishu_webhook: "",
+  notification_telegram_enabled: false,
+  notification_telegram_bot_token: "",
+  notification_telegram_chat_id: "",
+  notification_email_enabled: false,
+  notification_email_host: "",
+  notification_email_port: 587,
+  notification_email_username: "",
+  notification_email_password: "",
+  notification_email_sender: "",
+  notification_email_recipients: "",
+  notification_email_tls: true,
 };
 
 export default function SettingsPage() {
@@ -76,6 +107,7 @@ export default function SettingsPage() {
         ifind_base_url: response.config.ifind_base_url,
         ifind_service_id: response.config.ifind_service_id,
         provider_timeout_seconds: response.config.provider_timeout_seconds,
+        ...notificationDraftFromConfig(response.config),
       });
       setMessage("已读取当前设置");
     } catch (err) {
@@ -100,6 +132,8 @@ export default function SettingsPage() {
         ifind_base_url: draft.ifind_base_url.trim(),
         ifind_service_id: draft.ifind_service_id,
         provider_timeout_seconds: draft.provider_timeout_seconds,
+        notification_channels: buildNotificationChannels(draft),
+        sentiment_monitor: config?.sentiment_monitor,
       });
       setConfig(response.config);
       applyDraft({
@@ -110,6 +144,7 @@ export default function SettingsPage() {
         ifind_base_url: response.config.ifind_base_url,
         ifind_service_id: response.config.ifind_service_id,
         provider_timeout_seconds: response.config.provider_timeout_seconds,
+        ...notificationDraftFromConfig(response.config),
       });
       setMessage("设置已保存");
     } catch (err) {
@@ -307,6 +342,78 @@ export default function SettingsPage() {
                   </Row>
                 </Form>
               </Card>
+
+              <Card className="workbench-panel" title="通知渠道">
+                <Alert
+                  className="mb-4"
+                  showIcon
+                  title="用于手动发送短线情绪提醒草稿；后台定时任务会在下一版接入。"
+                  type="info"
+                />
+                <Form form={form} layout="vertical" onValuesChange={(_, values) => updateDraft(values)}>
+                  <Row gutter={12}>
+                    <Col md={12} xs={24}>
+                      <Form.Item label="企业微信启用" name="notification_wechat_enabled" valuePropName="checked">
+                        <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+                      </Form.Item>
+                      <Form.Item label="企业微信 Webhook" name="notification_wechat_webhook">
+                        <Input.Password placeholder="留空表示沿用已保存 webhook" />
+                      </Form.Item>
+                    </Col>
+                    <Col md={12} xs={24}>
+                      <Form.Item label="飞书启用" name="notification_feishu_enabled" valuePropName="checked">
+                        <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+                      </Form.Item>
+                      <Form.Item label="飞书 Webhook" name="notification_feishu_webhook">
+                        <Input.Password placeholder="留空表示沿用已保存 webhook" />
+                      </Form.Item>
+                    </Col>
+                    <Col md={12} xs={24}>
+                      <Form.Item label="Telegram 启用" name="notification_telegram_enabled" valuePropName="checked">
+                        <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+                      </Form.Item>
+                      <Form.Item label="Telegram Bot Token" name="notification_telegram_bot_token">
+                        <Input.Password placeholder="留空表示沿用已保存 token" />
+                      </Form.Item>
+                      <Form.Item label="Telegram Chat ID" name="notification_telegram_chat_id">
+                        <Input />
+                      </Form.Item>
+                    </Col>
+                    <Col md={12} xs={24}>
+                      <Form.Item label="邮件启用" name="notification_email_enabled" valuePropName="checked">
+                        <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+                      </Form.Item>
+                      <Row gutter={8}>
+                        <Col span={16}>
+                          <Form.Item label="SMTP Host" name="notification_email_host">
+                            <Input />
+                          </Form.Item>
+                        </Col>
+                        <Col span={8}>
+                          <Form.Item label="端口" name="notification_email_port">
+                            <InputNumber className="w-full" min={1} />
+                          </Form.Item>
+                        </Col>
+                      </Row>
+                      <Form.Item label="SMTP 用户名" name="notification_email_username">
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="SMTP 密码" name="notification_email_password">
+                        <Input.Password placeholder="留空表示沿用已保存密码" />
+                      </Form.Item>
+                      <Form.Item label="发件人" name="notification_email_sender">
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="收件人（逗号分隔）" name="notification_email_recipients">
+                        <Input />
+                      </Form.Item>
+                      <Form.Item label="TLS" name="notification_email_tls" valuePropName="checked">
+                        <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                </Form>
+              </Card>
             </Space>
           </Col>
 
@@ -362,4 +469,93 @@ function ProbeStatus({ status }: { status: RuntimeSettingsHealthProbe["status"] 
     return <Tag color="warning">missing_key</Tag>;
   }
   return <Tag color="error">{status}</Tag>;
+}
+
+function notificationDraftFromConfig(config: RuntimeSettingsConfig): Pick<
+  SettingsDraft,
+  | "notification_wechat_enabled"
+  | "notification_wechat_webhook"
+  | "notification_feishu_enabled"
+  | "notification_feishu_webhook"
+  | "notification_telegram_enabled"
+  | "notification_telegram_bot_token"
+  | "notification_telegram_chat_id"
+  | "notification_email_enabled"
+  | "notification_email_host"
+  | "notification_email_port"
+  | "notification_email_username"
+  | "notification_email_password"
+  | "notification_email_sender"
+  | "notification_email_recipients"
+  | "notification_email_tls"
+> {
+  const channels = config.notifications?.channels ?? [];
+  const wechat = channels.find((channel) => channel.id === "wechat-work");
+  const feishu = channels.find((channel) => channel.id === "feishu");
+  const telegram = channels.find((channel) => channel.id === "telegram");
+  const email = channels.find((channel) => channel.id === "email");
+  return {
+    notification_wechat_enabled: Boolean(wechat?.enabled),
+    notification_wechat_webhook: "",
+    notification_feishu_enabled: Boolean(feishu?.enabled),
+    notification_feishu_webhook: "",
+    notification_telegram_enabled: Boolean(telegram?.enabled),
+    notification_telegram_bot_token: "",
+    notification_telegram_chat_id: telegram?.chat_id_configured ? "已配置" : "",
+    notification_email_enabled: Boolean(email?.enabled),
+    notification_email_host: email?.smtp_host ?? "",
+    notification_email_port: email?.smtp_port ?? 587,
+    notification_email_username: email?.smtp_username ?? "",
+    notification_email_password: "",
+    notification_email_sender: email?.smtp_sender ?? "",
+    notification_email_recipients: (email?.smtp_recipients ?? []).join(","),
+    notification_email_tls: email?.smtp_use_tls ?? true,
+  };
+}
+
+function buildNotificationChannels(draft: SettingsDraft) {
+  return [
+    {
+      id: "wechat-work",
+      type: "wechat_work" as const,
+      name: "企业微信",
+      enabled: draft.notification_wechat_enabled,
+      webhook_url: draft.notification_wechat_webhook.trim() || null,
+    },
+    {
+      id: "feishu",
+      type: "feishu" as const,
+      name: "飞书",
+      enabled: draft.notification_feishu_enabled,
+      webhook_url: draft.notification_feishu_webhook.trim() || null,
+    },
+    {
+      id: "telegram",
+      type: "telegram" as const,
+      name: "Telegram",
+      enabled: draft.notification_telegram_enabled,
+      bot_token: draft.notification_telegram_bot_token.trim() || null,
+      chat_id: draft.notification_telegram_chat_id.trim() === "已配置" ? null : draft.notification_telegram_chat_id.trim() || null,
+    },
+    {
+      id: "email",
+      type: "email" as const,
+      name: "邮件",
+      enabled: draft.notification_email_enabled,
+      smtp_host: draft.notification_email_host.trim() || null,
+      smtp_port: draft.notification_email_port,
+      smtp_username: draft.notification_email_username.trim() || null,
+      smtp_password: draft.notification_email_password.trim() || null,
+      smtp_sender: draft.notification_email_sender.trim() || null,
+      smtp_recipients: splitRecipients(draft.notification_email_recipients),
+      smtp_use_tls: draft.notification_email_tls,
+    },
+  ];
+}
+
+function splitRecipients(value: string): string[] {
+  return value
+    .split(/[,\n，]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }

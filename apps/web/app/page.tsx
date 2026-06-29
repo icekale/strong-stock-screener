@@ -8,6 +8,7 @@ import {
   getDataSourceStatus,
   getLatestScreenRun,
   getMarketOverview,
+  getSectorRadar,
   getWatchlistPool,
   recheckGsgfReview,
   runGsgfCalibration,
@@ -20,6 +21,7 @@ import type {
   MarketOverviewResponse,
   ScreenRunFilters,
   ScreenStrategy,
+  SectorRadarResponse,
   StrongStockIntradaySnapshot,
   StrongStockScreeningItem,
   StrongStockScreeningResponse,
@@ -32,6 +34,7 @@ export default function HomePage() {
   const [tradeDate, setTradeDate] = useState(defaultTradeDate());
   const [sources, setSources] = useState<DataSourceStatusResponse | null>(null);
   const [marketOverview, setMarketOverview] = useState<MarketOverviewResponse | null>(null);
+  const [sectorRadar, setSectorRadar] = useState<SectorRadarResponse | null>(null);
   const [result, setResult] = useState<StrongStockScreeningResponse | null>(null);
   const [intraday, setIntraday] = useState<StrongStockIntradaySnapshot | null>(null);
   const [strategy, setStrategy] = useState<ScreenStrategy>("combined");
@@ -51,6 +54,7 @@ export default function HomePage() {
     setScreenFilters(loadSavedScreenFilters());
     void refreshSources();
     void refreshMarketOverview();
+    void refreshSectorRadar();
     void refreshLatest();
     void refreshWatchlistPool();
   }, []);
@@ -69,6 +73,15 @@ export default function HomePage() {
     } catch (err) {
       setMarketOverview(null);
       setError(err instanceof Error ? err.message : "读取全A市场概览失败");
+    }
+  }
+
+  async function refreshSectorRadar() {
+    try {
+      setSectorRadar(await getSectorRadar(20));
+    } catch (err) {
+      setSectorRadar(null);
+      setError(err instanceof Error ? err.message : "读取板块资金流失败");
     }
   }
 
@@ -96,7 +109,7 @@ export default function HomePage() {
       const response = await createScreenRun(tradeDate, 30, scanLimit, screenFilters, { strategy });
       setResult(response);
       setIntraday(null);
-      await Promise.all([refreshSources(), refreshMarketOverview()]);
+      await Promise.all([refreshSources(), refreshMarketOverview(), refreshSectorRadar()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "运行筛选失败");
     } finally {
@@ -220,7 +233,8 @@ export default function HomePage() {
       error={error}
       intraday={intraday}
       marketOverview={marketOverview}
-      onRefreshSources={() => void Promise.all([refreshSources(), refreshMarketOverview()])}
+      sectorRadar={sectorRadar}
+      onRefreshSources={() => void Promise.all([refreshSources(), refreshMarketOverview(), refreshSectorRadar()])}
       onRun={() => void handleRun()}
       onRunGsgfCalibration={(options) => void handleRunGsgfCalibration(options)}
       onRecheckGsgfReview={() => void handleRecheckGsgfReview()}

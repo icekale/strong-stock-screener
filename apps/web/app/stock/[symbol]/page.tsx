@@ -4,10 +4,8 @@ import {
   Alert,
   Button,
   Card,
-  Descriptions,
   Empty,
   Input,
-  List,
   Segmented,
   Select,
   Space,
@@ -30,9 +28,15 @@ import {
   type KlineSubPaneCount,
 } from "../../../lib/klineIndicatorLayout";
 import { filterStockList, stockListStatusOptions, type StockListStatus } from "../../../lib/stockListFilter";
-import type { KlineBar, StockKlineResponse, StockResearchResponse, StrongStockScreeningItem } from "../../../lib/types";
+import type {
+  GsgfChartAnnotation,
+  KlineBar,
+  StockKlineResponse,
+  StockResearchResponse,
+  StrongStockScreeningItem,
+} from "../../../lib/types";
 
-type ChartTab = "day" | "week" | "info" | "strategy" | "concept" | "research";
+type ChartTab = "day" | "week" | "info" | "strategy" | "concept";
 type MovingAverageField = "ma5" | "ma10" | "ma20" | "ma60";
 
 type StockListItem = {
@@ -49,7 +53,6 @@ const CHART_TABS: Array<{ key: ChartTab; label: string }> = [
   { key: "info", label: "信息" },
   { key: "strategy", label: "战法" },
   { key: "concept", label: "概念" },
-  { key: "research", label: "研究" },
 ];
 
 const KLINE_CHART_HEIGHT = 680;
@@ -62,6 +65,15 @@ const MOVING_AVERAGES: Array<{ color: string; field: MovingAverageField; label: 
   { color: "#64748b", field: "ma60", label: "MA60", period: 60 },
 ];
 
+const GSGF_MODEL_CONDITIONS = [
+  "20日内有涨停，优先强势板块和高辨识度个股。",
+  "趋势优先，股价在关键均线上方，尤其关注200日新高。",
+  "K线红肥绿瘦，上涨放量饱满，缩量回踩不破趋势。",
+  "放量上涨继续跟踪，放量滞涨或实体阴线降低评级。",
+  "买绿不买红，卖红不卖绿；不冲高不卖，不跳水不买。",
+  "5日线拐头向下、跌破均线、断板未修复时触发空仓纪律。",
+];
+
 export default function StockKlinePage({ params }: { params: Promise<{ symbol: string }> }) {
   const { symbol: rawSymbol } = use(params);
   const symbol = decodeURIComponent(rawSymbol);
@@ -69,12 +81,10 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
   const [research, setResearch] = useState<StockResearchResponse | null>(null);
   const [screenItems, setScreenItems] = useState<StrongStockScreeningItem[]>([]);
   const [loading, setLoading] = useState(true);
-  const [researchLoading, setResearchLoading] = useState(true);
   const [listLoading, setListLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [researchError, setResearchError] = useState<string | null>(null);
   const [activeChartTab, setActiveChartTab] = useState<ChartTab>("day");
-  const [candidateListCollapsed, setCandidateListCollapsed] = useState(true);
+  const [candidateListCollapsed, setCandidateListCollapsed] = useState(false);
   const [showGsgfAnnotations, setShowGsgfAnnotations] = useState(true);
   const [chartDataSource, setChartDataSource] = useState<KlineChartDataSourceMode>("tickflow");
   const [visibleMovingAverages, setVisibleMovingAverages] = useState<MovingAverageField[]>([
@@ -114,25 +124,17 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
 
   useEffect(() => {
     let cancelled = false;
-    setResearchLoading(true);
-    setResearchError(null);
     getStockResearch(symbol)
       .then((response) => {
         if (!cancelled) {
           setResearch(response);
         }
       })
-      .catch((err) => {
+      .catch(() => {
         if (!cancelled) {
           setResearch(null);
-          setResearchError(err instanceof Error ? err.message : "读取个股研究失败");
         }
       })
-      .finally(() => {
-        if (!cancelled) {
-          setResearchLoading(false);
-        }
-      });
     return () => {
       cancelled = true;
     };
@@ -188,6 +190,9 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
   const activeTabLabel = CHART_TABS.find((item) => item.key === activeChartTab)?.label ?? "日 K 线";
   const chartDataSourceLabel =
     chartDataSource === "tickflow" ? (data?.source_status.source ?? "TickFlow 读取中") : "kline-charts-react 内置 stock-sdk";
+  const gsgfAnnotations = data?.gsgf_annotations ?? [];
+  const annotationCount = gsgfAnnotations.length;
+  const canShowGsgfAnnotations = activeChartTab === "day" && chartDataSource === "tickflow" && annotationCount > 0;
 
   function toggleMovingAverage(field: MovingAverageField) {
     setVisibleMovingAverages((current) => {
@@ -241,6 +246,8 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
                   chartDataSource={chartDataSource}
                   currentStock={currentStock}
                   dataSource={chartDataSourceLabel}
+                  annotationCount={annotationCount}
+                  canShowGsgfAnnotations={canShowGsgfAnnotations}
                   indicatorState={indicatorState}
                   isChartTab={isChartTab}
                   loading={loading}
@@ -258,10 +265,17 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
                 <div className="overflow-hidden rounded-md border border-slate-100">
                   {isChartTab ? (
                     <div className="h-[calc(100vh-236px)] min-h-[560px] bg-white">
+                      <GsgfEvidenceSummary
+                        activeTab={activeChartTab}
+                        annotations={gsgfAnnotations}
+                        canShowGsgfAnnotations={canShowGsgfAnnotations}
+                        chartDataSource={chartDataSource}
+                        showGsgfAnnotations={showGsgfAnnotations}
+                      />
                       <TickFlowKlineChart
                         annotations={
                           activeChartTab === "day" && chartDataSource === "tickflow"
-                            ? data?.gsgf_annotations ?? []
+                            ? gsgfAnnotations
                             : []
                         }
                         bars={chartBars}
@@ -270,7 +284,7 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
                         movingAverages={visibleMovingAverages}
                         period={activeChartTab === "week" ? "weekly" : "daily"}
                         showGsgfAnnotations={
-                          activeChartTab === "day" && chartDataSource === "tickflow" && showGsgfAnnotations
+                          canShowGsgfAnnotations && showGsgfAnnotations
                         }
                         subIndicators={indicatorState.subIndicators}
                         symbol={symbol}
@@ -284,8 +298,6 @@ export default function StockKlinePage({ params }: { params: Promise<{ symbol: s
                       currentStock={currentStock}
                       quote={quote}
                       research={research}
-                      researchError={researchError}
-                      researchLoading={researchLoading}
                       sameIndustryItems={stockList.filter(
                         (item) => item.industry && item.industry === currentStock?.industry,
                       )}
@@ -364,22 +376,95 @@ function MovingAverageControl({
   );
 }
 
-function AnnotationControl({ active, onToggle }: { active: boolean; onToggle: () => void }) {
+function AnnotationControl({
+  active,
+  annotationCount,
+  available,
+  onToggle,
+}: {
+  active: boolean;
+  annotationCount: number;
+  available: boolean;
+  onToggle: () => void;
+}) {
+  const label = available ? `${active ? "隐藏证据" : "显示证据"} (${annotationCount})` : `GSGF 证据 (${annotationCount})`;
   return (
     <Button
       aria-pressed={active}
+      disabled={!available}
       onClick={onToggle}
       size="small"
-      title={`${active ? "隐藏" : "显示"}股是股非图表证据`}
-      type={active ? "primary" : "default"}
+      title={available ? `${active ? "隐藏" : "显示"}股是股非图表证据` : "GSGF 图表证据仅支持日K + TickFlow，且需要当前股票存在证据"}
+      type={available && active ? "primary" : "default"}
     >
-      GSGF 证据
+      {label}
     </Button>
+  );
+}
+
+function GsgfEvidenceSummary({
+  activeTab,
+  annotations,
+  canShowGsgfAnnotations,
+  chartDataSource,
+  showGsgfAnnotations,
+}: {
+  activeTab: ChartTab;
+  annotations: GsgfChartAnnotation[];
+  canShowGsgfAnnotations: boolean;
+  chartDataSource: KlineChartDataSourceMode;
+  showGsgfAnnotations: boolean;
+}) {
+  const isSupportedMode = activeTab === "day" && chartDataSource === "tickflow";
+  const visibleAnnotations = canShowGsgfAnnotations && showGsgfAnnotations ? annotations.slice(0, 4) : [];
+
+  if (!isSupportedMode) {
+    return (
+      <div className="border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-500">
+        GSGF 图表证据仅支持日K + TickFlow
+      </div>
+    );
+  }
+
+  if (annotations.length === 0) {
+    return (
+      <div className="border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-500">
+        暂无 GSGF 图表证据
+      </div>
+    );
+  }
+
+  if (!showGsgfAnnotations) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-500">
+        <span>GSGF 图表证据已隐藏</span>
+        <Tag className="m-0" color="default">{annotations.length} 条可显示</Tag>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-b border-slate-100 bg-white px-3 py-2">
+      <Typography.Text className="text-xs font-black text-slate-500">GSGF 证据</Typography.Text>
+      {visibleAnnotations.map((item, index) => (
+        <Tag className="m-0 max-w-full truncate" color={annotationTagColor(item.severity)} key={`${item.type}-${item.label}-${item.date ?? index}`}>
+          {item.label} · {formatAnnotationDate(item.date ?? item.start_date ?? item.end_date)}
+          {item.price !== null && item.price !== undefined ? ` · ${formatPrice(item.price)}` : ""}
+        </Tag>
+      ))}
+      {annotations.length > visibleAnnotations.length && (
+        <Typography.Text className="text-xs font-semibold text-slate-400">
+          另 {annotations.length - visibleAnnotations.length} 条
+        </Typography.Text>
+      )}
+    </div>
   );
 }
 
 function ChartControlBar({
   activeTabLabel,
+  annotationCount,
+  canShowGsgfAnnotations,
   chartBarCount,
   chartDataSource,
   currentStock,
@@ -398,6 +483,8 @@ function ChartControlBar({
   visibleMovingAverages,
 }: {
   activeTabLabel: string;
+  annotationCount: number;
+  canShowGsgfAnnotations: boolean;
   chartBarCount: number;
   chartDataSource: KlineChartDataSourceMode;
   currentStock: StockListItem | null;
@@ -456,7 +543,12 @@ function ChartControlBar({
             visibleMovingAverages={visibleMovingAverages}
           />
           {chartDataSource === "tickflow" && (
-            <AnnotationControl active={showGsgfAnnotations} onToggle={onAnnotationToggle} />
+            <AnnotationControl
+              active={showGsgfAnnotations}
+              annotationCount={annotationCount}
+              available={canShowGsgfAnnotations}
+              onToggle={onAnnotationToggle}
+            />
           )}
           <SubIndicatorControl
             indicatorState={indicatorState}
@@ -676,10 +768,10 @@ function QuoteSummary({
 function ChartTabs({ activeTab, onChange }: { activeTab: ChartTab; onChange: (tab: ChartTab) => void }) {
   return (
     <div className="overflow-x-auto border-b border-slate-200 bg-slate-50">
-      <div className="grid min-w-[520px] grid-cols-6 p-2 text-center text-sm font-black text-slate-500">
+      <div className="grid min-w-[520px] grid-cols-5 p-2 text-center text-sm font-black text-slate-500">
         <Segmented
           block
-          className="col-span-6"
+          className="col-span-5"
           onChange={(value) => onChange(value as ChartTab)}
           options={CHART_TABS.map((item) => ({ label: item.label, value: item.key }))}
           value={activeTab}
@@ -696,8 +788,6 @@ function StockDetailPanel({
   currentStock,
   quote,
   research,
-  researchError,
-  researchLoading,
   sameIndustryItems,
 }: {
   activeTab: ChartTab;
@@ -706,8 +796,6 @@ function StockDetailPanel({
   currentStock: StockListItem | null;
   quote: QuoteSnapshot | null;
   research: StockResearchResponse | null;
-  researchError: string | null;
-  researchLoading: boolean;
   sameIndustryItems: StockListItem[];
 }) {
   const latest = bars[bars.length - 1] ?? null;
@@ -720,10 +808,9 @@ function StockDetailPanel({
         <InfoCard label="状态" value={statusLabel(currentStock?.status ?? null)} />
         <InfoCard label="最新价" tone="text-red-500" value={quote ? formatPrice(quote.close) : "--"} />
         <InfoCard label="成交量" value={quote ? formatVolume(quote.volume) : "--"} />
-        <InfoCard label="K线数量" value={`${bars.length || "--"}`} />
-        <InfoCard label="MA5" value={latest?.ma5 ? formatPrice(latest.ma5) : "--"} />
-        <InfoCard label="MA20" value={latest?.ma20 ? formatPrice(latest.ma20) : "--"} />
-        <InfoCard label="MA60" value={latest?.ma60 ? formatPrice(latest.ma60) : "--"} />
+        <InfoCard label="总市值" value={pickResearchValue(research, ["总市值", "总市值(元)", "总市值（元）", "总市值(亿元)", "总市值（亿元）", "market_cap", "market_capitalization"])} />
+        <InfoCard label="动态市盈率" value={pickResearchValue(research, ["动态市盈率", "市盈率动态", "市盈率(动态)", "市盈率（动态）", "PE动态", "动态PE", "市盈率TTM", "PE TTM", "PE_TTM", "pe_ttm"])} />
+        <InfoCard label="静态市盈率" value={pickResearchValue(research, ["静态市盈率", "市盈率静态", "市盈率(静态)", "市盈率（静态）", "PE静态", "静态PE", "市盈率", "PE", "pe"])} />
       </div>
     );
   }
@@ -739,21 +826,10 @@ function StockDetailPanel({
           <InfoCard label="收盘 / MA20" value={latest ? comparePrice(latest.close, latest.ma20) : "--"} />
           <InfoCard label="收盘 / MA60" value={latest ? comparePrice(latest.close, latest.ma60) : "--"} />
         </div>
+        <ModelConditionsSection />
         <TagSection emptyText="暂无命中规则" items={ruleHits} title="规则命中" tone="red" />
         <TagSection emptyText="暂无风险提示" items={riskFlags} title="风险提示" tone="amber" />
       </div>
-    );
-  }
-
-  if (activeTab === "research") {
-    return (
-      <ResearchPanel
-        candidate={candidate}
-        currentStock={currentStock}
-        error={researchError}
-        loading={researchLoading}
-        research={research}
-      />
     );
   }
 
@@ -784,161 +860,36 @@ function StockDetailPanel({
   );
 }
 
-function ResearchPanel({
-  candidate,
-  currentStock,
-  error,
-  loading,
-  research,
-}: {
-  candidate: StrongStockScreeningItem | null;
-  currentStock: StockListItem | null;
-  error: string | null;
-  loading: boolean;
-  research: StockResearchResponse | null;
-}) {
-  if (loading) {
-    return (
-      <div className="flex min-h-[520px] items-center justify-center bg-white">
-        <Spin tip="正在读取 iFinD 研究..." />
-      </div>
-    );
-  }
-
-  const sourceStatuses = research?.source_status ?? [];
-  const failedSources = sourceStatuses.filter((item) => item.status !== "success");
-  const sourceSummary =
-    failedSources.length > 0
-      ? failedSources.map((item) => `${item.source}: ${item.detail}`).join("；")
-      : sourceStatuses.length > 0
-        ? sourceStatuses.map((item) => item.source).join(" / ")
-        : "iFinD 研究状态待读取";
-
+function ModelConditionsSection() {
   return (
-    <div className="min-h-[520px] space-y-4 bg-white p-4">
-      <Card className="workbench-card" size="small">
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <Typography.Text className="text-sm font-black text-slate-950">iFinD 研究</Typography.Text>
-            <Typography.Text className="mt-1 block text-xs font-bold text-slate-500">
-              {error ?? sourceSummary}
-            </Typography.Text>
+    <div>
+      <h3 className="mb-2 text-xs font-black text-slate-500">股是股非模型选股条件</h3>
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+        {GSGF_MODEL_CONDITIONS.map((item, index) => (
+          <div className="rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm font-bold leading-6 text-slate-700" key={item}>
+            <span className="mr-2 font-black tabular-nums text-slate-400">{index + 1}.</span>
+            {item}
           </div>
-          <Tag className="m-0 w-fit">不替代 TickFlow 行情</Tag>
-        </div>
-      </Card>
-
-      <div className="grid gap-3 xl:grid-cols-2">
-        <ResearchSection
-          title="行业研究"
-          payload={buildIndustryResearchPayload(research, currentStock)}
-        />
-        <ResearchSection title="财务指标" payload={buildFinancialResearchPayload(research)} />
-        <ResearchSection title="估值指标" payload={buildValuationResearchPayload(research)} />
-        <ResearchRecordsSection
-          title="风险事件"
-          emptyText="暂无 iFinD 风险事件"
-          records={research?.events ?? []}
-          tone="amber"
-        />
-        <ResearchRecordsSection
-          title="公司公告"
-          emptyText="暂无 iFinD 公司公告"
-          records={research?.notices ?? []}
-          tone="slate"
-        />
-        <ResearchRecordsSection
-          title="新闻资讯"
-          emptyText="暂无 iFinD 新闻资讯"
-          records={research?.news ?? []}
-          tone="slate"
-        />
+        ))}
       </div>
     </div>
   );
 }
 
-function ResearchSection({ payload, title }: { payload: Record<string, unknown>; title: string }) {
-  const entries = Object.entries(payload).filter(([, value]) => formatResearchValue(value) !== "--").slice(0, 10);
-  return (
-    <Card className="workbench-card" size="small" title={<span className="text-xs font-black text-slate-500">{title}</span>}>
-      {entries.length > 0 ? (
-        <Descriptions
-          column={2}
-          items={entries.map(([key, value]) => ({
-            key,
-            label: key,
-            children: <span className="font-black text-slate-900">{formatResearchValue(value)}</span>,
-          }))}
-          size="small"
-        />
-      ) : (
-        <Empty description={`暂无${title}数据`} image={Empty.PRESENTED_IMAGE_SIMPLE} />
-      )}
-    </Card>
-  );
-}
-
-function ResearchRecordsSection({
-  emptyText,
-  records,
-  title,
-  tone,
-}: {
-  emptyText: string;
-  records: Array<Record<string, unknown>>;
-  title: string;
-  tone: "amber" | "slate";
-}) {
-  return (
-    <Card className="workbench-card" size="small" title={<span className="text-xs font-black text-slate-500">{title}</span>}>
-      {records.length > 0 ? (
-        <List
-          dataSource={records.slice(0, 8)}
-          renderItem={(record, index) => (
-            <List.Item key={`${title}-${index}`}>
-              <List.Item.Meta
-                title={<span className="line-clamp-2 text-sm font-black text-slate-900">{recordTitle(record)}</span>}
-                description={<span className="line-clamp-2 text-xs font-semibold leading-5 text-slate-500">{recordSummary(record)}</span>}
-              />
-              <Tag color={tone === "amber" ? "orange" : "default"}>{title}</Tag>
-            </List.Item>
-          )}
-          size="small"
-        />
-      ) : (
-        <Empty description={emptyText} image={Empty.PRESENTED_IMAGE_SIMPLE} />
-      )}
-    </Card>
-  );
-}
-
-function buildIndustryResearchPayload(
-  research: StockResearchResponse | null,
-  currentStock: StockListItem | null,
-): Record<string, unknown> {
-  const sector = research?.sector ?? {};
-  return {
-    所属行业: currentStock?.industry ?? research?.profile?.["所属行业"] ?? "--",
-    板块强度: candidateSectorLabel(sector["强度"]),
-    板块得分: sector["得分"] ?? sector["score"] ?? "--",
-    板块排名: sector["排名"] ?? sector["rank"] ?? "--",
-    板块备注: sector["备注"] ?? sector["说明"] ?? sector["reason"] ?? "--",
-    板块概览: sector["摘要"] ?? sector["概览"] ?? sector["summary"] ?? "--",
-  };
-}
-
-function buildFinancialResearchPayload(research: StockResearchResponse | null): Record<string, unknown> {
-  return research?.financials ?? {};
-}
-
-function buildValuationResearchPayload(research: StockResearchResponse | null): Record<string, unknown> {
-  return research?.valuation ?? {};
-}
-
-function candidateSectorLabel(value: unknown): string {
-  if (typeof value === "string" && value.trim()) {
-    return value;
+function pickResearchValue(research: StockResearchResponse | null, keys: string[]): string {
+  const payloads = [research?.valuation, research?.financials, research?.profile];
+  for (const payload of payloads) {
+    if (!payload) {
+      continue;
+    }
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(payload, key)) {
+        const value = formatResearchValue(payload[key]);
+        if (value !== "--") {
+          return value;
+        }
+      }
+    }
   }
   return "--";
 }
@@ -1021,44 +972,28 @@ function formatResearchValue(value: unknown): string {
   return String(value);
 }
 
-function recordTitle(record: Record<string, unknown>): string {
-  const candidates = [record.title, record.标题, record.name, record.名称, record.summary, record.摘要];
-  for (const candidate of candidates) {
-    const formatted = formatResearchValue(candidate);
-    if (formatted !== "--") {
-      return formatted;
-    }
+function annotationTagColor(severity: GsgfChartAnnotation["severity"]): string {
+  if (severity === "positive") {
+    return "red";
   }
-  return "未命名记录";
+  if (severity === "warning") {
+    return "orange";
+  }
+  if (severity === "danger") {
+    return "green";
+  }
+  return "default";
 }
 
-function recordSummary(record: Record<string, unknown>): string {
-  const preferredKeys = [
-    "detail",
-    "内容",
-    "desc",
-    "description",
-    "summary",
-    "摘要",
-    "level",
-    "sentiment",
-    "sentiment_label",
-    "source",
-    "date",
-    "date_time",
-    "日期",
-    "发布时间",
-  ];
-  const values = preferredKeys.map((key) => record[key]).filter((value) => value !== undefined && value !== null);
-  if (values.length > 0) {
-    return values.map((value) => formatResearchValue(value)).filter((item) => item !== "--").join(" · ");
+function formatAnnotationDate(value: string | null): string {
+  if (!value) {
+    return "日期待补";
   }
-  const fallback = Object.entries(record)
-    .filter(([key]) => !["title", "标题", "name", "名称", "summary", "摘要"].includes(key))
-    .slice(0, 4)
-    .map(([key, value]) => `${key}: ${formatResearchValue(value)}`)
-    .filter((item) => !item.endsWith(": --"));
-  return fallback.length > 0 ? fallback.join(" · ") : "暂无摘要";
+  const digits = value.replace(/\D/g, "");
+  if (digits.length >= 8) {
+    return `${digits.slice(0, 4)}-${digits.slice(4, 6)}-${digits.slice(6, 8)}`;
+  }
+  return value;
 }
 
 type QuoteSnapshot = {

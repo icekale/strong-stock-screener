@@ -111,7 +111,9 @@ class IfindMcpProvider:
         financials, status = self._safe_tool_call(
             service_id="hexin-ifind-ds-stock-mcp",
             tool_name="get_stock_financials",
-            arguments={"query": f"{symbol} 最新报告期的ROE、营收增速、净利润增速、市盈率TTM、市净率"},
+            arguments={
+                "query": f"{symbol} 最新报告期的ROE、营收增速、净利润增速、总市值、动态市盈率、静态市盈率、市盈率TTM、市净率"
+            },
             source="iFinD 财务估值",
         )
         response.source_status.append(status)
@@ -119,7 +121,34 @@ class IfindMcpProvider:
         response.financials = finance_payload
         response.valuation = _pick_fields(
             finance_payload,
-            ["市盈率", "市盈率TTM", "PE", "PE TTM", "市净率", "PB", "市销率", "PS", "总市值"],
+            [
+                "总市值",
+                "总市值(元)",
+                "总市值（元）",
+                "总市值(亿元)",
+                "总市值（亿元）",
+                "动态市盈率",
+                "市盈率动态",
+                "市盈率(动态)",
+                "市盈率（动态）",
+                "PE动态",
+                "动态PE",
+                "市盈率TTM",
+                "PE TTM",
+                "PE_TTM",
+                "静态市盈率",
+                "市盈率静态",
+                "市盈率(静态)",
+                "市盈率（静态）",
+                "PE静态",
+                "静态PE",
+                "市盈率",
+                "PE",
+                "市净率",
+                "PB",
+                "市销率",
+                "PS",
+            ],
         )
 
         events, status = self._safe_tool_call(

@@ -1,4 +1,4 @@
-export type SourceStatusValue = "success" | "failed" | "disabled" | "missing_key";
+export type SourceStatusValue = "success" | "failed" | "disabled" | "missing_key" | "stale";
 export type RiskCheckStatus = "triggered" | "clear" | "unknown";
 export type ScreenStrategy = "strong_stock" | "gsgf" | "combined";
 export type GsgfIntradayConfirmation = "盘中确认" | "等待确认" | "低吸确认" | "减仓确认" | "风险失效" | "无GSGF上下文";
@@ -255,6 +255,234 @@ export type SectorRadarResponse = {
   generated_at: string;
 };
 
+export type ShortTermSentimentStockItem = {
+  symbol: string;
+  name: string;
+  industry: string | null;
+  board_count: number;
+  limit_up_hits_20d: number;
+  break_board_count: number;
+  last_limit_up_date: string | null;
+  first_seal_time: string | null;
+  last_seal_time: string | null;
+  board_note: string | null;
+  limit_up_evidence: string[];
+};
+
+export type ShortTermSentimentLadderGroup = {
+  board_count: number;
+  label: string;
+  items: ShortTermSentimentStockItem[];
+};
+
+export type ShortTermSentimentIndustryItem = {
+  name: string;
+  limit_up_count: number;
+  break_board_count: number;
+  max_consecutive_boards: number;
+  leader: string | null;
+  symbols: string[];
+  strength_score: number;
+};
+
+export type ShortTermSentimentResponse = {
+  trade_date: string;
+  metrics: {
+    limit_up_count: number;
+    break_board_count: number;
+    max_consecutive_boards: number;
+    hot_industry_count: number;
+  };
+  limit_up_pool: ShortTermSentimentStockItem[];
+  break_board_pool: ShortTermSentimentStockItem[];
+  ladder: ShortTermSentimentLadderGroup[];
+  hot_industries: ShortTermSentimentIndustryItem[];
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
+export type MarketEmotionLevel = "冰点" | "一般" | "良好" | "火爆";
+
+export type MarketEmotionBucket = {
+  label: string;
+  min_pct: number | null;
+  max_pct: number | null;
+  count: number | null;
+  source: string;
+};
+
+export type MarketEmotionMetrics = {
+  emotion_score: number;
+  emotion_level: MarketEmotionLevel;
+  limit_up_count: number;
+  break_board_count: number;
+  limit_down_count: number | null;
+  losing_effect_score: number | null;
+  max_consecutive_boards: number;
+  advance_count: number | null;
+  decline_count: number | null;
+  seal_rate_pct: number | null;
+  turnover_cny: number | null;
+  turnover_change_cny: number | null;
+  turnover_change_pct: number | null;
+  main_flow_cny: number | null;
+  yesterday_limit_up_performance_pct: number | null;
+  yesterday_ladder_performance_pct: number | null;
+};
+
+export type MarketEmotionSample = {
+  trade_date: string;
+  sampled_at: string;
+  emotion_score: number;
+  emotion_level: MarketEmotionLevel;
+  limit_up_count: number;
+  break_board_count: number;
+  limit_down_count: number | null;
+  losing_effect_score: number | null;
+  max_consecutive_boards: number;
+  advance_count: number | null;
+  decline_count: number | null;
+  seal_rate_pct: number | null;
+  turnover_cny: number | null;
+  turnover_change_pct: number | null;
+};
+
+export type MarketEmotionSnapshotResponse = {
+  trade_date: string;
+  metrics: MarketEmotionMetrics;
+  buckets: MarketEmotionBucket[];
+  samples: MarketEmotionSample[];
+  source_status: StrongStockSourceStatus[];
+  notes: string[];
+  generated_at: string;
+};
+
+export type SentimentSnapshotStatus = "fresh" | "cached" | "missing";
+
+export type SentimentSummaryMetrics = {
+  emotion_score: number;
+  emotion_level: MarketEmotionLevel;
+  limit_up_count: number;
+  break_board_count: number;
+  limit_down_count: number | null;
+  losing_effect_score: number | null;
+  max_consecutive_boards: number;
+  advance_count: number | null;
+  decline_count: number | null;
+  seal_rate_pct: number | null;
+  turnover_cny: number | null;
+  turnover_change_cny: number | null;
+  turnover_change_pct: number | null;
+};
+
+export type SentimentSummaryResponse = {
+  trade_date: string;
+  snapshot_status: SentimentSnapshotStatus;
+  cached_at: string | null;
+  metrics: SentimentSummaryMetrics;
+  hot_industries: ShortTermSentimentIndustryItem[];
+  source_status: StrongStockSourceStatus[];
+  notes: string[];
+  generated_at: string;
+};
+
+export type SentimentDetailResponse = {
+  trade_date: string;
+  snapshot_status: SentimentSnapshotStatus;
+  cached_at: string | null;
+  sentiment: ShortTermSentimentResponse;
+  market_emotion: MarketEmotionSnapshotResponse;
+};
+
+export type ShortTermIntradaySentimentItem = {
+  symbol: string;
+  name: string;
+  industry: string | null;
+  pool_tags: string[];
+  action: "watch" | "low_buy_watch" | "reduce" | "avoid_chase" | "data_incomplete";
+  last_price: number | null;
+  pct_change: number | null;
+  open_gap_pct: number | null;
+  intraday_ma: number | null;
+  latest_vs_intraday_ma_pct: number | null;
+  turnover_cny: number | null;
+  signals: string[];
+};
+
+export type ShortTermIntradaySentimentResponse = {
+  trade_date: string;
+  metrics: {
+    watched_count: number;
+    alert_count: number;
+    reduce_count: number;
+    low_buy_watch_count: number;
+    avoid_chase_count: number;
+  };
+  items: ShortTermIntradaySentimentItem[];
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
+export type ShortTermIntradaySignalAlert = {
+  symbol: string;
+  name: string;
+  industry: string | null;
+  action: "watch" | "low_buy_watch" | "reduce" | "avoid_chase" | "data_incomplete";
+  severity: "high" | "medium" | "low";
+  pool_tags: string[];
+  pct_change: number | null;
+  turnover_cny: number | null;
+  reasons: string[];
+};
+
+export type ShortTermIntradaySignalDigest = {
+  title: string;
+  trade_date: string;
+  alert_count: number;
+  alerts: ShortTermIntradaySignalAlert[];
+  message_text: string;
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
+export type SentimentMonitorConfig = {
+  enabled: boolean;
+  interval_minutes: 1 | 2 | 3;
+  cooldown_minutes: number;
+  limit: number;
+  emotion_score_change_threshold: number;
+  emotion_score_15m_threshold: number;
+  break_board_jump_threshold: number;
+  limit_down_jump_threshold: number;
+  seal_rate_drop_threshold: number;
+  limit_up_jump_threshold: number;
+  losing_effect_jump_threshold: number;
+};
+
+export type SentimentMutationAlert = {
+  type: string;
+  severity: "high" | "medium" | "low";
+  title: string;
+  message: string;
+  previous_value: number | null;
+  current_value: number | null;
+  threshold: number;
+  generated_at: string;
+};
+
+export type SentimentMonitorStatus = {
+  enabled: boolean;
+  running: boolean;
+  in_trading_session: boolean;
+  config: SentimentMonitorConfig;
+  last_sampled_at: string | null;
+  last_trade_date: string | null;
+  last_emotion_score: number | null;
+  last_notification_at: string | null;
+  last_error: string | null;
+  last_alerts: SentimentMutationAlert[];
+};
+
 export type RuntimeSettingsConfig = {
   candidate_provider: "recent_limit_up" | "thsdk";
   kline_provider: "tickflow";
@@ -270,6 +498,57 @@ export type RuntimeSettingsConfig = {
   ifind_service_id: "hexin-ifind-ds-stock-mcp" | "hexin-ifind-ds-news-mcp" | "hexin-ifind-ds-index-mcp";
   provider_timeout_seconds: number;
   runtime_config_path: string;
+  notifications: NotificationSettingsPublic;
+  sentiment_monitor: SentimentMonitorConfig;
+};
+
+export type NotificationChannelType = "wechat_work" | "feishu" | "telegram" | "email";
+
+export type NotificationChannelConfig = {
+  id: string;
+  type: NotificationChannelType;
+  name: string;
+  enabled: boolean;
+  webhook_url?: string | null;
+  bot_token?: string | null;
+  chat_id?: string | null;
+  smtp_host?: string | null;
+  smtp_port?: number;
+  smtp_username?: string | null;
+  smtp_password?: string | null;
+  smtp_sender?: string | null;
+  smtp_recipients?: string[];
+  smtp_use_tls?: boolean;
+};
+
+export type NotificationChannelPublic = {
+  id: string;
+  type: NotificationChannelType;
+  name: string;
+  enabled: boolean;
+  webhook_configured: boolean;
+  bot_token_configured: boolean;
+  chat_id_configured: boolean;
+  smtp_host: string;
+  smtp_port: number;
+  smtp_username: string;
+  smtp_sender: string;
+  smtp_recipients: string[];
+  smtp_use_tls: boolean;
+};
+
+export type NotificationSettingsPublic = {
+  channels: NotificationChannelPublic[];
+};
+
+export type NotificationSendResult = {
+  results: Array<{
+    channel_id: string;
+    channel_name: string;
+    type: NotificationChannelType | null;
+    status: "success" | "failed" | "disabled" | "not_found";
+    detail: string;
+  }>;
 };
 
 export type RuntimeSettingsResponse = {
@@ -282,6 +561,8 @@ export type RuntimeSettingsResponse = {
     ifind_base_url?: string | null;
     ifind_service_id?: "hexin-ifind-ds-stock-mcp" | "hexin-ifind-ds-news-mcp" | "hexin-ifind-ds-index-mcp" | null;
     provider_timeout_seconds?: number | null;
+    notification_channels?: NotificationChannelConfig[];
+    sentiment_monitor?: SentimentMonitorConfig;
   };
 };
 

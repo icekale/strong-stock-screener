@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from time import perf_counter
 from pathlib import Path
 
@@ -16,11 +17,16 @@ from app.models import (
     GsgfReviewSummary,
     GsgfTradePlan,
     KlineBar,
+    MarketEmotionSnapshotResponse,
     MarketOverviewResponse,
     MarketSectorStrengthItem,
     ScreenStrategy,
     SectorRadarItem,
     SectorRadarResponse,
+    SentimentDetailResponse,
+    ShortTermIntradaySentimentResponse,
+    ShortTermIntradaySignalDigest,
+    ShortTermSentimentResponse,
     StockKlineResponse,
     StockResearchResponse,
     StrongStockDataUnavailable,
@@ -44,6 +50,7 @@ from app.services.gsgf_backtest import summarize_gsgf_backtest
 from app.services.gsgf_real_calibration import summarize_gsgf_real_calibration
 from app.services.gsgf_review import GsgfReviewStore
 from app.services.gsgf_trade_plan import build_gsgf_trade_plan
+from app.services.market_emotion_history import MarketEmotionHistoryStore
 from app.services.runs import RunStore
 from app.services.runtime_settings import (
     SettingsUpdate,
@@ -52,7 +59,24 @@ from app.services.runtime_settings import (
     public_settings_payload,
     save_runtime_settings,
 )
+from app.services.notification_channels import (
+    DefaultSmtpClient,
+    NotificationSendResult,
+    NotificationSettings,
+    send_notification_message,
+)
 from app.services.screener import StrongStockScreener
+from app.services.short_term_cache import TtlCache
+from app.services.sentiment_snapshot_store import SentimentSnapshotStore
+from app.services.sentiment_monitor import SentimentMonitor, SentimentMonitorConfig
+from app.services.short_term_sentiment import (
+    build_missing_sentiment_summary,
+    build_market_emotion_snapshot,
+    build_sentiment_summary,
+    build_short_term_intraday_sentiment,
+    build_short_term_intraday_signal_digest,
+    build_short_term_sentiment,
+)
 
 
 class ScreenFiltersRequest(BaseModel):
@@ -126,12 +150,27 @@ class HealthProbe(BaseModel):
     detail: str
 
 
+class NotificationSendRequest(BaseModel):
+    title: str
+    message_text: str
+    channel_ids: list[str] = Field(default_factory=list, max_length=20)
+
+
 def _cors_allow_origins() -> list[str]:
     settings = get_settings()
     return [origin.strip() for origin in settings.cors_allow_origins.split(",") if origin.strip()]
 
 
-app = FastAPI(title="强势股选股 API", version="0.1.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    startup_sentiment_monitor()
+    try:
+        yield
+    finally:
+        shutdown_sentiment_monitor()
+
+
+app = FastAPI(title="强势股选股 API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_allow_origins(),
@@ -139,6 +178,20 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+SHORT_TERM_SENTIMENT_CACHE: TtlCache[ShortTermSentimentResponse] = TtlCache(ttl_seconds=90)
+MARKET_EMOTION_CACHE: TtlCache[MarketEmotionSnapshotResponse] = TtlCache(ttl_seconds=45)
+
+
+def startup_sentiment_monitor() -> None:
+    if load_runtime_settings(_runtime_config_path()).sentiment_monitor.enabled:
+        _sentiment_monitor().start()
+
+
+def shutdown_sentiment_monitor() -> None:
+    monitor = getattr(app.state, "sentiment_monitor", None)
+    if monitor is not None:
+        monitor.stop()
 
 
 @app.get("/health")
@@ -209,6 +262,53 @@ def update_runtime_settings(request: SettingsUpdate) -> dict[str, object]:
         "config": public_settings_payload(_effective_settings()),
         "saved": _public_saved_settings(),
     }
+
+
+@app.post("/api/notifications/send")
+def send_notification(request: NotificationSendRequest) -> dict[str, object]:
+    runtime = load_runtime_settings(_runtime_config_path())
+    result: NotificationSendResult = send_notification_message(
+        NotificationSettings(channels=runtime.notification_channels),
+        title=request.title,
+        message_text=request.message_text,
+        channel_ids=request.channel_ids,
+        http_client=getattr(app.state, "notification_http_client", None),
+        smtp_client=getattr(app.state, "notification_smtp_client", None) or DefaultSmtpClient(),
+    )
+    return result.model_dump(mode="json")
+
+
+@app.get("/api/short-term/sentiment/monitor/status")
+def get_sentiment_monitor_status() -> dict[str, object]:
+    return _sentiment_monitor().status().model_dump(mode="json")
+
+
+@app.put("/api/short-term/sentiment/monitor/config")
+def update_sentiment_monitor_config(request: SentimentMonitorConfig) -> dict[str, object]:
+    _save_sentiment_monitor_config(request)
+    monitor = _sentiment_monitor()
+    if request.enabled:
+        return monitor.start().model_dump(mode="json")
+    return monitor.stop().model_dump(mode="json")
+
+
+@app.post("/api/short-term/sentiment/monitor/start")
+def start_sentiment_monitor() -> dict[str, object]:
+    current = load_runtime_settings(_runtime_config_path()).sentiment_monitor
+    _save_sentiment_monitor_config(current.model_copy(update={"enabled": True}))
+    return _sentiment_monitor().start().model_dump(mode="json")
+
+
+@app.post("/api/short-term/sentiment/monitor/stop")
+def stop_sentiment_monitor() -> dict[str, object]:
+    current = load_runtime_settings(_runtime_config_path()).sentiment_monitor
+    _save_sentiment_monitor_config(current.model_copy(update={"enabled": False}))
+    return _sentiment_monitor().stop().model_dump(mode="json")
+
+
+@app.post("/api/short-term/sentiment/monitor/run-once")
+def run_sentiment_monitor_once(trade_date: str | None = None) -> dict[str, object]:
+    return _sentiment_monitor().run_once(trade_date).model_dump(mode="json")
 
 
 @app.get("/api/settings/health")
@@ -374,6 +474,160 @@ def get_sector_radar(limit: int = 20) -> dict[str, object]:
     return _estimated_sector_radar(overview, bounded_limit).model_dump(mode="json")
 
 
+@app.get("/api/short-term/sentiment")
+def get_short_term_sentiment(trade_date: str, limit: int = 50) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 100))
+    try:
+        result = _cached_short_term_sentiment(trade_date, bounded_limit)
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return result.model_dump(mode="json")
+
+
+@app.get("/api/short-term/sentiment/summary")
+def get_short_term_sentiment_summary(
+    trade_date: str,
+    limit: int = 80,
+    refresh: bool = False,
+) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 100))
+    cached = _sentiment_snapshot_store().load_summary(trade_date)
+    if cached is not None:
+        return cached.model_dump(mode="json")
+    if not refresh:
+        return build_missing_sentiment_summary(trade_date).model_dump(mode="json")
+    try:
+        sentiment, market_emotion = _build_and_persist_sentiment_snapshots(trade_date, bounded_limit)
+        result = build_sentiment_summary(sentiment, market_emotion, snapshot_status="fresh")
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return result.model_dump(mode="json")
+
+
+@app.get("/api/short-term/sentiment/detail")
+def get_short_term_sentiment_detail(
+    trade_date: str,
+    limit: int = 80,
+    refresh: bool = False,
+) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 100))
+    store = _sentiment_snapshot_store()
+    sentiment = store.load_sentiment(trade_date)
+    market_emotion = store.load_market_emotion(trade_date)
+    if sentiment is not None and market_emotion is not None:
+        return SentimentDetailResponse(
+            trade_date=trade_date,
+            snapshot_status="cached",
+            cached_at=market_emotion.generated_at,
+            sentiment=sentiment,
+            market_emotion=market_emotion,
+        ).model_dump(mode="json")
+    if not refresh:
+        raise HTTPException(status_code=404, detail="no sentiment snapshot")
+    try:
+        sentiment, market_emotion = _build_and_persist_sentiment_snapshots(trade_date, bounded_limit)
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return SentimentDetailResponse(
+        trade_date=trade_date,
+        snapshot_status="fresh",
+        sentiment=sentiment,
+        market_emotion=market_emotion,
+    ).model_dump(mode="json")
+
+
+@app.get("/api/short-term/market-emotion")
+def get_short_term_market_emotion(trade_date: str, limit: int = 80) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 100))
+    candidate_provider = _candidate_provider()
+    market_overview_provider = _market_overview_provider()
+    try:
+        cache_key = (
+            "market-emotion:"
+            f"{_provider_cache_key(candidate_provider)}:"
+            f"{_provider_cache_key(market_overview_provider)}:"
+            f"{trade_date}:{bounded_limit}"
+        )
+        result = MARKET_EMOTION_CACHE.get_or_set(
+            cache_key,
+            lambda: build_market_emotion_snapshot(
+                candidate_provider,
+                market_overview_provider,
+                trade_date=trade_date,
+                limit=bounded_limit,
+                sentiment_snapshot=_cached_short_term_sentiment(trade_date, bounded_limit),
+            ),
+        ).model_copy(deep=True)
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    try:
+        history_store = _market_emotion_history_store()
+        history_store.append(result)
+        result.samples = history_store.load(trade_date)
+        sentiment = _cached_short_term_sentiment(trade_date, bounded_limit)
+        _sentiment_snapshot_store().save(sentiment=sentiment, market_emotion=result)
+    except Exception as exc:
+        result.source_status.append(
+            StrongStockSourceStatus(
+                source="市场情绪采样",
+                status="failed",
+                detail=f"采样写入失败: {exc.__class__.__name__}",
+            )
+        )
+    return result.model_dump(mode="json")
+
+
+@app.get("/api/short-term/sentiment/intraday")
+def get_short_term_intraday_sentiment(
+    trade_date: str,
+    limit: int = 80,
+    period: str = "1m",
+    count: int = 120,
+) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 100))
+    bounded_count = max(1, min(count, 240))
+    if period not in {"1m", "5m", "10m", "15m", "30m", "60m"}:
+        raise HTTPException(status_code=422, detail="period must be one of 1m/5m/10m/15m/30m/60m")
+    try:
+        result: ShortTermIntradaySentimentResponse = build_short_term_intraday_sentiment(
+            _candidate_provider(),
+            _quote_provider(),
+            trade_date=trade_date,
+            limit=bounded_limit,
+            period=period,
+            count=bounded_count,
+        )
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return result.model_dump(mode="json")
+
+
+@app.get("/api/short-term/sentiment/intraday/digest")
+def get_short_term_intraday_signal_digest(
+    trade_date: str,
+    limit: int = 80,
+    period: str = "1m",
+    count: int = 120,
+) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 100))
+    bounded_count = max(1, min(count, 240))
+    if period not in {"1m", "5m", "10m", "15m", "30m", "60m"}:
+        raise HTTPException(status_code=422, detail="period must be one of 1m/5m/10m/15m/30m/60m")
+    try:
+        snapshot = build_short_term_intraday_sentiment(
+            _candidate_provider(),
+            _quote_provider(),
+            trade_date=trade_date,
+            limit=bounded_limit,
+            period=period,
+            count=bounded_count,
+        )
+        digest: ShortTermIntradaySignalDigest = build_short_term_intraday_signal_digest(snapshot)
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return digest.model_dump(mode="json")
+
+
 @app.get("/api/stocks/{symbol}/kline")
 def get_stock_kline(symbol: str, count: int = 220) -> dict[str, object]:
     kline_provider = _kline_provider()
@@ -518,6 +772,78 @@ def get_watchlist_gsgf_status() -> dict[str, object]:
     return {"items": output}
 
 
+def _cached_short_term_sentiment(trade_date: str, limit: int) -> ShortTermSentimentResponse:
+    candidate_provider = _candidate_provider()
+    cache_key = f"sentiment:{_provider_cache_key(candidate_provider)}:{trade_date}:{limit}"
+    return SHORT_TERM_SENTIMENT_CACHE.get_or_set(
+        cache_key,
+        lambda: build_short_term_sentiment(
+            candidate_provider,
+            trade_date=trade_date,
+            limit=limit,
+        ),
+    ).model_copy(deep=True)
+
+
+def _build_and_persist_sentiment_snapshots(
+    trade_date: str,
+    limit: int,
+) -> tuple[ShortTermSentimentResponse, MarketEmotionSnapshotResponse]:
+    sentiment = _cached_short_term_sentiment(trade_date, limit)
+    candidate_provider = _candidate_provider()
+    market_overview_provider = _market_overview_provider()
+    cache_key = (
+        "market-emotion:"
+        f"{_provider_cache_key(candidate_provider)}:"
+        f"{_provider_cache_key(market_overview_provider)}:"
+        f"{trade_date}:{limit}"
+    )
+    market_emotion = MARKET_EMOTION_CACHE.get_or_set(
+        cache_key,
+        lambda: build_market_emotion_snapshot(
+            candidate_provider,
+            market_overview_provider,
+            trade_date=trade_date,
+            limit=limit,
+            sentiment_snapshot=sentiment,
+        ),
+    ).model_copy(deep=True)
+    try:
+        history_store = _market_emotion_history_store()
+        history_store.append(market_emotion)
+        market_emotion.samples = history_store.load(trade_date)
+    except Exception as exc:
+        market_emotion.source_status.append(
+            StrongStockSourceStatus(
+                source="市场情绪采样",
+                status="failed",
+                detail=f"采样写入失败: {exc.__class__.__name__}",
+            )
+        )
+    _sentiment_snapshot_store().save(sentiment=sentiment, market_emotion=market_emotion)
+    return sentiment, market_emotion
+
+
+def _provider_cache_key(provider: object) -> str:
+    parts = [
+        provider.__class__.__module__,
+        provider.__class__.__name__,
+        str(getattr(provider, "source_name", "")),
+    ]
+    for attr in (
+        "trading_days",
+        "calendar_day_factor",
+        "timeout_seconds",
+        "base_url",
+        "api_key_source",
+        "ifind_service_id",
+    ):
+        value = getattr(provider, attr, None)
+        if value not in (None, ""):
+            parts.append(f"{attr}={value}")
+    return "|".join(parts)
+
+
 def _candidate_provider() -> object:
     injected = getattr(app.state, "candidate_provider", None)
     if injected is not None:
@@ -614,6 +940,34 @@ def _gsgf_review_store() -> GsgfReviewStore:
     return GsgfReviewStore(get_settings().data_dir)
 
 
+def _market_emotion_history_store() -> MarketEmotionHistoryStore:
+    data_dir = getattr(app.state, "runs_dir", None)
+    if data_dir is not None:
+        return MarketEmotionHistoryStore(Path(data_dir))
+    return MarketEmotionHistoryStore(get_settings().data_dir)
+
+
+def _sentiment_snapshot_store() -> SentimentSnapshotStore:
+    data_dir = getattr(app.state, "runs_dir", None)
+    if data_dir is not None:
+        return SentimentSnapshotStore(Path(data_dir))
+    return SentimentSnapshotStore(get_settings().data_dir)
+
+
+def _sentiment_monitor() -> SentimentMonitor:
+    injected = getattr(app.state, "sentiment_monitor", None)
+    if injected is not None:
+        return injected
+    builder = getattr(app.state, "sentiment_monitor_snapshot_builder", None)
+    monitor = SentimentMonitor(
+        snapshot_builder=builder or _build_and_persist_sentiment_snapshots,
+        config_loader=lambda: load_runtime_settings(_runtime_config_path()).sentiment_monitor,
+        notifier=_send_sentiment_monitor_notification,
+    )
+    app.state.sentiment_monitor = monitor
+    return monitor
+
+
 def _watchlist_path() -> Path:
     injected = getattr(app.state, "watchlist_path", None)
     if injected is not None:
@@ -626,6 +980,36 @@ def _runtime_config_path() -> Path:
     if injected is not None:
         return Path(injected)
     return get_settings().data_dir / "runtime_config.json"
+
+
+def _save_sentiment_monitor_config(config: SentimentMonitorConfig) -> None:
+    current = load_runtime_settings(_runtime_config_path())
+    effective = _effective_settings()
+    save_runtime_settings(
+        _runtime_config_path(),
+        SettingsUpdate(
+            candidate_provider=current.candidate_provider or effective.candidate_provider,
+            kline_provider=current.kline_provider or effective.kline_provider,
+            quote_provider=current.quote_provider or effective.quote_provider,
+            tickflow_base_url=current.tickflow_base_url or effective.tickflow_base_url,
+            ifind_base_url=current.ifind_base_url or effective.ifind_base_url,
+            ifind_service_id=current.ifind_service_id or effective.ifind_service_id,
+            provider_timeout_seconds=current.provider_timeout_seconds or effective.provider_timeout_seconds,
+            notification_channels=current.notification_channels,
+            sentiment_monitor=config,
+        ),
+    )
+
+
+def _send_sentiment_monitor_notification(title: str, message_text: str) -> NotificationSendResult:
+    runtime = load_runtime_settings(_runtime_config_path())
+    return send_notification_message(
+        NotificationSettings(channels=runtime.notification_channels),
+        title=title,
+        message_text=message_text,
+        http_client=getattr(app.state, "notification_http_client", None),
+        smtp_client=getattr(app.state, "notification_smtp_client", None) or DefaultSmtpClient(),
+    )
 
 
 def _effective_settings():

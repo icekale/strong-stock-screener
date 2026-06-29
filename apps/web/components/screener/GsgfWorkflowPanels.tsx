@@ -249,7 +249,11 @@ function CalibrationBucketTable({
                     <td className="px-2 py-2 font-black tabular-nums text-[#11100e]">
                       {bucket.composite_score === null ? "--" : bucket.composite_score.toFixed(2)}
                     </td>
-                    <td className="px-2 py-2 text-[#7b756d]">{bucket.calibration_rating}</td>
+                    <td className="px-2 py-2">
+                      <Tag className="m-0" color={calibrationRatingColor(bucket.calibration_rating)}>
+                        {bucket.calibration_rating}
+                      </Tag>
+                    </td>
                     <td className="px-2 py-2 font-black tabular-nums text-[#11100e]">
                       {formatPlainPercent(primaryWindow?.hit_rate)}
                     </td>
@@ -270,6 +274,22 @@ function CalibrationBucketTable({
       )}
     </div>
   );
+}
+
+function calibrationRatingColor(rating: string): string {
+  if (rating === "强") {
+    return "green";
+  }
+  if (rating === "中强") {
+    return "cyan";
+  }
+  if (rating === "中性") {
+    return "blue";
+  }
+  if (rating === "弱") {
+    return "orange";
+  }
+  return "default";
 }
 
 function ValuePill({ label, value }: { label: string; value: string }) {

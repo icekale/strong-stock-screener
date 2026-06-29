@@ -74,6 +74,36 @@ def test_summarize_gsgf_real_calibration_truncates_history_and_groups_target_buc
     assert buckets["放量突破确认"].examples[0].symbol == "603890.SH"
 
 
+def test_summarize_gsgf_real_calibration_scores_buckets_across_windows() -> None:
+    def analyzer(bars: list[KlineBar]) -> GsgfAnalysis:
+        if bars[-1].close == 10:
+            return GsgfAnalysis(
+                total_score=88,
+                final_status="确认买点",
+                confirm_type="放量突破确认",
+            )
+        return GsgfAnalysis(
+            total_score=68,
+            final_status="观察",
+            zone="b_zone_a_point",
+        )
+
+    summary = summarize_gsgf_real_calibration(
+        candidate_provider=FakeCandidateProvider(),
+        kline_provider=FakeKlineProvider(),
+        trade_dates=["2026-06-12"],
+        windows=[1, 3, 5, 10],
+        analyzer=analyzer,
+    )
+
+    buckets = {bucket.name: bucket for bucket in summary.buckets}
+    assert buckets["确认买点"].composite_score == 72.92
+    assert buckets["确认买点"].calibration_rating == "强"
+    assert buckets["放量突破确认"].composite_score == 75.92
+    assert buckets["放量突破确认"].calibration_rating == "强"
+    assert buckets["B区A点"].calibration_rating == "弱"
+
+
 def test_summarize_gsgf_real_calibration_reuses_kline_fetches_across_dates() -> None:
     class RepeatedCandidateProvider:
         source_name = "fake重复候选池"

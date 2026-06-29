@@ -1,0 +1,76 @@
+"use client";
+
+import { Table, Tag } from "antd";
+import type { ColumnsType } from "antd/es/table";
+import Link from "next/link";
+import type { ShortTermSentimentStockItem } from "../../lib/types";
+
+export type StockPoolTableProps = {
+  dataSource: ShortTermSentimentStockItem[];
+  loading: boolean;
+  title: "涨停池" | "炸板池";
+};
+
+export function StockPoolTable({ dataSource, loading, title }: StockPoolTableProps) {
+  return (
+    <section className="workbench-panel rounded-xl border">
+      <div className="workbench-panel-divider flex items-center justify-between border-b px-4 py-3">
+        <div>
+          <div className="text-sm font-black text-[#11100e]">{title}</div>
+          <div className="text-xs text-[#7b756d]">点击股票名称进入 K 线详情页。</div>
+        </div>
+        <Tag color={title === "涨停池" ? "red" : "green"}>{dataSource.length} 只</Tag>
+      </div>
+      <Table
+        columns={stockColumns}
+        dataSource={dataSource}
+        loading={loading}
+        pagination={{ pageSize: 10, showSizeChanger: false }}
+        rowKey={(item) => `${title}-${item.symbol}`}
+        scroll={{ x: 680 }}
+        size="small"
+      />
+    </section>
+  );
+}
+
+const stockColumns: ColumnsType<ShortTermSentimentStockItem> = [
+  {
+    title: "股票",
+    dataIndex: "name",
+    fixed: "left",
+    render: (value: string, item) => (
+      <Link className="font-black text-[#11100e] hover:text-[#d92d20]" href={`/stock/${item.symbol}`}>
+        {value}
+        <span className="ml-2 text-xs font-semibold text-[#7b756d]">{item.symbol}</span>
+      </Link>
+    ),
+  },
+  {
+    title: "行业",
+    dataIndex: "industry",
+    render: (value: string | null) => value ?? "--",
+  },
+  {
+    title: "连板",
+    dataIndex: "board_count",
+    sorter: (a, b) => a.board_count - b.board_count,
+    render: (value: number) => <Tag color={value >= 3 ? "red" : value === 2 ? "orange" : "default"}>{value}板</Tag>,
+  },
+  {
+    title: "20日涨停",
+    dataIndex: "limit_up_hits_20d",
+    sorter: (a, b) => a.limit_up_hits_20d - b.limit_up_hits_20d,
+  },
+  {
+    title: "炸板",
+    dataIndex: "break_board_count",
+    sorter: (a, b) => a.break_board_count - b.break_board_count,
+    render: (value: number) => <span className={value > 0 ? "font-black text-[#0f7a3b]" : ""}>{value}</span>,
+  },
+  {
+    title: "封板时间",
+    dataIndex: "first_seal_time",
+    render: (value: string | null) => value ?? "--",
+  },
+];

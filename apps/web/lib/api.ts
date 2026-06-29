@@ -272,7 +272,7 @@ export async function checkRuntimeSettingsHealth(symbol = "605289.SH"): Promise<
 export async function createScreenRun(
   tradeDate: string,
   limit = 30,
-  scanLimit = 40,
+  scanLimit = 160,
   filters: ScreenRunFilters = {},
   options: {
     strategy?: ScreenStrategy;

@@ -10,6 +10,8 @@ from app.models import (
     MarketOverviewResponse,
     MarketSectorStrengthItem,
     MarketTurnoverSummary,
+    SectorRadarItem,
+    SectorRadarResponse,
     StrongStockCandidate,
     StrongStockDataUnavailable,
     StrongStockSourceStatus,
@@ -265,6 +267,8 @@ class IndustryClusterKlineProvider(FakeKlineProvider):
 
 
 class CountingKlineProvider(FakeKlineProvider):
+    source_name = "counting fake K线"
+
     def __init__(self) -> None:
         self.symbols: list[str] = []
 
@@ -475,7 +479,20 @@ class FakeIfindResearchProvider:
         )
 
 
+class CountingIfindResearchProvider(FakeIfindResearchProvider):
+    source_name = "counting iFinD MCP"
+
+    def __init__(self) -> None:
+        self.symbols: list[str] = []
+
+    def get_stock_research(self, symbol: str):
+        self.symbols.append(symbol)
+        return super().get_stock_research(symbol)
+
+
 class FakeMarketOverviewProvider:
+    source_name = "fake市场概览"
+
     def get_overview(self) -> MarketOverviewResponse:
         return MarketOverviewResponse(
             trade_date="2026-06-26",
@@ -532,6 +549,63 @@ class FakeMarketOverviewProvider:
                     status="success",
                     detail="返回 2 个板块",
                 ),
+            ],
+        )
+
+
+class CountingMarketOverviewProvider(FakeMarketOverviewProvider):
+    source_name = "counting fake市场概览"
+
+    def __init__(self) -> None:
+        self.overview_calls = 0
+
+    def get_overview(self) -> MarketOverviewResponse:
+        self.overview_calls += 1
+        return super().get_overview()
+
+
+class CountingSectorRadarProvider(FakeMarketOverviewProvider):
+    source_name = "counting fake板块雷达"
+
+    def __init__(self) -> None:
+        self.radar_calls: list[int] = []
+
+    def get_sector_radar(self, limit: int = 20) -> SectorRadarResponse:
+        self.radar_calls.append(limit)
+        return SectorRadarResponse(
+            trade_date="2026-06-26",
+            capital_flow_status="direct",
+            flow_source="fake板块资金流",
+            inflow=[
+                SectorRadarItem(
+                    name="存储芯片",
+                    change_pct=3.26,
+                    turnover_cny=86_500_000_000,
+                    net_flow_cny=4_200_000_000,
+                    advance_count=38,
+                    decline_count=6,
+                    leader="香农芯创",
+                    source="fake板块资金流",
+                )
+            ],
+            outflow=[
+                SectorRadarItem(
+                    name="消费电子",
+                    change_pct=-2.18,
+                    turnover_cny=61_400_000_000,
+                    net_flow_cny=-3_300_000_000,
+                    advance_count=9,
+                    decline_count=58,
+                    leader="春秋电子",
+                    source="fake板块资金流",
+                )
+            ],
+            source_status=[
+                StrongStockSourceStatus(
+                    source="fake板块资金流",
+                    status="success",
+                    detail="返回 2 个板块",
+                )
             ],
         )
 
@@ -718,6 +792,20 @@ def test_stock_kline_endpoint_returns_gsgf_chart_annotations(tmp_path: Path) -> 
     assert any(item["type"] == "zone" for item in payload["gsgf_annotations"])
 
 
+def test_stock_kline_endpoint_reuses_cached_provider_result(tmp_path: Path) -> None:
+    kline_provider = CountingKlineProvider()
+    client = _client(tmp_path, kline_provider=kline_provider)
+
+    first = client.get("/api/stocks/603890.SH/kline?count=5")
+    second = client.get("/api/stocks/603890.SH/kline?count=5")
+    third = client.get("/api/stocks/603890.SH/kline?count=6")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 200
+    assert kline_provider.symbols == ["603890.SH", "603890.SH"]
+
+
 def test_stock_research_reports_missing_ifind_key_without_breaking(tmp_path: Path) -> None:
     client = _client(tmp_path)
 
@@ -752,6 +840,19 @@ def test_stock_research_returns_ifind_payload_from_provider(tmp_path: Path) -> N
     assert payload["sector"]["强度"] == "strong"
 
 
+def test_stock_research_endpoint_reuses_cached_ifind_payload(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    provider = CountingIfindResearchProvider()
+    app.state.ifind_provider = provider
+
+    first = client.get("/api/stocks/603890.SH/research")
+    second = client.get("/api/stocks/603890.SH/research")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert provider.symbols == ["603890.SH"]
+
+
 def test_market_overview_returns_full_a_share_metrics(tmp_path: Path) -> None:
     client = _client(tmp_path, market_overview_provider=FakeMarketOverviewProvider())
 
@@ -772,6 +873,18 @@ def test_market_overview_returns_full_a_share_metrics(tmp_path: Path) -> None:
     assert payload["source_status"][0]["source"] == "东方财富全A指数"
 
 
+def test_market_overview_endpoint_reuses_cached_snapshot(tmp_path: Path) -> None:
+    provider = CountingMarketOverviewProvider()
+    client = _client(tmp_path, market_overview_provider=provider)
+
+    first = client.get("/api/market/overview")
+    second = client.get("/api/market/overview")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert provider.overview_calls == 1
+
+
 def test_sector_radar_returns_inflow_and_outflow_rankings(tmp_path: Path) -> None:
     client = _client(tmp_path, market_overview_provider=FakeMarketOverviewProvider())
 
@@ -787,6 +900,20 @@ def test_sector_radar_returns_inflow_and_outflow_rankings(tmp_path: Path) -> Non
     assert payload["outflow"][0]["name"] == "消费电子"
     assert payload["outflow"][0]["net_flow_cny"] < 0
     assert payload["source_status"][0]["source"] == "东方财富全A指数"
+
+
+def test_sector_radar_endpoint_reuses_cached_provider_result(tmp_path: Path) -> None:
+    provider = CountingSectorRadarProvider()
+    client = _client(tmp_path, market_overview_provider=provider)
+
+    first = client.get("/api/sectors/radar?limit=2")
+    second = client.get("/api/sectors/radar?limit=2")
+    third = client.get("/api/sectors/radar?limit=3")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 200
+    assert provider.radar_calls == [2, 3]
 
 
 def test_screen_run_returns_items_and_persists_latest_without_empty_status(tmp_path: Path) -> None:
@@ -835,6 +962,24 @@ def test_screen_run_respects_scan_limit_before_fetching_klines(tmp_path: Path) -
     payload = response.json()
     assert len(payload["items"]) == 10
     assert "本次分析 12/50" in payload["source_status"][0]["detail"]
+
+
+def test_screen_run_uses_wider_default_scan_limit(tmp_path: Path) -> None:
+    kline_provider = CountingKlineProvider()
+    client = _client(
+        tmp_path,
+        candidate_provider=LargeCandidateProvider(count=200),
+        kline_provider=kline_provider,
+    )
+
+    response = client.post("/api/screen/runs", json={"trade_date": "2026-06-11", "limit": 10})
+
+    assert response.status_code == 200
+    scanned_candidates = [symbol for symbol in kline_provider.symbols if symbol.startswith("600")]
+    assert len(scanned_candidates) == 160
+    payload = response.json()
+    assert payload["gsgf_funnel"]["scan_limit_count"] == 160
+    assert "本次分析 160/200" in payload["source_status"][0]["detail"]
 
 
 def test_screen_run_is_stable_when_candidate_source_order_changes(tmp_path: Path) -> None:
@@ -955,6 +1100,9 @@ def test_screen_run_accepts_gsgf_strategy_and_returns_metadata(tmp_path: Path) -
     assert payload["strategy"] == "gsgf"
     assert payload["gsgf_model_version"] == "gsgf-v1"
     assert payload["sort_version"] == "gsgf-sort-v1"
+    assert payload["gsgf_funnel"]["candidate_pool_count"] >= len(payload["items"])
+    assert "final_displayed_count" in payload["gsgf_funnel"]
+    assert "gsgf_observation_items" in payload
     assert payload["items"][0]["gsgf"]["total_score"] >= 0
     assert payload["items"][0]["gsgf"]["final_status"] in {"确认买点", "候选", "低吸观察", "观察", "减仓", "回避"}
     assert "setup_score" in payload["items"][0]["gsgf"]

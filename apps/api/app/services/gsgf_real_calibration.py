@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from math import log10
 from statistics import mean
 from typing import Callable, Protocol
 
@@ -197,16 +198,24 @@ def _build_buckets(samples: list[_CalibrationSample], windows: list[int]) -> lis
         for bucket_name in sample.bucket_names:
             grouped[bucket_name].append(sample)
 
-    return [
-        GsgfCalibrationBucket(
-            name=bucket_name,
-            sample_count=len(grouped.get(bucket_name, [])),
-            windows=[_window_stat(grouped.get(bucket_name, []), window) for window in windows],
-            examples=[_example(sample) for sample in grouped.get(bucket_name, [])[:5]],
+    buckets: list[GsgfCalibrationBucket] = []
+    for bucket_name in TARGET_BUCKETS:
+        bucket_samples = grouped.get(bucket_name, [])
+        if not bucket_samples:
+            continue
+        window_stats = [_window_stat(bucket_samples, window) for window in windows]
+        composite_score = _composite_score(bucket_name, window_stats)
+        buckets.append(
+            GsgfCalibrationBucket(
+                name=bucket_name,
+                sample_count=len(bucket_samples),
+                windows=window_stats,
+                composite_score=composite_score,
+                calibration_rating=_calibration_rating(composite_score),
+                examples=[_example(sample) for sample in bucket_samples[:5]],
+            )
         )
-        for bucket_name in TARGET_BUCKETS
-        if grouped.get(bucket_name)
-    ]
+    return buckets
 
 
 def _unique_symbol_samples(samples: list[_CalibrationSample]) -> list[_CalibrationSample]:
@@ -247,6 +256,57 @@ def _window_stat(samples: list[_CalibrationSample], window: int) -> GsgfCalibrat
         avg_return_pct=_round_or_none(returns),
         avg_max_drawdown_pct=_round_or_none(drawdowns),
     )
+
+
+def _composite_score(bucket_name: str, windows: list[GsgfCalibrationWindowStat]) -> float | None:
+    weighted_scores: list[float] = []
+    total_weight = 0.0
+    for stat in windows:
+        if stat.sample_count <= 0 or stat.hit_rate is None or stat.avg_return_pct is None:
+            continue
+        weight = _window_weight(stat.window_days)
+        weighted_scores.append(_window_score(stat) * weight)
+        total_weight += weight
+    if total_weight == 0:
+        return None
+    score = sum(weighted_scores) / total_weight
+    if bucket_name == "放量突破确认":
+        score += 3
+    if bucket_name == "B区A点":
+        score -= 4
+    return round(max(0, min(score, 100)), 2)
+
+
+def _window_score(stat: GsgfCalibrationWindowStat) -> float:
+    hit_score = (stat.hit_rate or 0) * 0.6
+    return_score = max(-20, min(stat.avg_return_pct or 0, 20))
+    drawdown_penalty = abs(min(stat.avg_max_drawdown_pct or 0, 0)) * 0.7
+    sample_bonus = min(log10(stat.sample_count + 1) * 6, 8)
+    return hit_score + return_score - drawdown_penalty + sample_bonus
+
+
+def _window_weight(window_days: int) -> float:
+    if window_days <= 1:
+        return 0.2
+    if window_days <= 3:
+        return 0.25
+    if window_days <= 5:
+        return 0.25
+    if window_days <= 10:
+        return 0.3
+    return 0.15
+
+
+def _calibration_rating(score: float | None) -> str:
+    if score is None:
+        return "样本不足"
+    if score >= 70:
+        return "强"
+    if score >= 58:
+        return "中强"
+    if score >= 48:
+        return "中性"
+    return "弱"
 
 
 def _example(sample: _CalibrationSample) -> GsgfCalibrationExample:

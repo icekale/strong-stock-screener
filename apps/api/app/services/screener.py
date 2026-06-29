@@ -4,6 +4,7 @@ from collections import Counter
 from typing import Protocol
 
 from app.models import (
+    GsgfFunnelDiagnostics,
     KlineBar,
     RiskCheckStatus,
     ScreenStrategy,
@@ -77,6 +78,11 @@ class StrongStockScreener:
         stable_candidates = _candidates_for_scan(self.candidate_provider, filtered_candidates)
         candidates_to_scan = stable_candidates[:scan_limit]
         industry_context = _industry_context(candidates_to_scan)
+        funnel = GsgfFunnelDiagnostics(
+            candidate_pool_count=candidates_before_filter,
+            after_static_filters_count=len(filtered_candidates),
+            scan_limit_count=len(candidates_to_scan),
+        )
 
         source_status = [
             StrongStockSourceStatus(
@@ -91,6 +97,7 @@ class StrongStockScreener:
                 )
             ]
         items: list[StrongStockScreeningItem] = []
+        observation_items: list[StrongStockScreeningItem] = []
         failures = 0
         kdj_filtered = 0
         for candidate in candidates_to_scan:
@@ -99,18 +106,23 @@ class StrongStockScreener:
             except Exception:
                 failures += 1
                 continue
+            funnel.kline_success_count += 1
             item = analyze_screening_item(candidate, bars, trade_date=trade_date)
+            if item.status == "data_incomplete":
+                funnel.data_incomplete_count += 1
+                continue
             if not _passes_kdj_filter(item, filters):
                 kdj_filtered += 1
                 continue
-            if item.status != "data_incomplete":
-                items.append(
-                    _apply_candidate_risk_checks(
-                        _apply_industry_strength(item, industry_context),
-                        candidate=candidate,
-                        news_risk_provider=self.news_risk_provider,
-                    )
-                )
+            enriched_item = _apply_candidate_risk_checks(
+                _apply_industry_strength(item, industry_context),
+                candidate=candidate,
+                news_risk_provider=self.news_risk_provider,
+            )
+            _count_gsgf_signal(funnel, enriched_item)
+            if _is_gsgf_observation_item(enriched_item):
+                observation_items.append(enriched_item)
+            items.append(enriched_item)
 
         if kdj_filtered:
             source_status[0] = source_status[0].model_copy(
@@ -138,9 +150,15 @@ class StrongStockScreener:
                 )
             )
 
+        funnel.kline_failure_count = failures
+        funnel.kdj_filtered_count = kdj_filtered
         if exclude_gsgf_hard_risk:
+            before_hard_risk = len(items)
             items = [item for item in items if not _has_gsgf_hard_risk(item)]
+            funnel.hard_risk_filtered_count = before_hard_risk - len(items)
         ranked = sorted(items, key=lambda item: _screening_rank_key(item, strategy))[:limit]
+        ranked_observations = sorted(observation_items, key=lambda item: _gsgf_observation_rank_key(item))[:limit]
+        funnel.final_displayed_count = len(ranked)
         return StrongStockScreeningResult(
             strategy=strategy,
             gsgf_model_version="gsgf-v1",
@@ -148,6 +166,8 @@ class StrongStockScreener:
             trade_date=trade_date,
             source_status=source_status,
             items=ranked,
+            gsgf_funnel=funnel,
+            gsgf_observation_items=ranked_observations,
             watchlist_risk_items=self._watchlist_risks(watchlist_snapshot, trade_date),
         )
 
@@ -332,6 +352,41 @@ def _has_gsgf_hard_risk(item: StrongStockScreeningItem) -> bool:
     return item.gsgf.zone == "c_zone" or any(
         flag in {"高位巨量长上影", "C区风险"} for flag in item.gsgf.risk_flags
     )
+
+
+def _count_gsgf_signal(funnel: GsgfFunnelDiagnostics, item: StrongStockScreeningItem) -> None:
+    gsgf = item.gsgf
+    if gsgf is None:
+        return
+    has_structure = gsgf.zone in {"a_zone", "b_zone_a_point"} or bool(gsgf.setup_type or gsgf.confirm_type)
+    if has_structure:
+        funnel.gsgf_structure_hit_count += 1
+    if gsgf.final_status == "确认买点":
+        funnel.confirmed_buy_count += 1
+    if gsgf.final_status == "低吸观察":
+        funnel.low_buy_count += 1
+    if gsgf.zone == "b_zone_a_point" or gsgf.setup_type == "B区A点":
+        funnel.b_zone_a_point_count += 1
+    if gsgf.confirm_type == "放量突破确认":
+        funnel.volume_breakout_count += 1
+
+
+def _is_gsgf_observation_item(item: StrongStockScreeningItem) -> bool:
+    gsgf = item.gsgf
+    if gsgf is None or _has_gsgf_hard_risk(item):
+        return False
+    if gsgf.final_status in {"确认买点", "低吸观察"}:
+        return False
+    return gsgf.zone == "b_zone_a_point" or gsgf.setup_type == "B区A点"
+
+
+def _gsgf_observation_rank_key(item: StrongStockScreeningItem) -> tuple[int, int, int, str]:
+    gsgf = item.gsgf
+    if gsgf is None:
+        return (99, 99, 0, item.symbol)
+    setup_rank = 0 if gsgf.setup_type == "B区A点" else 1
+    volume_rank = 0 if gsgf.volume_structure == "three_yang_controls_three_yin" else 1
+    return (setup_rank, volume_rank, -gsgf.total_score, item.symbol)
 
 
 def _sort_version(strategy: ScreenStrategy) -> str:

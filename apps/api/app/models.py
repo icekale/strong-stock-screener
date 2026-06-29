@@ -285,6 +285,8 @@ class GsgfCalibrationSample(BaseModel):
 class GsgfCalibrationBucket(BaseModel):
     name: str
     sample_count: int = 0
+    composite_score: float | None = None
+    calibration_rating: str = "样本不足"
     windows: list[GsgfCalibrationWindowStat] = Field(default_factory=list)
     examples: list[GsgfCalibrationExample] = Field(default_factory=list)
 
@@ -590,6 +592,23 @@ class StockResearchResponse(BaseModel):
     )
 
 
+class GsgfFunnelDiagnostics(BaseModel):
+    candidate_pool_count: int = 0
+    after_static_filters_count: int = 0
+    scan_limit_count: int = 0
+    kline_success_count: int = 0
+    kline_failure_count: int = 0
+    data_incomplete_count: int = 0
+    kdj_filtered_count: int = 0
+    gsgf_structure_hit_count: int = 0
+    confirmed_buy_count: int = 0
+    low_buy_count: int = 0
+    b_zone_a_point_count: int = 0
+    volume_breakout_count: int = 0
+    hard_risk_filtered_count: int = 0
+    final_displayed_count: int = 0
+
+
 class StrongStockScreeningResult(BaseModel):
     strategy: ScreenStrategy = "strong_stock"
     strong_model_version: str = "strong-v1"
@@ -598,6 +617,8 @@ class StrongStockScreeningResult(BaseModel):
     trade_date: str
     source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
     items: list[StrongStockScreeningItem] = Field(default_factory=list)
+    gsgf_funnel: GsgfFunnelDiagnostics = Field(default_factory=GsgfFunnelDiagnostics)
+    gsgf_observation_items: list[StrongStockScreeningItem] = Field(default_factory=list)
     watchlist_risk_items: list[StrongStockRiskItem] = Field(default_factory=list)
     generated_at: str = Field(
         default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")

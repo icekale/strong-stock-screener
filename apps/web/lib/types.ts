@@ -73,6 +73,23 @@ export type StrongStockSourceStatus = {
   detail: string;
 };
 
+export type GsgfFunnelDiagnostics = {
+  candidate_pool_count: number;
+  after_static_filters_count: number;
+  scan_limit_count: number;
+  kline_success_count: number;
+  kline_failure_count: number;
+  data_incomplete_count: number;
+  kdj_filtered_count: number;
+  gsgf_structure_hit_count: number;
+  confirmed_buy_count: number;
+  low_buy_count: number;
+  b_zone_a_point_count: number;
+  volume_breakout_count: number;
+  hard_risk_filtered_count: number;
+  final_displayed_count: number;
+};
+
 export type GsgfBacktestSummary = {
   windows: number[];
   sample_count: number;
@@ -178,6 +195,8 @@ export type GsgfCalibrationSample = {
 export type GsgfCalibrationBucket = {
   name: string;
   sample_count: number;
+  composite_score: number | null;
+  calibration_rating: string;
   windows: GsgfCalibrationWindowStat[];
   examples: GsgfCalibrationExample[];
 };
@@ -683,6 +702,8 @@ export type StrongStockScreeningResponse = {
   trade_date: string;
   source_status: StrongStockSourceStatus[];
   items: StrongStockScreeningItem[];
+  gsgf_funnel: GsgfFunnelDiagnostics;
+  gsgf_observation_items: StrongStockScreeningItem[];
   watchlist_risk_items: WatchlistRiskItem[];
   generated_at: string;
 };

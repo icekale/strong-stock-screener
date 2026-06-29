@@ -90,7 +90,7 @@ class ScreenFiltersRequest(BaseModel):
 class ScreenRunRequest(BaseModel):
     trade_date: str
     limit: int = Field(default=30, ge=1, le=100)
-    scan_limit: int = Field(default=40, ge=1, le=300)
+    scan_limit: int = Field(default=160, ge=1, le=300)
     filters: ScreenFiltersRequest = Field(default_factory=ScreenFiltersRequest)
     strategy: ScreenStrategy = "strong_stock"
     include_gsgf: bool = True
@@ -181,6 +181,10 @@ app.add_middleware(
 
 SHORT_TERM_SENTIMENT_CACHE: TtlCache[ShortTermSentimentResponse] = TtlCache(ttl_seconds=90)
 MARKET_EMOTION_CACHE: TtlCache[MarketEmotionSnapshotResponse] = TtlCache(ttl_seconds=45)
+MARKET_OVERVIEW_CACHE: TtlCache[MarketOverviewResponse] = TtlCache(ttl_seconds=45)
+SECTOR_RADAR_CACHE: TtlCache[SectorRadarResponse] = TtlCache(ttl_seconds=45)
+STOCK_KLINE_CACHE: TtlCache[StockKlineResponse] = TtlCache(ttl_seconds=300)
+STOCK_RESEARCH_CACHE: TtlCache[StockResearchResponse] = TtlCache(ttl_seconds=900)
 
 
 def startup_sentiment_monitor() -> None:
@@ -258,6 +262,7 @@ def get_runtime_settings() -> dict[str, object]:
 @app.put("/api/settings")
 def update_runtime_settings(request: SettingsUpdate) -> dict[str, object]:
     save_runtime_settings(_runtime_config_path(), request)
+    _clear_data_source_caches()
     return {
         "config": public_settings_payload(_effective_settings()),
         "saved": _public_saved_settings(),
@@ -458,20 +463,15 @@ def recheck_gsgf_review(request: GsgfReviewRecheckRequest) -> dict[str, object]:
 
 @app.get("/api/market/overview")
 def get_market_overview() -> dict[str, object]:
-    provider = _market_overview_provider()
-    result: MarketOverviewResponse = provider.get_overview()
+    result = _cached_market_overview()
     return result.model_dump(mode="json")
 
 
 @app.get("/api/sectors/radar")
 def get_sector_radar(limit: int = 20) -> dict[str, object]:
-    provider = _market_overview_provider()
     bounded_limit = max(1, min(limit, 50))
-    if hasattr(provider, "get_sector_radar"):
-        result: SectorRadarResponse = provider.get_sector_radar(limit=bounded_limit)
-        return result.model_dump(mode="json")
-    overview: MarketOverviewResponse = provider.get_overview()
-    return _estimated_sector_radar(overview, bounded_limit).model_dump(mode="json")
+    result = _cached_sector_radar(bounded_limit)
+    return result.model_dump(mode="json")
 
 
 @app.get("/api/short-term/sentiment")
@@ -630,42 +630,19 @@ def get_short_term_intraday_signal_digest(
 
 @app.get("/api/stocks/{symbol}/kline")
 def get_stock_kline(symbol: str, count: int = 220) -> dict[str, object]:
-    kline_provider = _kline_provider()
     bounded_count = max(1, min(count, 260))
     try:
-        bars = kline_provider.get_klines(symbol, count=bounded_count)[-bounded_count:]
+        result = _cached_stock_kline(symbol, bounded_count)
     except StrongStockDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"K线获取失败: {exc.__class__.__name__}") from exc
-    return StockKlineResponse(
-        symbol=symbol,
-        source_status=StrongStockSourceStatus(
-            source=getattr(kline_provider, "source_name", "K线源"),
-            status="success",
-            detail=f"返回 {len(bars)} 条日K",
-        ),
-        bars=bars,
-        gsgf_annotations=build_gsgf_chart_annotations(bars),
-    ).model_dump(mode="json")
+    return result.model_dump(mode="json")
 
 
 @app.get("/api/stocks/{symbol}/research")
 def get_stock_research(symbol: str) -> dict[str, object]:
-    ifind_provider = _ifind_provider()
-    try:
-        research = ifind_provider.get_stock_research(symbol)
-    except StrongStockDataUnavailable as exc:
-        research = StockResearchResponse(
-            symbol=symbol,
-            source_status=[
-                StrongStockSourceStatus(
-                    source=ifind_provider.source_name,
-                    status="failed",
-                    detail=str(exc),
-                )
-            ],
-        )
+    research = _cached_stock_research(symbol)
     return research.model_dump(mode="json")
 
 
@@ -783,6 +760,80 @@ def _cached_short_term_sentiment(trade_date: str, limit: int) -> ShortTermSentim
             limit=limit,
         ),
     ).model_copy(deep=True)
+
+
+def _cached_market_overview() -> MarketOverviewResponse:
+    provider = _market_overview_provider()
+    cache_key = f"market-overview:{_provider_cache_key(provider)}"
+    return MARKET_OVERVIEW_CACHE.get_or_set(cache_key, provider.get_overview).model_copy(deep=True)
+
+
+def _cached_sector_radar(limit: int) -> SectorRadarResponse:
+    provider = _market_overview_provider()
+    cache_key = f"sector-radar:{_provider_cache_key(provider)}:{limit}"
+
+    def build() -> SectorRadarResponse:
+        if hasattr(provider, "get_sector_radar"):
+            return provider.get_sector_radar(limit=limit)
+        return _estimated_sector_radar(_cached_market_overview(), limit)
+
+    return SECTOR_RADAR_CACHE.get_or_set(cache_key, build).model_copy(deep=True)
+
+
+def _cached_stock_kline(symbol: str, count: int) -> StockKlineResponse:
+    kline_provider = _kline_provider()
+    normalized_symbol = symbol.strip().upper()
+    cache_key = f"stock-kline:{_provider_cache_key(kline_provider)}:{normalized_symbol}:{count}"
+
+    def build() -> StockKlineResponse:
+        bars = kline_provider.get_klines(normalized_symbol, count=count)[-count:]
+        return StockKlineResponse(
+            symbol=normalized_symbol,
+            source_status=StrongStockSourceStatus(
+                source=getattr(kline_provider, "source_name", "K线源"),
+                status="success",
+                detail=f"返回 {len(bars)} 条日K",
+            ),
+            bars=bars,
+            gsgf_annotations=build_gsgf_chart_annotations(bars),
+        )
+
+    return STOCK_KLINE_CACHE.get_or_set(cache_key, build).model_copy(deep=True)
+
+
+def _cached_stock_research(symbol: str) -> StockResearchResponse:
+    ifind_provider = _ifind_provider()
+    normalized_symbol = symbol.strip().upper()
+    cache_key = f"stock-research:{_provider_cache_key(ifind_provider)}:{normalized_symbol}"
+
+    def build() -> StockResearchResponse:
+        try:
+            return ifind_provider.get_stock_research(normalized_symbol)
+        except StrongStockDataUnavailable as exc:
+            return StockResearchResponse(
+                symbol=normalized_symbol,
+                source_status=[
+                    StrongStockSourceStatus(
+                        source=ifind_provider.source_name,
+                        status="failed",
+                        detail=str(exc),
+                    )
+                ],
+            )
+
+    return STOCK_RESEARCH_CACHE.get_or_set(cache_key, build).model_copy(deep=True)
+
+
+def _clear_data_source_caches() -> None:
+    for cache in (
+        SHORT_TERM_SENTIMENT_CACHE,
+        MARKET_EMOTION_CACHE,
+        MARKET_OVERVIEW_CACHE,
+        SECTOR_RADAR_CACHE,
+        STOCK_KLINE_CACHE,
+        STOCK_RESEARCH_CACHE,
+    ):
+        cache.clear()
 
 
 def _build_and_persist_sentiment_snapshots(

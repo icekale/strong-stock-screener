@@ -5,7 +5,20 @@ from statistics import mean
 from app.models import GsgfAnalysis, GsgfChartAnnotation, GsgfScoreBreakdown, IndustryStrength, KlineBar
 from app.services.gsgf_trade_plan import build_gsgf_trade_plan
 
-GSGF_MODEL_VERSION = "gsgf-v1"
+GSGF_MODEL_VERSION = "gsgf-v2"
+
+EVIDENCE_REFS = {
+    "全局阴量压制": "book2-p026-002211-global-negative-volume",
+    "高位巨量长上影": "book1-p172-000735-high-shadow-sell",
+    "高位星线平台": "book3-p132-002130-high-star-platform",
+    "C区风险": "book3-p171-300228-c-zone-star-risk",
+    "B区A点": "book1-p081-600379-b-zone-a-point",
+    "双星止跌": "book3-p055-002101-double-star-stop",
+    "补仓星线": "book3-p069-002757-replenish-star",
+    "星线蓄势": "book3-p041-600470-buffer-star",
+    "放量突破确认": "book1-p022-600680-lift-distribute",
+    "星线后确认": "book3-p027-300297-second-gap-star",
+}
 
 
 def analyze_gsgf(
@@ -43,6 +56,18 @@ def analyze_gsgf(
     total_score = max(0, min(100, sum(scores.model_dump().values()) - _risk_penalty(risk_flags)))
     action = _action(total_score, zone, risk_flags, trigger_tags)
     final_status = _final_status(total_score, setup_type, confirm_type, risk_flags)
+    evidence_refs = _evidence_refs(setup_type, confirm_type, risk_flags)
+    diagnostics = _diagnostics(
+        scores=scores,
+        zone=zone,
+        volume_structure=volume_structure,
+        setup_type=setup_type,
+        confirm_type=confirm_type,
+        pattern_tags=pattern_tags,
+        trigger_tags=_dedupe(trigger_tags + setup_tags + confirm_tags),
+        pressure_flags=pressure_flags,
+        risk_flags=risk_flags,
+    )
     return _with_trade_plan(GsgfAnalysis(
         model_version=GSGF_MODEL_VERSION,
         total_score=round(total_score),
@@ -59,6 +84,8 @@ def analyze_gsgf(
         trigger_tags=_dedupe(trigger_tags + setup_tags + confirm_tags),
         pressure_flags=pressure_flags,
         risk_flags=risk_flags,
+        evidence_refs=evidence_refs,
+        diagnostics=diagnostics,
         explanation=_dedupe(
             volume_notes
             + ma_notes
@@ -271,11 +298,19 @@ def _stars(bars: list[KlineBar], zone: str) -> tuple[int, list[str], list[str]]:
     risks: list[str] = []
     star_count = sum(1 for bar in recent if _is_star(bar))
     avg_volume20 = mean(bar.volume for bar in bars[-20:])
+    previous_high120 = max(bar.high for bar in bars[-120:-1]) if len(bars) >= 121 else max(bar.high for bar in bars[:-1])
     if star_count >= 2 and mean(bar.volume for bar in recent) < avg_volume20 * 0.9:
         if zone in {"a_zone", "b_zone_a_point"}:
             trigger_tags.append("星线蓄势")
         else:
             trigger_tags.append("星线平台待确认")
+    if (
+        latest.close >= previous_high120 * 0.90
+        and star_count >= 2
+        and _is_star(latest)
+        and latest.volume >= avg_volume20 * 1.25
+    ):
+        risks.append("高位星线平台")
     if _long_upper_shadow(latest) and latest.volume > avg_volume20 * 1.8:
         risks.append("高位巨量长上影")
     return (8 if "星线蓄势" in trigger_tags else 4 if trigger_tags else 0), trigger_tags, risks
@@ -293,6 +328,8 @@ def _setup_signal(bars: list[KlineBar], zone: str) -> tuple[str | None, int, lis
     if star and latest.low <= (latest.ma20 or latest.low) * 1.03 and latest.close >= (latest.ma20 or latest.close) * 0.96:
         return "补仓星线", 20, ["补仓星线"]
     if star and zone == "b_zone_a_point":
+        return "B区A点", 18, ["B区A点"]
+    if not star and _is_b_zone_reclaim(bars):
         return "B区A点", 18, ["B区A点"]
     if star and latest.volume <= avg_volume20 * 1.10 and zone == "a_zone":
         return "星线蓄势", 14, ["星线蓄势"]
@@ -349,7 +386,12 @@ def _sector_score(industry_strength: IndustryStrength | None) -> int:
 
 
 def _action(total_score: int, zone: str, risk_flags: list[str], trigger_tags: list[str]) -> str:
-    if "C区风险" in risk_flags or "高位巨量长上影" in risk_flags or "全局阴量压制" in risk_flags:
+    if (
+        "C区风险" in risk_flags
+        or "高位巨量长上影" in risk_flags
+        or "高位星线平台" in risk_flags
+        or "全局阴量压制" in risk_flags
+    ):
         return "avoid"
     if total_score >= 80 and zone in {"a_zone", "b_zone_a_point"}:
         return "strong_candidate"
@@ -366,6 +408,8 @@ def _risk_penalty(risk_flags: list[str]) -> int:
         penalty += 20
     if "高位巨量长上影" in risk_flags:
         penalty += 25
+    if "高位星线平台" in risk_flags:
+        penalty += 25
     if "全局阴量压制" in risk_flags:
         penalty += 18
     return penalty
@@ -377,7 +421,7 @@ def _final_status(
     confirm_type: str | None,
     risk_flags: list[str],
 ) -> str:
-    hard_risks = {"C区风险", "高位巨量长上影", "全局阴量压制"}
+    hard_risks = {"C区风险", "高位巨量长上影", "高位星线平台", "全局阴量压制"}
     if any(flag in hard_risks for flag in risk_flags):
         return "减仓" if total_score >= 35 else "回避"
     if confirm_type and total_score >= 70:
@@ -414,6 +458,79 @@ def _higher_lows(bars: list[KlineBar]) -> bool:
     chunks = [bars[-60:-40], bars[-40:-20], bars[-20:]]
     lows = [min(bar.low for bar in chunk) for chunk in chunks if chunk]
     return len(lows) == 3 and lows[0] < lows[1] < lows[2]
+
+
+def _is_b_zone_reclaim(bars: list[KlineBar]) -> bool:
+    if len(bars) < 65:
+        return False
+    latest = bars[-1]
+    ma10 = latest.ma10 or latest.close
+    ma20 = latest.ma20 or latest.close
+    ma60 = latest.ma60 or latest.close
+    recent_pullback = bars[-6:-1]
+    avg_volume20 = mean(bar.volume for bar in bars[-25:-5])
+    pullback_volume = mean(bar.volume for bar in recent_pullback)
+    pullback_low = min(bar.low for bar in recent_pullback)
+    pullback_high = max(bar.high for bar in recent_pullback)
+    medium_trend_up = (latest.ma20 or latest.close) > (latest.ma60 or latest.close) * 0.98
+    pullback_near_ma = pullback_low <= max(ma20, ma60) * 1.04
+    pullback_contract = pullback_volume <= avg_volume20 * 0.82
+    has_pullback = pullback_low <= pullback_high * 0.985
+    reclaim = latest.close >= max(ma10, ma20) * 0.995 and latest.close > bars[-2].close
+    return medium_trend_up and pullback_near_ma and pullback_contract and has_pullback and reclaim
+
+
+def _evidence_refs(
+    setup_type: str | None,
+    confirm_type: str | None,
+    risk_flags: list[str],
+) -> list[str]:
+    refs: list[str] = []
+    for key in [setup_type, confirm_type, *risk_flags]:
+        ref = EVIDENCE_REFS.get(key or "")
+        if ref:
+            refs.append(ref)
+    return _dedupe(refs)
+
+
+def _diagnostics(
+    *,
+    scores: GsgfScoreBreakdown,
+    zone: str,
+    volume_structure: str,
+    setup_type: str | None,
+    confirm_type: str | None,
+    pattern_tags: list[str],
+    trigger_tags: list[str],
+    pressure_flags: list[str],
+    risk_flags: list[str],
+) -> dict[str, dict[str, object]]:
+    return {
+        "safety": {
+            "score": scores.safety_pressure,
+            "flags": _dedupe(pressure_flags + risk_flags),
+        },
+        "capital": {
+            "score": scores.volume_thickness,
+            "flags": [] if volume_structure == "neutral" else [volume_structure],
+        },
+        "ma": {
+            "score": scores.ma_alignment,
+            "flags": [zone] if zone != "unknown" else [],
+        },
+        "pattern": {
+            "score": scores.pattern_space,
+            "flags": _dedupe(([zone] if zone != "unknown" else []) + pattern_tags),
+        },
+        "star": {
+            "score": scores.star_trigger,
+            "flags": [tag for tag in trigger_tags if "星" in tag or tag == "B区A点"],
+        },
+        "confirmation": {
+            "score": scores.star_trigger if confirm_type else 0,
+            "flags": [confirm_type] if confirm_type else [],
+        },
+    }
 
 
 def _dedupe(values: list[str]) -> list[str]:

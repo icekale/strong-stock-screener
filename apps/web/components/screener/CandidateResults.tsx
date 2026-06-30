@@ -602,7 +602,41 @@ function GsgfSummaryPills({ gsgf }: { gsgf: GsgfAnalysis | null }) {
           确认信号 {gsgfLabel(gsgf.confirm_type)}
         </span>
       )}
+      <GsgfEvidencePill refs={gsgf.evidence_refs} />
+      <GsgfDiagnosticsPill diagnostics={gsgf.diagnostics} />
     </>
+  );
+}
+
+function GsgfEvidencePill({ refs }: { refs: string[] }) {
+  if (refs.length === 0) {
+    return null;
+  }
+  return (
+    <span
+      className="inline-flex h-6 max-w-[180px] items-center truncate rounded-full bg-white px-2 text-[11px] font-bold text-slate-600 ring-1 ring-slate-200"
+      title={refs.join(" / ")}
+    >
+      证据链 {refs.length}
+    </span>
+  );
+}
+
+function GsgfDiagnosticsPill({ diagnostics }: { diagnostics: GsgfAnalysis["diagnostics"] }) {
+  const names = Object.entries(diagnostics)
+    .filter(([, item]) => item.flags.length > 0 || item.score !== null)
+    .map(([name]) => gsgfLabel(name))
+    .slice(0, 3);
+  if (names.length === 0) {
+    return null;
+  }
+  return (
+    <span
+      className="inline-flex h-6 max-w-[180px] items-center truncate rounded-full bg-slate-100 px-2 text-[11px] font-bold text-slate-700 ring-1 ring-slate-200"
+      title={names.join(" / ")}
+    >
+      诊断 {names.join("/")}
+    </span>
   );
 }
 

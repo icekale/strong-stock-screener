@@ -49,7 +49,7 @@ class GsgfTradePlan(BaseModel):
 
 
 class GsgfAnalysis(BaseModel):
-    model_version: str = "gsgf-v1"
+    model_version: str = "gsgf-v2"
     total_score: int = 0
     action: GsgfAction = "wait_trigger"
     final_status: GsgfFinalStatus = "观察"
@@ -64,6 +64,8 @@ class GsgfAnalysis(BaseModel):
     trigger_tags: list[str] = Field(default_factory=list)
     pressure_flags: list[str] = Field(default_factory=list)
     risk_flags: list[str] = Field(default_factory=list)
+    evidence_refs: list[str] = Field(default_factory=list)
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
     explanation: list[str] = Field(default_factory=list)
     trade_plan: GsgfTradePlan | None = None
 

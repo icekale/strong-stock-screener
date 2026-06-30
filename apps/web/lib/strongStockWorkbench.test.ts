@@ -92,6 +92,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(typesSource, /final_status: GsgfFinalStatus/);
   assert.match(typesSource, /setup_type: string \| null/);
   assert.match(typesSource, /confirm_type: string \| null/);
+  assert.match(typesSource, /evidence_refs: string\[\]/);
+  assert.match(typesSource, /diagnostics: Record<string, \{ score: number \| null; flags: string\[\] \}>/);
   assert.match(typesSource, /GsgfBacktestSummary/);
   assert.match(typesSource, /GsgfBacktestBucket/);
   assert.match(typesSource, /GsgfBacktestWindowStat/);
@@ -180,6 +182,10 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(screenerFeatureSource, /确认信号/);
   assert.match(screenerFeatureSource, /setup_type/);
   assert.match(screenerFeatureSource, /confirm_type/);
+  assert.match(screenerFeatureSource, /evidence_refs/);
+  assert.match(screenerFeatureSource, /diagnostics/);
+  assert.match(screenerFeatureSource, /证据链/);
+  assert.match(screenerFeatureSource, /诊断/);
   assert.match(screenerFeatureSource, /gsgfLabel/);
   assert.match(screenerFeatureSource, /扫描候选数/);
   assert.match(screenerFeatureSource, /高级筛选/);

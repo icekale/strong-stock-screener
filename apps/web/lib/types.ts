@@ -36,6 +36,8 @@ export type GsgfAnalysis = {
   trigger_tags: string[];
   pressure_flags: string[];
   risk_flags: string[];
+  evidence_refs: string[];
+  diagnostics: Record<string, { score: number | null; flags: string[] }>;
   explanation: string[];
   trade_plan: GsgfTradePlan | null;
 };

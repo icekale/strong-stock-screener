@@ -1282,7 +1282,7 @@ def test_screen_run_accepts_gsgf_strategy_and_returns_metadata(tmp_path: Path) -
     assert response.status_code == 200
     payload = response.json()
     assert payload["strategy"] == "gsgf"
-    assert payload["gsgf_model_version"] == "gsgf-v1"
+    assert payload["gsgf_model_version"] == "gsgf-v2"
     assert payload["sort_version"] == "gsgf-sort-v1"
     assert payload["gsgf_funnel"]["candidate_pool_count"] >= len(payload["items"])
     assert "final_displayed_count" in payload["gsgf_funnel"]
@@ -1291,6 +1291,8 @@ def test_screen_run_accepts_gsgf_strategy_and_returns_metadata(tmp_path: Path) -
     assert payload["items"][0]["gsgf"]["final_status"] in {"确认买点", "候选", "低吸观察", "观察", "减仓", "回避"}
     assert "setup_score" in payload["items"][0]["gsgf"]
     assert "confirm_score" in payload["items"][0]["gsgf"]
+    assert "evidence_refs" in payload["items"][0]["gsgf"]
+    assert "diagnostics" in payload["items"][0]["gsgf"]
 
 
 def test_gsgf_backtest_returns_bucketed_forward_stats(tmp_path: Path) -> None:
@@ -1421,7 +1423,7 @@ def test_watchlist_gsgf_status_returns_structure_triggers(tmp_path: Path) -> Non
     assert response.status_code == 200
     payload = response.json()
     assert payload["items"][0]["symbol"] == "603890.SH"
-    assert payload["items"][0]["gsgf"]["model_version"] == "gsgf-v1"
+    assert payload["items"][0]["gsgf"]["model_version"] == "gsgf-v2"
 
 
 def test_latest_returns_404_before_first_run(tmp_path: Path) -> None:

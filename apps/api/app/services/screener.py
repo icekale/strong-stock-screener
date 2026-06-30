@@ -161,7 +161,7 @@ class StrongStockScreener:
         funnel.final_displayed_count = len(ranked)
         return StrongStockScreeningResult(
             strategy=strategy,
-            gsgf_model_version="gsgf-v1",
+            gsgf_model_version="gsgf-v2",
             sort_version=_sort_version(strategy),
             trade_date=trade_date,
             source_status=source_status,

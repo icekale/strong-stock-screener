@@ -101,7 +101,7 @@ def test_screening_item_includes_gsgf_analysis() -> None:
     )
 
     assert item.gsgf is not None
-    assert item.gsgf.model_version == "gsgf-v1"
+    assert item.gsgf.model_version == "gsgf-v2"
     assert item.gsgf.total_score > 0
     assert item.gsgf.zone in {"a_zone", "b_zone_a_point", "unformed"}
 

@@ -5,7 +5,7 @@ from app.models import KlineBar
 
 def test_gsgf_analysis_serializes_business_fields() -> None:
     analysis = GsgfAnalysis(
-        model_version="gsgf-v1",
+        model_version="gsgf-v2",
         total_score=78,
         action="watch_candidate",
         final_status="候选",
@@ -27,12 +27,14 @@ def test_gsgf_analysis_serializes_business_fields() -> None:
         trigger_tags=["星线蓄势"],
         pressure_flags=["前高压力"],
         risk_flags=[],
+        evidence_refs=["book1-p081-600379-b-zone-a-point"],
+        diagnostics={"pattern": {"score": 15, "flags": ["b_zone_a_point"]}},
         explanation=["B区A点，等待确认"],
     )
 
     payload = analysis.model_dump(mode="json")
 
-    assert payload["model_version"] == "gsgf-v1"
+    assert payload["model_version"] == "gsgf-v2"
     assert payload["total_score"] == 78
     assert payload["action"] == "watch_candidate"
     assert payload["final_status"] == "候选"
@@ -40,6 +42,8 @@ def test_gsgf_analysis_serializes_business_fields() -> None:
     assert payload["setup_type"] == "B区A点"
     assert payload["setup_score"] == 18
     assert payload["scores"]["volume_thickness"] == 22
+    assert payload["evidence_refs"] == ["book1-p081-600379-b-zone-a-point"]
+    assert payload["diagnostics"]["pattern"]["flags"] == ["b_zone_a_point"]
 
 
 def _bars(closes: list[float], volumes: list[float] | None = None) -> list[KlineBar]:
@@ -89,10 +93,13 @@ def test_gsgf_detects_volume_breakout_confirmation() -> None:
 
     analysis = analyze_gsgf(bars)
 
+    assert analysis.model_version == "gsgf-v2"
     assert analysis.confirm_type == "放量突破确认"
     assert analysis.confirm_score >= 30
     assert analysis.final_status == "确认买点"
     assert "放量突破确认" in analysis.trigger_tags
+    assert "book1-p022-600680-lift-distribute" in analysis.evidence_refs
+    assert "confirmation" in analysis.diagnostics
     assert analysis.trade_plan is not None
     assert any("持有优于追涨" in item for item in analysis.trade_plan.holder_guidance)
 
@@ -146,6 +153,65 @@ def test_gsgf_detects_high_volume_upper_shadow_pressure() -> None:
 
     assert "高位巨量长上影" in analysis.risk_flags
     assert analysis.action == "avoid"
+
+
+def test_gsgf_marks_high_star_platform_as_risk_not_low_absorb() -> None:
+    closes = [8 + index * 0.05 for index in range(216)]
+    closes += [18.0, 18.05, 18.02, 18.06]
+    bars = _bars(closes, [1_000_000 for _ in range(216)] + [2_400_000, 2_500_000, 2_450_000, 2_550_000])
+    for idx in range(216, 220):
+        base = bars[idx - 1].close
+        bars[idx] = bars[idx].model_copy(
+            update={
+                "open": round(base * 1.002, 2),
+                "close": round(base * 1.003, 2),
+                "high": round(base * 1.035, 2),
+                "low": round(base * 0.986, 2),
+            }
+        )
+
+    analysis = analyze_gsgf(bars)
+
+    assert "高位星线平台" in analysis.risk_flags
+    assert analysis.final_status in {"减仓", "回避"}
+    assert analysis.final_status != "低吸观察"
+    assert "book3-p132-002130-high-star-platform" in analysis.evidence_refs
+
+
+def test_gsgf_b_zone_a_point_requires_contracting_pullback_and_reclaim() -> None:
+    closes = [10 + index * 0.02 for index in range(220)]
+    bars = _bars(closes)
+
+    plain = analyze_gsgf(bars)
+    assert plain.setup_type != "B区A点"
+
+    for idx in range(214, 219):
+        base = bars[idx - 1].close
+        bars[idx] = bars[idx].model_copy(
+            update={
+                "open": round(base * 0.995, 2),
+                "close": round(base * 0.992, 2),
+                "high": round(base * 1.002, 2),
+                "low": round(base * 0.982, 2),
+                "volume": 620_000,
+            }
+        )
+    previous = bars[-2].close
+    bars[-1] = bars[-1].model_copy(
+        update={
+            "open": round(previous * 1.005, 2),
+            "close": round(previous * 1.035, 2),
+            "high": round(previous * 1.042, 2),
+            "low": round(previous * 0.998, 2),
+            "volume": 1_450_000,
+        }
+    )
+
+    analysis = analyze_gsgf(bars)
+
+    assert analysis.setup_type == "B区A点"
+    assert analysis.final_status in {"候选", "低吸观察"}
+    assert "book1-p081-600379-b-zone-a-point" in analysis.evidence_refs
 
 
 def test_gsgf_chart_annotations_mark_high_volume_upper_shadow_risk() -> None:

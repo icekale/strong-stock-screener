@@ -111,6 +111,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(typesSource, /composite_score: number \| null/);
   assert.match(typesSource, /calibration_rating: string/);
   assert.match(typesSource, /unique_symbol_buckets: GsgfCalibrationBucket\[\]/);
+  assert.match(typesSource, /GsgfCalibrationDiagnosticGroup/);
+  assert.match(typesSource, /diagnostic_groups: GsgfCalibrationDiagnosticGroup\[\]/);
   assert.match(typesSource, /GsgfChartAnnotation/);
   assert.match(typesSource, /ScreenStrategy = "strong_stock" \| "gsgf" \| "combined"/);
   assert.match(typesSource, /ScreenRunFilters/);
@@ -282,6 +284,13 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(screenerFeatureSource, /运行校准/);
   assert.match(screenerFeatureSource, /综合分/);
   assert.match(screenerFeatureSource, /评级/);
+  assert.match(screenerFeatureSource, /诊断分桶/);
+  assert.match(screenerFeatureSource, /确认信号/);
+  assert.match(screenerFeatureSource, /准备形态/);
+  assert.match(screenerFeatureSource, /结构区间/);
+  assert.match(screenerFeatureSource, /评分段/);
+  assert.match(screenerFeatureSource, /信号后T\+演化/);
+  assert.match(screenerFeatureSource, /最大回撤/);
   assert.match(screenerFeatureSource, /GsgfFunnelPanel/);
   assert.match(screenerFeatureSource, /漏斗诊断/);
   assert.match(screenerFeatureSource, /扫描覆盖/);

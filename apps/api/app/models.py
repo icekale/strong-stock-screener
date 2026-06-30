@@ -291,6 +291,11 @@ class GsgfCalibrationBucket(BaseModel):
     examples: list[GsgfCalibrationExample] = Field(default_factory=list)
 
 
+class GsgfCalibrationDiagnosticGroup(BaseModel):
+    name: str
+    buckets: list[GsgfCalibrationBucket] = Field(default_factory=list)
+
+
 class GsgfRealCalibrationSummary(BaseModel):
     trade_dates: list[str] = Field(default_factory=list)
     windows: list[int] = Field(default_factory=list)
@@ -299,6 +304,7 @@ class GsgfRealCalibrationSummary(BaseModel):
     skipped_count: int = 0
     buckets: list[GsgfCalibrationBucket] = Field(default_factory=list)
     unique_symbol_buckets: list[GsgfCalibrationBucket] = Field(default_factory=list)
+    diagnostic_groups: list[GsgfCalibrationDiagnosticGroup] = Field(default_factory=list)
     samples: list[GsgfCalibrationSample] = Field(default_factory=list)
     source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
     generated_at: str = Field(

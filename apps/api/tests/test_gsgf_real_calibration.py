@@ -104,6 +104,38 @@ def test_summarize_gsgf_real_calibration_scores_buckets_across_windows() -> None
     assert buckets["B区A点"].calibration_rating == "弱"
 
 
+def test_summarize_gsgf_real_calibration_groups_diagnostics_for_tuning() -> None:
+    def analyzer(bars: list[KlineBar]) -> GsgfAnalysis:
+        if bars[-1].close == 10:
+            return GsgfAnalysis(
+                total_score=88,
+                final_status="确认买点",
+                confirm_type="放量突破确认",
+            )
+        return GsgfAnalysis(
+            total_score=68,
+            final_status="低吸观察",
+            zone="b_zone_a_point",
+            setup_type="双星止跌",
+        )
+
+    summary = summarize_gsgf_real_calibration(
+        candidate_provider=FakeCandidateProvider(),
+        kline_provider=FakeKlineProvider(),
+        trade_dates=["2026-06-12"],
+        windows=[1],
+        analyzer=analyzer,
+    )
+
+    groups = {group.name: {bucket.name: bucket for bucket in group.buckets} for group in summary.diagnostic_groups}
+    assert groups["确认信号"]["放量突破确认"].sample_count == 1
+    assert groups["确认信号"]["无确认信号"].sample_count == 1
+    assert groups["准备形态"]["双星止跌"].sample_count == 1
+    assert groups["结构区间"]["B区A点"].sample_count == 1
+    assert groups["评分段"]["80-89"].sample_count == 1
+    assert groups["评分段"]["60-69"].sample_count == 1
+
+
 def test_summarize_gsgf_real_calibration_reuses_kline_fetches_across_dates() -> None:
     class RepeatedCandidateProvider:
         source_name = "fake重复候选池"

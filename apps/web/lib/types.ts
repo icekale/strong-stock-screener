@@ -201,6 +201,11 @@ export type GsgfCalibrationBucket = {
   examples: GsgfCalibrationExample[];
 };
 
+export type GsgfCalibrationDiagnosticGroup = {
+  name: string;
+  buckets: GsgfCalibrationBucket[];
+};
+
 export type GsgfRealCalibrationSummary = {
   trade_dates: string[];
   windows: number[];
@@ -209,6 +214,7 @@ export type GsgfRealCalibrationSummary = {
   skipped_count: number;
   buckets: GsgfCalibrationBucket[];
   unique_symbol_buckets: GsgfCalibrationBucket[];
+  diagnostic_groups: GsgfCalibrationDiagnosticGroup[];
   samples: GsgfCalibrationSample[];
   source_status: StrongStockSourceStatus[];
   generated_at: string;

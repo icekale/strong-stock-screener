@@ -164,6 +164,19 @@ export function GsgfCalibrationPanel({
         <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
           <CalibrationBucketTable buckets={calibrationSummary.buckets} title="样本分桶" />
           <CalibrationBucketTable buckets={calibrationSummary.unique_symbol_buckets} title="去重股票分桶" />
+          {calibrationSummary.diagnostic_groups.length > 0 && (
+            <div className="xl:col-span-2">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <h3 className="text-sm font-black text-[#11100e]">诊断分桶</h3>
+                <Tag className="m-0">确认信号 / 准备形态 / 结构区间 / 评分段</Tag>
+              </div>
+              <div className="grid gap-3 lg:grid-cols-2">
+                {calibrationSummary.diagnostic_groups.map((group) => (
+                  <CalibrationBucketTable buckets={group.buckets} key={group.name} title={group.name} />
+                ))}
+              </div>
+            </div>
+          )}
           <div className="xl:col-span-2">
             <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-[#7b756d]">
               <Tag className="m-0">样本日 {calibrationSummary.trade_dates.join(" / ")}</Tag>
@@ -178,10 +191,20 @@ export function GsgfCalibrationPanel({
                 <table className="min-w-full divide-y divide-[#ddd8d0] text-left text-xs">
                   <thead className="bg-[#f5f3f0] text-[#7b756d]">
                     <tr>
+                      <th className="px-3 py-2 font-black" colSpan={4 + calibrationSummary.windows.length}>
+                        信号后T+演化
+                      </th>
+                    </tr>
+                    <tr>
                       <th className="px-3 py-2 font-black">样例</th>
                       <th className="px-3 py-2 font-black">分桶</th>
                       <th className="px-3 py-2 font-black">状态</th>
-                      <th className="px-3 py-2 font-black">首窗收益</th>
+                      <th className="px-3 py-2 font-black">入场价</th>
+                      {calibrationSummary.windows.map((window) => (
+                        <th className="px-3 py-2 font-black" key={window}>
+                          T+{window}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-[#e5e0d8] bg-white">
@@ -192,9 +215,22 @@ export function GsgfCalibrationPanel({
                         </td>
                         <td className="px-3 py-2 text-[#7b756d]">{sample.bucket_names.join(" / ")}</td>
                         <td className="px-3 py-2 text-[#7b756d]">{sample.status}</td>
-                        <td className="px-3 py-2 font-black tabular-nums text-[#11100e]">
-                          {formatSignedPercent(sample.windows[0]?.realized_return_pct)}
+                        <td className="px-3 py-2 tabular-nums text-[#7b756d]">
+                          {sample.entry_close === null ? "--" : sample.entry_close.toFixed(2)}
                         </td>
+                        {calibrationSummary.windows.map((window) => {
+                          const sampleWindow = sample.windows.find((item) => item.window_days === window);
+                          return (
+                            <td className="px-3 py-2 tabular-nums" key={window}>
+                              <div className="font-black text-[#11100e]">
+                                {formatSignedPercent(sampleWindow?.realized_return_pct)}
+                              </div>
+                              <div className="text-[11px] text-[#7b756d]">
+                                最大回撤 {formatSignedPercent(sampleWindow?.max_drawdown_pct)}
+                              </div>
+                            </td>
+                          );
+                        })}
                       </tr>
                     ))}
                   </tbody>

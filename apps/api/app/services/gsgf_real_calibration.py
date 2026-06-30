@@ -9,6 +9,7 @@ from app.gsgf_rules import analyze_gsgf
 from app.models import (
     GsgfAnalysis,
     GsgfCalibrationBucket,
+    GsgfCalibrationDiagnosticGroup,
     GsgfCalibrationExample,
     GsgfCalibrationSample,
     GsgfCalibrationSampleWindow,
@@ -110,6 +111,7 @@ def summarize_gsgf_real_calibration(
         skipped_count=skipped_count,
         buckets=_build_buckets(samples, clean_windows),
         unique_symbol_buckets=_build_buckets(_unique_symbol_samples(samples), clean_windows),
+        diagnostic_groups=_build_diagnostic_groups(samples, clean_windows),
         samples=[_sample_payload(sample, clean_windows) for sample in samples if sample.bucket_names],
         source_status=[
             StrongStockSourceStatus(
@@ -216,6 +218,68 @@ def _build_buckets(samples: list[_CalibrationSample], windows: list[int]) -> lis
             )
         )
     return buckets
+
+
+def _build_diagnostic_groups(samples: list[_CalibrationSample], windows: list[int]) -> list[GsgfCalibrationDiagnosticGroup]:
+    target_samples = [sample for sample in samples if sample.bucket_names]
+    group_specs: list[tuple[str, Callable[[_CalibrationSample], str]]] = [
+        ("确认信号", lambda sample: sample.analysis.confirm_type or "无确认信号"),
+        ("准备形态", lambda sample: sample.analysis.setup_type or "无准备形态"),
+        ("结构区间", lambda sample: _zone_label(sample.analysis.zone)),
+        ("评分段", lambda sample: _score_bucket(sample.analysis.total_score)),
+    ]
+    return [
+        GsgfCalibrationDiagnosticGroup(
+            name=group_name,
+            buckets=_build_named_buckets(target_samples, windows, bucket_name_for_sample),
+        )
+        for group_name, bucket_name_for_sample in group_specs
+    ]
+
+
+def _build_named_buckets(
+    samples: list[_CalibrationSample],
+    windows: list[int],
+    bucket_name_for_sample: Callable[[_CalibrationSample], str],
+) -> list[GsgfCalibrationBucket]:
+    grouped: dict[str, list[_CalibrationSample]] = defaultdict(list)
+    for sample in samples:
+        grouped[bucket_name_for_sample(sample)].append(sample)
+
+    buckets: list[GsgfCalibrationBucket] = []
+    for bucket_name in sorted(grouped):
+        bucket_samples = grouped[bucket_name]
+        window_stats = [_window_stat(bucket_samples, window) for window in windows]
+        composite_score = _composite_score(bucket_name, window_stats)
+        buckets.append(
+            GsgfCalibrationBucket(
+                name=bucket_name,
+                sample_count=len(bucket_samples),
+                windows=window_stats,
+                composite_score=composite_score,
+                calibration_rating=_calibration_rating(composite_score),
+                examples=[_example(sample) for sample in bucket_samples[:5]],
+            )
+        )
+    return buckets
+
+
+def _zone_label(zone: str) -> str:
+    labels = {
+        "a_zone": "A区",
+        "b_zone_a_point": "B区A点",
+        "c_zone": "C区",
+        "unformed": "未成型",
+        "unknown": "未知",
+    }
+    return labels.get(zone, zone or "未知")
+
+
+def _score_bucket(score: int) -> str:
+    lower = max(0, min(100, (score // 10) * 10))
+    if lower >= 100:
+        return "100"
+    return f"{lower}-{lower + 9}"
 
 
 def _unique_symbol_samples(samples: list[_CalibrationSample]) -> list[_CalibrationSample]:

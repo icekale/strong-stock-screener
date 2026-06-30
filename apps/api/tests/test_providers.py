@@ -9,6 +9,7 @@ from app.providers.recent_limit_up_candidates import (
 )
 from app.providers.news_risk import analyze_negative_news_rows
 from app.providers.thsdk_candidates import ThsdkCandidateProvider, parse_thsdk_candidate_rows
+from app.providers.tdx_mcp import TdxMcpProvider
 from app.providers.tickflow import (
     TickFlowDailyKlineProvider,
     TickFlowIntradayBar,
@@ -1349,3 +1350,77 @@ def test_parse_watchlist_text_supports_groups_and_tags() -> None:
     assert items[1].symbol == "002000.SZ"
     assert items[1].group == "低吸"
     assert items[1].tags == ["消费", "强势"]
+
+
+class FakeTdxMcpHttpClient:
+    def __init__(self, payloads: list[object]) -> None:
+        self.payloads = list(payloads)
+        self.requests: list[dict[str, object]] = []
+
+    def post(self, url: str, **kwargs: object) -> FakeResponse:
+        self.requests.append({"url": url, **kwargs})
+        if not self.payloads:
+            raise AssertionError("no fake TDX payload left")
+        return FakeResponse(self.payloads.pop(0))
+
+
+def _tdx_tool_payload(rows: list[dict[str, object]]) -> dict[str, object]:
+    headers = list(rows[0].keys()) if rows else []
+    data = [[row.get(header) for header in headers] for row in rows]
+    return {
+        "result": {
+            "content": [
+                {
+                    "type": "text",
+                    "text": __import__("json").dumps(
+                        {
+                            "meta": {"code": 0, "total": len(rows), "message": "ok"},
+                            "headers": headers,
+                            "data": data,
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            ]
+        }
+    }
+
+
+def test_tdx_mcp_provider_builds_sector_radar_from_limit_up_concepts() -> None:
+    provider = TdxMcpProvider(
+        api_key="TDX-test",
+        http_client=FakeTdxMcpHttpClient(
+            [
+                {"headers": {"Mcp-Session-Id": "s1"}},
+                {},
+                _tdx_tool_payload(
+                    [
+                        {"sec_name": "华亚智能", "sec_code": "003043", "涨停原因": "半导体+设备", "连续涨停天数": "2", "所属概念": "半导体;机器人", "封单金额": "120000"},
+                        {"sec_name": "新洁能", "sec_code": "605111", "涨停原因": "半导体", "连续涨停天数": "1", "所属概念": "半导体", "封单金额": "90000"},
+                        {"sec_name": "惠康科技", "sec_code": "001237", "涨停原因": "通用设备", "连续涨停天数": "2", "所属概念": "机器人", "封单金额": "80000"},
+                    ]
+                ),
+            ]
+        ),
+    )
+
+    radar = provider.get_sector_radar(limit=5)
+
+    assert radar.capital_flow_status == "estimated"
+    assert radar.flow_source == "通达信MCP涨停概念集中度估算"
+    assert radar.inflow[0].name == "半导体"
+    assert radar.inflow[0].leader == "华亚智能"
+    assert radar.inflow[0].advance_count == 2
+    assert radar.inflow[0].net_flow_cny is not None
+    assert radar.source_status[0].source == "通达信MCP涨停概念"
+    assert radar.source_status[0].status == "success"
+
+
+def test_tdx_mcp_provider_status_reports_missing_key() -> None:
+    provider = TdxMcpProvider(api_key="")
+
+    status = provider.status()
+
+    assert status.source == "通达信MCP"
+    assert status.status == "missing_key"
+    assert "TDX_API_KEY" in status.detail

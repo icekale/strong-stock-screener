@@ -531,6 +531,10 @@ export type RuntimeSettingsConfig = {
   ifind_api_key_source: "runtime" | "env" | "none";
   ifind_base_url: string;
   ifind_service_id: "hexin-ifind-ds-stock-mcp" | "hexin-ifind-ds-news-mcp" | "hexin-ifind-ds-index-mcp";
+  tdx_api_key_configured: boolean;
+  tdx_api_key_preview: string;
+  tdx_api_key_source: "runtime" | "env" | "none";
+  tdx_base_url: string;
   provider_timeout_seconds: number;
   runtime_config_path: string;
   notifications: NotificationSettingsPublic;
@@ -595,6 +599,7 @@ export type RuntimeSettingsResponse = {
     tickflow_base_url?: string | null;
     ifind_base_url?: string | null;
     ifind_service_id?: "hexin-ifind-ds-stock-mcp" | "hexin-ifind-ds-news-mcp" | "hexin-ifind-ds-index-mcp" | null;
+    tdx_base_url?: string | null;
     provider_timeout_seconds?: number | null;
     notification_channels?: NotificationChannelConfig[];
     sentiment_monitor?: SentimentMonitorConfig;

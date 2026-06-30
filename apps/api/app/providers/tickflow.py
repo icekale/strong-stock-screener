@@ -171,7 +171,16 @@ class TickFlowQuoteProvider:
         except httpx.HTTPStatusError as exc:
             code = _payload_code(exc.response)
             if exc.response.status_code == 403 and "NO_INTRADAY_BATCH_PERMISSION" in code:
-                return self._get_intraday_bars_one_by_one(unique_symbols, period=period, count=count)
+                try:
+                    return self._get_intraday_bars_one_by_one(unique_symbols, period=period, count=count)
+                except httpx.HTTPStatusError as fallback_exc:
+                    raise StrongStockDataUnavailable(
+                        f"TickFlow 分钟线请求失败: HTTP {fallback_exc.response.status_code}"
+                    ) from fallback_exc
+                except Exception as fallback_exc:
+                    raise StrongStockDataUnavailable(
+                        f"TickFlow 分钟线请求失败: {fallback_exc.__class__.__name__}"
+                    ) from fallback_exc
             raise StrongStockDataUnavailable(
                 f"TickFlow 分钟线请求失败: HTTP {exc.response.status_code}"
             ) from exc

@@ -39,6 +39,7 @@ from app.providers.market_overview import EastmoneyMarketOverviewProvider
 from app.providers.news_risk import EastmoneyNewsRiskProvider
 from app.providers.recent_limit_up_candidates import RecentLimitUpCandidateProvider
 from app.providers.thsdk_candidates import ThsdkCandidateProvider
+from app.providers.tdx_mcp import TdxMcpProvider
 from app.providers.tickflow import TickFlowDailyKlineProvider, TickFlowQuoteProvider
 from app.providers.watchlist import (
     WatchlistItem,
@@ -350,6 +351,10 @@ def settings_health(symbol: str = "605289.SH") -> dict[str, object]:
             _probe(
                 "iFinD A股数据",
                 lambda: ifind_provider.probe_tools(settings.ifind_service_id),
+            ).model_dump(mode="json"),
+            _probe(
+                "通达信MCP",
+                lambda: _tdx_provider().status(),
             ).model_dump(mode="json"),
         ],
     }
@@ -812,9 +817,26 @@ def _cached_sector_radar(limit: int) -> SectorRadarResponse:
     cache_key = f"sector-radar:{_provider_cache_key(provider)}:{limit}"
 
     def build() -> SectorRadarResponse:
+        result: SectorRadarResponse | None = None
         if hasattr(provider, "get_sector_radar"):
-            return provider.get_sector_radar(limit=limit)
-        return _estimated_sector_radar(_cached_market_overview(), limit)
+            result = provider.get_sector_radar(limit=limit)
+        else:
+            result = _estimated_sector_radar(_cached_market_overview(), limit)
+        if result.inflow or result.outflow:
+            return result
+        try:
+            tdx_result = _tdx_provider().get_sector_radar(limit=limit)
+        except Exception as exc:
+            result.source_status.append(
+                StrongStockSourceStatus(
+                    source="通达信MCP板块兜底",
+                    status="failed",
+                    detail=f"TDX fallback failed: {exc.__class__.__name__}",
+                )
+            )
+            return result
+        tdx_result.source_status = [*result.source_status, *tdx_result.source_status]
+        return tdx_result
 
     return SECTOR_RADAR_CACHE.get_or_set(cache_key, build).model_copy(deep=True)
 
@@ -979,6 +1001,19 @@ def _news_risk_provider() -> object:
     return EastmoneyNewsRiskProvider.from_akshare()
 
 
+def _tdx_provider() -> TdxMcpProvider:
+    injected = getattr(app.state, "tdx_provider", None)
+    if injected is not None:
+        return injected
+    settings = _effective_settings()
+    return TdxMcpProvider(
+        api_key=settings.tdx_api_key,
+        base_url=settings.tdx_base_url,
+        timeout_seconds=settings.provider_timeout_seconds,
+        http_client=getattr(app.state, "tdx_http_client", None),
+    )
+
+
 def _ifind_provider() -> IfindMcpProvider:
     injected = getattr(app.state, "ifind_provider", None)
     if injected is not None:
@@ -1088,6 +1123,7 @@ def _save_sentiment_monitor_config(config: SentimentMonitorConfig) -> None:
             tickflow_base_url=current.tickflow_base_url or effective.tickflow_base_url,
             ifind_base_url=current.ifind_base_url or effective.ifind_base_url,
             ifind_service_id=current.ifind_service_id or effective.ifind_service_id,
+            tdx_base_url=current.tdx_base_url or effective.tdx_base_url,
             provider_timeout_seconds=current.provider_timeout_seconds or effective.provider_timeout_seconds,
             notification_channels=current.notification_channels,
             sentiment_monitor=config,
@@ -1160,7 +1196,7 @@ def _estimated_sector_radar_item(sector: MarketSectorStrengthItem) -> SectorRada
 def _public_saved_settings() -> dict[str, object]:
     return load_runtime_settings(_runtime_config_path()).model_dump(
         mode="json",
-        exclude={"tickflow_api_key", "ifind_api_key"},
+        exclude={"tickflow_api_key", "ifind_api_key", "tdx_api_key"},
         exclude_none=True,
     )
 

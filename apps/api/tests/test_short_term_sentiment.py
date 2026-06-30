@@ -146,6 +146,16 @@ class FakeSentimentQuoteProvider:
         }
 
 
+class FailingIntradayBarsQuoteProvider(FakeSentimentQuoteProvider):
+    def get_intraday_bars(
+        self,
+        symbols: list[str],
+        period: str = "1m",
+        count: int = 120,
+    ) -> dict[str, list[TickFlowIntradayBar]]:
+        raise StrongStockDataUnavailable("TickFlow 分钟线请求失败: HTTP 429")
+
+
 class FakeEmotionMarketOverviewProvider:
     def __init__(self) -> None:
         self.overview_calls = 0
@@ -662,3 +672,38 @@ def test_short_term_intraday_signal_digest_api_returns_alert_message() -> None:
     assert payload["title"] == "短线情绪提醒 · 2026-06-26"
     assert payload["alert_count"] >= 2
     assert payload["message_text"]
+
+
+def test_short_term_intraday_sentiment_degrades_when_minute_bars_rate_limited() -> None:
+    result = build_short_term_intraday_sentiment(
+        FakeSentimentCandidateProvider(),
+        FailingIntradayBarsQuoteProvider(),
+        trade_date="2026-06-26",
+        limit=20,
+    )
+
+    assert result.metrics.watched_count == 4
+    assert result.source_status[0].source == "TickFlow 实时行情"
+    assert result.source_status[0].status == "success"
+    assert result.source_status[1].source == "TickFlow 当日分钟线"
+    assert result.source_status[1].status == "failed"
+    assert "HTTP 429" in result.source_status[1].detail
+    assert all(item.intraday_ma is None for item in result.items)
+
+
+def test_short_term_intraday_sentiment_api_degrades_when_minute_bars_rate_limited() -> None:
+    app.state.candidate_provider = FakeSentimentCandidateProvider()
+    app.state.quote_provider = FailingIntradayBarsQuoteProvider()
+    try:
+        response = TestClient(app).get(
+            "/api/short-term/sentiment/intraday?trade_date=2026-06-26&limit=20"
+        )
+    finally:
+        delattr(app.state, "candidate_provider")
+        delattr(app.state, "quote_provider")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["metrics"]["watched_count"] == 4
+    assert payload["source_status"][1]["status"] == "failed"
+    assert "HTTP 429" in payload["source_status"][1]["detail"]

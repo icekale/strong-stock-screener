@@ -31,6 +31,8 @@ type SettingsDraft = {
   ifind_api_key: string;
   ifind_base_url: string;
   ifind_service_id: "hexin-ifind-ds-stock-mcp" | "hexin-ifind-ds-news-mcp" | "hexin-ifind-ds-index-mcp";
+  tdx_api_key: string;
+  tdx_base_url: string;
   provider_timeout_seconds: number;
   notification_wechat_enabled: boolean;
   notification_wechat_webhook: string;
@@ -58,6 +60,8 @@ const DEFAULT_DRAFT: SettingsDraft = {
   ifind_api_key: "",
   ifind_base_url: "https://api-mcp.51ifind.com:8643",
   ifind_service_id: "hexin-ifind-ds-stock-mcp",
+  tdx_api_key: "",
+  tdx_base_url: "https://mcp.tdx.com.cn:3001/mcp",
   provider_timeout_seconds: 12,
   notification_wechat_enabled: false,
   notification_wechat_webhook: "",
@@ -106,6 +110,8 @@ export function SettingsWorkspace() {
         ifind_api_key: "",
         ifind_base_url: response.config.ifind_base_url,
         ifind_service_id: response.config.ifind_service_id,
+        tdx_api_key: "",
+        tdx_base_url: response.config.tdx_base_url,
         provider_timeout_seconds: response.config.provider_timeout_seconds,
         ...notificationDraftFromConfig(response.config),
       });
@@ -131,6 +137,8 @@ export function SettingsWorkspace() {
         ifind_api_key: draft.ifind_api_key.trim() || undefined,
         ifind_base_url: draft.ifind_base_url.trim(),
         ifind_service_id: draft.ifind_service_id,
+        tdx_api_key: draft.tdx_api_key.trim() || undefined,
+        tdx_base_url: draft.tdx_base_url.trim(),
         provider_timeout_seconds: draft.provider_timeout_seconds,
         notification_channels: buildNotificationChannels(draft),
         sentiment_monitor: config?.sentiment_monitor,
@@ -143,6 +151,8 @@ export function SettingsWorkspace() {
         ifind_api_key: "",
         ifind_base_url: response.config.ifind_base_url,
         ifind_service_id: response.config.ifind_service_id,
+        tdx_api_key: "",
+        tdx_base_url: response.config.tdx_base_url,
         provider_timeout_seconds: response.config.provider_timeout_seconds,
         ...notificationDraftFromConfig(response.config),
       });
@@ -251,6 +261,10 @@ export function SettingsWorkspace() {
                     <KeyStatus configured={Boolean(config?.ifind_api_key_configured)} />
                   </Descriptions.Item>
                   <Descriptions.Item label="iFinD 服务">{config?.ifind_service_id ?? "未读取"}</Descriptions.Item>
+                  <Descriptions.Item label="通达信 MCP Key">
+                    <KeyStatus configured={Boolean(config?.tdx_api_key_configured)} />
+                  </Descriptions.Item>
+                  <Descriptions.Item label="通达信 MCP">{config?.tdx_api_key_source ?? "未读取"}</Descriptions.Item>
                   <Descriptions.Item label="超时">{config ? `${config.provider_timeout_seconds}s` : "未读取"}</Descriptions.Item>
                 </Descriptions>
               </Card>
@@ -337,6 +351,38 @@ export function SettingsWorkspace() {
                       <Descriptions bordered column={1} size="small">
                         <Descriptions.Item label="Key 来源">{config?.ifind_api_key_source ?? "未读取"}</Descriptions.Item>
                         <Descriptions.Item label="Key 摘要">{config?.ifind_api_key_preview || "未配置"}</Descriptions.Item>
+                      </Descriptions>
+                    </Col>
+                  </Row>
+                </Form>
+              </Card>
+
+              <Card className="workbench-panel" title="通达信 MCP 补充源">
+                <Alert
+                  className="mb-4"
+                  showIcon
+                  title="通达信 MCP 用于补充涨跌停、短线情绪和板块主线集中度；主行情仍优先使用 TickFlow。"
+                  type="info"
+                />
+                <Form form={form} layout="vertical" onValuesChange={(_, values) => updateDraft(values)}>
+                  <Row gutter={12}>
+                    <Col md={12} xs={24}>
+                      <Form.Item label="通达信 MCP Base URL" name="tdx_base_url">
+                        <Input />
+                      </Form.Item>
+                    </Col>
+                    <Col md={12} xs={24}>
+                      <Form.Item label="通达信 MCP Key" name="tdx_api_key">
+                        <Input.Password
+                          autoComplete="off"
+                          placeholder={config?.tdx_api_key_configured ? "留空表示沿用已保存 Key" : "请输入通达信 MCP Key"}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col md={12} xs={24}>
+                      <Descriptions bordered column={1} size="small">
+                        <Descriptions.Item label="Key 来源">{config?.tdx_api_key_source ?? "未读取"}</Descriptions.Item>
+                        <Descriptions.Item label="Key 摘要">{config?.tdx_api_key_preview || "未配置"}</Descriptions.Item>
                       </Descriptions>
                     </Col>
                   </Row>

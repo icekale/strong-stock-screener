@@ -231,6 +231,8 @@ export async function saveRuntimeSettings(payload: {
   ifind_api_key?: string | null;
   ifind_base_url: string;
   ifind_service_id: "hexin-ifind-ds-stock-mcp" | "hexin-ifind-ds-news-mcp" | "hexin-ifind-ds-index-mcp";
+  tdx_api_key?: string | null;
+  tdx_base_url: string;
   provider_timeout_seconds: number;
   notification_channels?: NotificationChannelConfig[];
   sentiment_monitor?: SentimentMonitorConfig;

@@ -182,34 +182,6 @@ export function sectorRadarSourceSummary(sectorRadar: SectorRadarResponse | null
   return `${successCount}/${items.length} 板块源可用 · ${flowLabel}`;
 }
 
-export function buildSectorRadarSentiment(sectorRadar: SectorRadarResponse | null): {
-  footerValue: string;
-  score: number | null;
-  subValue: string;
-  tone: "positive" | "neutral" | "warning";
-} {
-  const inflow = sectorRadar?.inflow ?? [];
-  const outflow = sectorRadar?.outflow ?? [];
-  const inflowTotal = inflow.reduce((sum, item) => sum + Math.max(0, item.net_flow_cny ?? 0), 0);
-  const outflowTotal = outflow.reduce((sum, item) => sum + Math.abs(Math.min(0, item.net_flow_cny ?? 0)), 0);
-  const total = inflowTotal + outflowTotal;
-  if (total <= 0) {
-    return {
-      footerValue: "等待板块资金流",
-      score: null,
-      subValue: "读取 /sectors 同源数据中",
-      tone: "neutral",
-    };
-  }
-  const score = Math.round((inflowTotal / total) * 100);
-  return {
-    footerValue: `${inflow.length}/${outflow.length}`,
-    score,
-    subValue: `流入 ${formatCnyCompact(inflowTotal)} · 流出 ${formatCnyCompact(outflowTotal)}`,
-    tone: score >= 55 ? "positive" : score >= 45 ? "neutral" : "warning",
-  };
-}
-
 export function realtimeTurnoverSourceLabel(marketOverview: MarketOverviewResponse | null): string | null {
   const statuses = marketOverview?.source_status ?? [];
   if (statuses.some((item) => item.source === "iFinD 实时指数" && item.status === "success")) {

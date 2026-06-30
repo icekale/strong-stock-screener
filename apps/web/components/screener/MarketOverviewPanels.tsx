@@ -7,12 +7,12 @@ import type {
   MarketOverviewResponse,
   SectorRadarItem,
   SectorRadarResponse,
+  SentimentSummaryResponse,
   StrongStockScreeningItem,
   StrongStockScreeningResponse,
 } from "../../lib/types";
 import { realtimeTurnoverSubtitles, type MarketDashboardStats } from "./types";
 import {
-  buildSectorRadarSentiment,
   exportCandidatesCsv,
   formatCnyCompact,
   formatDateTime,
@@ -35,6 +35,7 @@ export function MarketOverviewPanels({
   result,
   running,
   sectorRadar,
+  sentimentSummary,
   sources,
   stats,
 }: {
@@ -45,6 +46,7 @@ export function MarketOverviewPanels({
   result: StrongStockScreeningResponse | null;
   running: boolean;
   sectorRadar: SectorRadarResponse | null;
+  sentimentSummary: SentimentSummaryResponse | null;
   sources: DataSourceStatusResponse | null;
   stats: MarketDashboardStats;
 }) {
@@ -58,7 +60,14 @@ export function MarketOverviewPanels({
         running={running}
         sources={sources}
       />
-      <MarketEnvironmentPanel marketOverview={marketOverview} result={result} sectorRadar={sectorRadar} sources={sources} stats={stats} />
+      <MarketEnvironmentPanel
+        marketOverview={marketOverview}
+        result={result}
+        sectorRadar={sectorRadar}
+        sentimentSummary={sentimentSummary}
+        sources={sources}
+        stats={stats}
+      />
     </>
   );
 }
@@ -172,17 +181,19 @@ function MarketEnvironmentPanel({
   marketOverview,
   result,
   sectorRadar,
+  sentimentSummary,
   sources,
   stats,
 }: {
   marketOverview: MarketOverviewResponse | null;
   result: StrongStockScreeningResponse | null;
   sectorRadar: SectorRadarResponse | null;
+  sentimentSummary: SentimentSummaryResponse | null;
   sources: DataSourceStatusResponse | null;
   stats: MarketDashboardStats;
 }) {
   const sourceState = sourceSummary(sources);
-  const sectorSentiment = buildSectorRadarSentiment(sectorRadar);
+  const sentimentMetric = buildSentimentMetric(sentimentSummary);
   const turnover = marketOverview?.turnover ?? null;
   const advanceDecline = marketOverview?.advance_decline ?? null;
   const advanceCount = advanceDecline?.advance_count ?? null;
@@ -205,12 +216,12 @@ function MarketEnvironmentPanel({
       />
       <TerminalMetricCard
         label="情绪指数 SENTIMENT"
-        value={sectorSentiment.score === null ? "--" : String(sectorSentiment.score)}
+        value={sentimentMetric.score === null ? "--" : String(sentimentMetric.score)}
         suffix="/100"
-        subValue={sectorSentiment.subValue}
-        footerLabel="Sector Flow"
-        footerValue={sectorSentiment.footerValue}
-        tone={sectorSentiment.tone}
+        subValue={sentimentMetric.subValue}
+        footerLabel="Short-term"
+        footerValue={sentimentMetric.footerValue}
+        tone={sentimentMetric.tone}
       />
       <MarketBreadthCard
         label="涨跌比 ADVANCE/DECLINE"
@@ -237,6 +248,30 @@ function MarketEnvironmentPanel({
       />
     </section>
   );
+}
+
+function buildSentimentMetric(sentimentSummary: SentimentSummaryResponse | null): {
+  footerValue: string;
+  score: number | null;
+  subValue: string;
+  tone: "positive" | "neutral" | "warning";
+} {
+  if (!sentimentSummary) {
+    return {
+      footerValue: "等待短线情绪",
+      score: null,
+      subValue: "读取涨跌停、炸板和连板情绪中",
+      tone: "neutral",
+    };
+  }
+  const metrics = sentimentSummary.metrics;
+  const sealRate = metrics.seal_rate_pct === null ? "--" : `${metrics.seal_rate_pct.toFixed(1)}%`;
+  return {
+    footerValue: `跌停 ${metrics.limit_down_count ?? "--"} · 封板率 ${sealRate}`,
+    score: Math.round(metrics.emotion_score),
+    subValue: `${metrics.emotion_level} · 涨停 ${metrics.limit_up_count} / 炸板 ${metrics.break_board_count}`,
+    tone: metrics.emotion_score >= 70 ? "warning" : metrics.emotion_score >= 45 ? "neutral" : "positive",
+  };
 }
 
 function MarketBreadthCard({

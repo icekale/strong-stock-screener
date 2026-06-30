@@ -646,6 +646,63 @@ class CountingSectorRadarProvider(FakeMarketOverviewProvider):
         )
 
 
+class EmptySectorRadarProvider(FakeMarketOverviewProvider):
+    source_name = "empty fake板块雷达"
+
+    def get_sector_radar(self, limit: int = 20) -> SectorRadarResponse:
+        return SectorRadarResponse(
+            trade_date="2026-06-26",
+            capital_flow_status="unavailable",
+            flow_source="empty fake板块资金流",
+            inflow=[],
+            outflow=[],
+            source_status=[
+                StrongStockSourceStatus(
+                    source="empty fake板块资金流",
+                    status="failed",
+                    detail="主源无板块资金流",
+                )
+            ],
+        )
+
+
+class FakeTdxSectorRadarProvider:
+    source_name = "通达信MCP"
+
+    def __init__(self) -> None:
+        self.calls: list[int] = []
+
+    def status(self) -> StrongStockSourceStatus:
+        return StrongStockSourceStatus(source="通达信MCP", status="success", detail="fake tdx configured")
+
+    def get_sector_radar(self, limit: int = 20) -> SectorRadarResponse:
+        self.calls.append(limit)
+        return SectorRadarResponse(
+            trade_date="2026-06-26",
+            capital_flow_status="estimated",
+            flow_source="通达信MCP涨停概念集中度估算",
+            inflow=[
+                SectorRadarItem(
+                    name="半导体",
+                    source="通达信MCP涨停概念",
+                    advance_count=3,
+                    decline_count=0,
+                    leader="新洁能",
+                    net_flow_cny=680_000_000,
+                    strength_score=71,
+                )
+            ],
+            outflow=[],
+            source_status=[
+                StrongStockSourceStatus(
+                    source="通达信MCP涨停概念",
+                    status="success",
+                    detail="fallback ok",
+                )
+            ],
+        )
+
+
 def _client(
     tmp_path: Path,
     candidate_provider: object | None = None,
@@ -756,6 +813,32 @@ def test_settings_can_be_saved_with_ifind_configuration(tmp_path: Path) -> None:
     assert "ifind_api_key" not in payload["saved"]
 
 
+def test_settings_can_be_saved_with_tdx_mcp_configuration(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.put(
+        "/api/settings",
+        json={
+            "candidate_provider": "recent_limit_up",
+            "kline_provider": "tickflow",
+            "quote_provider": "tickflow",
+            "tickflow_api_key": "tk_saved_secret",
+            "tickflow_base_url": "https://api.example.test",
+            "provider_timeout_seconds": 3.5,
+            "tdx_api_key": "tdx_saved_secret",
+            "tdx_base_url": "https://mcp.tdx.example.test/mcp",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["config"]["tdx_api_key_configured"] is True
+    assert payload["config"]["tdx_api_key_preview"] != "tdx_saved_secret"
+    assert payload["config"]["tdx_base_url"] == "https://mcp.tdx.example.test/mcp"
+    assert "tdx_api_key" not in payload["saved"]
+    assert "tdx_saved_secret" not in response.text
+
+
 def test_settings_health_check_reports_ifind_mcp_probe(tmp_path: Path) -> None:
     client = _client(tmp_path)
     app.state.ifind_http_client = FakeIfindHealthClient()
@@ -783,6 +866,34 @@ def test_settings_health_check_reports_ifind_mcp_probe(tmp_path: Path) -> None:
     assert "iFinD MCP" in probe_names
     assert "iFinD A股数据" in probe_names
     assert all(isinstance(item["latency_ms"], int) for item in payload["probes"])
+
+
+def test_settings_health_check_reports_tdx_mcp_probe(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    app.state.tdx_provider = FakeTdxSectorRadarProvider()
+
+    response = client.get("/api/settings/health?symbol=603890.SH")
+
+    assert response.status_code == 200
+    payload = response.json()
+    probe_names = [item["name"] for item in payload["probes"]]
+    assert "通达信MCP" in probe_names
+    tdx_probe = next(item for item in payload["probes"] if item["name"] == "通达信MCP")
+    assert tdx_probe["status"] == "success"
+    assert tdx_probe["detail"] == "fake tdx configured"
+    assert isinstance(tdx_probe["latency_ms"], int)
+
+
+def test_settings_health_check_constructs_default_tdx_provider(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.get("/api/settings/health?symbol=603890.SH")
+
+    assert response.status_code == 200
+    payload = response.json()
+    tdx_probe = next(item for item in payload["probes"] if item["name"] == "通达信MCP")
+    assert tdx_probe["status"] in {"success", "missing_key"}
+    assert tdx_probe["detail"]
 
 
 def test_settings_health_check_reports_provider_probes(tmp_path: Path) -> None:
@@ -971,6 +1082,22 @@ def test_sector_radar_endpoint_reuses_cached_provider_result(tmp_path: Path) -> 
     assert second.status_code == 200
     assert third.status_code == 200
     assert provider.radar_calls == [2, 3]
+
+
+def test_sector_radar_falls_back_to_tdx_when_primary_source_is_empty(tmp_path: Path) -> None:
+    provider = FakeTdxSectorRadarProvider()
+    client = _client(tmp_path, market_overview_provider=EmptySectorRadarProvider())
+    app.state.tdx_provider = provider
+
+    response = client.get("/api/sectors/radar?limit=5")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["flow_source"] == "通达信MCP涨停概念集中度估算"
+    assert payload["inflow"][0]["name"] == "半导体"
+    assert payload["source_status"][0]["source"] == "empty fake板块资金流"
+    assert payload["source_status"][1]["source"] == "通达信MCP涨停概念"
+    assert provider.calls == [5]
 
 
 def test_screen_run_returns_items_and_persists_latest_without_empty_status(tmp_path: Path) -> None:

@@ -33,6 +33,8 @@ class RuntimeSettings(BaseModel):
     ifind_api_key: str | None = None
     ifind_base_url: str | None = None
     ifind_service_id: IfindServiceId | None = None
+    tdx_api_key: str | None = None
+    tdx_base_url: str | None = None
     provider_timeout_seconds: float | None = Field(default=None, ge=1, le=60)
     notification_channels: list[NotificationChannelConfig] = Field(default_factory=list)
     sentiment_monitor: SentimentMonitorConfig = Field(default_factory=SentimentMonitorConfig)
@@ -47,6 +49,8 @@ class SettingsUpdate(BaseModel):
     ifind_api_key: str | None = None
     ifind_base_url: str = "https://api-mcp.51ifind.com:8643"
     ifind_service_id: IfindServiceId = "hexin-ifind-ds-stock-mcp"
+    tdx_api_key: str | None = None
+    tdx_base_url: str = "https://mcp.tdx.com.cn:3001/mcp"
     provider_timeout_seconds: float = Field(ge=1, le=60)
     notification_channels: list[NotificationChannelConfig] = Field(default_factory=list)
     sentiment_monitor: SentimentMonitorConfig = Field(default_factory=SentimentMonitorConfig)
@@ -61,10 +65,13 @@ class EffectiveRuntimeSettings(BaseModel):
     ifind_api_key: str
     ifind_base_url: str
     ifind_service_id: IfindServiceId
+    tdx_api_key: str
+    tdx_base_url: str
     provider_timeout_seconds: float
     runtime_config_path: str
     tickflow_api_key_source: Literal["runtime", "env", "none"]
     ifind_api_key_source: Literal["runtime", "env", "none"]
+    tdx_api_key_source: Literal["runtime", "env", "none"]
 
 
 def load_runtime_settings(path: Path) -> RuntimeSettings:
@@ -87,6 +94,7 @@ def save_runtime_settings(path: Path, update: SettingsUpdate) -> RuntimeSettings
             "tickflow_base_url": update.tickflow_base_url.strip(),
             "ifind_base_url": update.ifind_base_url.strip(),
             "ifind_service_id": update.ifind_service_id,
+            "tdx_base_url": update.tdx_base_url.strip(),
             "provider_timeout_seconds": update.provider_timeout_seconds,
             "notification_channels": _merge_notification_channels(
                 current.notification_channels,
@@ -99,6 +107,8 @@ def save_runtime_settings(path: Path, update: SettingsUpdate) -> RuntimeSettings
         next_settings = next_settings.model_copy(update={"tickflow_api_key": update.tickflow_api_key.strip()})
     if update.ifind_api_key is not None:
         next_settings = next_settings.model_copy(update={"ifind_api_key": update.ifind_api_key.strip()})
+    if update.tdx_api_key is not None:
+        next_settings = next_settings.model_copy(update={"tdx_api_key": update.tdx_api_key.strip()})
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         next_settings.model_dump_json(indent=2, exclude_none=True),
@@ -127,6 +137,15 @@ def effective_runtime_settings(base: Settings, path: Path) -> EffectiveRuntimeSe
     else:
         ifind_key_source = "none"
 
+    runtime_tdx_key = runtime.tdx_api_key or ""
+    env_tdx_key = base.tdx_api_key or ""
+    if runtime_tdx_key:
+        tdx_key_source: Literal["runtime", "env", "none"] = "runtime"
+    elif env_tdx_key:
+        tdx_key_source = "env"
+    else:
+        tdx_key_source = "none"
+
     return EffectiveRuntimeSettings(
         candidate_provider=(runtime.candidate_provider or base.candidate_provider),  # type: ignore[arg-type]
         kline_provider=(runtime.kline_provider or base.kline_provider),  # type: ignore[arg-type]
@@ -136,10 +155,13 @@ def effective_runtime_settings(base: Settings, path: Path) -> EffectiveRuntimeSe
         ifind_api_key=runtime_ifind_key or env_ifind_key,
         ifind_base_url=(runtime.ifind_base_url or base.ifind_base_url).rstrip("/"),
         ifind_service_id=(runtime.ifind_service_id or base.ifind_service_id),  # type: ignore[arg-type]
+        tdx_api_key=runtime_tdx_key or env_tdx_key,
+        tdx_base_url=(runtime.tdx_base_url or base.tdx_base_url).rstrip("/"),
         provider_timeout_seconds=runtime.provider_timeout_seconds or base.provider_timeout_seconds,
         runtime_config_path=str(path),
         tickflow_api_key_source=key_source,
         ifind_api_key_source=ifind_key_source,
+        tdx_api_key_source=tdx_key_source,
     )
 
 
@@ -157,6 +179,10 @@ def public_settings_payload(config: EffectiveRuntimeSettings) -> dict[str, objec
         "ifind_api_key_source": config.ifind_api_key_source,
         "ifind_base_url": config.ifind_base_url,
         "ifind_service_id": config.ifind_service_id,
+        "tdx_api_key_configured": bool(config.tdx_api_key),
+        "tdx_api_key_preview": _mask_key(config.tdx_api_key),
+        "tdx_api_key_source": config.tdx_api_key_source,
+        "tdx_base_url": config.tdx_base_url,
         "provider_timeout_seconds": config.provider_timeout_seconds,
         "runtime_config_path": config.runtime_config_path,
         "notifications": public_notification_settings(

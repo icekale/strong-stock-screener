@@ -9,6 +9,7 @@ import {
   getLatestScreenRun,
   getMarketOverview,
   getSectorRadar,
+  getSentimentSummary,
   getWatchlistPool,
   recheckGsgfReview,
   runGsgfCalibration,
@@ -22,6 +23,7 @@ import type {
   ScreenRunFilters,
   ScreenStrategy,
   SectorRadarResponse,
+  SentimentSummaryResponse,
   StrongStockIntradaySnapshot,
   StrongStockScreeningItem,
   StrongStockScreeningResponse,
@@ -35,6 +37,7 @@ export function HomeWorkbench() {
   const [sources, setSources] = useState<DataSourceStatusResponse | null>(null);
   const [marketOverview, setMarketOverview] = useState<MarketOverviewResponse | null>(null);
   const [sectorRadar, setSectorRadar] = useState<SectorRadarResponse | null>(null);
+  const [sentimentSummary, setSentimentSummary] = useState<SentimentSummaryResponse | null>(null);
   const [result, setResult] = useState<StrongStockScreeningResponse | null>(null);
   const [intraday, setIntraday] = useState<StrongStockIntradaySnapshot | null>(null);
   const [strategy, setStrategy] = useState<ScreenStrategy>("combined");
@@ -55,6 +58,7 @@ export function HomeWorkbench() {
     void refreshSources();
     void refreshMarketOverview();
     void refreshSectorRadar();
+    void refreshSentimentSummary();
     void refreshLatest();
     void refreshWatchlistPool();
   }, []);
@@ -85,6 +89,14 @@ export function HomeWorkbench() {
     }
   }
 
+  async function refreshSentimentSummary() {
+    try {
+      setSentimentSummary(await getSentimentSummary(tradeDate, 80, false));
+    } catch {
+      setSentimentSummary(null);
+    }
+  }
+
   async function refreshLatest() {
     try {
       setResult(await getLatestScreenRun());
@@ -109,7 +121,7 @@ export function HomeWorkbench() {
       const response = await createScreenRun(tradeDate, 30, scanLimit, screenFilters, { strategy });
       setResult(response);
       setIntraday(null);
-      await Promise.all([refreshSources(), refreshMarketOverview(), refreshSectorRadar()]);
+      await Promise.all([refreshSources(), refreshMarketOverview(), refreshSectorRadar(), refreshSentimentSummary()]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "运行筛选失败");
     } finally {
@@ -234,7 +246,8 @@ export function HomeWorkbench() {
       intraday={intraday}
       marketOverview={marketOverview}
       sectorRadar={sectorRadar}
-      onRefreshSources={() => void Promise.all([refreshSources(), refreshMarketOverview(), refreshSectorRadar()])}
+      sentimentSummary={sentimentSummary}
+      onRefreshSources={() => void Promise.all([refreshSources(), refreshMarketOverview(), refreshSectorRadar(), refreshSentimentSummary()])}
       onRun={() => void handleRun()}
       onRunGsgfCalibration={(options) => void handleRunGsgfCalibration(options)}
       onRecheckGsgfReview={() => void handleRecheckGsgfReview()}

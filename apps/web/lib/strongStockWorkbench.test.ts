@@ -228,6 +228,11 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(homeFeatureSource, /sectorRadar/);
   assert.match(homeFeatureSource, /refreshSectorRadar/);
   assert.match(homeFeatureSource, /getSectorRadar/);
+  assert.match(homeFeatureSource, /sentimentSummary/);
+  assert.match(homeFeatureSource, /refreshSentimentSummary/);
+  assert.match(homeFeatureSource, /getSentimentSummary/);
+  assert.match(marketPanelsSource, /sentimentSummary/);
+  assert.doesNotMatch(marketPanelsSource, /const sectorSentiment = buildSectorRadarSentiment\(sectorRadar\)/);
   assert.match(homeFeatureSource, /watchlistPoolItems/);
   assert.match(homeFeatureSource, /setWatchlistPoolItems\(response\.items\)/);
   assert.doesNotMatch(apiSource + screenerFeatureSource + homeFeatureSource, /x-api-key|TICKFLOW_API_KEY/);

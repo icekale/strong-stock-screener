@@ -11,6 +11,7 @@ import type {
   ScreenRunFilters,
   ScreenStrategy,
   SectorRadarResponse,
+  SentimentSummaryResponse,
   StrongStockIntradaySnapshot,
   StrongStockScreeningItem,
   StrongStockScreeningResponse,
@@ -47,6 +48,7 @@ type ScreenerWorkbenchProps = {
   intraday: StrongStockIntradaySnapshot | null;
   marketOverview: MarketOverviewResponse | null;
   sectorRadar: SectorRadarResponse | null;
+  sentimentSummary: SentimentSummaryResponse | null;
   reviewSummary: GsgfReviewSummary | null;
   calibrationSummary: GsgfRealCalibrationSummary | null;
   running: boolean;
@@ -84,6 +86,7 @@ export function ScreenerWorkbench({
   result,
   marketOverview,
   sectorRadar,
+  sentimentSummary,
   reviewSummary,
   calibrationSummary,
   running,
@@ -143,6 +146,7 @@ export function ScreenerWorkbench({
           result={result}
           running={running}
           sectorRadar={sectorRadar}
+          sentimentSummary={sentimentSummary}
           sources={sources}
           stats={dashboardStats}
         />

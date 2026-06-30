@@ -66,7 +66,7 @@ const stockColumns: ColumnsType<ShortTermSentimentStockItem> = [
     title: "炸板",
     dataIndex: "break_board_count",
     sorter: (a, b) => a.break_board_count - b.break_board_count,
-    render: (value: number) => <span className={value > 0 ? "font-black text-[#0f7a3b]" : ""}>{value}</span>,
+    render: (value: number) => <span className={value > 0 ? "font-black market-green-text" : ""}>{value}</span>,
   },
   {
     title: "封板时间",

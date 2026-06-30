@@ -649,7 +649,7 @@ function RealtimeMetricCard({
     tone === "red"
       ? "text-[#d92d20]"
       : tone === "green"
-        ? "text-[#0f7a3b]"
+        ? "market-green-text"
         : tone === "amber"
           ? "text-[#b45309]"
           : "text-[#11100e]";
@@ -685,7 +685,7 @@ function DistributionPanel({ buckets }: { buckets: MarketEmotionBucket[] }) {
               <span className="text-xs font-semibold text-[#625b52]">{bucket.label}</span>
               <div className="h-3 overflow-hidden rounded-full bg-[#eee9df]">
                 <div
-                  className={`h-full rounded-full ${isUp ? "bg-[#d92d20]" : "bg-[#0f7a3b]"}`}
+                  className={`h-full rounded-full ${isUp ? "bg-[#d92d20]" : "market-green-fill"}`}
                   style={{ width: `${width}%` }}
                 />
               </div>

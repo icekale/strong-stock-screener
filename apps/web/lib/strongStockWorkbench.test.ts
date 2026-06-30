@@ -194,6 +194,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(homeFeatureSource, /setScreenFiltersSaved/);
   assert.match(apiSource, /getDataSourceStatus/);
   assert.match(typesSource, /MarketOverviewResponse/);
+  assert.match(typesSource, /MarketIndexSnapshot/);
+  assert.match(typesSource, /indices: MarketIndexSnapshot\[\]/);
   assert.match(typesSource, /SectorRadarResponse/);
   assert.match(typesSource, /ShortTermSentimentResponse/);
   assert.match(typesSource, /ShortTermSentimentStockItem/);
@@ -329,6 +331,9 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(screenerFeatureSource, /TickFlow/);
   assert.match(screenerFeatureSource, /运行筛选/);
   assert.match(screenerFeatureSource, /MarketTickerBar/);
+  assert.match(screenerFeatureSource, /findMarketIndex\(indices, "399006\.SZ", "创业板"\)/);
+  assert.match(screenerFeatureSource, /findMarketIndex\(indices, "000688\.SH", "科创50"\)/);
+  assert.match(screenerFeatureSource, /formatSignedPercent\(changePct\)/);
   assert.match(screenerFeatureSource, /MarketEnvironmentPanel/);
   assert.match(screenerFeatureSource, /FilterLogicRail/);
   assert.match(screenerFeatureSource, /SectorStrengthPanel/);
@@ -537,6 +542,10 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.doesNotMatch(stockFeatureSource, /compactStockLabel/);
   assert.match(stockFeatureSource, /ChartControlBar/);
   assert.match(stockFeatureSource, /行情摘要/);
+  assert.match(apiSource, /getStockQuote/);
+  assert.match(typesSource, /StockQuoteResponse/);
+  assert.match(stockFeatureSource, /formatTurnoverRate\(quote\?\.turnoverRate \?\? null\)/);
+  assert.doesNotMatch(stockFeatureSource, /<HeaderMetric label="换" value="--" \/>/);
   assert.match(stockFeatureSource, /formatSourceStatus/);
   assert.match(stockFeatureSource, /status === "success"/);
   assert.match(stockFeatureSource, /可用/);

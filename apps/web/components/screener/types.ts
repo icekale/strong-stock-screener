@@ -5,7 +5,7 @@ import type {
 } from "../../lib/types";
 
 export const statusCopy: Record<StrongStockScreeningItem["status"], { label: string; tone: string }> = {
-  focus: { label: "可关注", tone: "bg-emerald-50 text-emerald-700 ring-emerald-100" },
+  focus: { label: "可关注", tone: "market-green-badge ring-1 market-green-ring" },
   wait_pullback: { label: "等回踩", tone: "bg-sky-50 text-sky-700 ring-sky-100" },
   reduce_risk: { label: "减仓风险", tone: "bg-amber-50 text-amber-700 ring-amber-100" },
   data_incomplete: { label: "数据不足", tone: "bg-slate-100 text-slate-600 ring-slate-200" },
@@ -31,7 +31,7 @@ export const industryStrengthCopy: Record<
   NonNullable<StrongStockScreeningItem["industry_strength"]>,
   { label: string; tone: string }
 > = {
-  strong: { label: "强", tone: "bg-emerald-50 text-emerald-700 ring-emerald-100" },
+  strong: { label: "强", tone: "market-green-badge ring-1 market-green-ring" },
   neutral: { label: "中", tone: "bg-slate-100 text-slate-600 ring-slate-200" },
   weak: { label: "弱", tone: "bg-amber-50 text-amber-700 ring-amber-100" },
 };

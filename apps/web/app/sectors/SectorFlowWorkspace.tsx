@@ -41,7 +41,7 @@ export function SectorFlowWorkspace({ data, loading }: SectorFlowWorkspaceProps)
               净流入
             </button>
             <button
-              className={`rounded-md px-3 py-1 text-xs font-black ${mode === "outflow" ? "bg-white text-[#0f7a3b] shadow-sm" : "text-[#7b756d]"}`}
+              className={`rounded-md px-3 py-1 text-xs font-black ${mode === "outflow" ? "bg-white market-green-text shadow-sm" : "text-[#7b756d]"}`}
               onClick={() => setMode("outflow")}
               type="button"
             >
@@ -67,7 +67,7 @@ export function SectorFlowWorkspace({ data, loading }: SectorFlowWorkspaceProps)
                     #{index + 1} · {item.leader ?? "暂无领涨股"} · {formatChange(item.change_pct)}
                   </div>
                 </div>
-                <div className={mode === "inflow" ? "text-right font-black text-[#d92d20]" : "text-right font-black text-[#0f7a3b]"}>
+                <div className={mode === "inflow" ? "text-right font-black text-[#d92d20]" : "text-right font-black market-green-text"}>
                   {formatCny(item.net_flow_cny)}
                 </div>
               </button>
@@ -133,9 +133,9 @@ function FlowChartCard({ items, title, tone }: { items: SectorRadarItem[]; title
               railColor="#f0ebe4"
               showInfo={false}
               size={["100%", 10]}
-              strokeColor={tone === "red" ? "#ef4444" : "#16a34a"}
+              strokeColor={tone === "red" ? "#ef4444" : "var(--market-green-fill)"}
             />
-            <div className={tone === "red" ? "text-xs font-black text-[#d92d20]" : "text-xs font-black text-[#0f7a3b]"}>
+            <div className={tone === "red" ? "text-xs font-black text-[#d92d20]" : "text-xs font-black market-green-text"}>
               {formatCny(item.net_flow_cny)}
             </div>
           </div>
@@ -162,7 +162,7 @@ const columns: ColumnsType<SectorRadarItem> = [
     dataIndex: "net_flow_cny",
     sorter: (a, b) => (a.net_flow_cny ?? 0) - (b.net_flow_cny ?? 0),
     render: (value: number | null) => (
-      <span className={(value ?? 0) >= 0 ? "font-black text-[#d92d20]" : "font-black text-[#0f7a3b]"}>
+      <span className={(value ?? 0) >= 0 ? "font-black text-[#d92d20]" : "font-black market-green-text"}>
         {formatCny(value)}
       </span>
     ),

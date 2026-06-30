@@ -23,6 +23,7 @@ import type {
   ShortTermIntradaySignalDigest,
   ShortTermSentimentResponse,
   StockKlineResponse,
+  StockQuoteResponse,
   StockResearchResponse,
   StrongStockIntradaySnapshot,
   StrongStockScreeningResponse,
@@ -485,6 +486,14 @@ export async function getStockKline(symbol: string, count = 220): Promise<StockK
     throw new Error(`读取K线失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<StockKlineResponse>;
+}
+
+export async function getStockQuote(symbol: string): Promise<StockQuoteResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/stocks/${encodeURIComponent(symbol)}/quote`);
+  if (!response.ok) {
+    throw new Error(`读取实时行情失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<StockQuoteResponse>;
 }
 
 export async function getStockResearch(symbol: string): Promise<StockResearchResponse> {

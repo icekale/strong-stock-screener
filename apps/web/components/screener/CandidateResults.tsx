@@ -391,7 +391,7 @@ function CandidateCardList({
                 K线
               </a>
               <button
-                className="min-h-[36px] rounded-md bg-slate-950 px-3 text-xs font-bold text-white disabled:cursor-not-allowed disabled:bg-emerald-100 disabled:text-emerald-700"
+                className="min-h-[36px] rounded-md bg-slate-950 px-3 text-xs font-bold text-white disabled:cursor-not-allowed disabled:bg-[var(--market-green-bg)] disabled:text-[var(--market-green-text)]"
                 disabled={alreadyAdded}
                 onClick={() => onAddToWatchlist(item, "自选", [])}
                 type="button"
@@ -593,7 +593,7 @@ function GsgfSummaryPills({ gsgf }: { gsgf: GsgfAnalysis | null }) {
         {gsgfLabel(gsgf.action)}
       </span>
       {gsgf.setup_type && (
-        <span className="inline-flex h-6 items-center rounded-full bg-emerald-50 px-2 text-[11px] font-bold text-emerald-700 ring-1 ring-emerald-100">
+        <span className="inline-flex h-6 items-center rounded-full px-2 text-[11px] font-bold ring-1 market-green-badge market-green-ring">
           setup {gsgfLabel(gsgf.setup_type)}
         </span>
       )}

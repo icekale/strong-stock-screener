@@ -166,6 +166,22 @@ class StrongStockSourceStatus(BaseModel):
     detail: str
 
 
+class StockQuoteResponse(BaseModel):
+    symbol: str
+    name: str | None = None
+    last_price: float | None = None
+    prev_close: float | None = None
+    open_price: float | None = None
+    high_price: float | None = None
+    low_price: float | None = None
+    pct_change: float | None = None
+    turnover_rate: float | None = None
+    turnover_cny: float | None = None
+    volume: float | None = None
+    quote_time: str | None = None
+    source_status: StrongStockSourceStatus
+
+
 class GsgfBacktestWindowStat(BaseModel):
     window_days: int
     sample_count: int = 0
@@ -337,12 +353,22 @@ class MarketSectorStrengthItem(BaseModel):
     source: str
 
 
+class MarketIndexSnapshot(BaseModel):
+    symbol: str
+    name: str
+    last_price: float | None = None
+    change_pct: float | None = None
+    turnover_cny: float | None = None
+    source: str
+
+
 class MarketOverviewResponse(BaseModel):
     trade_date: str | None = None
     turnover: MarketTurnoverSummary = Field(default_factory=MarketTurnoverSummary)
     advance_decline: MarketAdvanceDeclineSummary = Field(
         default_factory=MarketAdvanceDeclineSummary
     )
+    indices: list[MarketIndexSnapshot] = Field(default_factory=list)
     sectors: list[MarketSectorStrengthItem] = Field(default_factory=list)
     source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
     generated_at: str = Field(

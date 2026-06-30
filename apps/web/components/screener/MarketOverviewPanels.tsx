@@ -50,7 +50,14 @@ export function MarketOverviewPanels({
 }) {
   return (
     <>
-      <MarketTickerBar candidates={candidates} generatedAt={generatedAt} onRun={onRun} running={running} sources={sources} />
+      <MarketTickerBar
+        candidates={candidates}
+        generatedAt={generatedAt}
+        marketOverview={marketOverview}
+        onRun={onRun}
+        running={running}
+        sources={sources}
+      />
       <MarketEnvironmentPanel marketOverview={marketOverview} result={result} sectorRadar={sectorRadar} sources={sources} stats={stats} />
     </>
   );
@@ -59,28 +66,32 @@ export function MarketOverviewPanels({
 export function MarketTickerBar({
   candidates,
   generatedAt,
+  marketOverview,
   onRun,
   running,
   sources,
 }: {
   candidates: StrongStockScreeningItem[];
   generatedAt: string | null;
+  marketOverview: MarketOverviewResponse | null;
   onRun: () => void;
   running: boolean;
   sources: DataSourceStatusResponse | null;
 }) {
   const sourceState = sourceSummary(sources);
+  const indices = marketOverview?.indices ?? [];
 
   return (
     <header className="rounded-lg border border-[#ddd8d0] bg-[#f8f7f4]">
       <div className="flex flex-col gap-3 px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <MarketIndexPill label="上证" status="待接入" />
-          <MarketIndexPill label="深证" status="待接入" />
-          <MarketIndexPill label="创业板" status="待接入" negative />
+          <MarketIndexPill index={findMarketIndex(indices, "000001.SH", "上证")} />
+          <MarketIndexPill index={findMarketIndex(indices, "399001.SZ", "深证")} />
+          <MarketIndexPill index={findMarketIndex(indices, "399006.SZ", "创业板")} />
+          <MarketIndexPill index={findMarketIndex(indices, "000688.SH", "科创50")} />
           <span className="mx-2 hidden h-7 w-px bg-[#d6d0c7] xl:block" />
           <span className="inline-flex h-8 items-center gap-2 rounded-full px-3 text-xs font-semibold text-[#7b756d]">
-            <span className={`size-2 rounded-full ${sourceState.ok ? "bg-emerald-500" : "bg-amber-500"}`} />
+            <span className={`size-2 rounded-full ${sourceState.ok ? "market-green-fill" : "bg-amber-500"}`} />
             LIVE · {generatedAt ? formatDateTime(generatedAt) : "等待筛选"}
           </span>
           <Tag className="m-0" color={sourceState.ok ? "green" : "orange"}>
@@ -115,26 +126,44 @@ export function MarketTickerBar({
   );
 }
 
-function MarketIndexPill({
-  label,
-  negative = false,
-  status,
-}: {
-  label: string;
-  negative?: boolean;
-  status: string;
-}) {
+function findMarketIndex(
+  indices: MarketOverviewResponse["indices"],
+  symbol: string,
+  fallbackName: string,
+): MarketOverviewResponse["indices"][number] {
+  return indices.find((item) => item.symbol === symbol) ?? {
+    symbol,
+    name: fallbackName,
+    last_price: null,
+    change_pct: null,
+    turnover_cny: null,
+    source: "待数据",
+  };
+}
+
+function MarketIndexPill({ index }: { index: MarketOverviewResponse["indices"][number] }) {
+  const changePct = index.change_pct;
+  const hasChange = changePct !== null && changePct !== undefined && Number.isFinite(changePct);
+  const isUp = hasChange && changePct >= 0;
+  const status = hasChange ? formatSignedPercent(changePct) : "待数据";
+  const price = index.last_price === null || index.last_price === undefined || !Number.isFinite(index.last_price)
+    ? null
+    : index.last_price.toFixed(2);
+
   return (
     <span
       className={`inline-flex h-9 items-center gap-2 rounded-full border px-4 text-xs font-bold ${
-        negative
-          ? "border-red-200 bg-red-50 text-red-700"
-          : "border-emerald-200 bg-emerald-50 text-emerald-700"
+        !hasChange
+          ? "border-[#ddd8d0] bg-[#f1efea] text-[#7b756d]"
+          : isUp
+            ? "border-red-200 bg-red-50 text-red-700"
+            : "market-green-badge"
       }`}
-      title="顶部指数将在市场概览 API 接入后显示实时数值"
+      title={`${index.name} · ${index.source}`}
     >
-      <span className="text-[#7b756d]">{label}</span>
-      <span>{status}</span>
+      <span className="text-[#7b756d]">{index.name}</span>
+      {price ? <span className="hidden tabular-nums sm:inline">{price}</span> : null}
+      <span className="tabular-nums">{status}</span>
     </span>
   );
 }
@@ -183,14 +212,15 @@ function MarketEnvironmentPanel({
         footerValue={sectorSentiment.footerValue}
         tone={sectorSentiment.tone}
       />
-      <TerminalMetricCard
+      <MarketBreadthCard
         label="涨跌比 ADVANCE/DECLINE"
-        value={advanceCount === null || declineCount === null ? "--" : `${advanceCount}/${declineCount}`}
+        advanceCount={advanceCount}
+        declineCount={declineCount}
         subValue={unchangedCount === null ? "全A市场口径，等待数据" : `上涨/下跌 · 平盘 ${unchangedCount}`}
         footerLabel="Market Breadth"
         footerValue={marketOverview?.trade_date ?? "--"}
         progress={advanceWidth}
-        tone={advanceCount !== null && declineCount !== null && advanceCount >= declineCount ? "positive" : "warning"}
+        declineProgress={breadthTotal > 0 && declineCount !== null ? Math.round((declineCount / breadthTotal) * 100) : 0}
       />
       <TerminalMetricCard
         label="数据可信 SOURCE"
@@ -206,6 +236,55 @@ function MarketEnvironmentPanel({
         }
       />
     </section>
+  );
+}
+
+function MarketBreadthCard({
+  advanceCount,
+  declineCount,
+  declineProgress,
+  footerLabel,
+  footerValue,
+  label,
+  progress,
+  subValue,
+}: {
+  advanceCount: number | null;
+  declineCount: number | null;
+  declineProgress: number;
+  footerLabel: string;
+  footerValue: string;
+  label: string;
+  progress: number;
+  subValue: string;
+}) {
+  const upWidth = Math.max(0, Math.min(100, progress));
+  const downWidth = Math.max(0, Math.min(100 - upWidth, declineProgress));
+
+  return (
+    <article className="rounded-xl border border-[#ddd8d0] bg-[#f8f7f4] p-4">
+      <p className="text-xs font-semibold uppercase text-[#7b756d]">{label}</p>
+      <div className="mt-2 flex items-baseline gap-1 text-3xl font-black leading-none tabular-nums">
+        {advanceCount === null || declineCount === null ? (
+          <span className="text-[#11100e]">--</span>
+        ) : (
+          <>
+            <span className="text-[#d92d20]">{advanceCount}</span>
+            <span className="text-[#7b756d]">/</span>
+            <span className="market-green-text">{declineCount}</span>
+          </>
+        )}
+      </div>
+      <p className="mt-3 text-xs font-medium text-[#7b756d]">{subValue}</p>
+      <div className="mt-3 flex h-1.5 overflow-hidden rounded-full bg-[#d9d4cb]">
+        <div className="h-full bg-[#d92d20]" style={{ width: `${upWidth}%` }} />
+        <div className="h-full market-green-fill" style={{ width: `${downWidth}%` }} />
+      </div>
+      <div className="mt-4 flex items-center justify-between border-t border-[#ddd8d0] pt-3 text-xs">
+        <span className="text-[#7b756d]">{footerLabel}</span>
+        <span className="font-semibold text-[#5f5a53]">{footerValue}</span>
+      </div>
+    </article>
   );
 }
 
@@ -230,7 +309,7 @@ function TerminalMetricCard({
   tone: "positive" | "neutral" | "warning";
   value: string;
 }) {
-  const toneClass = tone === "positive" ? "text-[#28c840]" : tone === "warning" ? "text-[#f04438]" : "text-[#11100e]";
+  const toneClass = tone === "positive" ? "market-green-text" : tone === "warning" ? "text-[#f04438]" : "text-[#11100e]";
   return (
     <article className="rounded-xl border border-[#ddd8d0] bg-[#f8f7f4] p-4">
       <p className="text-xs font-semibold uppercase text-[#7b756d]">{label}</p>
@@ -241,7 +320,7 @@ function TerminalMetricCard({
       <p className="mt-3 text-xs font-medium text-[#7b756d]">{subValue}</p>
       {progress !== undefined && (
         <div className="mt-3 h-1.5 rounded-full bg-[#d9d4cb]">
-          <div className="h-1.5 rounded-full bg-[#28c840]" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
+          <div className="h-1.5 rounded-full market-green-fill" style={{ width: `${Math.max(0, Math.min(100, progress))}%` }} />
         </div>
       )}
       <div className="mt-4 flex items-center justify-between border-t border-[#ddd8d0] pt-3 text-xs">
@@ -324,7 +403,7 @@ function SectorFlowStat({
   tone: "green" | "neutral" | "red";
   value: string;
 }) {
-  const toneClass = tone === "red" ? "text-[#d92d20]" : tone === "green" ? "text-[#0f7a3b]" : "text-[#11100e]";
+  const toneClass = tone === "red" ? "text-[#d92d20]" : tone === "green" ? "market-green-text" : "text-[#11100e]";
   return (
     <div className="rounded-lg border border-[#e3ddd3] bg-white px-3 py-2">
       <div className="text-[11px] font-black text-[#7b756d]">{label}</div>
@@ -374,8 +453,8 @@ function SectorFlowRow({
 }) {
   const flow = item.net_flow_cny ?? 0;
   const width = Math.max(8, Math.min(100, (Math.abs(flow) / maxFlow) * 100));
-  const barClass = tone === "red" ? "bg-[#d92d20]" : "bg-[#0f7a3b]";
-  const valueClass = tone === "red" ? "text-[#d92d20]" : "text-[#0f7a3b]";
+  const barClass = tone === "red" ? "bg-[#d92d20]" : "market-green-fill";
+  const valueClass = tone === "red" ? "text-[#d92d20]" : "market-green-text";
 
   return (
     <div className="grid grid-cols-[96px_minmax(0,1fr)_80px] items-center gap-3 text-sm">

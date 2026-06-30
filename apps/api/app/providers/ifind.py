@@ -284,6 +284,9 @@ def _try_parse_json(value: str) -> Any:
 
 def _coerce_mapping(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
+        answer_rows = _extract_answer_table_rows(value)
+        if answer_rows:
+            return {**value, **answer_rows[0]}
         return value
     if isinstance(value, list) and len(value) == 1 and isinstance(value[0], dict):
         return value[0]
@@ -308,5 +311,69 @@ def _coerce_records(value: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _extract_answer_table_rows(value: dict[str, Any]) -> list[dict[str, str]]:
+    data = value.get("data")
+    if not isinstance(data, dict):
+        return []
+    answer = data.get("answer")
+    if not isinstance(answer, str):
+        return []
+    table = _markdown_table(answer)
+    if len(table) < 2:
+        return []
+    header = table[0]
+    rows: list[dict[str, str]] = []
+    for row in table[1:]:
+        item: dict[str, str] = {}
+        for index in range(min(len(header), len(row))):
+            key = _normalize_ifind_field_name(header[index])
+            value_text = row[index].strip()
+            if key and value_text:
+                item[key] = value_text
+        if item:
+            rows.append(item)
+    return rows
+
+
+def _markdown_table(value: str) -> list[list[str]]:
+    rows: list[list[str]] = []
+    for line in value.splitlines():
+        text = line.strip()
+        if not text.startswith("|") or "---" in text:
+            continue
+        rows.append([cell.strip() for cell in text.strip("|").split("|")])
+    return rows
+
+
+def _normalize_ifind_field_name(value: str) -> str:
+    text = value.strip()
+    for marker in ("（单位：", "（单位:", "(单位：", "(单位:"):
+        if marker in text:
+            text = text.split(marker, 1)[0].strip()
+            break
+    return text
+
+
 def _pick_fields(payload: dict[str, Any], names: list[str]) -> dict[str, Any]:
-    return {name: payload[name] for name in names if name in payload}
+    normalized = _with_valuation_aliases(payload)
+    return {name: normalized[name] for name in names if name in normalized}
+
+
+def _with_valuation_aliases(payload: dict[str, Any]) -> dict[str, Any]:
+    result = dict(payload)
+    if "总市值" not in result:
+        for key in ("总市值(元)", "总市值（元）", "总市值(亿元)", "总市值（亿元）"):
+            if key in result:
+                result["总市值"] = result[key]
+                break
+    if "动态市盈率" not in result:
+        for key in ("市盈率(PE,TTM)", "市盈率（PE，TTM）", "市盈率TTM", "PE TTM", "PE_TTM"):
+            if key in result:
+                result["动态市盈率"] = result[key]
+                break
+    if "静态市盈率" not in result:
+        for key in ("市盈率（PE，LYR）", "市盈率(PE,LYR)", "市盈率(静态)", "市盈率（静态）", "市盈率", "PE"):
+            if key in result:
+                result["静态市盈率"] = result[key]
+                break
+    return result

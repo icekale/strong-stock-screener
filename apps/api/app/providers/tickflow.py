@@ -18,6 +18,7 @@ class TickFlowQuote(BaseModel):
     high_price: float | None = None
     low_price: float | None = None
     pct_change: float | None = None
+    turnover_rate: float | None = None
     turnover_cny: float | None = None
     volume: float | None = None
     quote_time: str | None = None
@@ -315,6 +316,20 @@ def _quote_from_item(item: dict[str, Any]) -> TickFlowQuote:
         pct_change *= 100
     if pct_change is not None:
         pct_change = round(pct_change, 4)
+    turnover_rate = _optional_float(
+        _first_present(
+            item.get("turnover_rate"),
+            item.get("turnoverRate"),
+            item.get("turnover_ratio"),
+            item.get("turnoverRatio"),
+            ext_item.get("turnover_rate"),
+            ext_item.get("turnoverRate"),
+        )
+    )
+    if turnover_rate is not None and abs(turnover_rate) <= 1:
+        turnover_rate *= 100
+    if turnover_rate is not None:
+        turnover_rate = round(turnover_rate, 4)
     return TickFlowQuote(
         symbol=symbol,
         name=_optional_str(_first_present(item.get("name"), ext_item.get("name"))),
@@ -324,6 +339,7 @@ def _quote_from_item(item: dict[str, Any]) -> TickFlowQuote:
         high_price=_optional_float(_first_present(item.get("high"), item.get("high_price"))),
         low_price=_optional_float(_first_present(item.get("low"), item.get("low_price"))),
         pct_change=pct_change,
+        turnover_rate=turnover_rate,
         turnover_cny=_optional_float(_first_present(item.get("turnover_cny"), item.get("turnover"), item.get("amount"))),
         volume=_optional_float(item.get("volume")),
         quote_time=_optional_str(_first_present(item.get("quote_time"), item.get("time"), item.get("timestamp"))),

@@ -249,10 +249,20 @@ export type MarketSectorStrengthItem = {
   source: string;
 };
 
+export type MarketIndexSnapshot = {
+  symbol: string;
+  name: string;
+  last_price: number | null;
+  change_pct: number | null;
+  turnover_cny: number | null;
+  source: string;
+};
+
 export type MarketOverviewResponse = {
   trade_date: string | null;
   turnover: MarketTurnoverSummary;
   advance_decline: MarketAdvanceDeclineSummary;
+  indices: MarketIndexSnapshot[];
   sectors: MarketSectorStrengthItem[];
   source_status: StrongStockSourceStatus[];
   generated_at: string;
@@ -651,6 +661,22 @@ export type StockKlineResponse = {
   source_status: StrongStockSourceStatus;
   bars: KlineBar[];
   gsgf_annotations: GsgfChartAnnotation[];
+};
+
+export type StockQuoteResponse = {
+  symbol: string;
+  name: string | null;
+  last_price: number | null;
+  prev_close: number | null;
+  open_price: number | null;
+  high_price: number | null;
+  low_price: number | null;
+  pct_change: number | null;
+  turnover_rate: number | null;
+  turnover_cny: number | null;
+  volume: number | null;
+  quote_time: string | null;
+  source_status: StrongStockSourceStatus;
 };
 
 export type StockResearchResponse = {

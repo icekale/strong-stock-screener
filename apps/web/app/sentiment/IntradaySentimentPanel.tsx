@@ -151,7 +151,7 @@ const intradayColumns: ColumnsType<ShortTermIntradaySentimentItem> = [
     dataIndex: "pct_change",
     sorter: (a, b) => (a.pct_change ?? 0) - (b.pct_change ?? 0),
     render: (value: number | null) => (
-      <span className={(value ?? 0) >= 0 ? "text-[#d92d20]" : "text-[#0f7a3b]"}>
+      <span className={(value ?? 0) >= 0 ? "text-[#d92d20]" : "market-green-text"}>
         {formatPct(value)}
       </span>
     ),

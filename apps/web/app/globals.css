@@ -2,6 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --market-green-text: #2f6f4a;
+  --market-green-fill: #6f9d77;
+  --market-green-bg: #edf4ee;
+  --market-green-border: #c9dccd;
+}
+
 html {
   background: #f5f3f0;
 }
@@ -51,6 +58,30 @@ body {
 
 .workbench-ink {
   color: #11100e;
+}
+
+.market-green-text {
+  color: var(--market-green-text);
+}
+
+.market-green-fill {
+  background: var(--market-green-fill);
+}
+
+.market-green-badge {
+  border-color: var(--market-green-border);
+  background: var(--market-green-bg);
+  color: var(--market-green-text);
+}
+
+.market-green-ring {
+  --tw-ring-color: var(--market-green-border);
+}
+
+.ant-tag-green {
+  border-color: var(--market-green-border) !important;
+  background: var(--market-green-bg) !important;
+  color: var(--market-green-text) !important;
 }
 
 .workbench-table-row-selected > td {

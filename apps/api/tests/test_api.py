@@ -7,6 +7,7 @@ from app.main import app
 from app.models import (
     KlineBar,
     MarketAdvanceDeclineSummary,
+    MarketIndexSnapshot,
     MarketOverviewResponse,
     MarketSectorStrengthItem,
     MarketTurnoverSummary,
@@ -319,6 +320,7 @@ class FakeLiveQuoteProvider:
                 high_price=16.8 if symbol == "603890.SH" else 19.4,
                 low_price=16.0 if symbol == "603890.SH" else 18.2,
                 pct_change=8.45 if symbol == "603890.SH" else -7.5,
+                turnover_rate=12.34 if symbol == "603890.SH" else 4.56,
                 turnover_cny=360_000_000,
                 volume=220_000,
                 quote_time="2026-06-11T10:05:00+08:00",
@@ -509,6 +511,40 @@ class FakeMarketOverviewProvider:
                 limit_up_count=None,
                 limit_down_count=None,
             ),
+            indices=[
+                MarketIndexSnapshot(
+                    symbol="000001.SH",
+                    name="上证",
+                    last_price=4027.26,
+                    change_pct=-2.25,
+                    turnover_cny=1_600_000_000_000,
+                    source="iFinD 实时指数",
+                ),
+                MarketIndexSnapshot(
+                    symbol="399001.SZ",
+                    name="深证",
+                    last_price=15782.22,
+                    change_pct=-3.43,
+                    turnover_cny=1_900_000_000_000,
+                    source="iFinD 实时指数",
+                ),
+                MarketIndexSnapshot(
+                    symbol="399006.SZ",
+                    name="创业板",
+                    last_price=3188.66,
+                    change_pct=1.25,
+                    turnover_cny=800_000_000_000,
+                    source="iFinD 实时指数",
+                ),
+                MarketIndexSnapshot(
+                    symbol="000688.SH",
+                    name="科创50",
+                    last_price=1020.48,
+                    change_pct=0.86,
+                    turnover_cny=300_000_000_000,
+                    source="iFinD 实时指数",
+                ),
+            ],
             sectors=[
                 MarketSectorStrengthItem(
                     name="存储芯片",
@@ -868,9 +904,30 @@ def test_market_overview_returns_full_a_share_metrics(tmp_path: Path) -> None:
     assert payload["advance_decline"]["advance_count"] == 802
     assert payload["advance_decline"]["decline_count"] == 4738
     assert payload["advance_decline"]["unchanged_count"] == 51
+    assert [item["symbol"] for item in payload["indices"]] == [
+        "000001.SH",
+        "399001.SZ",
+        "399006.SZ",
+        "000688.SH",
+    ]
+    assert payload["indices"][2]["name"] == "创业板"
+    assert payload["indices"][3]["name"] == "科创50"
     assert payload["sectors"][0]["name"] == "存储芯片"
     assert payload["sectors"][0]["source"] == "东方财富行业板块"
     assert payload["source_status"][0]["source"] == "东方财富全A指数"
+
+
+def test_stock_quote_returns_tickflow_turnover_rate(tmp_path: Path) -> None:
+    client = _client(tmp_path, quote_provider=FakeLiveQuoteProvider())
+
+    response = client.get("/api/stocks/603890.SH/quote")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "603890.SH"
+    assert payload["last_price"] == 16.55
+    assert payload["turnover_rate"] == 12.34
+    assert payload["source_status"]["source"] == "TickFlow"
 
 
 def test_market_overview_endpoint_reuses_cached_snapshot(tmp_path: Path) -> None:

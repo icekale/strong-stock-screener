@@ -100,13 +100,28 @@ class FakeMarketOverviewHttpClient:
                 }
             )
         if "ulist.np/get" in url:
+            params = kwargs.get("params", {})
+            secids = str(params.get("secids", "")) if isinstance(params, dict) else ""
+            if "399006" in secids or "000688" in secids:
+                return FakeResponse(
+                    {
+                        "data": {
+                            "diff": [
+                                {"f2": 4027.26, "f3": -2.25, "f6": 10, "f12": "000001", "f14": "上证指数"},
+                                {"f2": 15782.22, "f3": -3.43, "f6": 20, "f12": "399001", "f14": "深证成指"},
+                                {"f2": 3188.66, "f3": 1.25, "f6": 999, "f12": "399006", "f14": "创业板指"},
+                                {"f2": 1020.48, "f3": 0.86, "f6": 888, "f12": "000688", "f14": "科创50"},
+                            ]
+                        }
+                    }
+                )
             return FakeResponse(
                 {
                     "data": {
                         "diff": [
-                            {"f6": 10, "f104": 100, "f105": 200, "f106": 10},
-                            {"f6": 20, "f104": 300, "f105": 400, "f106": 20},
-                            {"f6": 30, "f104": 20, "f105": 30, "f106": 5},
+                            {"f2": 4027.26, "f3": -2.25, "f6": 10, "f12": "000001", "f14": "上证指数", "f104": 100, "f105": 200, "f106": 10},
+                            {"f2": 15782.22, "f3": -3.43, "f6": 20, "f12": "399001", "f14": "深证成指", "f104": 300, "f105": 400, "f106": 20},
+                            {"f2": 1266.9, "f3": -0.84, "f6": 30, "f12": "899050", "f14": "北证50", "f104": 20, "f105": 30, "f106": 5},
                         ]
                     }
                 }
@@ -204,9 +219,11 @@ class FakeTickFlowIndexQuoteProvider:
         self.quotes = quotes or []
         self.error = error
         self.symbols: list[str] = []
+        self.calls: list[list[str]] = []
 
     def get_quotes(self, symbols: list[str]) -> list[TickFlowQuote]:
         self.symbols = symbols
+        self.calls.append(symbols)
         if self.error is not None:
             raise self.error
         return self.quotes
@@ -246,6 +263,8 @@ def test_market_overview_prefers_ifind_realtime_index_snapshot() -> None:
                 '{"tables":[["证券代码","证券简称","time","最新价","涨跌幅","成交额","上涨家数","下跌家数"],'
                 '["000001.SH","上证指数","2026-06-26 16:01:19","4027.26","-2.25","1600000000000","369","1947"],'
                 '["399001.SZ","深证成指","2026-06-26 16:00:57","15782.223","-3.43","1900000000000","396","2507"],'
+                '["399006.SZ","创业板指","2026-06-26 16:00:57","3188.66","1.25","800000000000","188","412"],'
+                '["000688.SH","科创50","2026-06-26 16:00:57","1020.48","0.86","300000000000","96","171"],'
                 '["899050.BJ","北证50","2026-06-26 15:37:00","1266.903","-0.84","20000000000","37","284"]]}'
             ),
         }
@@ -266,7 +285,7 @@ def test_market_overview_prefers_ifind_realtime_index_snapshot() -> None:
             "service_id": "hexin-ifind-ds-index-mcp",
             "tool_name": "index_highfreq_quotes",
             "arguments": {
-                "symbols": "000001.SH,399001.SZ,899050.BJ",
+                "symbols": "000001.SH,399001.SZ,899050.BJ,399006.SZ,000688.SH",
                 "indicators": "最新价,涨跌幅,成交额,上涨家数,下跌家数",
                 "data_mode": "real_time",
             },
@@ -281,6 +300,15 @@ def test_market_overview_prefers_ifind_realtime_index_snapshot() -> None:
     assert overview.advance_decline.advance_count == 802
     assert overview.advance_decline.decline_count == 4738
     assert overview.advance_decline.limit_down_count == 2
+    assert [item.symbol for item in overview.indices] == [
+        "000001.SH",
+        "399001.SZ",
+        "399006.SZ",
+        "000688.SH",
+    ]
+    assert overview.indices[2].name == "创业板"
+    assert overview.indices[2].change_pct == 1.25
+    assert overview.indices[3].name == "科创50"
     assert overview.sectors[0].name == "橡胶助剂"
     assert overview.source_status[0].source == "iFinD 实时指数"
     assert overview.source_status[0].status == "success"
@@ -303,7 +331,7 @@ def test_market_overview_falls_back_to_tickflow_realtime_turnover() -> None:
 
     overview = provider.get_overview()
 
-    assert quote_provider.symbols == ["000001.SH", "399001.SZ", "899050.BJ"]
+    assert quote_provider.calls[0] == ["000001.SH", "399001.SZ", "899050.BJ"]
     assert overview.turnover.total_cny == 3_520_000_000_000
     assert overview.turnover.previous_total_cny == 3_000_000_000_000
     assert overview.turnover.change_cny == 520_000_000_000
@@ -316,6 +344,38 @@ def test_market_overview_falls_back_to_tickflow_realtime_turnover() -> None:
     assert overview.source_status[0].status == "failed"
     assert overview.source_status[1].source == "TickFlow 实时指数"
     assert overview.source_status[1].status == "success"
+
+
+def test_market_overview_uses_tickflow_display_indices_before_eastmoney() -> None:
+    quote_provider = FakeTickFlowIndexQuoteProvider(
+        quotes=[
+            TickFlowQuote(symbol="000001.SH", name="上证指数", last_price=4027.26, pct_change=-2.25, turnover_cny=1_600_000_000_000),
+            TickFlowQuote(symbol="399001.SZ", name="深证成指", last_price=15782.22, pct_change=-3.43, turnover_cny=1_900_000_000_000),
+            TickFlowQuote(symbol="399006.SZ", name="创业板指", last_price=3188.66, pct_change=1.25, turnover_cny=800_000_000_000),
+            TickFlowQuote(symbol="000688.SH", name="科创50", last_price=1020.48, pct_change=0.86, turnover_cny=300_000_000_000),
+            TickFlowQuote(symbol="899050.BJ", name="北证50", last_price=1266.9, pct_change=-0.84, turnover_cny=20_000_000_000),
+        ]
+    )
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FakeMarketOverviewHttpClient(),
+        realtime_quote_provider=quote_provider,
+        ifind_index_provider=FakeIfindIndexProvider(error=RuntimeError("ifind down")),
+    )
+
+    overview = provider.get_overview()
+
+    assert quote_provider.calls == [
+        ["000001.SH", "399001.SZ", "899050.BJ"],
+        ["000001.SH", "399001.SZ", "399006.SZ", "000688.SH"],
+    ]
+    assert overview.turnover.total_cny == 3_520_000_000_000
+    assert [item.symbol for item in overview.indices] == [
+        "000001.SH",
+        "399001.SZ",
+        "399006.SZ",
+        "000688.SH",
+    ]
+    assert overview.indices[2].source == "TickFlow 实时指数"
 
 
 def test_market_overview_falls_back_to_eastmoney_when_tickflow_unavailable() -> None:
@@ -334,6 +394,21 @@ def test_market_overview_falls_back_to_eastmoney_when_tickflow_unavailable() -> 
     assert overview.source_status[1].status == "failed"
     assert overview.source_status[2].source == "东方财富全A指数"
     assert "fallback" in overview.source_status[2].detail
+
+
+def test_market_overview_display_indices_do_not_double_count_turnover() -> None:
+    provider = EastmoneyMarketOverviewProvider(http_client=FakeMarketOverviewHttpClient())
+
+    overview = provider.get_overview()
+
+    assert overview.turnover.total_cny == 60
+    assert [item.symbol for item in overview.indices] == [
+        "000001.SH",
+        "399001.SZ",
+        "399006.SZ",
+        "000688.SH",
+    ]
+    assert overview.indices[2].source == "东方财富指数行情"
 
 
 def test_market_overview_provider_returns_direct_sector_capital_flow() -> None:
@@ -575,6 +650,51 @@ def test_ifind_stock_research_keeps_market_cap_and_dynamic_static_pe() -> None:
     assert "静态市盈率" in query
 
 
+class FakeIfindMarkdownResearchHttpClient:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, object]] = []
+
+    def post(self, url: str, **kwargs: object) -> FakeResponse:
+        self.requests.append({"url": url, **kwargs})
+        payload = kwargs.get("json", {})
+        params = payload.get("params", {}) if isinstance(payload, dict) else {}
+        tool_name = params.get("name") if isinstance(params, dict) else None
+        if tool_name == "get_stock_financials":
+            return FakeResponse(
+                {
+                    "result": {
+                        "structuredContent": {
+                            "code": 1,
+                            "msg": "success",
+                            "data": {
+                                "answer": (
+                                    "|证券代码|证券简称|总市值（单位：元）|市盈率（PE，LYR）|市盈率(PE,TTM)|\n"
+                                    "|---|---|---|---|---|\n"
+                                    "|603005.SH|晶方科技|351.3249亿|95.0509|95.0304|\n"
+                                )
+                            },
+                        }
+                    }
+                }
+            )
+        return FakeResponse({"result": {"structuredContent": {}}})
+
+
+def test_ifind_stock_research_extracts_valuation_from_markdown_answer_table() -> None:
+    client = FakeIfindMarkdownResearchHttpClient()
+    provider = IfindMcpProvider(
+        api_key="ifind-test",
+        base_url="https://api-mcp.51ifind.com:8643",
+        http_client=client,
+    )
+
+    research = provider.get_stock_research("603005.SH")
+
+    assert research.valuation["总市值"] == "351.3249亿"
+    assert research.valuation["动态市盈率"] == "95.0304"
+    assert research.valuation["静态市盈率"] == "95.0509"
+
+
 def test_analyze_negative_news_rows_flags_regulatory_and_loss_keywords() -> None:
     risk = analyze_negative_news_rows(
         [
@@ -673,6 +793,7 @@ def test_tickflow_provider_maps_quote_payload() -> None:
                     "high": 16.95,
                     "low": 15.88,
                     "pct_change": 0.101,
+                    "turnover_rate": 12.34,
                     "turnover_cny": 350000000,
                     "volume": 200000,
                     "quote_time": "2026-06-11T10:00:00+08:00",
@@ -698,6 +819,7 @@ def test_tickflow_provider_maps_quote_payload() -> None:
             high_price=16.95,
             low_price=15.88,
             pct_change=10.1,
+            turnover_rate=12.34,
             turnover_cny=350000000.0,
             volume=200000.0,
             quote_time="2026-06-11T10:00:00+08:00",
@@ -1007,6 +1129,7 @@ def test_parse_tickflow_quote_payload_accepts_items_shape() -> None:
                     "ext": {"name": "示例股份", "change_pct": 8.2},
                     "price": "12.3",
                     "amount": "1000000",
+                    "turnoverRate": "6.78",
                 }
             ]
         }
@@ -1015,7 +1138,24 @@ def test_parse_tickflow_quote_payload_accepts_items_shape() -> None:
     assert quotes[0].symbol == "002000.SZ"
     assert quotes[0].name == "示例股份"
     assert quotes[0].pct_change == 8.2
+    assert quotes[0].turnover_rate == 6.78
     assert quotes[0].turnover_cny == 1000000.0
+
+
+def test_parse_tickflow_quote_payload_normalizes_decimal_turnover_rate() -> None:
+    quotes = parse_tickflow_quote_payload(
+        {
+            "data": [
+                {
+                    "symbol": "603005.SH",
+                    "price": 53.87,
+                    "turnover_rate": 0.14943733238252443,
+                }
+            ]
+        }
+    )
+
+    assert quotes[0].turnover_rate == 14.9437
 
 
 def test_parse_baidu_kline_payload_maps_market_rows() -> None:

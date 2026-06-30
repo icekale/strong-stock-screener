@@ -10,6 +10,7 @@ import httpx
 from app.models import (
     MarketAdvanceDeclineSummary,
     MarketEmotionBucket,
+    MarketIndexSnapshot,
     MarketOverviewResponse,
     MarketSectorStrengthItem,
     MarketTurnoverSummary,
@@ -20,9 +21,18 @@ from app.models import (
 
 
 INDEX_SECIDS = ("1.000001", "0.399001", "0.899050")
+DISPLAY_INDEX_SECIDS = ("1.000001", "0.399001", "0.399006", "1.000688")
+DISPLAY_INDEX_SYMBOLS = ["000001.SH", "399001.SZ", "399006.SZ", "000688.SH"]
 TICKFLOW_INDEX_SYMBOLS = ["000001.SH", "399001.SZ", "899050.BJ"]
-IFIND_INDEX_SYMBOLS = "000001.SH,399001.SZ,899050.BJ"
+IFIND_AGGREGATE_INDEX_SYMBOLS = {"000001.SH", "399001.SZ", "899050.BJ"}
+IFIND_INDEX_SYMBOLS = "000001.SH,399001.SZ,899050.BJ,399006.SZ,000688.SH"
 IFIND_INDEX_INDICATORS = "最新价,涨跌幅,成交额,上涨家数,下跌家数"
+DISPLAY_INDEX_NAMES = {
+    "000001.SH": "上证",
+    "399001.SZ": "深证",
+    "399006.SZ": "创业板",
+    "000688.SH": "科创50",
+}
 A_SHARE_STOCK_LIST_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -57,6 +67,7 @@ class EastmoneyMarketOverviewProvider:
         eastmoney_trade_date = trade_date.replace("-", "")
         turnover = MarketTurnoverSummary()
         advance_decline = MarketAdvanceDeclineSummary()
+        indices: list[MarketIndexSnapshot] = []
         sectors: list[MarketSectorStrengthItem] = []
 
         if self.ifind_index_provider is None:
@@ -71,6 +82,7 @@ class EastmoneyMarketOverviewProvider:
             try:
                 ifind = self._fetch_ifind_realtime_overview()
                 turnover.total_cny = round(ifind["total_cny"], 2)
+                indices = ifind.get("indices", [])
                 advance_decline = MarketAdvanceDeclineSummary(
                     advance_count=ifind.get("advance_count"),
                     decline_count=ifind.get("decline_count"),
@@ -155,6 +167,42 @@ class EastmoneyMarketOverviewProvider:
                     source="东方财富全A指数",
                     status="failed",
                     detail=f"指数快照获取失败: {exc.__class__.__name__}",
+                )
+            )
+
+        try:
+            if not indices:
+                try:
+                    indices = self._fetch_tickflow_display_indices()
+                    source_status.append(
+                        StrongStockSourceStatus(
+                            source="TickFlow 指数展示",
+                            status="success",
+                            detail=f"返回 {len(indices)} 个顶部指数展示项",
+                        )
+                    )
+                except Exception as tickflow_exc:
+                    source_status.append(
+                        StrongStockSourceStatus(
+                            source="TickFlow 指数展示",
+                            status="failed" if self.realtime_quote_provider is not None else "disabled",
+                            detail=f"顶部指数展示获取失败: {tickflow_exc.__class__.__name__}; fallback 到东方财富",
+                        )
+                    )
+                    indices = self._fetch_display_index_snapshot()
+                    source_status.append(
+                        StrongStockSourceStatus(
+                            source="东方财富指数展示",
+                            status="success",
+                            detail=f"返回 {len(indices)} 个顶部指数展示项",
+                        )
+                    )
+        except Exception as exc:
+            source_status.append(
+                StrongStockSourceStatus(
+                    source="东方财富指数展示",
+                    status="failed",
+                    detail=f"顶部指数展示获取失败: {exc.__class__.__name__}",
                 )
             )
 
@@ -247,6 +295,7 @@ class EastmoneyMarketOverviewProvider:
             trade_date=trade_date,
             turnover=turnover,
             advance_decline=advance_decline,
+            indices=indices,
             sectors=sectors,
             source_status=source_status,
         )
@@ -359,16 +408,27 @@ class EastmoneyMarketOverviewProvider:
         has_advance = False
         has_decline = False
         trade_dates: list[str] = []
+        indices_by_symbol: dict[str, MarketIndexSnapshot] = {}
         for row in rows:
+            symbol = _text(row.get("证券代码"))
+            if symbol in DISPLAY_INDEX_NAMES:
+                indices_by_symbol[symbol] = MarketIndexSnapshot(
+                    symbol=symbol,
+                    name=DISPLAY_INDEX_NAMES[symbol],
+                    last_price=_number(row.get("最新价")),
+                    change_pct=_number(row.get("涨跌幅")),
+                    turnover_cny=_number(row.get("成交额")),
+                    source="iFinD 实时指数",
+                )
             amount = _number(row.get("成交额"))
-            if amount is not None:
+            if amount is not None and symbol in IFIND_AGGREGATE_INDEX_SYMBOLS:
                 total += amount
             up_count = _integer(row.get("上涨家数"))
-            if up_count is not None:
+            if up_count is not None and symbol in IFIND_AGGREGATE_INDEX_SYMBOLS:
                 advance_count += up_count
                 has_advance = True
             down_count = _integer(row.get("下跌家数"))
-            if down_count is not None:
+            if down_count is not None and symbol in IFIND_AGGREGATE_INDEX_SYMBOLS:
                 decline_count += down_count
                 has_decline = True
             trade_date = _date_from_quote_time(row.get("time"))
@@ -382,11 +442,21 @@ class EastmoneyMarketOverviewProvider:
             "decline_count": decline_count if has_decline else None,
             "trade_date": max(trade_dates) if trade_dates else None,
             "quote_count": len(rows),
+            "indices": [
+                indices_by_symbol[symbol]
+                for symbol in DISPLAY_INDEX_NAMES
+                if symbol in indices_by_symbol
+            ],
         }
 
     def _fetch_tickflow_realtime_turnover(self) -> dict[str, Any]:
         quotes = self.realtime_quote_provider.get_quotes(TICKFLOW_INDEX_SYMBOLS)
-        amounts = [_number(getattr(quote, "turnover_cny", None)) for quote in quotes]
+        aggregate_symbols = set(TICKFLOW_INDEX_SYMBOLS)
+        amounts = [
+            _number(getattr(quote, "turnover_cny", None))
+            for quote in quotes
+            if str(getattr(quote, "symbol", "") or "") in aggregate_symbols
+        ]
         valid_amounts = [amount for amount in amounts if amount is not None]
         if not valid_amounts:
             raise ValueError("empty tickflow turnover")
@@ -403,6 +473,31 @@ class EastmoneyMarketOverviewProvider:
             "quote_count": len(valid_amounts),
         }
 
+    def _fetch_tickflow_display_indices(self) -> list[MarketIndexSnapshot]:
+        if self.realtime_quote_provider is None:
+            raise ValueError("tickflow display index source disabled")
+        quotes = self.realtime_quote_provider.get_quotes(DISPLAY_INDEX_SYMBOLS)
+        items_by_symbol: dict[str, MarketIndexSnapshot] = {}
+        for quote in quotes:
+            symbol = str(getattr(quote, "symbol", "") or "")
+            if symbol not in DISPLAY_INDEX_NAMES:
+                continue
+            items_by_symbol[symbol] = MarketIndexSnapshot(
+                symbol=symbol,
+                name=DISPLAY_INDEX_NAMES[symbol],
+                last_price=_number(getattr(quote, "last_price", None)),
+                change_pct=_number(getattr(quote, "pct_change", None)),
+                turnover_cny=_number(getattr(quote, "turnover_cny", None)),
+                source="TickFlow 实时指数",
+            )
+        if not items_by_symbol:
+            raise ValueError("empty tickflow display indices")
+        return [
+            items_by_symbol[symbol]
+            for symbol in DISPLAY_INDEX_SYMBOLS
+            if symbol in items_by_symbol
+        ]
+
     def _fetch_index_snapshot(self) -> list[dict[str, Any]]:
         response = self.http_client.get(
             "https://push2.eastmoney.com/api/qt/ulist.np/get",
@@ -418,6 +513,39 @@ class EastmoneyMarketOverviewProvider:
         if not rows:
             raise ValueError("empty index snapshot")
         return rows
+
+    def _fetch_display_index_snapshot(self) -> list[MarketIndexSnapshot]:
+        response = self.http_client.get(
+            "https://push2.eastmoney.com/api/qt/ulist.np/get",
+            params={
+                "secids": ",".join(DISPLAY_INDEX_SECIDS),
+                "fields": "f2,f3,f6,f12,f14",
+            },
+            headers={"User-Agent": USER_AGENT},
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        rows = _extract_diff(response.json())
+        if not rows:
+            raise ValueError("empty display index snapshot")
+        items_by_symbol: dict[str, MarketIndexSnapshot] = {}
+        for row in rows:
+            symbol = _eastmoney_index_symbol(row.get("f12"))
+            if symbol not in DISPLAY_INDEX_NAMES:
+                continue
+            items_by_symbol[symbol] = MarketIndexSnapshot(
+                symbol=symbol,
+                name=DISPLAY_INDEX_NAMES[symbol],
+                last_price=_number(row.get("f2")),
+                change_pct=_number(row.get("f3")),
+                turnover_cny=_number(row.get("f6")),
+                source="东方财富指数行情",
+            )
+        return [
+            items_by_symbol[symbol]
+            for symbol in DISPLAY_INDEX_NAMES
+            if symbol in items_by_symbol
+        ]
 
     def _fetch_index_amount_history(self) -> dict[str, object]:
         latest_total = 0.0
@@ -781,3 +909,12 @@ def _text(value: object) -> str | None:
         return None
     text = str(value).strip()
     return text or None
+
+
+def _eastmoney_index_symbol(value: object) -> str:
+    code = str(value or "").strip()
+    if code.startswith("399"):
+        return f"{code}.SZ"
+    if code:
+        return f"{code}.SH"
+    return ""

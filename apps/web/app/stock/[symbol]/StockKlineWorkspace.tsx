@@ -16,7 +16,7 @@ import {
 } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { TickFlowKlineChart, type KlineChartDataSourceMode } from "../../../components/TickFlowKlineChart";
-import { getLatestScreenRun, getStockKline, getStockResearch } from "../../../lib/api";
+import { getLatestScreenRun, getStockKline, getStockQuote, getStockResearch } from "../../../lib/api";
 import {
   buildKlineIndicatorState,
   KLINE_SUB_INDICATOR_OPTIONS,
@@ -32,6 +32,7 @@ import type {
   GsgfChartAnnotation,
   KlineBar,
   StockKlineResponse,
+  StockQuoteResponse,
   StockResearchResponse,
   StrongStockScreeningItem,
 } from "../../../lib/types";
@@ -76,6 +77,7 @@ const GSGF_MODEL_CONDITIONS = [
 
 export function StockKlineWorkspace({ symbol }: { symbol: string }) {
   const [data, setData] = useState<StockKlineResponse | null>(null);
+  const [realtimeQuote, setRealtimeQuote] = useState<StockQuoteResponse | null>(null);
   const [research, setResearch] = useState<StockResearchResponse | null>(null);
   const [screenItems, setScreenItems] = useState<StrongStockScreeningItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -114,6 +116,25 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
       .finally(() => {
         if (!cancelled) {
           setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [symbol]);
+
+  useEffect(() => {
+    let cancelled = false;
+    setRealtimeQuote(null);
+    getStockQuote(symbol)
+      .then((response) => {
+        if (!cancelled) {
+          setRealtimeQuote(response);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRealtimeQuote(null);
         }
       });
     return () => {
@@ -190,7 +211,7 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
     () => screenItems.find((item) => item.symbol === symbol) ?? null,
     [screenItems, symbol],
   );
-  const quote = useMemo(() => buildQuote(dailyBars), [dailyBars]);
+  const quote = useMemo(() => buildQuote(dailyBars, realtimeQuote), [dailyBars, realtimeQuote]);
   const isChartTab = activeChartTab === "day" || activeChartTab === "week";
   const activeTabLabel = CHART_TABS.find((item) => item.key === activeChartTab)?.label ?? "日 K 线";
   const chartDataSourceLabel =
@@ -235,8 +256,8 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
             currentStock={currentStock}
             loading={loading}
             quote={quote}
-            source={data?.source_status.source ?? "--"}
-            status={data?.source_status.status ?? "disabled"}
+            source={realtimeQuote?.source_status.source ?? data?.source_status.source ?? "--"}
+            status={realtimeQuote?.source_status.status ?? data?.source_status.status ?? "disabled"}
             symbol={symbol}
           />
 
@@ -731,7 +752,7 @@ function QuoteSummary({
   symbol: string;
 }) {
   const isUp = (quote?.change ?? 0) >= 0;
-  const tone = isUp ? "text-red-500" : "text-emerald-600";
+  const tone = isUp ? "text-red-500" : "market-green-text";
 
   return (
     <header className="border-b border-slate-200 bg-white">
@@ -760,8 +781,8 @@ function QuoteSummary({
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6 xl:min-w-0">
           <HeaderMetric label="开" value={quote ? formatPrice(quote.open) : "--"} />
           <HeaderMetric label="高" tone="text-red-500" value={quote ? formatPrice(quote.high) : "--"} />
-          <HeaderMetric label="低" tone="text-emerald-600" value={quote ? formatPrice(quote.low) : "--"} />
-          <HeaderMetric label="换" value="--" />
+          <HeaderMetric label="低" tone="market-green-text" value={quote ? formatPrice(quote.low) : "--"} />
+          <HeaderMetric label="换" value={formatTurnoverRate(quote?.turnoverRate ?? null)} />
           <HeaderMetric label="量" value={quote ? formatVolume(quote.volume) : "--"} />
           <HeaderMetric label="K线" value={`${bars.length || "--"}`} />
         </div>
@@ -1008,25 +1029,45 @@ type QuoteSnapshot = {
   high: number;
   low: number;
   open: number;
+  turnoverRate: number | null;
   volume: number;
 };
 
-function buildQuote(bars: KlineBar[]): QuoteSnapshot | null {
+function buildQuote(bars: KlineBar[], realtimeQuote: StockQuoteResponse | null): QuoteSnapshot | null {
   const latest = bars[bars.length - 1];
   if (!latest) {
-    return null;
+    if (!realtimeQuote?.last_price) {
+      return null;
+    }
+    const change = realtimeQuote.prev_close ? realtimeQuote.last_price - realtimeQuote.prev_close : 0;
+    return {
+      change,
+      changePct: realtimeQuote.pct_change ?? (realtimeQuote.prev_close ? (change / realtimeQuote.prev_close) * 100 : 0),
+      close: realtimeQuote.last_price,
+      high: realtimeQuote.high_price ?? realtimeQuote.last_price,
+      low: realtimeQuote.low_price ?? realtimeQuote.last_price,
+      open: realtimeQuote.open_price ?? realtimeQuote.last_price,
+      turnoverRate: realtimeQuote.turnover_rate,
+      volume: realtimeQuote.volume ?? 0,
+    };
   }
   const previous = bars[bars.length - 2];
-  const change = previous ? latest.close - previous.close : 0;
-  const changePct = previous && previous.close !== 0 ? (change / previous.close) * 100 : 0;
+  const close = realtimeQuote?.last_price ?? latest.close;
+  const open = realtimeQuote?.open_price ?? latest.open;
+  const high = realtimeQuote?.high_price ?? latest.high;
+  const low = realtimeQuote?.low_price ?? latest.low;
+  const previousClose = realtimeQuote?.prev_close ?? previous?.close ?? null;
+  const change = previousClose ? close - previousClose : previous ? latest.close - previous.close : 0;
+  const changePct = realtimeQuote?.pct_change ?? (previousClose ? (change / previousClose) * 100 : 0);
   return {
     change,
     changePct,
-    close: latest.close,
-    high: latest.high,
-    low: latest.low,
-    open: latest.open,
-    volume: latest.volume,
+    close,
+    high,
+    low,
+    open,
+    turnoverRate: realtimeQuote?.turnover_rate ?? null,
+    volume: realtimeQuote?.volume ?? latest.volume,
   };
 }
 
@@ -1229,4 +1270,11 @@ function formatVolume(value: number): string {
     return `${(value / 10_000).toFixed(1)}万`;
   }
   return `${Math.round(value)}`;
+}
+
+function formatTurnoverRate(value: number | null): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return "--";
+  }
+  return `${value.toFixed(2)}%`;
 }

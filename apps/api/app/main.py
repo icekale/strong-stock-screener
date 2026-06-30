@@ -28,6 +28,7 @@ from app.models import (
     ShortTermIntradaySignalDigest,
     ShortTermSentimentResponse,
     StockKlineResponse,
+    StockQuoteResponse,
     StockResearchResponse,
     StrongStockDataUnavailable,
     StrongStockSourceStatus,
@@ -642,6 +643,40 @@ def get_stock_kline(symbol: str, count: int = 220) -> dict[str, object]:
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"K线获取失败: {exc.__class__.__name__}") from exc
     return result.model_dump(mode="json")
+
+
+@app.get("/api/stocks/{symbol}/quote")
+def get_stock_quote(symbol: str) -> dict[str, object]:
+    quote_provider = _quote_provider()
+    try:
+        quotes = quote_provider.get_quotes([symbol])
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"实时行情获取失败: {exc.__class__.__name__}") from exc
+    if not quotes:
+        raise HTTPException(status_code=503, detail="实时行情未返回数据")
+    quote = quotes[0]
+    source_status = (
+        quote_provider.status()
+        if hasattr(quote_provider, "status")
+        else StrongStockSourceStatus(source=getattr(quote_provider, "source_name", "实时行情"), status="success", detail="实时行情源已配置")
+    )
+    return StockQuoteResponse(
+        symbol=quote.symbol,
+        name=quote.name,
+        last_price=quote.last_price,
+        prev_close=quote.prev_close,
+        open_price=quote.open_price,
+        high_price=quote.high_price,
+        low_price=quote.low_price,
+        pct_change=quote.pct_change,
+        turnover_rate=getattr(quote, "turnover_rate", None),
+        turnover_cny=quote.turnover_cny,
+        volume=quote.volume,
+        quote_time=quote.quote_time,
+        source_status=source_status,
+    ).model_dump(mode="json")
 
 
 @app.get("/api/stocks/{symbol}/research")

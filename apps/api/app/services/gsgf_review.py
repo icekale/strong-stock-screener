@@ -25,8 +25,20 @@ class GsgfReviewStore:
     def snapshots_path(self) -> Path:
         return self.root_dir / "snapshots.jsonl"
 
-    def persist_snapshot(self, result: StrongStockScreeningResult) -> GsgfReviewSnapshotResponse:
+    @property
+    def latest_summary_path(self) -> Path:
+        return self.root_dir / "latest_summary.json"
+
+    def persist_snapshot(
+        self,
+        result: StrongStockScreeningResult,
+        *,
+        dedupe: bool = False,
+    ) -> GsgfReviewSnapshotResponse:
         records = [_record_from_item(result.trade_date, item) for item in result.items if item.gsgf is not None]
+        if dedupe and records:
+            existing_keys = {_record_key(record) for record in self.load_records()}
+            records = [record for record in records if _record_key(record) not in existing_keys]
         self.root_dir.mkdir(parents=True, exist_ok=True)
         if records:
             with self.snapshots_path.open("a", encoding="utf-8") as handle:
@@ -61,6 +73,17 @@ class GsgfReviewStore:
             buckets=_buckets(items, clean_windows),
         )
 
+    def save_latest_summary(self, summary: GsgfReviewSummary) -> None:
+        self.root_dir.mkdir(parents=True, exist_ok=True)
+        self.latest_summary_path.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
+
+    def load_latest_summary(self) -> GsgfReviewSummary | None:
+        if not self.latest_summary_path.exists():
+            return None
+        return GsgfReviewSummary.model_validate_json(
+            self.latest_summary_path.read_text(encoding="utf-8")
+        )
+
 
 def _record_from_item(trade_date: str, item) -> GsgfReviewRecord:
     gsgf = item.gsgf
@@ -75,6 +98,10 @@ def _record_from_item(trade_date: str, item) -> GsgfReviewRecord:
         setup_type=gsgf.setup_type,
         confirm_type=gsgf.confirm_type,
     )
+
+
+def _record_key(record: GsgfReviewRecord) -> tuple[str, str, str, str]:
+    return (record.trade_date, record.symbol, record.signal_type, record.status)
 
 
 def _review_item(record: GsgfReviewRecord, bars: list[KlineBar], windows: list[int]) -> GsgfReviewItem:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
 from time import perf_counter
 from pathlib import Path
@@ -52,6 +53,7 @@ from app.providers.watchlist import (
 from app.services.intraday import IntradayMonitor
 from app.services.background_jobs import BackgroundJobStore
 from app.services.gsgf_backtest import summarize_gsgf_backtest
+from app.services.gsgf_auto_review import GsgfAutoReviewService
 from app.services.gsgf_real_calibration import summarize_gsgf_real_calibration
 from app.services.gsgf_review import GsgfReviewStore
 from app.services.gsgf_trade_plan import build_gsgf_trade_plan
@@ -170,9 +172,11 @@ def _cors_allow_origins() -> list[str]:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     startup_sentiment_monitor()
+    startup_gsgf_auto_review()
     try:
         yield
     finally:
+        shutdown_gsgf_auto_review()
         shutdown_sentiment_monitor()
 
 
@@ -204,6 +208,16 @@ def shutdown_sentiment_monitor() -> None:
     monitor = getattr(app.state, "sentiment_monitor", None)
     if monitor is not None:
         monitor.stop()
+
+
+def startup_gsgf_auto_review() -> None:
+    _gsgf_auto_review_service().start()
+
+
+def shutdown_gsgf_auto_review() -> None:
+    service = getattr(app.state, "gsgf_auto_review_service", None)
+    if service is not None:
+        service.stop()
 
 
 @app.get("/health")
@@ -1218,6 +1232,79 @@ def _sentiment_monitor() -> SentimentMonitor:
     )
     app.state.sentiment_monitor = monitor
     return monitor
+
+
+def _gsgf_auto_review_service() -> GsgfAutoReviewService:
+    injected = getattr(app.state, "gsgf_auto_review_service", None)
+    if injected is not None:
+        return injected
+    service = GsgfAutoReviewService(
+        config_loader=lambda: load_runtime_settings(_runtime_config_path()).gsgf_auto_review,
+        review_runner=_run_gsgf_daily_review,
+        calibration_runner=_start_gsgf_weekly_calibration,
+        recent_trade_dates=_recent_screen_trade_dates,
+        notifier=_send_sentiment_monitor_notification,
+    )
+    app.state.gsgf_auto_review_service = service
+    return service
+
+
+def _run_gsgf_daily_review() -> GsgfReviewSummary:
+    config = load_runtime_settings(_runtime_config_path()).gsgf_auto_review
+    store = _gsgf_review_store()
+    records = store.load_records()
+    kline_provider = _kline_provider()
+    bars_by_symbol: dict[str, list[KlineBar]] = {}
+    for symbol in _dedupe_symbols([record.symbol for record in records]):
+        try:
+            bars_by_symbol[symbol] = kline_provider.get_klines(symbol, count=config.kline_count)
+        except Exception:
+            bars_by_symbol[symbol] = []
+    summary = store.recheck_snapshots(bars_by_symbol, windows=config.windows)
+    store.save_latest_summary(summary)
+    return summary
+
+
+def _start_gsgf_weekly_calibration(
+    trade_dates: list[str],
+    windows: list[int],
+    scan_limit: int,
+    count: int,
+):
+    return _background_job_store().create_calibration_job(
+        lambda progress, should_cancel: summarize_gsgf_real_calibration(
+            candidate_provider=_candidate_provider(),
+            kline_provider=_kline_provider(),
+            trade_dates=trade_dates,
+            windows=windows,
+            scan_limit=scan_limit,
+            kline_count=count,
+            progress=progress,
+            should_cancel=should_cancel,
+        )
+    )
+
+
+def _recent_screen_trade_dates(count: int) -> list[str]:
+    dates: list[str] = []
+    dates.extend(record.trade_date for record in _gsgf_review_store().load_records())
+    runs_dir = _run_store().runs_dir
+    if runs_dir.exists():
+        for path in sorted(runs_dir.glob("*.json")):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            trade_date = payload.get("trade_date")
+            if isinstance(trade_date, str):
+                dates.append(trade_date)
+    deduped = []
+    seen: set[str] = set()
+    for trade_date in sorted(dates):
+        if trade_date not in seen:
+            seen.add(trade_date)
+            deduped.append(trade_date)
+    return deduped[-max(1, count):]
 
 
 def _watchlist_path() -> Path:

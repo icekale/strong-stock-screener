@@ -1568,6 +1568,22 @@ def test_gsgf_calibration_job_endpoint_returns_job_status(tmp_path: Path) -> Non
     assert payload["job_id"]
 
 
+def test_recent_screen_trade_dates_reads_saved_runs(tmp_path: Path) -> None:
+    from app.main import _recent_screen_trade_dates
+
+    client = _client(tmp_path)
+    client.post(
+        "/api/screen/runs",
+        json={"trade_date": "2026-06-10", "limit": 10, "scan_limit": 10, "strategy": "gsgf"},
+    )
+    client.post(
+        "/api/screen/runs",
+        json={"trade_date": "2026-06-11", "limit": 10, "scan_limit": 10, "strategy": "gsgf"},
+    )
+
+    assert _recent_screen_trade_dates(2) == ["2026-06-10", "2026-06-11"]
+
+
 def test_screen_run_accepts_combined_strategy(tmp_path: Path) -> None:
     client = _client(tmp_path)
 

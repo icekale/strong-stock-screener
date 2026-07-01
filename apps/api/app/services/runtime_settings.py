@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.config import Settings
+from app.services.gsgf_auto_review import GsgfAutoReviewConfig
 from app.services.notification_channels import (
     NotificationChannelConfig,
     NotificationSettings,
@@ -38,6 +39,7 @@ class RuntimeSettings(BaseModel):
     provider_timeout_seconds: float | None = Field(default=None, ge=1, le=60)
     notification_channels: list[NotificationChannelConfig] = Field(default_factory=list)
     sentiment_monitor: SentimentMonitorConfig = Field(default_factory=SentimentMonitorConfig)
+    gsgf_auto_review: GsgfAutoReviewConfig = Field(default_factory=GsgfAutoReviewConfig)
 
 
 class SettingsUpdate(BaseModel):
@@ -54,6 +56,7 @@ class SettingsUpdate(BaseModel):
     provider_timeout_seconds: float = Field(ge=1, le=60)
     notification_channels: list[NotificationChannelConfig] = Field(default_factory=list)
     sentiment_monitor: SentimentMonitorConfig = Field(default_factory=SentimentMonitorConfig)
+    gsgf_auto_review: GsgfAutoReviewConfig = Field(default_factory=GsgfAutoReviewConfig)
 
 
 class EffectiveRuntimeSettings(BaseModel):
@@ -101,6 +104,7 @@ def save_runtime_settings(path: Path, update: SettingsUpdate) -> RuntimeSettings
                 update.notification_channels,
             ),
             "sentiment_monitor": update.sentiment_monitor,
+            "gsgf_auto_review": update.gsgf_auto_review,
         }
     )
     if update.tickflow_api_key is not None:
@@ -192,6 +196,8 @@ def public_settings_payload(config: EffectiveRuntimeSettings) -> dict[str, objec
         ),
         "sentiment_monitor": load_runtime_settings(Path(config.runtime_config_path))
         .sentiment_monitor.model_dump(mode="json"),
+        "gsgf_auto_review": load_runtime_settings(Path(config.runtime_config_path))
+        .gsgf_auto_review.model_dump(mode="json"),
     }
 
 

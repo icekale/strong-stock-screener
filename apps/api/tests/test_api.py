@@ -849,6 +849,17 @@ def test_settings_can_be_saved_and_read_without_exposing_full_key(tmp_path: Path
     assert "tk_saved_secret" not in get_response.text
 
 
+def test_settings_exposes_gsgf_auto_review_config(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.get("/api/settings")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["config"]["gsgf_auto_review"]["daily_review_time"] == "15:40"
+    assert payload["config"]["gsgf_auto_review"]["weekly_calibration_scan_limit"] == 80
+
+
 def test_settings_can_be_saved_with_ifind_configuration(tmp_path: Path) -> None:
     client = _client(tmp_path)
 

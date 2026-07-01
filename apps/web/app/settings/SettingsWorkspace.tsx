@@ -20,7 +20,7 @@ import {
 } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { checkRuntimeSettingsHealth, getRuntimeSettings, saveRuntimeSettings } from "../../lib/api";
-import type { RuntimeSettingsConfig, RuntimeSettingsHealthProbe } from "../../lib/types";
+import type { GsgfAutoReviewConfig, RuntimeSettingsConfig, RuntimeSettingsHealthProbe } from "../../lib/types";
 
 type SettingsDraft = {
   candidate_provider: "recent_limit_up" | "thsdk";
@@ -49,6 +49,16 @@ type SettingsDraft = {
   notification_email_sender: string;
   notification_email_recipients: string;
   notification_email_tls: boolean;
+  gsgf_auto_snapshot_enabled: boolean;
+  gsgf_daily_review_enabled: boolean;
+  gsgf_daily_review_time: string;
+  gsgf_weekly_calibration_enabled: boolean;
+  gsgf_weekly_calibration_weekday: number;
+  gsgf_weekly_calibration_time: string;
+  gsgf_weekly_calibration_trade_days: number;
+  gsgf_weekly_calibration_scan_limit: number;
+  gsgf_notify_on_success: boolean;
+  gsgf_notify_on_degradation: boolean;
 };
 
 const DEFAULT_DRAFT: SettingsDraft = {
@@ -78,6 +88,16 @@ const DEFAULT_DRAFT: SettingsDraft = {
   notification_email_sender: "",
   notification_email_recipients: "",
   notification_email_tls: true,
+  gsgf_auto_snapshot_enabled: true,
+  gsgf_daily_review_enabled: true,
+  gsgf_daily_review_time: "15:40",
+  gsgf_weekly_calibration_enabled: true,
+  gsgf_weekly_calibration_weekday: 5,
+  gsgf_weekly_calibration_time: "16:10",
+  gsgf_weekly_calibration_trade_days: 5,
+  gsgf_weekly_calibration_scan_limit: 80,
+  gsgf_notify_on_success: true,
+  gsgf_notify_on_degradation: true,
 };
 
 export function SettingsWorkspace() {
@@ -113,6 +133,7 @@ export function SettingsWorkspace() {
         tdx_api_key: "",
         tdx_base_url: response.config.tdx_base_url,
         provider_timeout_seconds: response.config.provider_timeout_seconds,
+        ...gsgfDraftFromConfig(response.config),
         ...notificationDraftFromConfig(response.config),
       });
       setMessage("已读取当前设置");
@@ -142,6 +163,7 @@ export function SettingsWorkspace() {
         provider_timeout_seconds: draft.provider_timeout_seconds,
         notification_channels: buildNotificationChannels(draft),
         sentiment_monitor: config?.sentiment_monitor,
+        gsgf_auto_review: buildGsgfAutoReviewConfig(draft, config?.gsgf_auto_review),
       });
       setConfig(response.config);
       applyDraft({
@@ -154,6 +176,7 @@ export function SettingsWorkspace() {
         tdx_api_key: "",
         tdx_base_url: response.config.tdx_base_url,
         provider_timeout_seconds: response.config.provider_timeout_seconds,
+        ...gsgfDraftFromConfig(response.config),
         ...notificationDraftFromConfig(response.config),
       });
       setMessage("设置已保存");
@@ -389,6 +412,69 @@ export function SettingsWorkspace() {
                 </Form>
               </Card>
 
+              <Card className="workbench-panel" title="GSGF 自动复盘">
+                <Alert
+                  className="mb-4"
+                  showIcon
+                  title="自动复盘会在后台保存筛选信号、复查真实走势，并在信号退化时通过已启用通知渠道提醒。"
+                  type="info"
+                />
+                <Form form={form} layout="vertical" onValuesChange={(_, values) => updateDraft(values)}>
+                  <Row gutter={12}>
+                    <Col md={8} xs={24}>
+                      <Form.Item label="筛选后自动保存快照" name="gsgf_auto_snapshot_enabled" valuePropName="checked">
+                        <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+                      </Form.Item>
+                    </Col>
+                    <Col md={8} xs={24}>
+                      <Form.Item label="每日复盘" name="gsgf_daily_review_enabled" valuePropName="checked">
+                        <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+                      </Form.Item>
+                    </Col>
+                    <Col md={8} xs={24}>
+                      <Form.Item label="每日复盘时间" name="gsgf_daily_review_time">
+                        <Input placeholder="15:40" />
+                      </Form.Item>
+                    </Col>
+                    <Col md={8} xs={24}>
+                      <Form.Item label="每周真实样本校准" name="gsgf_weekly_calibration_enabled" valuePropName="checked">
+                        <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+                      </Form.Item>
+                    </Col>
+                    <Col md={8} xs={24}>
+                      <Form.Item label="校准星期（1-7）" name="gsgf_weekly_calibration_weekday">
+                        <InputNumber className="w-full" max={7} min={1} />
+                      </Form.Item>
+                    </Col>
+                    <Col md={8} xs={24}>
+                      <Form.Item label="校准时间" name="gsgf_weekly_calibration_time">
+                        <Input placeholder="16:10" />
+                      </Form.Item>
+                    </Col>
+                    <Col md={8} xs={24}>
+                      <Form.Item label="回看交易日数" name="gsgf_weekly_calibration_trade_days">
+                        <InputNumber className="w-full" max={20} min={1} />
+                      </Form.Item>
+                    </Col>
+                    <Col md={8} xs={24}>
+                      <Form.Item label="校准扫描候选数" name="gsgf_weekly_calibration_scan_limit">
+                        <InputNumber className="w-full" max={300} min={1} />
+                      </Form.Item>
+                    </Col>
+                    <Col md={8} xs={24}>
+                      <Form.Item label="校准完成通知" name="gsgf_notify_on_success" valuePropName="checked">
+                        <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+                      </Form.Item>
+                    </Col>
+                    <Col md={8} xs={24}>
+                      <Form.Item label="信号退化通知" name="gsgf_notify_on_degradation" valuePropName="checked">
+                        <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                </Form>
+              </Card>
+
               <Card className="workbench-panel" title="通知渠道">
                 <Alert
                   className="mb-4"
@@ -515,6 +601,54 @@ function ProbeStatus({ status }: { status: RuntimeSettingsHealthProbe["status"] 
     return <Tag color="warning">missing_key</Tag>;
   }
   return <Tag color="error">{status}</Tag>;
+}
+
+function gsgfDraftFromConfig(config: RuntimeSettingsConfig): Pick<
+  SettingsDraft,
+  | "gsgf_auto_snapshot_enabled"
+  | "gsgf_daily_review_enabled"
+  | "gsgf_daily_review_time"
+  | "gsgf_weekly_calibration_enabled"
+  | "gsgf_weekly_calibration_weekday"
+  | "gsgf_weekly_calibration_time"
+  | "gsgf_weekly_calibration_trade_days"
+  | "gsgf_weekly_calibration_scan_limit"
+  | "gsgf_notify_on_success"
+  | "gsgf_notify_on_degradation"
+> {
+  const value = config.gsgf_auto_review;
+  return {
+    gsgf_auto_snapshot_enabled: value.auto_snapshot_enabled,
+    gsgf_daily_review_enabled: value.daily_review_enabled,
+    gsgf_daily_review_time: value.daily_review_time,
+    gsgf_weekly_calibration_enabled: value.weekly_calibration_enabled,
+    gsgf_weekly_calibration_weekday: value.weekly_calibration_weekday,
+    gsgf_weekly_calibration_time: value.weekly_calibration_time,
+    gsgf_weekly_calibration_trade_days: value.weekly_calibration_trade_days,
+    gsgf_weekly_calibration_scan_limit: value.weekly_calibration_scan_limit,
+    gsgf_notify_on_success: value.notify_on_success,
+    gsgf_notify_on_degradation: value.notify_on_degradation,
+  };
+}
+
+function buildGsgfAutoReviewConfig(
+  draft: SettingsDraft,
+  current: GsgfAutoReviewConfig | undefined,
+): GsgfAutoReviewConfig {
+  return {
+    auto_snapshot_enabled: draft.gsgf_auto_snapshot_enabled,
+    daily_review_enabled: draft.gsgf_daily_review_enabled,
+    daily_review_time: draft.gsgf_daily_review_time.trim() || "15:40",
+    weekly_calibration_enabled: draft.gsgf_weekly_calibration_enabled,
+    weekly_calibration_weekday: draft.gsgf_weekly_calibration_weekday,
+    weekly_calibration_time: draft.gsgf_weekly_calibration_time.trim() || "16:10",
+    weekly_calibration_trade_days: draft.gsgf_weekly_calibration_trade_days,
+    weekly_calibration_scan_limit: draft.gsgf_weekly_calibration_scan_limit,
+    windows: current?.windows ?? [1, 3, 5, 10],
+    kline_count: current?.kline_count ?? 260,
+    notify_on_success: draft.gsgf_notify_on_success,
+    notify_on_degradation: draft.gsgf_notify_on_degradation,
+  };
 }
 
 function notificationDraftFromConfig(config: RuntimeSettingsConfig): Pick<

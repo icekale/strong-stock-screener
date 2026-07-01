@@ -222,6 +222,31 @@ export type GsgfRealCalibrationSummary = {
   generated_at: string;
 };
 
+export type BackgroundJobStatus = "pending" | "running" | "success" | "failed" | "canceled";
+
+export type BackgroundJobState = {
+  job_id: string;
+  type: string;
+  status: BackgroundJobStatus;
+  progress_current: number;
+  progress_total: number;
+  message: string;
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+  result_path: string | null;
+};
+
+export type GsgfModelHealth = {
+  best_signals: string[];
+  weak_signals: string[];
+  insufficient_sample_signals: string[];
+  degraded_signals: string[];
+  last_review_at: string | null;
+  last_calibration_at: string | null;
+  summary_text: string;
+};
+
 export type DataSourceStatusResponse = {
   items: StrongStockSourceStatus[];
 };
@@ -572,6 +597,21 @@ export type SentimentMonitorStatus = {
   last_alerts: SentimentMutationAlert[];
 };
 
+export type GsgfAutoReviewConfig = {
+  auto_snapshot_enabled: boolean;
+  daily_review_enabled: boolean;
+  daily_review_time: string;
+  weekly_calibration_enabled: boolean;
+  weekly_calibration_weekday: number;
+  weekly_calibration_time: string;
+  weekly_calibration_trade_days: number;
+  weekly_calibration_scan_limit: number;
+  windows: number[];
+  kline_count: number;
+  notify_on_success: boolean;
+  notify_on_degradation: boolean;
+};
+
 export type RuntimeSettingsConfig = {
   candidate_provider: "recent_limit_up" | "thsdk";
   kline_provider: "tickflow";
@@ -593,6 +633,7 @@ export type RuntimeSettingsConfig = {
   runtime_config_path: string;
   notifications: NotificationSettingsPublic;
   sentiment_monitor: SentimentMonitorConfig;
+  gsgf_auto_review: GsgfAutoReviewConfig;
 };
 
 export type NotificationChannelType = "wechat_work" | "feishu" | "telegram" | "email";
@@ -657,6 +698,7 @@ export type RuntimeSettingsResponse = {
     provider_timeout_seconds?: number | null;
     notification_channels?: NotificationChannelConfig[];
     sentiment_monitor?: SentimentMonitorConfig;
+    gsgf_auto_review?: GsgfAutoReviewConfig;
   };
 };
 

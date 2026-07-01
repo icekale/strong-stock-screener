@@ -402,7 +402,8 @@ def create_screen_run(request: ScreenRunRequest) -> dict[str, object]:
     except StrongStockDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     _run_store().save(result)
-    if any(item.gsgf is not None for item in result.items):
+    auto_review_config = load_runtime_settings(_runtime_config_path()).gsgf_auto_review
+    if auto_review_config.auto_snapshot_enabled and any(item.gsgf is not None for item in result.items):
         _gsgf_review_store().persist_snapshot(result, dedupe=True)
     return result.model_dump(mode="json")
 

@@ -1,8 +1,14 @@
 "use client";
 
-import { Button, Input, InputNumber, Tag } from "antd";
+import { Button, Input, InputNumber, Progress, Tag } from "antd";
 import { useEffect, useState } from "react";
-import type { GsgfCalibrationBucket, GsgfRealCalibrationSummary, GsgfReviewSummary } from "../../lib/types";
+import type {
+  BackgroundJobState,
+  GsgfCalibrationBucket,
+  GsgfModelHealth,
+  GsgfRealCalibrationSummary,
+  GsgfReviewSummary,
+} from "../../lib/types";
 import {
   formatDateTime,
   formatPlainPercent,
@@ -13,6 +19,7 @@ import {
 } from "./screenerUtils";
 
 export type GsgfReviewPanelProps = {
+  gsgfHealth: GsgfModelHealth | null;
   onRecheck: () => void;
   onSaveSnapshot: () => void;
   reviewRunning: boolean;
@@ -20,9 +27,11 @@ export type GsgfReviewPanelProps = {
 };
 
 export type GsgfCalibrationPanelProps = {
+  calibrationJob: BackgroundJobState | null;
   calibrationRunning: boolean;
   calibrationSummary: GsgfRealCalibrationSummary | null;
   defaultTradeDate: string;
+  onCancelCalibration: () => void;
   onRunCalibration: (options: {
     tradeDatesText: string;
     windowsText: string;
@@ -32,11 +41,13 @@ export type GsgfCalibrationPanelProps = {
 };
 
 export function GsgfReviewPanel({
+  gsgfHealth,
   onRecheck,
   onSaveSnapshot,
   reviewRunning,
   reviewSummary,
 }: {
+  gsgfHealth: GsgfModelHealth | null;
   onRecheck: () => void;
   onSaveSnapshot: () => void;
   reviewRunning: boolean;
@@ -62,6 +73,7 @@ export function GsgfReviewPanel({
           </Button>
         </div>
       </div>
+      <ModelHealthBar gsgfHealth={gsgfHealth} />
       {buckets.length > 0 ? (
         <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
           {buckets.map((bucket) => (
@@ -89,14 +101,18 @@ export function GsgfReviewPanel({
 }
 
 export function GsgfCalibrationPanel({
+  calibrationJob,
   calibrationRunning,
   calibrationSummary,
   defaultTradeDate,
+  onCancelCalibration,
   onRunCalibration,
 }: {
+  calibrationJob: BackgroundJobState | null;
   calibrationRunning: boolean;
   calibrationSummary: GsgfRealCalibrationSummary | null;
   defaultTradeDate: string;
+  onCancelCalibration: () => void;
   onRunCalibration: (options: {
     tradeDatesText: string;
     windowsText: string;
@@ -159,6 +175,38 @@ export function GsgfCalibrationPanel({
           </Button>
         </div>
       </div>
+
+      {calibrationJob && (
+        <div className="mt-3 rounded-lg border border-[#ddd8d0] bg-white px-3 py-2">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-black text-[#11100e]">校准任务</span>
+                <Tag className="m-0" color={jobStatusColor(calibrationJob.status)}>
+                  {calibrationJob.status}
+                </Tag>
+                <span className="text-xs font-semibold text-[#7b756d]">
+                  {calibrationJob.progress_current}/{calibrationJob.progress_total || 1} · {calibrationJob.message || "等待执行"}
+                </span>
+              </div>
+              {calibrationJob.error && (
+                <p className="mt-1 text-xs font-semibold text-[#d93025]">{calibrationJob.error}</p>
+              )}
+            </div>
+            {(calibrationJob.status === "pending" || calibrationJob.status === "running") && (
+              <Button danger onClick={onCancelCalibration} size="small">
+                取消任务
+              </Button>
+            )}
+          </div>
+          <Progress
+            className="mt-2"
+            percent={jobProgressPercent(calibrationJob)}
+            size="small"
+            status={calibrationJob.status === "failed" ? "exception" : calibrationJob.status === "success" ? "success" : "active"}
+          />
+        </div>
+      )}
 
       {calibrationSummary ? (
         <div className="mt-3 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
@@ -248,6 +296,34 @@ export function GsgfCalibrationPanel({
   );
 }
 
+function ModelHealthBar({ gsgfHealth }: { gsgfHealth: GsgfModelHealth | null }) {
+  if (!gsgfHealth) {
+    return (
+      <div className="mt-3 rounded-lg bg-[#f5f3f0] px-3 py-2 text-xs font-semibold text-[#7b756d]">
+        模型健康：暂无自动复盘摘要，保存快照并复查后生成。
+      </div>
+    );
+  }
+  return (
+    <div className="mt-3 rounded-lg border border-[#ddd8d0] bg-white px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-black text-[#11100e]">模型健康</span>
+        <Tag className="m-0" color="success">
+          强信号 {gsgfHealth.best_signals.length}
+        </Tag>
+        <Tag className="m-0" color="warning">
+          弱信号 {gsgfHealth.weak_signals.length}
+        </Tag>
+        <Tag className="m-0" color={gsgfHealth.degraded_signals.length > 0 ? "error" : "default"}>
+          退化 {gsgfHealth.degraded_signals.length}
+        </Tag>
+        <Tag className="m-0">样本不足 {gsgfHealth.insufficient_sample_signals.length}</Tag>
+      </div>
+      <p className="mt-1 text-xs font-semibold text-[#7b756d]">{gsgfHealth.summary_text}</p>
+    </div>
+  );
+}
+
 function CalibrationBucketTable({
   buckets,
   title,
@@ -310,6 +386,27 @@ function CalibrationBucketTable({
       )}
     </div>
   );
+}
+
+function jobProgressPercent(job: BackgroundJobState): number {
+  if (job.status === "success") {
+    return 100;
+  }
+  const total = Math.max(job.progress_total, 1);
+  return Math.min(99, Math.round((job.progress_current / total) * 100));
+}
+
+function jobStatusColor(status: BackgroundJobState["status"]): string {
+  if (status === "success") {
+    return "success";
+  }
+  if (status === "failed") {
+    return "error";
+  }
+  if (status === "canceled") {
+    return "default";
+  }
+  return "processing";
 }
 
 function calibrationRatingColor(rating: string): string {

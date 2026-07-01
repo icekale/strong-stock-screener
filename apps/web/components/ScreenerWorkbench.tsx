@@ -4,7 +4,9 @@ import { Alert, App } from "antd";
 import dynamic from "next/dynamic";
 import { useEffect, useMemo, useState } from "react";
 import type {
+  BackgroundJobState,
   DataSourceStatusResponse,
+  GsgfModelHealth,
   GsgfRealCalibrationSummary,
   GsgfReviewSummary,
   MarketOverviewResponse,
@@ -51,6 +53,8 @@ type ScreenerWorkbenchProps = {
   sentimentSummary: SentimentSummaryResponse | null;
   reviewSummary: GsgfReviewSummary | null;
   calibrationSummary: GsgfRealCalibrationSummary | null;
+  calibrationJob: BackgroundJobState | null;
+  gsgfHealth: GsgfModelHealth | null;
   running: boolean;
   reviewRunning: boolean;
   calibrationRunning: boolean;
@@ -75,6 +79,7 @@ type ScreenerWorkbenchProps = {
     scanLimit: number;
     count: number;
   }) => void;
+  onCancelGsgfCalibration: () => void;
   onRecheckGsgfReview: () => void;
   onRefreshSources: () => void;
   onSaveGsgfReviewSnapshot: () => void;
@@ -89,6 +94,8 @@ export function ScreenerWorkbench({
   sentimentSummary,
   reviewSummary,
   calibrationSummary,
+  calibrationJob,
+  gsgfHealth,
   running,
   reviewRunning,
   calibrationRunning,
@@ -108,6 +115,7 @@ export function ScreenerWorkbench({
   onAddManyToWatchlist,
   onRun,
   onRunGsgfCalibration,
+  onCancelGsgfCalibration,
   onRecheckGsgfReview,
   onRefreshSources,
   onSaveGsgfReviewSnapshot,
@@ -175,6 +183,7 @@ export function ScreenerWorkbench({
         />
 
         <GsgfReviewPanel
+          gsgfHealth={gsgfHealth}
           onRecheck={onRecheckGsgfReview}
           onSaveSnapshot={onSaveGsgfReviewSnapshot}
           reviewRunning={reviewRunning}
@@ -182,9 +191,11 @@ export function ScreenerWorkbench({
         />
 
         <GsgfCalibrationPanel
+          calibrationJob={calibrationJob}
           calibrationRunning={calibrationRunning}
           calibrationSummary={calibrationSummary}
           defaultTradeDate={tradeDate}
+          onCancelCalibration={onCancelGsgfCalibration}
           onRunCalibration={onRunGsgfCalibration}
         />
 

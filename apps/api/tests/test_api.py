@@ -1540,6 +1540,30 @@ def test_screen_run_auto_saves_gsgf_review_snapshot(tmp_path: Path) -> None:
     assert len(records) > 0
 
 
+def test_screen_run_respects_disabled_gsgf_auto_snapshot(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    settings_response = client.put(
+        "/api/settings",
+        json={
+            "candidate_provider": "recent_limit_up",
+            "kline_provider": "tickflow",
+            "quote_provider": "tickflow",
+            "tickflow_base_url": "https://api.example.test",
+            "provider_timeout_seconds": 3.5,
+            "gsgf_auto_review": {"auto_snapshot_enabled": False},
+        },
+    )
+    assert settings_response.status_code == 200
+
+    response = client.post(
+        "/api/screen/runs",
+        json={"trade_date": "2026-06-11", "limit": 10, "scan_limit": 10, "strategy": "gsgf"},
+    )
+
+    assert response.status_code == 200
+    assert not (tmp_path / "gsgf_review" / "snapshots.jsonl").exists()
+
+
 def test_gsgf_review_latest_endpoint_returns_persisted_summary(tmp_path: Path) -> None:
     client = _client(tmp_path)
     client.post(

@@ -1,22 +1,29 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ScreenerWorkbench } from "../components/ScreenerWorkbench";
 import {
   addWatchlistPoolItem,
+  cancelGsgfCalibrationJob,
+  createGsgfCalibrationJob,
   createScreenRun,
   getDataSourceStatus,
+  getGsgfCalibrationJob,
+  getGsgfModelHealth,
+  getLatestGsgfCalibration,
+  getLatestGsgfReview,
   getLatestScreenRun,
   getMarketOverview,
   getSectorRadar,
   getSentimentSummary,
   getWatchlistPool,
   recheckGsgfReview,
-  runGsgfCalibration,
   saveLatestGsgfReviewSnapshot,
 } from "../lib/api";
 import type {
+  BackgroundJobState,
   DataSourceStatusResponse,
+  GsgfModelHealth,
   GsgfRealCalibrationSummary,
   GsgfReviewSummary,
   MarketOverviewResponse,
@@ -49,9 +56,12 @@ export function HomeWorkbench() {
   const [reviewRunning, setReviewRunning] = useState(false);
   const [calibrationSummary, setCalibrationSummary] = useState<GsgfRealCalibrationSummary | null>(null);
   const [calibrationRunning, setCalibrationRunning] = useState(false);
+  const [calibrationJob, setCalibrationJob] = useState<BackgroundJobState | null>(null);
+  const [gsgfHealth, setGsgfHealth] = useState<GsgfModelHealth | null>(null);
   const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [watchlistMessage, setWatchlistMessage] = useState<string | null>(null);
+  const calibrationPollerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setScreenFilters(loadSavedScreenFilters());
@@ -60,7 +70,14 @@ export function HomeWorkbench() {
     void refreshSectorRadar();
     void refreshSentimentSummary();
     void refreshLatest();
+    void refreshGsgfLatest();
     void refreshWatchlistPool();
+
+    return () => {
+      if (calibrationPollerRef.current) {
+        clearTimeout(calibrationPollerRef.current);
+      }
+    };
   }, []);
 
   async function refreshSources() {
@@ -103,6 +120,17 @@ export function HomeWorkbench() {
     } catch {
       setResult(null);
     }
+  }
+
+  async function refreshGsgfLatest() {
+    const [latestReview, latestCalibration, latestHealth] = await Promise.all([
+      getLatestGsgfReview().catch(() => null),
+      getLatestGsgfCalibration().catch(() => null),
+      getGsgfModelHealth().catch(() => null),
+    ]);
+    setReviewSummary(latestReview);
+    setCalibrationSummary(latestCalibration);
+    setGsgfHealth(latestHealth);
   }
 
   async function refreshWatchlistPool() {
@@ -190,6 +218,7 @@ export function HomeWorkbench() {
     try {
       await saveLatestGsgfReviewSnapshot();
       setReviewSummary(await recheckGsgfReview({ windows: [1, 3, 5, 10], count: 180 }));
+      setGsgfHealth(await getGsgfModelHealth().catch(() => null));
     } catch (err) {
       setError(err instanceof Error ? err.message : "保存股是股非复盘快照失败");
     } finally {
@@ -202,6 +231,7 @@ export function HomeWorkbench() {
     setError(null);
     try {
       setReviewSummary(await recheckGsgfReview({ windows: [1, 3, 5, 10], count: 180 }));
+      setGsgfHealth(await getGsgfModelHealth().catch(() => null));
     } catch (err) {
       setError(err instanceof Error ? err.message : "复查股是股非信号失败");
     } finally {
@@ -223,26 +253,69 @@ export function HomeWorkbench() {
     setCalibrationRunning(true);
     setError(null);
     try {
-      setCalibrationSummary(
-        await runGsgfCalibration({
-          tradeDates,
-          windows: splitNumberList(options.windowsText, [1, 3, 5, 10]),
-          scanLimit: options.scanLimit,
-          count: options.count,
-        }),
-      );
+      const job = await createGsgfCalibrationJob({
+        tradeDates,
+        windows: splitNumberList(options.windowsText, [1, 3, 5, 10]),
+        scanLimit: options.scanLimit,
+        count: options.count,
+      });
+      setCalibrationJob(job);
+      pollGsgfCalibrationJob(job.job_id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "运行股是股非真实样本校准失败");
-    } finally {
       setCalibrationRunning(false);
+      setError(err instanceof Error ? err.message : "运行股是股非真实样本校准失败");
     }
+  }
+
+  async function handleCancelGsgfCalibration() {
+    if (!calibrationJob) {
+      return;
+    }
+    try {
+      setCalibrationJob(await cancelGsgfCalibrationJob(calibrationJob.job_id));
+      setCalibrationRunning(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "取消股是股非校准任务失败");
+    }
+  }
+
+  function pollGsgfCalibrationJob(jobId: string) {
+    if (calibrationPollerRef.current) {
+      clearTimeout(calibrationPollerRef.current);
+    }
+    calibrationPollerRef.current = setTimeout(() => {
+      void (async () => {
+        try {
+          const job = await getGsgfCalibrationJob(jobId);
+          setCalibrationJob(job);
+          if (job.status === "success") {
+            setCalibrationRunning(false);
+            await refreshGsgfLatest();
+            return;
+          }
+          if (job.status === "failed" || job.status === "canceled") {
+            setCalibrationRunning(false);
+            if (job.error) {
+              setError(job.error);
+            }
+            return;
+          }
+          pollGsgfCalibrationJob(jobId);
+        } catch (err) {
+          setCalibrationRunning(false);
+          setError(err instanceof Error ? err.message : "读取股是股非校准任务失败");
+        }
+      })();
+    }, 2000);
   }
 
   return (
     <ScreenerWorkbench
+      calibrationJob={calibrationJob}
       calibrationRunning={calibrationRunning}
       calibrationSummary={calibrationSummary}
       error={error}
+      gsgfHealth={gsgfHealth}
       intraday={intraday}
       marketOverview={marketOverview}
       sectorRadar={sectorRadar}
@@ -250,6 +323,7 @@ export function HomeWorkbench() {
       onRefreshSources={() => void Promise.all([refreshSources(), refreshMarketOverview(), refreshSectorRadar(), refreshSentimentSummary()])}
       onRun={() => void handleRun()}
       onRunGsgfCalibration={(options) => void handleRunGsgfCalibration(options)}
+      onCancelGsgfCalibration={() => void handleCancelGsgfCalibration()}
       onRecheckGsgfReview={() => void handleRecheckGsgfReview()}
       onAddToWatchlist={(item, group, tags) => void handleAddToWatchlist(item, group, tags)}
       onAddManyToWatchlist={(items, group, tags) => void handleAddManyToWatchlist(items, group, tags)}

@@ -1,8 +1,11 @@
 import type {
   AuctionSnapshotResponse,
+  BackgroundJobState,
   DataSourceStatusResponse,
   GsgfAnalysis,
+  GsgfAutoReviewConfig,
   GsgfBacktestSummary,
+  GsgfModelHealth,
   GsgfRealCalibrationSummary,
   GsgfReviewSnapshotResponse,
   GsgfReviewSummary,
@@ -254,6 +257,7 @@ export async function saveRuntimeSettings(payload: {
   provider_timeout_seconds: number;
   notification_channels?: NotificationChannelConfig[];
   sentiment_monitor?: SentimentMonitorConfig;
+  gsgf_auto_review?: GsgfAutoReviewConfig;
 }): Promise<RuntimeSettingsResponse> {
   const response = await fetch(`${API_BASE_URL}/api/settings`, {
     method: "PUT",
@@ -381,6 +385,81 @@ export async function runGsgfCalibration({
     throw new Error(`运行股是股非真实样本校准失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<GsgfRealCalibrationSummary>;
+}
+
+export async function getLatestGsgfReview(): Promise<GsgfReviewSummary | null> {
+  const response = await fetch(`${API_BASE_URL}/api/gsgf/review/latest`);
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`读取最新股是股非复盘失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<GsgfReviewSummary>;
+}
+
+export async function createGsgfCalibrationJob({
+  tradeDates,
+  windows = [1, 3, 5, 10],
+  scanLimit = 80,
+  count = 260,
+}: {
+  tradeDates: string[];
+  windows?: number[];
+  scanLimit?: number;
+  count?: number;
+}): Promise<BackgroundJobState> {
+  const response = await fetch(`${API_BASE_URL}/api/gsgf/calibration/jobs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      trade_dates: tradeDates,
+      windows,
+      scan_limit: scanLimit,
+      count,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`启动股是股非校准任务失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<BackgroundJobState>;
+}
+
+export async function getGsgfCalibrationJob(jobId: string): Promise<BackgroundJobState> {
+  const response = await fetch(`${API_BASE_URL}/api/gsgf/calibration/jobs/${encodeURIComponent(jobId)}`);
+  if (!response.ok) {
+    throw new Error(`读取股是股非校准任务失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<BackgroundJobState>;
+}
+
+export async function cancelGsgfCalibrationJob(jobId: string): Promise<BackgroundJobState> {
+  const response = await fetch(`${API_BASE_URL}/api/gsgf/calibration/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`取消股是股非校准任务失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<BackgroundJobState>;
+}
+
+export async function getLatestGsgfCalibration(): Promise<GsgfRealCalibrationSummary | null> {
+  const response = await fetch(`${API_BASE_URL}/api/gsgf/calibration/latest`);
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`读取最新股是股非校准失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<GsgfRealCalibrationSummary>;
+}
+
+export async function getGsgfModelHealth(): Promise<GsgfModelHealth> {
+  const response = await fetch(`${API_BASE_URL}/api/gsgf/health`);
+  if (!response.ok) {
+    throw new Error(`读取股是股非模型健康失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<GsgfModelHealth>;
 }
 
 export async function buildGsgfTradePlan(analysis: GsgfAnalysis): Promise<GsgfTradePlan> {

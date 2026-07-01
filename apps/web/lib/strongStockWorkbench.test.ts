@@ -120,6 +120,9 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(typesSource, /unique_symbol_buckets: GsgfCalibrationBucket\[\]/);
   assert.match(typesSource, /GsgfCalibrationDiagnosticGroup/);
   assert.match(typesSource, /diagnostic_groups: GsgfCalibrationDiagnosticGroup\[\]/);
+  assert.match(typesSource, /BackgroundJobState/);
+  assert.match(typesSource, /GsgfModelHealth/);
+  assert.match(typesSource, /GsgfAutoReviewConfig/);
   assert.match(typesSource, /GsgfChartAnnotation/);
   assert.match(typesSource, /ScreenStrategy = "strong_stock" \| "gsgf" \| "combined"/);
   assert.match(typesSource, /ScreenRunFilters/);
@@ -180,6 +183,12 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(apiSource, /\/api\/gsgf\/review\/recheck/);
   assert.match(apiSource, /runGsgfCalibration/);
   assert.match(apiSource, /\/api\/gsgf\/calibration/);
+  assert.match(apiSource, /getLatestGsgfReview/);
+  assert.match(apiSource, /createGsgfCalibrationJob/);
+  assert.match(apiSource, /getGsgfCalibrationJob/);
+  assert.match(apiSource, /cancelGsgfCalibrationJob/);
+  assert.match(apiSource, /getLatestGsgfCalibration/);
+  assert.match(apiSource, /getGsgfModelHealth/);
   assert.match(screenerFeatureSource, /scanLimit/);
   assert.match(screenerFeatureSource, /strategy/);
   assert.match(screenerFeatureSource, /股是股非模型/);
@@ -324,8 +333,12 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(screenerFeatureSource, /去重股票/);
   assert.match(screenerFeatureSource, /hit_rate/);
   assert.match(homeFeatureSource, /calibrationSummary/);
-  assert.match(homeFeatureSource, /runGsgfCalibration/);
+  assert.match(homeFeatureSource, /createGsgfCalibrationJob/);
   assert.match(homeFeatureSource, /handleRunGsgfCalibration/);
+  assert.match(homeFeatureSource, /refreshGsgfLatest/);
+  assert.match(homeFeatureSource, /calibrationJob/);
+  assert.match(gsgfPanelsSource, /校准任务/);
+  assert.match(gsgfPanelsSource, /模型健康/);
   assert.match(screenerFeatureSource, /strongIndustryOnly/);
   assert.match(screenerFeatureSource, /visibleCandidates/);
   assert.match(screenerFeatureSource, /候选筛选/);
@@ -651,6 +664,9 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.doesNotMatch(screenerFeatureSource + homeFeatureSource, /报告生成|历史报告|OCR|定时生成/);
   assert.match(settingsFeatureSource, /iFinD 研究增强/);
   assert.match(settingsFeatureSource, /通知渠道/);
+  assert.match(settingsFeatureSource, /GSGF 自动复盘/);
+  assert.match(settingsFeatureSource, /weekly_calibration_scan_limit/);
+  assert.match(settingsFeatureSource, /notify_on_degradation/);
   assert.match(settingsFeatureSource, /企业微信/);
   assert.match(settingsFeatureSource, /飞书/);
   assert.match(settingsFeatureSource, /Telegram/);

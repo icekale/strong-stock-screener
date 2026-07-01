@@ -1258,17 +1258,19 @@ def _intraday_watchlist_items(request: IntradaySnapshotRequest) -> list[Watchlis
 
 
 def _run_store() -> RunStore:
+    settings = get_settings()
     runs_dir = getattr(app.state, "runs_dir", None)
     if runs_dir is not None:
         return RunStore(Path(runs_dir))
-    return RunStore(get_settings().runs_dir)
+    return RunStore(settings.runs_dir, retention_count=settings.screen_run_retention_count)
 
 
 def _gsgf_review_store() -> GsgfReviewStore:
+    settings = get_settings()
     data_dir = getattr(app.state, "runs_dir", None)
     if data_dir is not None:
         return GsgfReviewStore(Path(data_dir))
-    return GsgfReviewStore(get_settings().data_dir)
+    return GsgfReviewStore(settings.data_dir, max_records=settings.gsgf_review_retention_records)
 
 
 def _background_job_store() -> BackgroundJobStore:
@@ -1284,17 +1286,26 @@ def _background_job_store() -> BackgroundJobStore:
 
 
 def _market_emotion_history_store() -> MarketEmotionHistoryStore:
+    settings = get_settings()
     data_dir = getattr(app.state, "runs_dir", None)
     if data_dir is not None:
         return MarketEmotionHistoryStore(Path(data_dir))
-    return MarketEmotionHistoryStore(get_settings().data_dir)
+    return MarketEmotionHistoryStore(
+        settings.data_dir,
+        retention_days=settings.market_emotion_history_retention_days,
+        samples_per_day=settings.market_emotion_samples_per_day,
+    )
 
 
 def _sentiment_snapshot_store() -> SentimentSnapshotStore:
+    settings = get_settings()
     data_dir = getattr(app.state, "runs_dir", None)
     if data_dir is not None:
         return SentimentSnapshotStore(Path(data_dir))
-    return SentimentSnapshotStore(get_settings().data_dir)
+    return SentimentSnapshotStore(
+        settings.data_dir,
+        retention_days=settings.sentiment_snapshot_retention_days,
+    )
 
 
 def _sentiment_monitor() -> SentimentMonitor:

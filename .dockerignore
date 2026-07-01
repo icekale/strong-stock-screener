@@ -8,10 +8,12 @@ __pycache__
 .ruff_cache
 node_modules
 .next
+.next-dev
 apps/api/.venv
 apps/api/data
 apps/web/node_modules
 apps/web/.next
+apps/web/.next-dev
 apps/web/.turbo
 dist
 data

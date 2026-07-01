@@ -59,3 +59,13 @@ def test_settings_prefers_prefixed_ifind_api_key(monkeypatch) -> None:
     settings = Settings(_env_file=None)
 
     assert settings.ifind_api_key == "ifind-prefixed"
+
+
+def test_settings_defaults_storage_retention_limits() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.screen_run_retention_count == 120
+    assert settings.gsgf_review_retention_records == 5000
+    assert settings.sentiment_snapshot_retention_days == 30
+    assert settings.market_emotion_history_retention_days == 30
+    assert settings.market_emotion_samples_per_day == 360

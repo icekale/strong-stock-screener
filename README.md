@@ -85,6 +85,11 @@ STRONG_STOCK_IFIND_SERVICE_ID=hexin-ifind-ds-stock-mcp
 STRONG_STOCK_CANDIDATE_PROVIDER=recent_limit_up
 STRONG_STOCK_DATA_DIR=./data
 STRONG_STOCK_CORS_ALLOW_ORIGINS=http://localhost:3110,http://127.0.0.1:3110
+STRONG_STOCK_SCREEN_RUN_RETENTION_COUNT=120
+STRONG_STOCK_GSGF_REVIEW_RETENTION_RECORDS=5000
+STRONG_STOCK_SENTIMENT_SNAPSHOT_RETENTION_DAYS=30
+STRONG_STOCK_MARKET_EMOTION_HISTORY_RETENTION_DAYS=30
+STRONG_STOCK_MARKET_EMOTION_SAMPLES_PER_DAY=360
 ```
 
 如果暂时不填 TickFlow key，后端会显示 `missing_key`，选股和 K 线能力会受限。
@@ -121,6 +126,8 @@ STRONG_STOCK_IMAGE_TAG=提交短哈希
 ```
 
 ### 4. 查看日志
+
+`docker-compose.yml` 已配置 Docker 日志滚动，默认单文件 10MB、最多 3 个文件，避免长期运行时容器日志占满磁盘。
 
 ```bash
 docker compose logs -f strong-stock-screener
@@ -164,10 +171,18 @@ uv sync
 ```bash
 cd apps/web
 corepack pnpm install
-corepack pnpm exec next dev -p 3110
+corepack pnpm dev -- -p 3110
 ```
 
 打开：http://localhost:3110
+
+如果只是本机拉起工作台，推荐使用仓库脚本：
+
+```bash
+python3 scripts/start-local-web.py
+```
+
+该脚本会停止旧的 `3110` 前端进程、清理开发态 `.next-dev` 目录并后台启动 Web。生产构建仍使用 `.next`，本地开发使用 `.next-dev`，避免 `next build` 覆盖正在运行的开发服务资源。
 
 ## 常用检查
 
@@ -224,6 +239,11 @@ curl http://localhost:3110/health
 | `STRONG_STOCK_CANDIDATE_PROVIDER` | `recent_limit_up` | 候选池来源，可选 `recent_limit_up` / `thsdk` |
 | `STRONG_STOCK_DATA_DIR` | `./data` | 后端数据目录 |
 | `STRONG_STOCK_CORS_ALLOW_ORIGINS` | `http://localhost:3110,http://127.0.0.1:3110` | CORS 允许来源 |
+| `STRONG_STOCK_SCREEN_RUN_RETENTION_COUNT` | `120` | 历史选股记录最多保留次数，不影响 `latest.json` |
+| `STRONG_STOCK_GSGF_REVIEW_RETENTION_RECORDS` | `5000` | 股是股非复盘样本最多保留条数 |
+| `STRONG_STOCK_SENTIMENT_SNAPSHOT_RETENTION_DAYS` | `30` | 情绪摘要快照最多保留交易日数 |
+| `STRONG_STOCK_MARKET_EMOTION_HISTORY_RETENTION_DAYS` | `30` | 情绪分时历史最多保留交易日数 |
+| `STRONG_STOCK_MARKET_EMOTION_SAMPLES_PER_DAY` | `360` | 单日情绪分时样本最多保留条数 |
 
 ## 开源协议
 

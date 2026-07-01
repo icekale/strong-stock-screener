@@ -1,7 +1,7 @@
 "use client";
 
 import { ReloadOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Empty, InputNumber, Progress, Space, Table, Tag, Typography } from "antd";
+import { Alert, App, Button, Collapse, Empty, InputNumber, Progress, Select, Table, Tag, Typography } from "antd";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addWatchlistPoolItem, getAuctionLatest, getAuctionSnapshot, getAuctionTimeline } from "../../lib/api";
@@ -147,49 +147,73 @@ export function AuctionWorkspace() {
   }
 
   return (
-    <main className="workbench-page min-h-screen p-5">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <Typography.Title className="m-0 text-[#11100e]" level={3}>
-            竞价雷达
-          </Typography.Title>
-          <Typography.Text className="workbench-muted">
-            基于 TickFlow 全A实时行情快照，区分开盘幅度、当前涨幅、量能活跃度和风险分层。
-          </Typography.Text>
-        </div>
-        <Space wrap>
-          <Tag color={sessionColor(data?.session)}>{sessionLabel(data?.session)}</Tag>
-          <Tag color={snapshotStatusColor(data?.snapshot_status)}>{snapshotStatusLabel(data?.snapshot_status)}</Tag>
-          <Tag>缓存年龄 {formatCacheAge(data?.cache_age_seconds)}</Tag>
-          <Tag color="blue">自动快照</Tag>
-          <Tag>{data?.trade_date ?? "等待数据"}</Tag>
+    <main className="workbench-page min-h-screen p-3 lg:p-5">
+      <section className="auction-status-strip workbench-panel mb-3 rounded-xl border px-4 py-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <Typography.Title className="m-0 text-[#11100e]" level={3}>
+                竞价雷达
+              </Typography.Title>
+              <Tag color={sessionColor(data?.session)}>{sessionLabel(data?.session)}</Tag>
+              <Tag color={snapshotStatusColor(data?.snapshot_status)}>{snapshotStatusLabel(data?.snapshot_status)}</Tag>
+            </div>
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-[#7b756d]">
+              <span>{data?.trade_date ?? "等待数据"}</span>
+              <span>缓存年龄 {formatCacheAge(data?.cache_age_seconds)}</span>
+              <span>自动快照 · TickFlow 全A实时行情</span>
+            </div>
+          </div>
           <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void refresh()} type="primary">
             刷新竞价
           </Button>
-        </Space>
-      </div>
+        </div>
+      </section>
 
       {error && <Alert className="mb-4" showIcon title={error} type="error" />}
 
-      <section className="mb-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="竞价候选" value={data?.metrics.candidate_count ?? null} suffix="只" />
-        <MetricCard label="强势高开" value={data?.metrics.strong_high_open_count ?? null} suffix="只" tone="red" />
-        <MetricCard label="高开风险" value={data?.metrics.high_risk_count ?? null} suffix="只" tone="amber" />
-        <MetricCard label="候选成交额" value={data?.metrics.total_turnover_cny ?? null} formatter={formatCny} />
+      <section className="auction-command-grid mb-4 grid items-start gap-3 xl:grid-cols-[minmax(0,1.05fr)_minmax(280px,0.7fr)_minmax(300px,0.85fr)]">
+        <section className="workbench-panel rounded-xl border p-3">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div>
+              <div className="text-sm font-black text-[#11100e]">早盘核心指标</div>
+              <div className="text-xs text-[#7b756d]">候选、强度、风险和成交额先看这里。</div>
+            </div>
+            <Tag color="red">第一屏作战区</Tag>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <MetricCard compact label="竞价候选" value={data?.metrics.candidate_count ?? null} suffix="只" />
+            <MetricCard compact label="强势高开" value={data?.metrics.strong_high_open_count ?? null} suffix="只" tone="red" />
+            <MetricCard compact label="高开风险" value={data?.metrics.high_risk_count ?? null} suffix="只" tone="amber" />
+            <MetricCard compact label="候选成交额" value={data?.metrics.total_turnover_cny ?? null} formatter={formatCny} />
+          </div>
+        </section>
+        <MainlineTopPanel
+          activeIndustry={industryFilter}
+          industryStats={industryStats}
+          loading={loading && !data}
+          onSelectIndustry={setIndustryFilter}
+          totalCount={data?.items.length ?? 0}
+        />
+        <RiskFocusPanel
+          highOpenRiskThreshold={highOpenRiskThreshold}
+          items={observationItems}
+          loading={loading && !data}
+        />
       </section>
 
       <AuctionTimelinePanel timeline={timeline} />
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+      <section className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_320px]">
         <section className="workbench-panel rounded-xl border">
-          <div className="workbench-panel-divider flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+          <div className="workbench-panel-divider flex flex-col gap-3 border-b px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
             <div>
               <div className="text-sm font-black text-[#11100e]">竞价强度榜</div>
               <div className="text-xs text-[#7b756d]">
                 按开盘幅度、当前涨幅、成交额和换手强度综合排序，当前显示 {visibleItems.length}/{data?.items.length ?? 0} 只。
               </div>
             </div>
-            <Space align="center" wrap>
+            <div className="flex flex-wrap items-center gap-2">
               {TIER_FILTERS.map((item) => (
                 <Button
                   key={item.value}
@@ -201,26 +225,19 @@ export function AuctionWorkspace() {
                 </Button>
               ))}
               <span className="text-xs font-black text-[#7b756d]">行业筛选</span>
-              <Button
-                onClick={() => setIndustryFilter("all")}
+              <Select
+                className="min-w-[160px]"
+                onChange={setIndustryFilter}
+                options={[
+                  { label: "全部行业", value: "all" },
+                  ...industryStats.map((item) => ({ label: item.industry, value: item.industry })),
+                ]}
                 size="small"
-                type={industryFilter === "all" ? "primary" : "default"}
-              >
-                全部行业
-              </Button>
-              {industryStats.slice(0, 6).map((item) => (
-                <Button
-                  key={item.industry}
-                  onClick={() => setIndustryFilter(item.industry)}
-                  size="small"
-                  type={industryFilter === item.industry ? "primary" : "default"}
-                >
-                  {item.industry}
-                </Button>
-              ))}
-            </Space>
+                value={industryFilter}
+              />
+            </div>
           </div>
-          <div className="workbench-panel-divider flex flex-wrap items-center gap-3 border-b px-4 py-3 text-xs text-[#7b756d]">
+          <div className="workbench-panel-divider flex flex-wrap items-center gap-3 border-b px-4 py-2.5 text-xs text-[#7b756d]">
             <span className="font-black text-[#11100e]">高开风险阈值</span>
             <InputNumber
               className="w-[96px]"
@@ -234,7 +251,7 @@ export function AuctionWorkspace() {
             />
             <span>% 以上纳入风险观察。{concentration.message}</span>
           </div>
-          <div className="p-4">
+          <div className="p-2 lg:p-4">
             <AuctionTable
               items={visibleItems}
               loading={loading && !data}
@@ -244,7 +261,7 @@ export function AuctionWorkspace() {
           </div>
         </section>
 
-        <aside className="space-y-4">
+        <aside className="space-y-3">
           <section className="workbench-panel rounded-xl border">
             <div className="workbench-panel-divider border-b px-4 py-3">
               <div className="text-sm font-black text-[#11100e]">风险与观察</div>
@@ -262,11 +279,16 @@ export function AuctionWorkspace() {
           </section>
 
           <section className="workbench-panel rounded-xl border">
-            <div className="workbench-panel-divider border-b px-4 py-3">
-              <div className="text-sm font-black text-[#11100e]">行业聚合</div>
-              <div className="text-xs text-[#7b756d]">主线集中度：{concentration.label}。点击行业可筛选左侧表格。</div>
+            <div className="workbench-panel-divider flex items-center justify-between gap-3 border-b px-4 py-3">
+              <div>
+                <div className="text-sm font-black text-[#11100e]">行业聚合</div>
+                <div className="text-xs text-[#7b756d]">主线集中度：{concentration.label}。</div>
+              </div>
+              <Button onClick={() => setIndustryFilter("all")} size="small" type={industryFilter === "all" ? "primary" : "default"}>
+                全部
+              </Button>
             </div>
-            <div className="space-y-3 p-4">
+            <div className="space-y-2 p-3">
               {loading ? (
                 <SkeletonRows />
               ) : industryStats.length ? (
@@ -286,25 +308,154 @@ export function AuctionWorkspace() {
           </section>
 
           <section className="workbench-panel rounded-xl border">
-            <div className="workbench-panel-divider border-b px-4 py-3">
-              <div className="text-sm font-black text-[#11100e]">数据源状态</div>
-              <div className="text-xs text-[#7b756d]">后台自动采样写入快照，页面优先读取缓存，手动刷新会强制拉取 TickFlow。</div>
-            </div>
-            <div className="space-y-2 p-4">
-              {(data?.source_status ?? []).map((item, index) => (
-                <div className="rounded-lg border border-[#e3ddd3] bg-white p-3 text-xs" key={`${item.source}-${index}`}>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="font-black text-[#11100e]">{item.source}</span>
-                    <Tag color={item.status === "success" ? "green" : "orange"}>{item.status}</Tag>
-                  </div>
-                  <div className="mt-1 leading-5 text-[#7b756d]">{item.detail}</div>
-                </div>
-              ))}
-            </div>
+            <Collapse
+              bordered={false}
+              className="bg-transparent"
+              items={[
+                {
+                  key: "source",
+                  label: (
+                    <div>
+                      <div className="text-sm font-black text-[#11100e]">数据源状态</div>
+                      <div className="text-xs text-[#7b756d]">默认收起，避免早盘盯盘时占主视野。</div>
+                    </div>
+                  ),
+                  children: (
+                    <div className="space-y-2">
+                      {(data?.source_status ?? []).length ? (
+                        (data?.source_status ?? []).map((item, index) => (
+                          <div className="rounded-lg border border-[#e3ddd3] bg-white p-3 text-xs" key={`${item.source}-${index}`}>
+                            <div className="flex items-center justify-between gap-2">
+                              <span className="font-black text-[#11100e]">{item.source}</span>
+                              <Tag color={item.status === "success" ? "green" : "orange"}>{item.status}</Tag>
+                            </div>
+                            <div className="mt-1 leading-5 text-[#7b756d]">{item.detail}</div>
+                          </div>
+                        ))
+                      ) : (
+                        <Empty description="暂无数据源状态" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+                      )}
+                    </div>
+                  ),
+                },
+              ]}
+            />
           </section>
         </aside>
       </section>
     </main>
+  );
+}
+
+function MainlineTopPanel({
+  activeIndustry,
+  industryStats,
+  loading,
+  onSelectIndustry,
+  totalCount,
+}: {
+  activeIndustry: string;
+  industryStats: IndustryAuctionStat[];
+  loading: boolean;
+  onSelectIndustry: (industry: string) => void;
+  totalCount: number;
+}) {
+  return (
+    <section className="workbench-panel rounded-xl border p-3">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-sm font-black text-[#11100e]">主线行业 Top</div>
+          <div className="text-xs text-[#7b756d]">看竞价是否集中到少数方向。</div>
+        </div>
+        <Button onClick={() => onSelectIndustry("all")} size="small" type={activeIndustry === "all" ? "primary" : "default"}>
+          全部
+        </Button>
+      </div>
+      <div className="space-y-2">
+        {loading ? (
+          <SkeletonRows />
+        ) : industryStats.length ? (
+          industryStats.slice(0, 3).map((item, index) => {
+            const percent = totalCount > 0 ? Math.round((item.count / totalCount) * 100) : 0;
+            return (
+              <button
+                className={`w-full rounded-lg border px-3 py-2 text-left transition ${
+                  activeIndustry === item.industry ? "border-[#d92d20] bg-white" : "border-[#e3ddd3] bg-white hover:border-[#c9bca8]"
+                }`}
+                key={item.industry}
+                onClick={() => onSelectIndustry(item.industry)}
+                type="button"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="min-w-0 truncate text-sm font-black text-[#11100e]">
+                    {index + 1}. {item.industry}
+                  </span>
+                  <span className="text-xs font-black text-[#d92d20]">{item.count} 只</span>
+                </div>
+                <div className="mt-1 flex items-center gap-2">
+                  <Progress className="m-0 flex-1" percent={percent} showInfo={false} strokeColor="#d92d20" />
+                  <span className="w-9 text-right text-xs font-semibold text-[#7b756d]">{percent}%</span>
+                </div>
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[#7b756d]">
+                  <span>均开 {formatPct(item.avgOpenGapPct)}</span>
+                  <span>强势 {item.strongCount}</span>
+                  <span>{formatCny(item.turnoverCny)}</span>
+                </div>
+              </button>
+            );
+          })
+        ) : (
+          <Empty description="暂无行业数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function RiskFocusPanel({
+  highOpenRiskThreshold,
+  items,
+  loading,
+}: {
+  highOpenRiskThreshold: number;
+  items: AuctionSnapshotItem[];
+  loading: boolean;
+}) {
+  return (
+    <section className="workbench-panel rounded-xl border p-3">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <div className="text-sm font-black text-[#11100e]">开盘风险提示</div>
+          <div className="text-xs text-[#7b756d]">高开 {highOpenRiskThreshold}% 以上、低开转强和风险标记优先看。</div>
+        </div>
+        <Tag color={items.length ? "orange" : "default"}>{items.length} 条</Tag>
+      </div>
+      <div className="space-y-2">
+        {loading ? (
+          <SkeletonRows />
+        ) : items.length ? (
+          items.slice(0, 3).map((item) => (
+            <Link
+              className="block rounded-lg border border-[#e3ddd3] bg-white px-3 py-2 no-underline transition hover:border-[#c9bca8]"
+              href={`/stock/${item.symbol}`}
+              key={item.symbol}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="min-w-0 truncate text-sm font-black text-[#11100e]">{item.name || item.symbol}</span>
+                <span className="text-xs font-black text-[#d92d20]">{formatPct(item.open_gap_pct)}</span>
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-[#7b756d]">
+                <span>{item.symbol}</span>
+                <span>{item.industry || "--"}</span>
+                <Tag color={tierColor(item.tier)}>{tierLabel(item.tier)}</Tag>
+              </div>
+            </Link>
+          ))
+        ) : (
+          <Empty description="暂无风险提示" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -314,19 +465,19 @@ function AuctionTimelinePanel({ timeline }: { timeline: AuctionTimelineResponse 
   const latestCapturedLabel = [...points].reverse().find((point) => point.snapshot_status === "captured")?.label ?? null;
   return (
     <section className="workbench-panel mb-4 rounded-xl border">
-      <div className="workbench-panel-divider flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
+      <div className="workbench-panel-divider flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5">
         <div>
-          <div className="text-sm font-black text-[#11100e]">竞价时间轴</div>
-          <div className="text-xs text-[#7b756d]">锁定 09:20、09:23、09:24:50、09:25 快照，观察强度是否持续。</div>
+          <div className="text-sm font-black text-[#11100e]">竞价时间轴 · 阶段快照</div>
+          <div className="text-xs text-[#7b756d]">锁定 09:20、09:23、09:24:50、09:25，观察强度是否持续。</div>
         </div>
         <Tag color="blue">连续出现优先，新晋谨慎确认</Tag>
       </div>
-      <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid gap-2 p-3 md:grid-cols-2 xl:grid-cols-4">
         {points.length ? (
           points.map((point) => (
-            <div className="rounded-lg border border-[#e3ddd3] bg-white p-3" key={point.label}>
+            <div className="rounded-lg border border-[#e3ddd3] bg-white px-3 py-2.5" key={point.label}>
               <div className="flex items-center justify-between gap-2">
-                <span className="text-base font-black text-[#11100e]">{point.label}</span>
+                <span className="text-sm font-black text-[#11100e]">{point.label}</span>
                 <Tag color={point.snapshot_status === "captured" ? "green" : "default"}>
                   {point.snapshot_status === "captured" ? "已锁定" : "等待"}
                 </Tag>
@@ -334,11 +485,11 @@ function AuctionTimelinePanel({ timeline }: { timeline: AuctionTimelineResponse 
               <div className="mt-1 text-xs text-[#7b756d]">
                 候选 {point.metrics.candidate_count} · 强势 {point.metrics.strong_high_open_count}
               </div>
-              <div className="mt-3 space-y-2">
+              <div className="mt-2 space-y-1.5">
                 {point.items.length ? (
-                  point.items.slice(0, 5).map((item, index) => (
+                  point.items.slice(0, 3).map((item, index) => (
                     <Link
-                      className="block rounded-md border border-[#eee8dc] bg-[#faf7f1] px-2 py-2 no-underline"
+                      className="block rounded-md border border-[#eee8dc] bg-[#faf7f1] px-2 py-1.5 no-underline"
                       href={`/stock/${item.symbol}`}
                       key={`${point.label}-${item.symbol}`}
                     >
@@ -423,6 +574,8 @@ function AuctionTable({
         {
           title: "股票",
           dataIndex: "name",
+          fixed: "left",
+          width: 190,
           render: (_, item) => (
             <Link className="font-black text-[#11100e]" href={`/stock/${item.symbol}`}>
               {item.name || item.symbol}
@@ -433,6 +586,7 @@ function AuctionTable({
         {
           title: "行业",
           dataIndex: "industry",
+          width: 120,
           render: (value: string | null) => (
             <Typography.Text className="text-xs text-[#7b756d]">{value || "--"}</Typography.Text>
           ),
@@ -440,6 +594,7 @@ function AuctionTable({
         {
           title: "竞价强度",
           dataIndex: "auction_score",
+          width: 150,
           render: (value: number) => (
             <div className="min-w-[120px]">
               <Progress percent={Math.max(0, Math.min(value, 100))} showInfo={false} strokeColor="#d92d20" />
@@ -451,24 +606,31 @@ function AuctionTable({
         {
           title: "当前涨幅",
           dataIndex: "current_pct_change",
+          align: "right",
+          width: 110,
           render: (value: number | null) => <PctValue value={value} />,
           sorter: (a, b) => (a.current_pct_change ?? -999) - (b.current_pct_change ?? -999),
         },
         {
           title: "开盘幅度",
           dataIndex: "open_gap_pct",
+          align: "right",
+          width: 110,
           render: (value: number | null) => <PctValue value={value} />,
           sorter: (a, b) => (a.open_gap_pct ?? -999) - (b.open_gap_pct ?? -999),
         },
         {
           title: "成交额",
           dataIndex: "turnover_cny",
+          align: "right",
+          width: 120,
           render: (value: number | null) => formatCny(value),
           sorter: (a, b) => (a.turnover_cny ?? 0) - (b.turnover_cny ?? 0),
         },
         {
           title: "分层",
           dataIndex: "tier",
+          width: 220,
           render: (_, item) => (
             <div className="min-w-[180px]">
               <Tag color={tierColor(item.tier)}>{tierLabel(item.tier)}</Tag>
@@ -479,6 +641,7 @@ function AuctionTable({
         {
           title: "操作",
           dataIndex: "symbol",
+          width: 96,
           render: (_, item) => (
             <Button
               loading={savingSymbol === item.symbol}
@@ -495,6 +658,7 @@ function AuctionTable({
       loading={loading}
       pagination={{ pageSize: 20, showSizeChanger: true, size: "small" }}
       rowKey="symbol"
+      scroll={{ x: 1120 }}
       size="small"
     />
   );
@@ -524,12 +688,14 @@ function RiskRow({ item }: { item: AuctionSnapshotItem }) {
 }
 
 function MetricCard({
+  compact = false,
   formatter,
   label,
   suffix,
   tone = "ink",
   value,
 }: {
+  compact?: boolean;
   formatter?: (value: number | null) => string;
   label: string;
   suffix?: string;
@@ -538,9 +704,9 @@ function MetricCard({
 }) {
   const toneClass = tone === "red" ? "text-[#d92d20]" : tone === "amber" ? "text-[#b45309]" : "text-[#11100e]";
   return (
-    <div className="workbench-panel rounded-xl border bg-white px-4 py-3">
+    <div className={`rounded-lg border border-[#e3ddd3] bg-white ${compact ? "px-3 py-2.5" : "px-4 py-3"}`}>
       <div className="text-xs font-black text-[#7b756d]">{label}</div>
-      <div className={`mt-2 text-2xl font-black ${toneClass}`}>
+      <div className={`${compact ? "mt-1 text-xl" : "mt-2 text-2xl"} font-black ${toneClass}`}>
         {formatter ? formatter(value) : value === null ? "--" : value}
         {!formatter && suffix ? <span className="ml-1 text-sm font-semibold text-[#7b756d]">{suffix}</span> : null}
       </div>

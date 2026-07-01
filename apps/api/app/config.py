@@ -29,6 +29,11 @@ class Settings(BaseSettings):
     tdx_base_url: str = "https://mcp.tdx.com.cn:3001/mcp"
     provider_timeout_seconds: float = 12
     cors_allow_origins: str = "http://localhost:3110,http://127.0.0.1:3110"
+    screen_run_retention_count: int = Field(default=120, ge=1, le=2000)
+    gsgf_review_retention_records: int = Field(default=5000, ge=1, le=100000)
+    sentiment_snapshot_retention_days: int = Field(default=30, ge=1, le=365)
+    market_emotion_history_retention_days: int = Field(default=30, ge=1, le=365)
+    market_emotion_samples_per_day: int = Field(default=360, ge=1, le=2000)
 
     model_config = SettingsConfigDict(
         env_prefix="STRONG_STOCK_",

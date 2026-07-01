@@ -94,6 +94,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   const dockerignoreSource = readFileSync(new URL("../../../.dockerignore", import.meta.url), "utf8");
   const singleStartSource = readFileSync(new URL("../../../scripts/start-single-container.sh", import.meta.url), "utf8");
   const nextConfigSource = readFileSync(new URL("../next.config.ts", import.meta.url), "utf8");
+  const webPackageSource = readFileSync(new URL("../package.json", import.meta.url), "utf8");
+  const localWebStartSource = readFileSync(new URL("../../../scripts/start-local-web.py", import.meta.url), "utf8");
 
   assert.match(typesSource, /StrongStockScreeningResponse/);
   assert.match(typesSource, /GsgfAnalysis/);
@@ -175,6 +177,10 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(singleStartSource, /next.*start/);
   assert.match(nextConfigSource, /\/api\/:path\*/);
   assert.match(nextConfigSource, /http:\/\/127\.0\.0\.1:8010\/api\/:path\*/);
+  assert.match(nextConfigSource, /distDir: process\.env\.NEXT_DIST_DIR \|\| "\.next"/);
+  assert.match(webPackageSource, /NEXT_DIST_DIR=\.next-dev next dev/);
+  assert.match(localWebStartSource, /\.next-dev/);
+  assert.match(localWebStartSource, /lsof/);
   assert.match(typesSource, /StockResearchResponse/);
   assert.match(typesSource, /ifind_api_key_configured: boolean/);
   assert.match(typesSource, /ifind_service_id: "hexin-ifind-ds-stock-mcp" \| "hexin-ifind-ds-news-mcp" \| "hexin-ifind-ds-index-mcp"/);
@@ -511,6 +517,12 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(auctionFeatureSource, /开盘幅度/);
   assert.match(auctionFeatureSource, /强势高开/);
   assert.match(auctionFeatureSource, /低开观察/);
+  assert.match(auctionFeatureSource, /auction-status-strip/);
+  assert.match(auctionFeatureSource, /auction-command-grid/);
+  assert.match(auctionFeatureSource, /主线行业 Top/);
+  assert.match(auctionFeatureSource, /阶段快照/);
+  assert.match(auctionFeatureSource, /数据源状态/);
+  assert.match(auctionFeatureSource, /Collapse/);
   assert.match(sentimentPageSource, /SentimentWorkspace/);
   assert.match(sentimentFeatureSource, /短线情绪中心/);
   assert.match(sentimentFeatureSource, /市场情绪仪表盘/);

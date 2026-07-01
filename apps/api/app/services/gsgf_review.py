@@ -18,8 +18,9 @@ from app.services.gsgf_backtest import DEFAULT_BACKTEST_WINDOWS
 
 
 class GsgfReviewStore:
-    def __init__(self, data_dir: Path) -> None:
+    def __init__(self, data_dir: Path, max_records: int | None = None) -> None:
         self.root_dir = data_dir / "gsgf_review"
+        self.max_records = max_records
 
     @property
     def snapshots_path(self) -> Path:
@@ -44,6 +45,7 @@ class GsgfReviewStore:
             with self.snapshots_path.open("a", encoding="utf-8") as handle:
                 for record in records:
                     handle.write(record.model_dump_json() + "\n")
+            self._prune_records()
         return GsgfReviewSnapshotResponse(saved_count=len(records), records=records)
 
     def load_records(self) -> list[GsgfReviewRecord]:
@@ -83,6 +85,15 @@ class GsgfReviewStore:
         return GsgfReviewSummary.model_validate_json(
             self.latest_summary_path.read_text(encoding="utf-8")
         )
+
+    def _prune_records(self) -> None:
+        if self.max_records is None or not self.snapshots_path.exists():
+            return
+        keep_count = max(1, self.max_records)
+        lines = [line for line in self.snapshots_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        if len(lines) <= keep_count:
+            return
+        self.snapshots_path.write_text("\n".join(lines[-keep_count:]) + "\n", encoding="utf-8")
 
 
 def _record_from_item(trade_date: str, item) -> GsgfReviewRecord:

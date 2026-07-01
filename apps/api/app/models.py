@@ -344,6 +344,16 @@ class BackgroundJobState(BaseModel):
     result_path: str | None = None
 
 
+class GsgfModelHealth(BaseModel):
+    best_signals: list[str] = Field(default_factory=list)
+    weak_signals: list[str] = Field(default_factory=list)
+    insufficient_sample_signals: list[str] = Field(default_factory=list)
+    degraded_signals: list[str] = Field(default_factory=list)
+    last_review_at: str | None = None
+    last_calibration_at: str | None = None
+    summary_text: str = "仅供复盘与模型校准，不构成投资建议。"
+
+
 class MarketTurnoverSummary(BaseModel):
     total_cny: float | None = None
     previous_total_cny: float | None = None

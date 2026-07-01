@@ -11,6 +11,7 @@ from app.models import BackgroundJobState, BackgroundJobStatus, GsgfRealCalibrat
 ProgressCallback = Callable[[int, int, str], None]
 CancelCheck = Callable[[], bool]
 CalibrationRunner = Callable[[ProgressCallback, CancelCheck], GsgfRealCalibrationSummary]
+SuccessCallback = Callable[[GsgfRealCalibrationSummary], object]
 
 
 class BackgroundJobStore:
@@ -23,7 +24,12 @@ class BackgroundJobStore:
         self._cancel_events: dict[str, Event] = {}
         self._threads: dict[str, Thread] = {}
 
-    def create_calibration_job(self, runner: CalibrationRunner) -> BackgroundJobState:
+    def create_calibration_job(
+        self,
+        runner: CalibrationRunner,
+        *,
+        on_success: SuccessCallback | None = None,
+    ) -> BackgroundJobState:
         job_id = datetime.now().strftime("%Y%m%d%H%M%S") + "-" + uuid4().hex[:8]
         state = BackgroundJobState(job_id=job_id, type="gsgf_calibration", progress_total=1)
         cancel_event = Event()
@@ -32,7 +38,7 @@ class BackgroundJobStore:
             self._cancel_events[job_id] = cancel_event
         thread = Thread(
             target=self._run_calibration,
-            args=(job_id, runner, cancel_event),
+            args=(job_id, runner, cancel_event, on_success),
             name=f"gsgf-calibration-{job_id}",
             daemon=True,
         )
@@ -67,6 +73,7 @@ class BackgroundJobStore:
         job_id: str,
         runner: CalibrationRunner,
         cancel_event: Event,
+        on_success: SuccessCallback | None,
     ) -> None:
         self._set_state(job_id, status="running", started_at=_now(), message="校准任务运行中")
 
@@ -85,6 +92,11 @@ class BackgroundJobStore:
             payload = result.model_dump_json(indent=2)
             result_path.write_text(payload, encoding="utf-8")
             self.latest_path.write_text(payload, encoding="utf-8")
+            if on_success is not None:
+                try:
+                    on_success(result)
+                except Exception:
+                    pass
             total = max(1, self.get(job_id).progress_total)
             self._set_state(
                 job_id,

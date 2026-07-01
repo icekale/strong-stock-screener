@@ -14,6 +14,7 @@ from app.models import (
     AuctionSnapshotResponse,
     GsgfAnalysis,
     GsgfBacktestSummary,
+    GsgfModelHealth,
     GsgfRealCalibrationSummary,
     GsgfReviewSnapshotResponse,
     GsgfReviewSummary,
@@ -54,6 +55,7 @@ from app.services.intraday import IntradayMonitor
 from app.services.background_jobs import BackgroundJobStore
 from app.services.gsgf_backtest import summarize_gsgf_backtest
 from app.services.gsgf_auto_review import GsgfAutoReviewService
+from app.services.gsgf_model_health import build_gsgf_model_health
 from app.services.gsgf_real_calibration import summarize_gsgf_real_calibration
 from app.services.gsgf_review import GsgfReviewStore
 from app.services.gsgf_trade_plan import build_gsgf_trade_plan
@@ -539,6 +541,12 @@ def get_latest_gsgf_review() -> dict[str, object]:
     if summary is None:
         raise HTTPException(status_code=404, detail="no gsgf review summary")
     return summary.model_dump(mode="json")
+
+
+@app.get("/api/gsgf/health")
+def get_gsgf_model_health() -> dict[str, object]:
+    health = _gsgf_model_health()
+    return health.model_dump(mode="json")
 
 
 @app.get("/api/market/overview")
@@ -1262,6 +1270,9 @@ def _run_gsgf_daily_review() -> GsgfReviewSummary:
             bars_by_symbol[symbol] = []
     summary = store.recheck_snapshots(bars_by_symbol, windows=config.windows)
     store.save_latest_summary(summary)
+    health = _gsgf_model_health()
+    if config.notify_on_degradation and health.degraded_signals:
+        _send_sentiment_monitor_notification("GSGF 模型信号退化提醒", health.summary_text)
     return summary
 
 
@@ -1271,6 +1282,7 @@ def _start_gsgf_weekly_calibration(
     scan_limit: int,
     count: int,
 ):
+    config = load_runtime_settings(_runtime_config_path()).gsgf_auto_review
     return _background_job_store().create_calibration_job(
         lambda progress, should_cancel: summarize_gsgf_real_calibration(
             candidate_provider=_candidate_provider(),
@@ -1281,7 +1293,15 @@ def _start_gsgf_weekly_calibration(
             kline_count=count,
             progress=progress,
             should_cancel=should_cancel,
-        )
+        ),
+        on_success=(
+            lambda result: _send_sentiment_monitor_notification(
+                "GSGF 每周真实样本校准完成",
+                build_gsgf_model_health(_gsgf_review_store().load_latest_summary(), result).summary_text,
+            )
+            if config.notify_on_success
+            else None
+        ),
     )
 
 
@@ -1305,6 +1325,13 @@ def _recent_screen_trade_dates(count: int) -> list[str]:
             seen.add(trade_date)
             deduped.append(trade_date)
     return deduped[-max(1, count):]
+
+
+def _gsgf_model_health() -> GsgfModelHealth:
+    return build_gsgf_model_health(
+        _gsgf_review_store().load_latest_summary(),
+        _background_job_store().load_latest_calibration(),
+    )
 
 
 def _watchlist_path() -> Path:

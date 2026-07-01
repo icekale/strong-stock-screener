@@ -44,6 +44,19 @@ def test_background_job_store_records_failure(tmp_path: Path) -> None:
     assert "boom" in (loaded.error or "")
 
 
+def test_background_job_store_calls_success_callback(tmp_path: Path) -> None:
+    store = BackgroundJobStore(tmp_path)
+    notifications: list[int] = []
+
+    job = store.create_calibration_job(
+        lambda _progress, _should_cancel: GsgfRealCalibrationSummary(scanned_count=3),
+        on_success=lambda result: notifications.append(result.scanned_count),
+    )
+    store.wait(job.job_id, timeout=3)
+
+    assert notifications == [3]
+
+
 def test_background_job_store_marks_cancel_requested(tmp_path: Path) -> None:
     store = BackgroundJobStore(tmp_path)
     started = Event()

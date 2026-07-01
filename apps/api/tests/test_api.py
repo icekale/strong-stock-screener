@@ -1584,6 +1584,15 @@ def test_recent_screen_trade_dates_reads_saved_runs(tmp_path: Path) -> None:
     assert _recent_screen_trade_dates(2) == ["2026-06-10", "2026-06-11"]
 
 
+def test_gsgf_health_endpoint_returns_summary(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.get("/api/gsgf/health")
+
+    assert response.status_code == 200
+    assert "summary_text" in response.json()
+
+
 def test_screen_run_accepts_combined_strategy(tmp_path: Path) -> None:
     client = _client(tmp_path)
 

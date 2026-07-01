@@ -1504,8 +1504,7 @@ def test_gsgf_review_endpoints_persist_and_recheck_latest_screen_run(tmp_path: P
     snapshot_response = client.post("/api/gsgf/review/snapshots/latest")
     assert snapshot_response.status_code == 200
     snapshot_payload = snapshot_response.json()
-    assert snapshot_payload["saved_count"] > 0
-    assert snapshot_payload["records"][0]["trade_date"] == "2026-06-11"
+    assert snapshot_payload["saved_count"] == 0
 
     summary_response = client.post("/api/gsgf/review/recheck", json={"windows": [1, 3], "count": 90})
     assert summary_response.status_code == 200
@@ -1515,6 +1514,47 @@ def test_gsgf_review_endpoints_persist_and_recheck_latest_screen_run(tmp_path: P
     assert summary_payload["buckets"][0]["sample_count"] > 0
     assert "realized_return_pct" in summary_payload["items"][0]["windows"][0]
     assert (tmp_path / "gsgf_review" / "snapshots.jsonl").exists()
+
+
+def test_screen_run_auto_saves_gsgf_review_snapshot(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.post(
+        "/api/screen/runs",
+        json={"trade_date": "2026-06-11", "limit": 10, "scan_limit": 10, "strategy": "gsgf"},
+    )
+
+    assert response.status_code == 200
+    records = (tmp_path / "gsgf_review" / "snapshots.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(records) > 0
+
+
+def test_gsgf_review_latest_endpoint_returns_persisted_summary(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    client.post(
+        "/api/screen/runs",
+        json={"trade_date": "2026-06-11", "limit": 10, "scan_limit": 10, "strategy": "gsgf"},
+    )
+    client.post("/api/gsgf/review/recheck", json={"windows": [1, 3], "count": 90})
+
+    response = client.get("/api/gsgf/review/latest")
+
+    assert response.status_code == 200
+    assert response.json()["record_count"] > 0
+
+
+def test_gsgf_calibration_job_endpoint_returns_job_status(tmp_path: Path) -> None:
+    client = _client(tmp_path, kline_provider=FakeCalibrationKlineProvider())
+
+    response = client.post(
+        "/api/gsgf/calibration/jobs",
+        json={"trade_dates": ["2026-01-28"], "windows": [1, 3], "scan_limit": 2, "count": 90},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["type"] == "gsgf_calibration"
+    assert payload["job_id"]
 
 
 def test_screen_run_accepts_combined_strategy(tmp_path: Path) -> None:

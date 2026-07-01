@@ -50,6 +50,7 @@ from app.providers.watchlist import (
     upsert_watchlist_item,
 )
 from app.services.intraday import IntradayMonitor
+from app.services.background_jobs import BackgroundJobStore
 from app.services.gsgf_backtest import summarize_gsgf_backtest
 from app.services.gsgf_real_calibration import summarize_gsgf_real_calibration
 from app.services.gsgf_review import GsgfReviewStore
@@ -385,6 +386,8 @@ def create_screen_run(request: ScreenRunRequest) -> dict[str, object]:
     except StrongStockDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     _run_store().save(result)
+    if any(item.gsgf is not None for item in result.items):
+        _gsgf_review_store().persist_snapshot(result, dedupe=True)
     return result.model_dump(mode="json")
 
 
@@ -442,6 +445,49 @@ def create_gsgf_calibration(request: GsgfCalibrationRequest) -> dict[str, object
     return result.model_dump(mode="json")
 
 
+@app.post("/api/gsgf/calibration/jobs")
+def create_gsgf_calibration_job(request: GsgfCalibrationRequest) -> dict[str, object]:
+    job = _background_job_store().create_calibration_job(
+        lambda progress, should_cancel: summarize_gsgf_real_calibration(
+            candidate_provider=_candidate_provider(),
+            kline_provider=_kline_provider(),
+            trade_dates=request.trade_dates,
+            windows=request.windows,
+            scan_limit=request.scan_limit,
+            kline_count=request.count,
+            progress=progress,
+            should_cancel=should_cancel,
+        )
+    )
+    return job.model_dump(mode="json")
+
+
+@app.get("/api/gsgf/calibration/jobs/{job_id}")
+def get_gsgf_calibration_job(job_id: str) -> dict[str, object]:
+    try:
+        job = _background_job_store().get(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="calibration job not found") from exc
+    return job.model_dump(mode="json")
+
+
+@app.post("/api/gsgf/calibration/jobs/{job_id}/cancel")
+def cancel_gsgf_calibration_job(job_id: str) -> dict[str, object]:
+    try:
+        job = _background_job_store().cancel(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="calibration job not found") from exc
+    return job.model_dump(mode="json")
+
+
+@app.get("/api/gsgf/calibration/latest")
+def get_latest_gsgf_calibration() -> dict[str, object]:
+    result = _background_job_store().load_latest_calibration()
+    if result is None:
+        raise HTTPException(status_code=404, detail="no gsgf calibration result")
+    return result.model_dump(mode="json")
+
+
 @app.post("/api/gsgf/trade-plan")
 def create_gsgf_trade_plan(request: GsgfTradePlanRequest) -> dict[str, object]:
     plan: GsgfTradePlan = build_gsgf_trade_plan(request.analysis)
@@ -453,7 +499,7 @@ def create_gsgf_review_snapshot_from_latest() -> dict[str, object]:
     result = _run_store().load_latest()
     if result is None:
         raise HTTPException(status_code=404, detail="no screen run")
-    snapshot: GsgfReviewSnapshotResponse = _gsgf_review_store().persist_snapshot(result)
+    snapshot: GsgfReviewSnapshotResponse = _gsgf_review_store().persist_snapshot(result, dedupe=True)
     return snapshot.model_dump(mode="json")
 
 
@@ -469,6 +515,15 @@ def recheck_gsgf_review(request: GsgfReviewRecheckRequest) -> dict[str, object]:
         except Exception:
             bars_by_symbol[symbol] = []
     summary: GsgfReviewSummary = store.recheck_snapshots(bars_by_symbol, windows=request.windows)
+    store.save_latest_summary(summary)
+    return summary.model_dump(mode="json")
+
+
+@app.get("/api/gsgf/review/latest")
+def get_latest_gsgf_review() -> dict[str, object]:
+    summary = _gsgf_review_store().load_latest_summary()
+    if summary is None:
+        raise HTTPException(status_code=404, detail="no gsgf review summary")
     return summary.model_dump(mode="json")
 
 
@@ -1123,6 +1178,18 @@ def _gsgf_review_store() -> GsgfReviewStore:
     if data_dir is not None:
         return GsgfReviewStore(Path(data_dir))
     return GsgfReviewStore(get_settings().data_dir)
+
+
+def _background_job_store() -> BackgroundJobStore:
+    data_dir = Path(getattr(app.state, "runs_dir", get_settings().data_dir))
+    existing = getattr(app.state, "background_job_store", None)
+    existing_data_dir = getattr(app.state, "background_job_store_data_dir", None)
+    if existing is not None and existing_data_dir == data_dir:
+        return existing
+    store = BackgroundJobStore(data_dir)
+    app.state.background_job_store = store
+    app.state.background_job_store_data_dir = data_dir
+    return store
 
 
 def _market_emotion_history_store() -> MarketEmotionHistoryStore:

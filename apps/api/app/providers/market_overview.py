@@ -12,6 +12,8 @@ from app.models import (
     MarketEmotionBucket,
     MarketIndexSnapshot,
     MarketOverviewResponse,
+    MarketRankingItem,
+    MarketRankingsResponse,
     MarketSectorStrengthItem,
     MarketTurnoverSummary,
     SectorRadarItem,
@@ -27,6 +29,7 @@ TICKFLOW_INDEX_SYMBOLS = ["000001.SH", "399001.SZ", "899050.BJ"]
 IFIND_AGGREGATE_INDEX_SYMBOLS = {"000001.SH", "399001.SZ", "899050.BJ"}
 IFIND_INDEX_SYMBOLS = "000001.SH,399001.SZ,899050.BJ,399006.SZ,000688.SH"
 IFIND_INDEX_INDICATORS = "最新价,涨跌幅,成交额,上涨家数,下跌家数"
+TICKFLOW_A_SHARE_UNIVERSE = "CN_Equity_A"
 DISPLAY_INDEX_NAMES = {
     "000001.SH": "上证",
     "399001.SZ": "深证",
@@ -49,10 +52,12 @@ class EastmoneyMarketOverviewProvider:
         http_client: object | None = None,
         realtime_quote_provider: object | None = None,
         ifind_index_provider: object | None = None,
+        ifind_stock_provider: object | None = None,
     ) -> None:
         self.timeout_seconds = timeout_seconds
         self.realtime_quote_provider = realtime_quote_provider
         self.ifind_index_provider = ifind_index_provider
+        self.ifind_stock_provider = ifind_stock_provider
         self._owns_client = http_client is None
         self.http_client = http_client or httpx.Client()
         self._a_share_realtime_rows_cache: list[dict[str, Any]] | None = None
@@ -351,13 +356,25 @@ class EastmoneyMarketOverviewProvider:
             )
 
     def get_pct_change_distribution(self) -> tuple[list[MarketEmotionBucket], StrongStockSourceStatus]:
+        tickflow_error: str | None = None
+        if self.realtime_quote_provider is not None:
+            try:
+                rankings = self.get_market_rankings(limit=1)
+                return rankings.buckets, StrongStockSourceStatus(
+                    source="TickFlow 全A实时涨跌幅",
+                    status="success",
+                    detail=f"全A实时行情返回 {sum(bucket.count or 0 for bucket in rankings.buckets)} 只股票",
+                )
+            except Exception as exc:
+                tickflow_error = exc.__class__.__name__
         try:
             rows = self._fetch_a_share_realtime_rows()
             buckets = _pct_change_buckets([_number(row.get("f3")) for row in rows])
+            fallback_prefix = f"TickFlow失败: {tickflow_error}; fallback 到" if tickflow_error else ""
             return buckets, StrongStockSourceStatus(
                 source="东方财富全A实时涨跌幅",
                 status="success",
-                detail=f"全A实时列表返回 {sum(bucket.count or 0 for bucket in buckets)} 只股票",
+                detail=f"{fallback_prefix}全A实时列表返回 {sum(bucket.count or 0 for bucket in buckets)} 只股票",
             )
         except Exception as exc:
             return _pct_change_buckets([]), StrongStockSourceStatus(
@@ -365,6 +382,189 @@ class EastmoneyMarketOverviewProvider:
                 status="failed",
                 detail=f"全A涨跌幅分布获取失败: {exc.__class__.__name__}",
             )
+
+    def get_market_rankings(self, limit: int = 50, batch_size: int = 200) -> MarketRankingsResponse:
+        if self.realtime_quote_provider is None:
+            return MarketRankingsResponse(
+                source_status=[
+                    StrongStockSourceStatus(
+                        source="TickFlow 全A实时行情",
+                        status="disabled",
+                        detail="未配置 TickFlow 实时行情源，无法生成全A排行榜",
+                    )
+                ]
+            )
+
+        bounded_limit = max(1, min(limit, 100))
+        bounded_batch_size = max(1, min(batch_size, 500))
+        source_status: list[StrongStockSourceStatus] = []
+        quotes: list[object] = []
+        tickflow_batch_count: int | None = None
+        tickflow_universe_error: Exception | None = None
+        if hasattr(self.realtime_quote_provider, "get_quotes_by_universe"):
+            try:
+                quotes = self.realtime_quote_provider.get_quotes_by_universe(TICKFLOW_A_SHARE_UNIVERSE)
+                source_status.append(
+                    StrongStockSourceStatus(
+                        source="TickFlow 全A标的池",
+                        status="success",
+                        detail=f"{TICKFLOW_A_SHARE_UNIVERSE} 标的池直接返回 {len(quotes)} 条实时行情",
+                    )
+                )
+            except Exception as exc:
+                tickflow_universe_error = exc
+                source_status.append(
+                    StrongStockSourceStatus(
+                        source="TickFlow 全A标的池",
+                        status="failed",
+                        detail=f"标的池请求失败: {exc}; fallback 到东方财富股票池分批查询",
+                    )
+                )
+
+        if not quotes:
+            rows = self._fetch_a_share_realtime_rows()
+            symbols = _dedupe_symbols(_eastmoney_stock_symbol(row.get("f12")) for row in rows)
+            source_status.append(
+                StrongStockSourceStatus(
+                    source="东方财富全A股票池",
+                    status="success",
+                    detail=f"股票池返回 {len(symbols)} 个标的，用于 TickFlow 批量实时行情查询",
+                )
+            )
+            if not symbols:
+                raise ValueError("empty a-share stock symbols")
+
+            tickflow_batch_count = len(range(0, len(symbols), bounded_batch_size))
+            for start in range(0, len(symbols), bounded_batch_size):
+                batch = symbols[start : start + bounded_batch_size]
+                quotes.extend(self.realtime_quote_provider.get_quotes(batch))
+
+        industry_by_symbol = self._a_share_industry_by_symbol()
+        items = [
+            _ranking_item_from_quote(quote).model_copy(
+                update={"industry": industry_by_symbol.get(str(getattr(quote, "symbol", "") or "").strip().upper())}
+            )
+            for quote in quotes
+        ]
+        items = [item for item in items if item.symbol]
+        if not items:
+            if tickflow_universe_error is not None:
+                raise ValueError(f"empty tickflow full-a quotes after universe fallback: {tickflow_universe_error}")
+            raise ValueError("empty tickflow full-a quotes")
+        pct_values = [item.pct_change for item in items]
+        buckets = _pct_change_buckets(pct_values, source="TickFlow 全A实时行情")
+        trade_dates = [
+            date
+            for date in (_date_from_quote_time(item.quote_time) for item in items)
+            if date
+        ]
+        source_status.append(
+            StrongStockSourceStatus(
+                source="TickFlow 全A实时行情",
+                status="success",
+                detail=_tickflow_rankings_status_detail(
+                    item_count=len(items),
+                    used_universe=any(status.source == "TickFlow 全A标的池" and status.status == "success" for status in source_status),
+                    batch_count=tickflow_batch_count,
+                ),
+            )
+        )
+        pct_change_rank = sorted(
+            [item for item in items if item.pct_change is not None],
+            key=lambda item: (item.pct_change or -999, item.turnover_cny or 0, item.symbol),
+            reverse=True,
+        )[:bounded_limit]
+        turnover_rank = sorted(
+            [item for item in items if item.turnover_cny is not None],
+            key=lambda item: (item.turnover_cny or 0, item.pct_change or -999, item.symbol),
+            reverse=True,
+        )[:bounded_limit]
+        supplemental_status = self._supplement_rank_industries(pct_change_rank, turnover_rank)
+        if supplemental_status is not None:
+            source_status.append(supplemental_status)
+        return MarketRankingsResponse(
+            trade_date=max(trade_dates) if trade_dates else None,
+            pct_change_rank=pct_change_rank,
+            turnover_rank=turnover_rank,
+            buckets=buckets,
+            source_status=source_status,
+        )
+
+    def _supplement_rank_industries(
+        self,
+        pct_change_rank: list[MarketRankingItem],
+        turnover_rank: list[MarketRankingItem],
+    ) -> StrongStockSourceStatus | None:
+        missing_symbols = _dedupe_symbols(
+            item.symbol
+            for item in [*pct_change_rank, *turnover_rank]
+            if item.symbol and not item.industry
+        )
+        if not missing_symbols:
+            return None
+        try:
+            industry_by_symbol = self._fetch_stock_industries_by_symbols(missing_symbols)
+        except Exception:
+            industry_by_symbol = {}
+        patched = _patch_rank_industries(pct_change_rank, turnover_rank, industry_by_symbol)
+        if patched:
+            return StrongStockSourceStatus(
+                source="东方财富行业补充",
+                status="success",
+                detail=f"补齐 {patched}/{len(missing_symbols)} 只排行股票行业",
+            )
+
+        missing_symbols = _dedupe_symbols(
+            item.symbol
+            for item in [*pct_change_rank, *turnover_rank]
+            if item.symbol and not item.industry
+        )
+        if self.ifind_stock_provider is None or not hasattr(self.ifind_stock_provider, "get_stock_industries"):
+            return StrongStockSourceStatus(
+                source="iFinD 行业补充",
+                status="disabled",
+                detail=f"{len(missing_symbols)} 只排行股票缺少行业，未配置 iFinD 行业补充源",
+            )
+        try:
+            industry_by_symbol = self.ifind_stock_provider.get_stock_industries(missing_symbols)
+        except Exception as exc:
+            return StrongStockSourceStatus(
+                source="iFinD 行业补充",
+                status="failed",
+                detail=f"{len(missing_symbols)} 只排行股票缺少行业，补充失败: {exc.__class__.__name__}",
+            )
+        unique_patched = _patch_rank_industries(pct_change_rank, turnover_rank, industry_by_symbol)
+        return StrongStockSourceStatus(
+            source="iFinD 行业补充",
+            status="success" if unique_patched else "stale",
+            detail=f"补齐 {unique_patched}/{len(missing_symbols)} 只排行股票行业",
+        )
+
+    def _fetch_stock_industries_by_symbols(self, symbols: list[str], batch_size: int = 100) -> dict[str, str]:
+        output: dict[str, str] = {}
+        bounded_batch_size = max(1, min(batch_size, 100))
+        for start in range(0, len(symbols), bounded_batch_size):
+            batch = symbols[start : start + bounded_batch_size]
+            secids = [_eastmoney_stock_secid(symbol) for symbol in batch]
+            secids = [secid for secid in secids if secid]
+            if not secids:
+                continue
+            response = self.http_client.get(
+                "https://push2.eastmoney.com/api/qt/ulist.np/get",
+                params={
+                    "secids": ",".join(secids),
+                    "fields": "f12,f14,f100",
+                },
+                headers={"User-Agent": USER_AGENT},
+                timeout=self.timeout_seconds,
+            )
+            response.raise_for_status()
+            for row in _extract_diff(response.json()):
+                symbol = _eastmoney_stock_symbol(row.get("f12"))
+                industry = _text(row.get("f100"))
+                if symbol and industry:
+                    output[symbol] = industry
+        return output
 
     def _fetch_direct_limit_down_count(self, date: str) -> int:
         response = self.http_client.get(
@@ -641,7 +841,7 @@ class EastmoneyMarketOverviewProvider:
                     "fltt": "2",
                     "invt": "2",
                     "fs": A_SHARE_STOCK_LIST_FS,
-                    "fields": "f3,f12,f14",
+                    "fields": "f3,f12,f14,f100",
                 },
                 headers={"User-Agent": USER_AGENT},
                 timeout=self.timeout_seconds,
@@ -660,6 +860,19 @@ class EastmoneyMarketOverviewProvider:
             raise ValueError("empty a-share realtime rows")
         self._a_share_realtime_rows_cache = rows
         return rows
+
+    def _a_share_industry_by_symbol(self) -> dict[str, str]:
+        try:
+            rows = self._fetch_a_share_realtime_rows()
+        except Exception:
+            return {}
+        output: dict[str, str] = {}
+        for row in rows:
+            symbol = _eastmoney_stock_symbol(row.get("f12"))
+            industry = _text(row.get("f100"))
+            if symbol and industry:
+                output[symbol] = industry
+        return output
 
     def _fetch_sector_capital_flow(self, limit: int, direction: str) -> list[SectorRadarItem]:
         response = self.http_client.get(
@@ -767,7 +980,10 @@ def _sector_radar_item(
     )
 
 
-def _pct_change_buckets(values: list[float | None]) -> list[MarketEmotionBucket]:
+def _pct_change_buckets(
+    values: list[float | None],
+    source: str = "东方财富全A实时涨跌幅",
+) -> list[MarketEmotionBucket]:
     bucket_defs = [
         (">10%", 10.0, None),
         ("7-10%", 7.0, 10.0),
@@ -786,7 +1002,7 @@ def _pct_change_buckets(values: list[float | None]) -> list[MarketEmotionBucket]
             min_pct=min_pct,
             max_pct=max_pct,
             count=0,
-            source="东方财富全A实时涨跌幅",
+            source=source,
         )
         for label, min_pct, max_pct in bucket_defs
     ]
@@ -806,6 +1022,18 @@ def _pct_in_bucket(value: float, min_pct: float | None, max_pct: float | None) -
     if max_pct is None:
         return value > min_pct
     return min_pct <= value < max_pct
+
+
+def _tickflow_rankings_status_detail(
+    item_count: int,
+    used_universe: bool,
+    batch_count: int | None,
+) -> str:
+    if used_universe:
+        return f"标的池 quotes 返回 {item_count} 只股票"
+    if batch_count is not None:
+        return f"批量 quotes 返回 {item_count} 只股票，批次 {batch_count} 个"
+    return f"quotes 返回 {item_count} 只股票"
 
 
 def _is_limit_down_row(row: dict[str, Any]) -> bool:
@@ -918,3 +1146,80 @@ def _eastmoney_index_symbol(value: object) -> str:
     if code:
         return f"{code}.SH"
     return ""
+
+
+def _eastmoney_stock_symbol(value: object) -> str:
+    code = str(value or "").strip()
+    if len(code) != 6 or not code.isdigit():
+        return ""
+    if code.startswith("92"):
+        return f"{code}.BJ"
+    if code.startswith(("6", "9")):
+        return f"{code}.SH"
+    if code.startswith(("0", "2", "3")):
+        return f"{code}.SZ"
+    if code.startswith(("4", "8")):
+        return f"{code}.BJ"
+    return ""
+
+
+def _eastmoney_stock_secid(symbol: object) -> str:
+    text = str(symbol or "").strip().upper()
+    if "." not in text:
+        text = _eastmoney_stock_symbol(text)
+    if not text or "." not in text:
+        return ""
+    code, exchange = text.split(".", 1)
+    if len(code) != 6 or not code.isdigit():
+        return ""
+    if exchange in {"SZ", "BJ"}:
+        return f"0.{code}"
+    if exchange == "SH":
+        return f"1.{code}"
+    return ""
+
+
+def _patch_rank_industries(
+    pct_change_rank: list[MarketRankingItem],
+    turnover_rank: list[MarketRankingItem],
+    industry_by_symbol: dict[str, str],
+) -> int:
+    patched_symbols: set[str] = set()
+    for item in [*pct_change_rank, *turnover_rank]:
+        if item.industry:
+            continue
+        industry = industry_by_symbol.get(item.symbol)
+        if industry:
+            item.industry = industry
+            patched_symbols.add(item.symbol)
+    return len(patched_symbols)
+
+
+def _dedupe_symbols(symbols: object) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for symbol in symbols:
+        text = str(symbol or "").strip().upper()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        output.append(text)
+    return output
+
+
+def _ranking_item_from_quote(quote: object) -> MarketRankingItem:
+    pct_change = _number(getattr(quote, "pct_change", None))
+    return MarketRankingItem(
+        symbol=str(getattr(quote, "symbol", "") or "").strip().upper(),
+        name=_text(getattr(quote, "name", None)),
+        industry=None,
+        last_price=_number(getattr(quote, "last_price", None)),
+        pct_change=pct_change,
+        current_pct_change=pct_change,
+        open_price=_number(getattr(quote, "open_price", None)),
+        prev_close=_number(getattr(quote, "prev_close", None)),
+        turnover_rate=_number(getattr(quote, "turnover_rate", None)),
+        turnover_cny=_number(getattr(quote, "turnover_cny", None)),
+        volume=_number(getattr(quote, "volume", None)),
+        quote_time=_text(getattr(quote, "quote_time", None)),
+    )

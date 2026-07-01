@@ -133,13 +133,22 @@ class TickFlowQuoteProvider:
     def get_quotes(self, symbols: list[str]) -> list[TickFlowQuote]:
         if not symbols:
             return []
+        return self._post_quotes({"symbols": symbols})
+
+    def get_quotes_by_universe(self, universe: str) -> list[TickFlowQuote]:
+        universe_id = universe.strip()
+        if not universe_id:
+            return []
+        return self._post_quotes({"universes": [universe_id]})
+
+    def _post_quotes(self, body: dict[str, object]) -> list[TickFlowQuote]:
         if not self.api_key:
             raise StrongStockDataUnavailable("STRONG_STOCK_TICKFLOW_API_KEY 或 TICKFLOW_API_KEY 未配置")
         try:
             response = self.http_client.post(
                 f"{self.base_url}/v1/quotes",
                 headers={"x-api-key": self.api_key},
-                json={"symbols": symbols},
+                json=body,
                 timeout=self.timeout_seconds,
             )
             response.raise_for_status()
@@ -148,7 +157,7 @@ class TickFlowQuoteProvider:
             raise
         except httpx.HTTPStatusError as exc:
             raise StrongStockDataUnavailable(
-                f"TickFlow 请求失败: HTTP {exc.response.status_code}"
+                f"TickFlow 请求失败: HTTP {exc.response.status_code}{_payload_error_detail(exc.response)}"
             ) from exc
         except Exception as exc:
             raise StrongStockDataUnavailable(f"TickFlow 请求失败: {exc.__class__.__name__}") from exc
@@ -435,6 +444,21 @@ def _payload_code(response: object) -> str:
     if isinstance(payload, dict):
         return str(payload.get("code") or payload.get("error") or "")
     return ""
+
+
+def _payload_error_detail(response: object) -> str:
+    try:
+        payload = response.json()
+    except Exception:
+        return ""
+    if not isinstance(payload, dict):
+        return ""
+    code = _optional_str(payload.get("code") or payload.get("error"))
+    message = _optional_str(payload.get("message") or payload.get("detail"))
+    parts = [part for part in (code, message) if part]
+    if not parts:
+        return ""
+    return f" ({'; '.join(parts)})"
 
 
 def _optional_float(value: object) -> float | None:

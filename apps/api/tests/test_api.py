@@ -9,6 +9,8 @@ from app.models import (
     MarketAdvanceDeclineSummary,
     MarketIndexSnapshot,
     MarketOverviewResponse,
+    MarketRankingItem,
+    MarketRankingsResponse,
     MarketSectorStrengthItem,
     MarketTurnoverSummary,
     SectorRadarItem,
@@ -588,6 +590,56 @@ class FakeMarketOverviewProvider:
             ],
         )
 
+    def get_market_rankings(self, limit: int = 50) -> MarketRankingsResponse:
+        return MarketRankingsResponse(
+            trade_date="2026-06-26",
+            pct_change_rank=[
+                MarketRankingItem(
+                    symbol="300001.SZ",
+                    name="涨幅一号",
+                    industry="机器人",
+                    last_price=11.2,
+                    open_price=10.8,
+                    prev_close=10.0,
+                    pct_change=12.0,
+                    current_pct_change=12.0,
+                    turnover_cny=300_000_000,
+                    turnover_rate=6.0,
+                    quote_time="2026-06-26T10:00:00+08:00",
+                ),
+                MarketRankingItem(
+                    symbol="300002.SZ",
+                    name="涨幅二号",
+                    industry="电池",
+                    last_price=12.1,
+                    open_price=11.0,
+                    prev_close=10.5,
+                    pct_change=8.5,
+                    current_pct_change=8.5,
+                    turnover_cny=900_000_000,
+                    turnover_rate=2.0,
+                    quote_time="2026-06-26T10:00:00+08:00",
+                ),
+            ][:limit],
+            turnover_rank=[
+                MarketRankingItem(
+                    symbol="600003.SH",
+                    name="成交一号",
+                    last_price=13.2,
+                    pct_change=3.2,
+                    turnover_cny=1_500_000_000,
+                    quote_time="2026-06-26T10:00:00+08:00",
+                )
+            ][:limit],
+            source_status=[
+                StrongStockSourceStatus(
+                    source="TickFlow 全A实时行情",
+                    status="success",
+                    detail="fake rankings",
+                )
+            ],
+        )
+
 
 class CountingMarketOverviewProvider(FakeMarketOverviewProvider):
     source_name = "counting fake市场概览"
@@ -644,6 +696,17 @@ class CountingSectorRadarProvider(FakeMarketOverviewProvider):
                 )
             ],
         )
+
+
+class CountingMarketRankingsProvider(FakeMarketOverviewProvider):
+    source_name = "counting fake全A排行"
+
+    def __init__(self) -> None:
+        self.ranking_calls: list[int] = []
+
+    def get_market_rankings(self, limit: int = 50) -> MarketRankingsResponse:
+        self.ranking_calls.append(limit)
+        return super().get_market_rankings(limit=limit)
 
 
 class EmptySectorRadarProvider(FakeMarketOverviewProvider):
@@ -1051,6 +1114,72 @@ def test_market_overview_endpoint_reuses_cached_snapshot(tmp_path: Path) -> None
     assert first.status_code == 200
     assert second.status_code == 200
     assert provider.overview_calls == 1
+
+
+def test_market_rankings_returns_tickflow_pct_and_turnover_rankings(tmp_path: Path) -> None:
+    client = _client(tmp_path, market_overview_provider=FakeMarketOverviewProvider())
+
+    response = client.get("/api/market/rankings?limit=2")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trade_date"] == "2026-06-26"
+    assert [item["symbol"] for item in payload["pct_change_rank"]] == ["300001.SZ", "300002.SZ"]
+    assert payload["turnover_rank"][0]["symbol"] == "600003.SH"
+    assert payload["source_status"][0]["source"] == "TickFlow 全A实时行情"
+
+
+def test_market_rankings_endpoint_reuses_cached_provider_result(tmp_path: Path) -> None:
+    provider = CountingMarketRankingsProvider()
+    client = _client(tmp_path, market_overview_provider=provider)
+
+    first = client.get("/api/market/rankings?limit=2")
+    second = client.get("/api/market/rankings?limit=2")
+    third = client.get("/api/market/rankings?limit=3")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 200
+    assert provider.ranking_calls == [2, 3]
+
+
+def test_auction_snapshot_returns_opening_auction_candidates(tmp_path: Path) -> None:
+    client = _client(tmp_path, market_overview_provider=FakeMarketOverviewProvider())
+    app.state.auction_now = datetime(2026, 6, 26, 9, 26)
+
+    try:
+        response = client.get("/api/auction/snapshot?limit=2")
+    finally:
+        delattr(app.state, "auction_now")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session"] == "pre_open"
+    assert payload["metrics"]["candidate_count"] == 2
+    assert payload["items"][0]["symbol"] == "300001.SZ"
+    assert payload["items"][0]["auction_score"] > payload["items"][1]["auction_score"]
+    assert payload["items"][0]["current_pct_change"] == 12.0
+    assert payload["items"][0]["industry"] == "机器人"
+    assert payload["items"][0]["open_gap_pct"] == 8.0
+    assert payload["items"][0]["tier"] == "risk_overheat"
+    assert payload["items"][0]["action_note"] == "高开过热，只适合观察封单与承接，不追高。"
+    assert "竞价强势高开" in payload["items"][0]["signals"]
+    assert "高开需防冲高回落" in payload["items"][0]["risk_flags"]
+    assert payload["source_status"][0]["source"] == "TickFlow 全A实时行情"
+
+
+def test_auction_snapshot_endpoint_reuses_cached_provider_result(tmp_path: Path) -> None:
+    provider = CountingMarketRankingsProvider()
+    client = _client(tmp_path, market_overview_provider=provider)
+
+    first = client.get("/api/auction/snapshot?limit=2")
+    second = client.get("/api/auction/snapshot?limit=2")
+    third = client.get("/api/auction/snapshot?limit=3")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 200
+    assert provider.ranking_calls == [100]
 
 
 def test_sector_radar_returns_inflow_and_outflow_rankings(tmp_path: Path) -> None:

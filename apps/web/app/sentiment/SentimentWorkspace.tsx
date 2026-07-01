@@ -6,6 +6,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ComponentType } from "react";
 import {
+  getMarketRankings,
   getSentimentDetail,
   getSentimentMonitorStatus,
   getSentimentSummary,
@@ -21,6 +22,8 @@ import type {
   MarketEmotionBucket,
   MarketEmotionSample,
   MarketEmotionSnapshotResponse,
+  MarketRankingItem,
+  MarketRankingsResponse,
   SentimentDetailResponse,
   SentimentMonitorStatus,
   SentimentSummaryResponse,
@@ -57,11 +60,13 @@ export function SentimentWorkspace() {
   const [summary, setSummary] = useState<SentimentSummaryResponse | null>(null);
   const [data, setData] = useState<ShortTermSentimentResponse | null>(null);
   const [marketEmotion, setMarketEmotion] = useState<MarketEmotionSnapshotResponse | null>(null);
+  const [marketRankings, setMarketRankings] = useState<MarketRankingsResponse | null>(null);
   const [intraday, setIntraday] = useState<ShortTermIntradaySentimentResponse | null>(null);
   const [digest, setDigest] = useState<ShortTermIntradaySignalDigest | null>(null);
   const [monitorStatus, setMonitorStatus] = useState<SentimentMonitorStatus | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(true);
+  const [rankingsLoading, setRankingsLoading] = useState(true);
   const [intradayLoading, setIntradayLoading] = useState(false);
   const [digestLoading, setDigestLoading] = useState(false);
   const [sendingDigest, setSendingDigest] = useState(false);
@@ -81,6 +86,7 @@ export function SentimentWorkspace() {
       const nextSummary = await getSentimentSummary(date, 80, forceRefresh);
       setSummary(nextSummary);
       void loadSentimentDetail(date, forceRefresh);
+      void loadMarketRankings();
     } catch (err) {
       setError(err instanceof Error ? err.message : "读取短线情绪概览失败");
       setSummary(null);
@@ -90,6 +96,17 @@ export function SentimentWorkspace() {
     } finally {
       setSummaryLoading(false);
     }
+  }
+
+  async function loadMarketRankings() {
+    setRankingsLoading(true);
+    await getMarketRankings(20)
+      .then((nextRankings) => setMarketRankings(nextRankings))
+      .catch((err: unknown) => {
+        setMarketRankings(null);
+        setError(err instanceof Error ? err.message : "读取全A实时排行榜失败");
+      })
+      .finally(() => setRankingsLoading(false));
   }
 
   async function loadSentimentDetail(date = tradeDate, forceRefresh = false) {
@@ -272,6 +289,7 @@ export function SentimentWorkspace() {
       ) : summary || data ? (
         <div className="space-y-4">
           <MarketEmotionDashboard data={marketEmotion} loading={detailLoading} summary={summary} />
+          <MarketRankingsGrid loading={rankingsLoading} rankings={marketRankings} />
           <SentimentMonitorPanel
             busy={monitorBusy}
             onIntervalChange={(value) => void updateMonitorInterval(value)}
@@ -455,6 +473,105 @@ function SentimentMonitorPanel({
           <div className="rounded-lg border border-[#e3ddd3] bg-white p-3 text-xs text-[#7b756d]">
             暂无突变提醒。后台只在 09:25-11:30、13:00-15:05 自动采样；手动采样不受交易时段限制。
           </div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function MarketRankingsGrid({
+  loading,
+  rankings,
+}: {
+  loading: boolean;
+  rankings: MarketRankingsResponse | null;
+}) {
+  return (
+    <section className="grid gap-4 xl:grid-cols-2">
+      <MarketRankingPanel
+        items={rankings?.pct_change_rank ?? []}
+        loading={loading}
+        sourceStatus={rankings?.source_status ?? []}
+        title="TickFlow涨幅榜"
+        valueFormatter={formatPct}
+        valueLabel="涨幅"
+        valueOf={(item) => item.pct_change}
+      />
+      <MarketRankingPanel
+        items={rankings?.turnover_rank ?? []}
+        loading={loading}
+        sourceStatus={rankings?.source_status ?? []}
+        title="TickFlow成交额榜"
+        valueFormatter={formatCny}
+        valueLabel="成交额"
+        valueOf={(item) => item.turnover_cny}
+      />
+    </section>
+  );
+}
+
+function MarketRankingPanel({
+  items,
+  loading,
+  sourceStatus,
+  title,
+  valueFormatter,
+  valueLabel,
+  valueOf,
+}: {
+  items: MarketRankingItem[];
+  loading: boolean;
+  sourceStatus: Array<{ source: string; status: string; detail: string }>;
+  title: string;
+  valueFormatter: (value: number | null) => string;
+  valueLabel: string;
+  valueOf: (item: MarketRankingItem) => number | null;
+}) {
+  const tickflowStatus = sourceStatus.find((item) => item.source.includes("TickFlow"));
+  return (
+    <section className="workbench-panel rounded-xl border">
+      <div className="workbench-panel-divider flex items-center justify-between gap-3 border-b px-4 py-3">
+        <div>
+          <div className="text-sm font-black text-[#11100e]">{title}</div>
+          <div className="text-xs text-[#7b756d]">全A实时 quotes 批量排序，作为情绪强弱的直接观察窗口。</div>
+        </div>
+        <Tag color={tickflowStatus?.status === "success" ? "green" : "default"}>
+          {tickflowStatus?.status === "success" ? "实时" : "待更新"}
+        </Tag>
+      </div>
+      <div className="p-4">
+        {loading ? (
+          <Skeleton active paragraph={{ rows: 5 }} />
+        ) : items.length ? (
+          <div className="space-y-2">
+            {items.slice(0, 10).map((item, index) => {
+              const value = valueOf(item);
+              const isUp = (item.pct_change ?? 0) >= 0;
+              return (
+                <Link
+                  className="grid grid-cols-[34px_minmax(0,1fr)_92px] items-center gap-3 rounded-lg border border-[#e3ddd3] bg-white px-3 py-2 no-underline transition hover:border-[#c9bca8]"
+                  href={`/stock/${item.symbol}`}
+                  key={`${title}-${item.symbol}`}
+                >
+                  <span className="text-xs font-black text-[#7b756d]">#{index + 1}</span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-sm font-black text-[#11100e]">{item.name || item.symbol}</span>
+                    <span className="block truncate text-xs text-[#7b756d]">
+                      {item.symbol} · 换手 {formatPct(item.turnover_rate)}
+                    </span>
+                  </span>
+                  <span className="text-right">
+                    <span className={`block text-sm font-black ${isUp ? "text-[#d92d20]" : "market-green-text"}`}>
+                      {valueFormatter(value)}
+                    </span>
+                    <span className="block text-[11px] font-semibold text-[#7b756d]">{valueLabel}</span>
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        ) : (
+          <Empty description="暂无 TickFlow 排行数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />
         )}
       </div>
     </section>

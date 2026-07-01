@@ -138,16 +138,16 @@ class FakeMarketOverviewHttpClient:
                         "data": {
                             "total": 10,
                             "diff": [
-                                {"f3": 11.2, "f12": "300001", "f14": "超强科技"},
-                                {"f3": 8.1, "f12": "300002", "f14": "强势股份"},
-                                {"f3": 5.5, "f12": "600003", "f14": "上涨股份"},
-                                {"f3": 3.2, "f12": "600004", "f14": "温和上涨"},
-                                {"f3": 1.1, "f12": "600005", "f14": "微涨股份"},
-                                {"f3": -1.2, "f12": "600006", "f14": "微跌股份"},
-                                {"f3": -4.4, "f12": "600007", "f14": "弱势股份"},
-                                {"f3": -6.6, "f12": "600008", "f14": "大跌股份"},
-                                {"f3": -8.8, "f12": "600009", "f14": "深跌股份"},
-                                {"f3": -10.5, "f12": "600010", "f14": "跌停附近"},
+                                {"f3": 11.2, "f12": "300001", "f14": "超强科技", "f100": "机器人"},
+                                {"f3": 8.1, "f12": "300002", "f14": "强势股份", "f100": "机器人"},
+                                {"f3": 5.5, "f12": "600003", "f14": "上涨股份", "f100": "电池"},
+                                {"f3": 3.2, "f12": "600004", "f14": "温和上涨", "f100": "化工"},
+                                {"f3": 1.1, "f12": "600005", "f14": "微涨股份", "f100": "电子"},
+                                {"f3": -1.2, "f12": "600006", "f14": "微跌股份", "f100": "电子"},
+                                {"f3": -4.4, "f12": "600007", "f14": "弱势股份", "f100": "通信"},
+                                {"f3": -6.6, "f12": "600008", "f14": "大跌股份", "f100": "通信"},
+                                {"f3": -8.8, "f12": "600009", "f14": "深跌股份", "f100": "传媒"},
+                                {"f3": -10.5, "f12": "600010", "f14": "跌停附近", "f100": "煤炭"},
                             ]
                         }
                     }
@@ -230,6 +230,34 @@ class FakeTickFlowIndexQuoteProvider:
         return self.quotes
 
 
+class FakeTickFlowRankingQuoteProvider:
+    source_name = "TickFlow"
+
+    def __init__(self, universe_error: Exception | None = None) -> None:
+        self.calls: list[list[str]] = []
+        self.universe_calls: list[str] = []
+        self.universe_error = universe_error
+
+    def get_quotes(self, symbols: list[str]) -> list[TickFlowQuote]:
+        self.calls.append(symbols)
+        return self._quotes_for_symbols(symbols)
+
+    def get_quotes_by_universe(self, universe: str) -> list[TickFlowQuote]:
+        self.universe_calls.append(universe)
+        if self.universe_error is not None:
+            raise self.universe_error
+        return self._quotes_for_symbols(["300001.SZ", "300002.SZ", "600003.SH", "600004.SH"])
+
+    def _quotes_for_symbols(self, symbols: list[str]) -> list[TickFlowQuote]:
+        quote_map = {
+            "300001.SZ": TickFlowQuote(symbol="300001.SZ", name="创业一", last_price=11, pct_change=12.0, turnover_cny=300_000_000, turnover_rate=18.0, quote_time="2026-06-30T10:00:00+08:00"),
+            "300002.SZ": TickFlowQuote(symbol="300002.SZ", name="创业二", last_price=12, pct_change=8.5, turnover_cny=900_000_000, turnover_rate=9.0, quote_time="2026-06-30T10:00:00+08:00"),
+            "600003.SH": TickFlowQuote(symbol="600003.SH", name="沪市三", last_price=13, pct_change=3.2, turnover_cny=1_500_000_000, turnover_rate=5.0, quote_time="2026-06-30T10:00:00+08:00"),
+            "600004.SH": TickFlowQuote(symbol="600004.SH", name="沪市四", last_price=14, pct_change=-2.0, turnover_cny=200_000_000, turnover_rate=2.0, quote_time="2026-06-30T10:00:00+08:00"),
+        }
+        return [quote_map[symbol] for symbol in symbols if symbol in quote_map]
+
+
 class FakeIfindIndexProvider:
     def __init__(self, payload: object | None = None, error: Exception | None = None) -> None:
         self.payload = payload
@@ -243,6 +271,52 @@ class FakeIfindIndexProvider:
         if self.error is not None:
             raise self.error
         return self.payload
+
+
+class FakeIfindIndustryProvider:
+    def __init__(self, industry_by_symbol: dict[str, str]) -> None:
+        self.industry_by_symbol = industry_by_symbol
+        self.calls: list[list[str]] = []
+
+    def status(self):
+        from app.models import StrongStockSourceStatus
+
+        return StrongStockSourceStatus(source="iFinD MCP", status="success", detail="fake ifind configured")
+
+    def get_stock_industries(self, symbols: list[str]) -> dict[str, str]:
+        self.calls.append(symbols)
+        return {symbol: self.industry_by_symbol[symbol] for symbol in symbols if symbol in self.industry_by_symbol}
+
+
+class FailingAshareIndustryHttpClient(FakeMarketOverviewHttpClient):
+    def get(self, url: str, **kwargs: object) -> FakeResponse:
+        params = kwargs.get("params", {})
+        if (
+            "clist/get" in url
+            and isinstance(params, dict)
+            and params.get("fs") == "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
+        ):
+            raise RuntimeError("eastmoney stock pool down")
+        return super().get(url, **kwargs)
+
+
+class BatchIndustryFallbackHttpClient(FailingAshareIndustryHttpClient):
+    def get(self, url: str, **kwargs: object) -> FakeResponse:
+        params = kwargs.get("params", {})
+        if "ulist.np/get" in url and isinstance(params, dict) and params.get("fields") == "f12,f14,f100":
+            return FakeResponse(
+                {
+                    "data": {
+                        "diff": [
+                            {"f12": "300001", "f14": "创业一", "f100": "电网设备"},
+                            {"f12": "300002", "f14": "创业二", "f100": "游戏Ⅱ"},
+                            {"f12": "600003", "f14": "沪市三", "f100": "电池"},
+                            {"f12": "600004", "f14": "沪市四", "f100": "航空机场"},
+                        ]
+                    }
+                }
+            )
+        return super().get(url, **kwargs)
 
 
 def test_tickflow_status_reports_missing_key_without_fake_quotes() -> None:
@@ -452,6 +526,134 @@ def test_market_overview_provider_returns_realtime_pct_change_distribution() -> 
     ]
     assert sum(bucket.count or 0 for bucket in buckets) == 10
     assert [bucket.count for bucket in buckets] == [1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+
+
+def test_market_overview_provider_builds_tickflow_full_a_rankings() -> None:
+    quote_provider = FakeTickFlowRankingQuoteProvider()
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FakeMarketOverviewHttpClient(),
+        realtime_quote_provider=quote_provider,
+    )
+
+    rankings = provider.get_market_rankings(limit=3, batch_size=2)
+
+    assert quote_provider.universe_calls == ["CN_Equity_A"]
+    assert quote_provider.calls == []
+    assert rankings.trade_date == "2026-06-30"
+    assert [item.symbol for item in rankings.pct_change_rank] == [
+        "300001.SZ",
+        "300002.SZ",
+        "600003.SH",
+    ]
+    assert [item.industry for item in rankings.pct_change_rank] == ["机器人", "机器人", "电池"]
+    assert [item.symbol for item in rankings.turnover_rank] == [
+        "600003.SH",
+        "300002.SZ",
+        "300001.SZ",
+    ]
+    assert rankings.buckets[0].source == "TickFlow 全A实时行情"
+    assert sum(bucket.count or 0 for bucket in rankings.buckets) == 4
+    assert [status.source for status in rankings.source_status] == [
+        "TickFlow 全A标的池",
+        "TickFlow 全A实时行情",
+    ]
+    assert rankings.source_status[1].status == "success"
+
+
+def test_market_overview_provider_supplements_missing_industries_from_ifind() -> None:
+    quote_provider = FakeTickFlowRankingQuoteProvider()
+    ifind_provider = FakeIfindIndustryProvider(
+        {
+            "300001.SZ": "人形机器人",
+            "300002.SZ": "固态电池",
+            "600003.SH": "算力设备",
+            "600004.SH": "基础化工",
+        }
+    )
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FailingAshareIndustryHttpClient(),
+        realtime_quote_provider=quote_provider,
+        ifind_stock_provider=ifind_provider,
+    )
+
+    rankings = provider.get_market_rankings(limit=4, batch_size=2)
+
+    assert ifind_provider.calls == [["300001.SZ", "300002.SZ", "600003.SH", "600004.SH"]]
+    assert [item.industry for item in rankings.pct_change_rank] == ["人形机器人", "固态电池", "算力设备", "基础化工"]
+    assert rankings.turnover_rank[0].industry == "算力设备"
+    assert any(
+        status.source == "iFinD 行业补充"
+        and status.status == "success"
+        and "补齐 4/4" in status.detail
+        for status in rankings.source_status
+    )
+
+
+def test_market_overview_provider_supplements_missing_industries_from_eastmoney_batch() -> None:
+    quote_provider = FakeTickFlowRankingQuoteProvider()
+    ifind_provider = FakeIfindIndustryProvider({"300001.SZ": "不应调用"})
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=BatchIndustryFallbackHttpClient(),
+        realtime_quote_provider=quote_provider,
+        ifind_stock_provider=ifind_provider,
+    )
+
+    rankings = provider.get_market_rankings(limit=4, batch_size=2)
+
+    assert ifind_provider.calls == []
+    assert [item.industry for item in rankings.pct_change_rank] == ["电网设备", "游戏Ⅱ", "电池", "航空机场"]
+    assert any(
+        status.source == "东方财富行业补充"
+        and status.status == "success"
+        and "补齐 4/4" in status.detail
+        for status in rankings.source_status
+    )
+
+
+def test_market_overview_provider_falls_back_to_stock_pool_when_tickflow_universe_fails() -> None:
+    quote_provider = FakeTickFlowRankingQuoteProvider(universe_error=RuntimeError("universe unavailable"))
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FakeMarketOverviewHttpClient(),
+        realtime_quote_provider=quote_provider,
+    )
+
+    rankings = provider.get_market_rankings(limit=3, batch_size=2)
+
+    assert quote_provider.universe_calls == ["CN_Equity_A"]
+    assert quote_provider.calls == [
+        ["300001.SZ", "300002.SZ"],
+        ["600003.SH", "600004.SH"],
+        ["600005.SH", "600006.SH"],
+        ["600007.SH", "600008.SH"],
+        ["600009.SH", "600010.SH"],
+    ]
+    assert [item.symbol for item in rankings.pct_change_rank] == [
+        "300001.SZ",
+        "300002.SZ",
+        "600003.SH",
+    ]
+    assert [status.source for status in rankings.source_status] == [
+        "TickFlow 全A标的池",
+        "东方财富全A股票池",
+        "TickFlow 全A实时行情",
+    ]
+    assert rankings.source_status[0].status == "failed"
+    assert "fallback 到东方财富股票池" in rankings.source_status[0].detail
+
+
+def test_market_overview_provider_prefers_tickflow_for_pct_change_distribution() -> None:
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FakeMarketOverviewHttpClient(),
+        realtime_quote_provider=FakeTickFlowRankingQuoteProvider(),
+    )
+
+    buckets, status = provider.get_pct_change_distribution()
+
+    assert status.source == "TickFlow 全A实时涨跌幅"
+    assert status.status == "success"
+    assert "全A实时行情返回 4 只股票" in status.detail
+    assert sum(bucket.count or 0 for bucket in buckets) == 4
+    assert buckets[0].source == "TickFlow 全A实时行情"
 
 
 def test_market_overview_provider_uses_direct_limit_down_pool() -> None:
@@ -696,6 +898,49 @@ def test_ifind_stock_research_extracts_valuation_from_markdown_answer_table() ->
     assert research.valuation["静态市盈率"] == "95.0509"
 
 
+class FakeIfindIndustryHttpClient:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, object]] = []
+
+    def post(self, url: str, **kwargs: object) -> FakeResponse:
+        self.requests.append({"url": url, **kwargs})
+        return FakeResponse(
+            {
+                "result": {
+                    "structuredContent": {
+                        "code": 1,
+                        "msg": "success",
+                        "data": {
+                            "answer": (
+                                "|证券代码|证券简称|所属行业|所属申万行业|\n"
+                                "|---|---|---|---|\n"
+                                "|300001.SZ|创业一|机器人|自动化设备|\n"
+                                "|600003.SH|沪市三|电池|电池II|\n"
+                            )
+                        },
+                    }
+                }
+            }
+        )
+
+
+def test_ifind_stock_industries_extracts_markdown_answer_table() -> None:
+    client = FakeIfindIndustryHttpClient()
+    provider = IfindMcpProvider(
+        api_key="ifind-test",
+        base_url="https://api-mcp.51ifind.com:8643",
+        http_client=client,
+    )
+
+    industries = provider.get_stock_industries(["300001.SZ", "600003.SH"])
+
+    assert industries == {"300001.SZ": "自动化设备", "600003.SH": "电池II"}
+    assert client.requests[0]["json"]["params"]["name"] == "get_stock_info"
+    query = client.requests[0]["json"]["params"]["arguments"]["query"]
+    assert "所属行业" in query
+    assert "所属申万行业" in query
+
+
 def test_analyze_negative_news_rows_flags_regulatory_and_loss_keywords() -> None:
     risk = analyze_negative_news_rows(
         [
@@ -830,6 +1075,72 @@ def test_tickflow_provider_maps_quote_payload() -> None:
     assert client.last_request["url"] == "https://api.tickflow.org/v1/quotes"
 
 
+def test_tickflow_provider_can_query_quotes_by_universe() -> None:
+    client = FakeHttpClient(
+        {
+            "data": [
+                {
+                    "symbol": "600000.SH",
+                    "last_price": 8.58,
+                    "prev_close": 8.61,
+                    "open": 8.58,
+                    "high": 8.58,
+                    "low": 8.58,
+                    "volume": 2790,
+                    "amount": 2393800,
+                    "timestamp": 1782869101000,
+                    "ext": {
+                        "type": "cn_equity",
+                        "name": "浦发银行",
+                        "change_pct": -0.003484320557491215,
+                        "turnover_rate": 8.376909702344889e-6,
+                    },
+                }
+            ]
+        }
+    )
+    provider = TickFlowQuoteProvider(
+        api_key="tk-test",
+        base_url="https://api.tickflow.org",
+        http_client=client,
+    )
+
+    quotes = provider.get_quotes_by_universe("CN_Equity_A")
+
+    assert quotes[0].symbol == "600000.SH"
+    assert quotes[0].name == "浦发银行"
+    assert quotes[0].pct_change == -0.3484
+    assert quotes[0].turnover_rate == 0.0008
+    assert quotes[0].turnover_cny == 2393800.0
+    assert client.last_request is not None
+    assert client.last_request["url"] == "https://api.tickflow.org/v1/quotes"
+    assert client.last_request["json"] == {"universes": ["CN_Equity_A"]}
+
+
+def test_tickflow_provider_http_error_includes_api_error_body() -> None:
+    provider = TickFlowQuoteProvider(
+        api_key="tk-test",
+        base_url="https://api.tickflow.org",
+        http_client=FakeQuoteErrorHttpClient(
+            FakeStatusResponse(
+                {"code": "INVALID_SYMBOL", "message": "invalid symbol format"},
+                status_code=400,
+            )
+        ),
+    )
+
+    try:
+        provider.get_quotes(["bad"])
+    except StrongStockDataUnavailable as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected TickFlow quote request to fail")
+
+    assert "HTTP 400" in message
+    assert "INVALID_SYMBOL" in message
+    assert "invalid symbol format" in message
+
+
 class FakeSequentialHttpClient:
     def __init__(self, payloads: list[object]) -> None:
         self.payloads = payloads
@@ -852,6 +1163,14 @@ class FakeStatusResponse(FakeResponse):
             request = httpx.Request("GET", "https://api.tickflow.org/test")
             response = httpx.Response(self.status_code, request=request, json=self.payload)
             raise httpx.HTTPStatusError("boom", request=request, response=response)
+
+
+class FakeQuoteErrorHttpClient:
+    def __init__(self, response: FakeStatusResponse) -> None:
+        self.response = response
+
+    def post(self, url: str, **kwargs: object) -> FakeStatusResponse:
+        return self.response
 
 
 class FakeIntradayBatchHttpClient:

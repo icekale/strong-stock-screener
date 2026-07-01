@@ -1,4 +1,5 @@
 import type {
+  AuctionSnapshotResponse,
   DataSourceStatusResponse,
   GsgfAnalysis,
   GsgfBacktestSummary,
@@ -8,6 +9,7 @@ import type {
   GsgfTradePlan,
   MarketEmotionSnapshotResponse,
   MarketOverviewResponse,
+  MarketRankingsResponse,
   NotificationChannelConfig,
   NotificationSendResult,
   RuntimeSettingsHealthResponse,
@@ -55,6 +57,22 @@ export async function getMarketOverview(): Promise<MarketOverviewResponse> {
     throw new Error(`读取全A市场概览失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<MarketOverviewResponse>;
+}
+
+export async function getMarketRankings(limit = 30): Promise<MarketRankingsResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/market/rankings?limit=${encodeURIComponent(limit)}`);
+  if (!response.ok) {
+    throw new Error(`读取全A实时排行榜失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<MarketRankingsResponse>;
+}
+
+export async function getAuctionSnapshot(limit = 100): Promise<AuctionSnapshotResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/auction/snapshot?limit=${encodeURIComponent(limit)}`);
+  if (!response.ok) {
+    throw new Error(`读取竞价雷达失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<AuctionSnapshotResponse>;
 }
 
 export async function getSectorRadar(limit = 20): Promise<SectorRadarResponse> {

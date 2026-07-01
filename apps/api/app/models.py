@@ -378,6 +378,68 @@ class MarketOverviewResponse(BaseModel):
     )
 
 
+class MarketRankingItem(BaseModel):
+    symbol: str
+    name: str | None = None
+    industry: str | None = None
+    last_price: float | None = None
+    pct_change: float | None = None
+    current_pct_change: float | None = None
+    open_price: float | None = None
+    prev_close: float | None = None
+    turnover_rate: float | None = None
+    turnover_cny: float | None = None
+    volume: float | None = None
+    quote_time: str | None = None
+
+
+class MarketRankingsResponse(BaseModel):
+    trade_date: str | None = None
+    pct_change_rank: list[MarketRankingItem] = Field(default_factory=list)
+    turnover_rank: list[MarketRankingItem] = Field(default_factory=list)
+    buckets: list["MarketEmotionBucket"] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
+class AuctionSnapshotMetrics(BaseModel):
+    candidate_count: int = 0
+    strong_high_open_count: int = 0
+    high_risk_count: int = 0
+    total_turnover_cny: float | None = None
+
+
+class AuctionSnapshotItem(BaseModel):
+    symbol: str
+    name: str | None = None
+    industry: str | None = None
+    last_price: float | None = None
+    current_pct_change: float | None = None
+    open_gap_pct: float | None = None
+    turnover_rate: float | None = None
+    turnover_cny: float | None = None
+    volume: float | None = None
+    auction_score: float = 0
+    tier: str = "neutral"
+    action_note: str | None = None
+    signals: list[str] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    quote_time: str | None = None
+
+
+class AuctionSnapshotResponse(BaseModel):
+    trade_date: str | None = None
+    session: str = "unknown"
+    metrics: AuctionSnapshotMetrics = Field(default_factory=AuctionSnapshotMetrics)
+    items: list[AuctionSnapshotItem] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
 class SectorRadarItem(BaseModel):
     name: str
     source: str

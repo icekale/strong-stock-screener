@@ -270,6 +270,58 @@ export type MarketOverviewResponse = {
   generated_at: string;
 };
 
+export type MarketRankingItem = {
+  symbol: string;
+  name: string | null;
+  last_price: number | null;
+  pct_change: number | null;
+  turnover_rate: number | null;
+  turnover_cny: number | null;
+  volume: number | null;
+  quote_time: string | null;
+};
+
+export type MarketRankingsResponse = {
+  trade_date: string | null;
+  pct_change_rank: MarketRankingItem[];
+  turnover_rank: MarketRankingItem[];
+  buckets: MarketEmotionBucket[];
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
+export type AuctionSnapshotItem = {
+  symbol: string;
+  name: string | null;
+  industry: string | null;
+  last_price: number | null;
+  current_pct_change: number | null;
+  open_gap_pct: number | null;
+  turnover_rate: number | null;
+  turnover_cny: number | null;
+  volume: number | null;
+  auction_score: number;
+  tier: "strong_high_open" | "volume_leader" | "risk_overheat" | "weak_low_open" | "reversal_watch" | "neutral";
+  action_note: string | null;
+  signals: string[];
+  risk_flags: string[];
+  quote_time: string | null;
+};
+
+export type AuctionSnapshotResponse = {
+  trade_date: string | null;
+  session: "call_auction" | "pre_open" | "continuous" | "closed" | "unknown";
+  metrics: {
+    candidate_count: number;
+    strong_high_open_count: number;
+    high_risk_count: number;
+    total_turnover_cny: number | null;
+  };
+  items: AuctionSnapshotItem[];
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
 export type SectorRadarItem = {
   name: string;
   source: string;

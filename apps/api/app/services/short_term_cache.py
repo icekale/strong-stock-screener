@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from threading import RLock
+from threading import Thread
 from time import monotonic
 from typing import Callable, Generic, TypeVar
 
@@ -11,6 +12,7 @@ class TtlCache(Generic[T]):
     def __init__(self, ttl_seconds: float = 90) -> None:
         self.ttl_seconds = ttl_seconds
         self._items: dict[str, tuple[float, T]] = {}
+        self._refreshing: set[str] = set()
         self._lock = RLock()
 
     def get_or_set(self, key: str, factory: Callable[[], T]) -> T:
@@ -25,6 +27,36 @@ class TtlCache(Generic[T]):
             self._items[key] = (monotonic() + self.ttl_seconds, value)
             return value
 
+    def get_or_refresh(self, key: str, factory: Callable[[], T]) -> T:
+        with self._lock:
+            now = monotonic()
+            cached = self._items.get(key)
+            if cached is not None:
+                expires_at, value = cached
+                if expires_at > now:
+                    return value
+                if key not in self._refreshing:
+                    self._refreshing.add(key)
+                    Thread(target=self._refresh, args=(key, factory), daemon=True).start()
+                return value
+
+        value = factory()
+        with self._lock:
+            self._items[key] = (monotonic() + self.ttl_seconds, value)
+        return value
+
     def clear(self) -> None:
         with self._lock:
             self._items.clear()
+            self._refreshing.clear()
+
+    def _refresh(self, key: str, factory: Callable[[], T]) -> None:
+        try:
+            value = factory()
+            with self._lock:
+                self._items[key] = (monotonic() + self.ttl_seconds, value)
+        except Exception:
+            pass
+        finally:
+            with self._lock:
+                self._refreshing.discard(key)

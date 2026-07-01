@@ -7,6 +7,7 @@ import {
   FundProjectionScreenOutlined,
   ThunderboltOutlined,
   LineChartOutlined,
+  RiseOutlined,
   SettingOutlined,
 } from "@ant-design/icons";
 import { Layout, Tooltip, Typography } from "antd";
@@ -42,6 +43,13 @@ const NAV_ITEMS: NavItem[] = [
     icon: <FundProjectionScreenOutlined />,
     label: "板块",
     title: "板块资金流",
+  },
+  {
+    href: "/auction",
+    key: "/auction",
+    icon: <RiseOutlined />,
+    label: "竞价",
+    title: "竞价雷达",
   },
   {
     href: "/sentiment",
@@ -154,6 +162,9 @@ function selectedNavKey(pathname: string): string {
   }
   if (pathname.startsWith("/sectors")) {
     return "/sectors";
+  }
+  if (pathname.startsWith("/auction")) {
+    return "/auction";
   }
   if (pathname.startsWith("/sentiment")) {
     return "/sentiment";

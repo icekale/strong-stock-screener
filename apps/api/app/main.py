@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.models import (
+    AuctionSnapshotResponse,
     GsgfAnalysis,
     GsgfBacktestSummary,
     GsgfRealCalibrationSummary,
@@ -19,6 +20,7 @@ from app.models import (
     KlineBar,
     MarketEmotionSnapshotResponse,
     MarketOverviewResponse,
+    MarketRankingsResponse,
     MarketSectorStrengthItem,
     ScreenStrategy,
     SectorRadarItem,
@@ -52,6 +54,7 @@ from app.services.gsgf_backtest import summarize_gsgf_backtest
 from app.services.gsgf_real_calibration import summarize_gsgf_real_calibration
 from app.services.gsgf_review import GsgfReviewStore
 from app.services.gsgf_trade_plan import build_gsgf_trade_plan
+from app.services.auction import build_auction_snapshot
 from app.services.market_emotion_history import MarketEmotionHistoryStore
 from app.services.runs import RunStore
 from app.services.runtime_settings import (
@@ -184,6 +187,8 @@ app.add_middleware(
 SHORT_TERM_SENTIMENT_CACHE: TtlCache[ShortTermSentimentResponse] = TtlCache(ttl_seconds=90)
 MARKET_EMOTION_CACHE: TtlCache[MarketEmotionSnapshotResponse] = TtlCache(ttl_seconds=45)
 MARKET_OVERVIEW_CACHE: TtlCache[MarketOverviewResponse] = TtlCache(ttl_seconds=45)
+MARKET_RANKINGS_CACHE: TtlCache[MarketRankingsResponse] = TtlCache(ttl_seconds=45)
+AUCTION_SNAPSHOT_CACHE: TtlCache[AuctionSnapshotResponse] = TtlCache(ttl_seconds=15)
 SECTOR_RADAR_CACHE: TtlCache[SectorRadarResponse] = TtlCache(ttl_seconds=45)
 STOCK_KLINE_CACHE: TtlCache[StockKlineResponse] = TtlCache(ttl_seconds=300)
 STOCK_RESEARCH_CACHE: TtlCache[StockResearchResponse] = TtlCache(ttl_seconds=900)
@@ -470,6 +475,30 @@ def recheck_gsgf_review(request: GsgfReviewRecheckRequest) -> dict[str, object]:
 @app.get("/api/market/overview")
 def get_market_overview() -> dict[str, object]:
     result = _cached_market_overview()
+    return result.model_dump(mode="json")
+
+
+@app.get("/api/market/rankings")
+def get_market_rankings(limit: int = 50) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 100))
+    try:
+        result = _cached_market_rankings(bounded_limit)
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"全A实时排行榜获取失败: {exc.__class__.__name__}") from exc
+    return result.model_dump(mode="json")
+
+
+@app.get("/api/auction/snapshot")
+def get_auction_snapshot(limit: int = 100) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 100))
+    try:
+        result = _cached_auction_snapshot(bounded_limit)
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"竞价雷达获取失败: {exc.__class__.__name__}") from exc
     return result.model_dump(mode="json")
 
 
@@ -812,6 +841,30 @@ def _cached_market_overview() -> MarketOverviewResponse:
     return MARKET_OVERVIEW_CACHE.get_or_set(cache_key, provider.get_overview).model_copy(deep=True)
 
 
+def _cached_market_rankings(limit: int) -> MarketRankingsResponse:
+    provider = _market_overview_provider()
+    cache_key = f"market-rankings:{_provider_cache_key(provider)}:{limit}"
+    if not hasattr(provider, "get_market_rankings"):
+        raise StrongStockDataUnavailable("当前市场概览源不支持全A实时排行榜")
+    return MARKET_RANKINGS_CACHE.get_or_refresh(
+        cache_key,
+        lambda: provider.get_market_rankings(limit=limit),
+    ).model_copy(deep=True)
+
+
+def _cached_auction_snapshot(limit: int) -> AuctionSnapshotResponse:
+    provider = _market_overview_provider()
+    cache_key = f"auction-snapshot:{_provider_cache_key(provider)}:{limit}"
+    return AUCTION_SNAPSHOT_CACHE.get_or_refresh(
+        cache_key,
+        lambda: build_auction_snapshot(
+            _cached_market_rankings(max(limit, 100)),
+            limit=limit,
+            now=getattr(app.state, "auction_now", None),
+        ),
+    ).model_copy(deep=True)
+
+
 def _cached_sector_radar(limit: int) -> SectorRadarResponse:
     provider = _market_overview_provider()
     cache_key = f"sector-radar:{_provider_cache_key(provider)}:{limit}"
@@ -890,6 +943,8 @@ def _clear_data_source_caches() -> None:
         SHORT_TERM_SENTIMENT_CACHE,
         MARKET_EMOTION_CACHE,
         MARKET_OVERVIEW_CACHE,
+        MARKET_RANKINGS_CACHE,
+        AUCTION_SNAPSHOT_CACHE,
         SECTOR_RADAR_CACHE,
         STOCK_KLINE_CACHE,
         STOCK_RESEARCH_CACHE,
@@ -1036,6 +1091,7 @@ def _market_overview_provider() -> object:
         timeout_seconds=settings.provider_timeout_seconds,
         realtime_quote_provider=_quote_provider(),
         ifind_index_provider=_ifind_provider(),
+        ifind_stock_provider=_ifind_provider(),
     )
 
 

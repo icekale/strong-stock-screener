@@ -198,6 +198,49 @@ class IfindMcpProvider:
         response.sector = _coerce_mapping(sector)
         return response
 
+    def get_stock_industries(self, symbols: list[str], batch_size: int = 5) -> dict[str, str]:
+        if not self.api_key:
+            return {}
+        normalized_symbols = _dedupe_symbols(symbols)
+        if not normalized_symbols:
+            return {}
+        bounded_batch_size = max(1, min(batch_size, 5))
+        output: dict[str, str] = {}
+        for start in range(0, len(normalized_symbols), bounded_batch_size):
+            batch = normalized_symbols[start : start + bounded_batch_size]
+            payload = self.call_tool(
+                "hexin-ifind-ds-stock-mcp",
+                "get_stock_info",
+                {
+                    "query": (
+                        "查询这些股票的证券代码、股票简称、所属行业、所属申万行业："
+                        + "、".join(batch)
+                    )
+                },
+            )
+            for row in _coerce_records_from_answer(payload):
+                symbol = _normalize_stock_symbol(
+                    row.get("证券代码")
+                    or row.get("股票代码")
+                    or row.get("代码")
+                    or row.get("symbol")
+                    or row.get("Symbol")
+                )
+                industry = _first_text(
+                    row,
+                    [
+                        "所属申万行业",
+                        "申万行业",
+                        "所属行业",
+                        "行业",
+                        "行业分类",
+                        "证监会行业",
+                    ],
+                )
+                if symbol and industry:
+                    output[symbol] = industry
+        return output
+
     def _safe_tool_call(
         self,
         service_id: str,
@@ -311,6 +354,14 @@ def _coerce_records(value: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _coerce_records_from_answer(value: Any) -> list[dict[str, Any]]:
+    if isinstance(value, dict):
+        answer_rows = _extract_answer_table_rows(value)
+        if answer_rows:
+            return answer_rows
+    return _coerce_records(value)
+
+
 def _extract_answer_table_rows(value: dict[str, Any]) -> list[dict[str, str]]:
     data = value.get("data")
     if not isinstance(data, dict):
@@ -377,3 +428,44 @@ def _with_valuation_aliases(payload: dict[str, Any]) -> dict[str, Any]:
                 result["静态市盈率"] = result[key]
                 break
     return result
+
+
+def _dedupe_symbols(symbols: list[str]) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for symbol in symbols:
+        normalized = _normalize_stock_symbol(symbol)
+        if normalized and normalized not in seen:
+            output.append(normalized)
+            seen.add(normalized)
+    return output
+
+
+def _normalize_stock_symbol(value: object) -> str:
+    text = str(value or "").strip().upper()
+    if not text:
+        return ""
+    if "." in text:
+        code, suffix = text.split(".", 1)
+        if len(code) == 6 and code.isdigit() and suffix in {"SH", "SZ", "BJ"}:
+            return f"{code}.{suffix}"
+    digits = "".join(ch for ch in text if ch.isdigit())
+    if len(digits) != 6:
+        return ""
+    if digits.startswith(("6", "9")):
+        return f"{digits}.SH"
+    if digits.startswith(("0", "2", "3")):
+        return f"{digits}.SZ"
+    if digits.startswith(("4", "8")) or digits.startswith("92"):
+        return f"{digits}.BJ"
+    return ""
+
+
+def _first_text(payload: dict[str, Any], keys: list[str]) -> str | None:
+    for key in keys:
+        value = payload.get(key)
+        if value is not None:
+            text = str(value).strip()
+            if text and text != "--":
+                return text
+    return None

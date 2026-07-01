@@ -10,8 +10,9 @@
 
 - GitHub 仓库：https://github.com/icekale/strong-stock-screener
 - GitHub Releases：https://github.com/icekale/strong-stock-screener/releases
-- Docker Hub API 镜像：https://hub.docker.com/r/icekale/strong-stock-screener-api
-- Docker Hub Web 镜像：https://hub.docker.com/r/icekale/strong-stock-screener-web
+- Docker Hub 单容器镜像：https://hub.docker.com/r/icekale/strong-stock-screener
+- Docker Hub API 镜像（旧双容器模式）：https://hub.docker.com/r/icekale/strong-stock-screener-api
+- Docker Hub Web 镜像（旧双容器模式）：https://hub.docker.com/r/icekale/strong-stock-screener-web
 - Docker 标签：`latest`，并保留构建时的提交标签，例如 `4d3bf4a`
 
 ## 功能概览
@@ -27,7 +28,7 @@
 - 自动复盘：保存 GSGF 信号快照，定期复查确认买点、低吸观察、B 区 A 点、放量突破确认等分桶表现。
 - 真实样本校准：用 TickFlow 数据跑真实样本，生成模型健康摘要和信号退化提醒。
 - 数据源设置页：可在 UI 查看 TickFlow、iFinD key 状态、数据源健康检查、请求延迟和 fallback 情况。
-- 独立部署：后端 FastAPI，前端 Next.js，支持 Docker Compose 本地构建，也支持 Docker Hub 预构建镜像。
+- 独立部署：后端 FastAPI，前端 Next.js，默认使用 Docker Hub 单容器镜像，也保留双容器本地构建方式。
 
 ## 技术栈
 
@@ -43,7 +44,9 @@
 ├── apps
 │   ├── api          # FastAPI 后端，默认端口 8010
 │   └── web          # Next.js 前端，默认端口 3110
+├── Dockerfile       # 单容器镜像，内部同时启动 API 和 Web
 ├── docker-compose.yml
+├── docker-compose.dual.yml
 ├── .env.example
 └── README.md
 ```
@@ -63,35 +66,7 @@ Docker Compose 默认把后端数据保存到项目目录的 `data/`，用于持
 
 ## Docker Compose 部署
 
-### 方式 A：使用 Docker Hub 预构建镜像
-
-镜像已发布到 Docker Hub：
-
-```bash
-docker pull icekale/strong-stock-screener-api:latest
-docker pull icekale/strong-stock-screener-web:latest
-```
-
-也可以固定到提交标签，例如：
-
-```bash
-docker pull icekale/strong-stock-screener-api:4d3bf4a
-docker pull icekale/strong-stock-screener-web:4d3bf4a
-```
-
-当前仓库的 `docker-compose.yml` 默认走本地构建，适合开发和二次修改。如果只想使用 Docker Hub 镜像，可以把 compose 里的 `build` 改成：
-
-```yaml
-api:
-  image: icekale/strong-stock-screener-api:latest
-
-web:
-  image: icekale/strong-stock-screener-web:latest
-```
-
-环境变量仍按下面的 `.env` 配置。
-
-### 方式 B：本地构建运行
+默认推荐使用单容器镜像：一个 Docker Hub 镜像内同时运行 FastAPI 和 Next.js。Unraid 只需要从 Docker Hub 拉取 `icekale/strong-stock-screener:latest`，不需要在 NAS 上本地构建。
 
 ### 1. 准备环境变量
 
@@ -110,47 +85,46 @@ STRONG_STOCK_IFIND_SERVICE_ID=hexin-ifind-ds-stock-mcp
 STRONG_STOCK_CANDIDATE_PROVIDER=recent_limit_up
 STRONG_STOCK_DATA_DIR=./data
 STRONG_STOCK_CORS_ALLOW_ORIGINS=http://localhost:3110,http://127.0.0.1:3110
-NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL=http://localhost:8010
 ```
 
 如果暂时不填 TickFlow key，后端会显示 `missing_key`，选股和 K 线能力会受限。
 如果暂时不填 iFinD key，研究增强能力会显示 `missing_key`，但不会影响 TickFlow 行情和现有选股主流程。
 
-部署到 Unraid 或局域网服务器时，把浏览器可访问的 API 地址写进 `.env`，例如：
-
-```bash
-NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL=http://192.168.5.28:8010
-STRONG_STOCK_CORS_ALLOW_ORIGINS=http://192.168.5.28:3110,http://localhost:3110,http://127.0.0.1:3110
-```
+单容器镜像内置同源 API 代理，浏览器访问 `http://服务器IP:3110` 即可，前端会通过 `/api/*` 代理到容器内部 FastAPI，不需要额外暴露 `8010` 端口。
 
 ### 2. 启动
 
 ```bash
-docker compose up --build
-# 或者：docker-compose up --build
+docker compose up -d
+# 或者：docker-compose up -d
 ```
 
 启动后访问：
 
 - 前端工作台：http://localhost:3110
-- 后端健康检查：http://localhost:8010/health
+- 后端健康检查：http://localhost:3110/health
 - 数据源设置：http://localhost:3110/settings
 - 自选股管理：http://localhost:3110/watchlist
 
-### 3. 后台运行
+### 3. 固定镜像标签
+
+`docker-compose.yml` 默认使用：
+
+```yaml
+image: icekale/strong-stock-screener:${STRONG_STOCK_IMAGE_TAG:-latest}
+```
+
+如需固定版本，可以在 `.env` 中设置：
 
 ```bash
-docker compose up -d --build
-# 或者：docker-compose up -d --build
+STRONG_STOCK_IMAGE_TAG=提交短哈希
 ```
 
 ### 4. 查看日志
 
 ```bash
-docker compose logs -f api
-docker compose logs -f web
-# 或者：docker-compose logs -f api
-# 或者：docker-compose logs -f web
+docker compose logs -f strong-stock-screener
+# 或者：docker-compose logs -f strong-stock-screener
 ```
 
 ### 5. 停止
@@ -161,6 +135,19 @@ docker compose down
 ```
 
 如需清空筛选记录、自选股和 UI 保存的运行时配置，停止服务后删除项目目录下的 `data/`。公开仓库已忽略该目录，请不要把 key 或运行数据提交到 Git。
+
+### 6. 旧双容器本地构建
+
+如果需要回滚到 API/Web 双容器开发模式，可以使用：
+
+```bash
+docker compose -f docker-compose.dual.yml up -d --build
+```
+
+双容器模式会暴露：
+
+- Web：http://localhost:3110
+- API：http://localhost:8010/health
 
 ## 本地开发
 
@@ -202,9 +189,8 @@ corepack pnpm test
 Docker：
 
 ```bash
-docker compose build
 docker compose up -d
-curl http://localhost:8010/health
+curl http://localhost:3110/health
 # 如果你的环境只支持旧版命令，把 docker compose 换成 docker-compose
 ```
 

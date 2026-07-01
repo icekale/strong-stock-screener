@@ -4,8 +4,8 @@ import { ReloadOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Empty, InputNumber, Progress, Space, Table, Tag, Typography } from "antd";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { addWatchlistPoolItem, getAuctionSnapshot } from "../../lib/api";
-import type { AuctionSnapshotItem, AuctionSnapshotResponse } from "../../lib/types";
+import { addWatchlistPoolItem, getAuctionLatest, getAuctionSnapshot, getAuctionTimeline } from "../../lib/api";
+import type { AuctionSnapshotItem, AuctionSnapshotResponse, AuctionTimelineResponse } from "../../lib/types";
 
 type AuctionTierFilter = "all" | AuctionSnapshotItem["tier"];
 type IndustryAuctionStat = {
@@ -28,7 +28,9 @@ const TIER_FILTERS: Array<{ label: string; value: AuctionTierFilter }> = [
 export function AuctionWorkspace() {
   const { message } = App.useApp();
   const [data, setData] = useState<AuctionSnapshotResponse | null>(null);
+  const [timeline, setTimeline] = useState<AuctionTimelineResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tierFilter, setTierFilter] = useState<AuctionTierFilter>("all");
   const [industryFilter, setIndustryFilter] = useState<string>("all");
@@ -36,31 +38,69 @@ export function AuctionWorkspace() {
   const [watchlistSavingSymbol, setWatchlistSavingSymbol] = useState<string | null>(null);
   const refreshPromiseRef = useRef<Promise<void> | null>(null);
 
+  const loadTimeline = useCallback(async () => {
+    try {
+      const snapshotTimeline = await getAuctionTimeline(5);
+      setTimeline(snapshotTimeline);
+    } catch {
+      setTimeline(null);
+    }
+  }, []);
+
+  const loadLatest = useCallback(async (showLoading = false) => {
+    if (showLoading) {
+      setLoading(true);
+    }
+    try {
+      const snapshot = await getAuctionLatest(100);
+      setData(snapshot);
+      setError(null);
+      return snapshot;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "读取竞价雷达快照失败");
+      return null;
+    } finally {
+      if (showLoading) {
+        setLoading(false);
+      }
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     if (refreshPromiseRef.current) {
       return refreshPromiseRef.current;
     }
-    setLoading(true);
+    setRefreshing(true);
     setError(null);
-    const promise = getAuctionSnapshot(100)
+    const promise = getAuctionSnapshot(100, true)
       .then((snapshot) => {
         setData(snapshot);
+        void loadTimeline();
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : "读取竞价雷达失败");
-        setData(null);
       })
       .finally(() => {
-        setLoading(false);
+        setRefreshing(false);
         refreshPromiseRef.current = null;
       });
     refreshPromiseRef.current = promise;
     return promise;
-  }, []);
+  }, [loadTimeline]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    void loadLatest(true).then((snapshot) => {
+      if (!snapshot || snapshot.snapshot_status === "missing") {
+        void refresh();
+      }
+    });
+    void loadTimeline();
+    const timer = window.setInterval(() => {
+      void loadLatest(false);
+      void loadTimeline();
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [loadLatest, loadTimeline, refresh]);
 
   const observationItems = useMemo(
     () =>
@@ -119,8 +159,11 @@ export function AuctionWorkspace() {
         </div>
         <Space wrap>
           <Tag color={sessionColor(data?.session)}>{sessionLabel(data?.session)}</Tag>
+          <Tag color={snapshotStatusColor(data?.snapshot_status)}>{snapshotStatusLabel(data?.snapshot_status)}</Tag>
+          <Tag>缓存年龄 {formatCacheAge(data?.cache_age_seconds)}</Tag>
+          <Tag color="blue">自动快照</Tag>
           <Tag>{data?.trade_date ?? "等待数据"}</Tag>
-          <Button icon={<ReloadOutlined />} loading={loading} onClick={() => void refresh()} type="primary">
+          <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void refresh()} type="primary">
             刷新竞价
           </Button>
         </Space>
@@ -134,6 +177,8 @@ export function AuctionWorkspace() {
         <MetricCard label="高开风险" value={data?.metrics.high_risk_count ?? null} suffix="只" tone="amber" />
         <MetricCard label="候选成交额" value={data?.metrics.total_turnover_cny ?? null} formatter={formatCny} />
       </section>
+
+      <AuctionTimelinePanel timeline={timeline} />
 
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <section className="workbench-panel rounded-xl border">
@@ -192,7 +237,7 @@ export function AuctionWorkspace() {
           <div className="p-4">
             <AuctionTable
               items={visibleItems}
-              loading={loading}
+              loading={loading && !data}
               onAddToWatchlist={handleAddToWatchlist}
               savingSymbol={watchlistSavingSymbol}
             />
@@ -243,7 +288,7 @@ export function AuctionWorkspace() {
           <section className="workbench-panel rounded-xl border">
             <div className="workbench-panel-divider border-b px-4 py-3">
               <div className="text-sm font-black text-[#11100e]">数据源状态</div>
-              <div className="text-xs text-[#7b756d]">第一版为 REST 快照，自动采样和 WebSocket 留到下一版。</div>
+              <div className="text-xs text-[#7b756d]">后台自动采样写入快照，页面优先读取缓存，手动刷新会强制拉取 TickFlow。</div>
             </div>
             <div className="space-y-2 p-4">
               {(data?.source_status ?? []).map((item, index) => (
@@ -260,6 +305,70 @@ export function AuctionWorkspace() {
         </aside>
       </section>
     </main>
+  );
+}
+
+function AuctionTimelinePanel({ timeline }: { timeline: AuctionTimelineResponse | null }) {
+  const points = timeline?.points ?? [];
+  const appearances = useMemo(() => buildTimelineAppearances(points), [points]);
+  const latestCapturedLabel = [...points].reverse().find((point) => point.snapshot_status === "captured")?.label ?? null;
+  return (
+    <section className="workbench-panel mb-4 rounded-xl border">
+      <div className="workbench-panel-divider flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
+        <div>
+          <div className="text-sm font-black text-[#11100e]">竞价时间轴</div>
+          <div className="text-xs text-[#7b756d]">锁定 09:20、09:23、09:24:50、09:25 快照，观察强度是否持续。</div>
+        </div>
+        <Tag color="blue">连续出现优先，新晋谨慎确认</Tag>
+      </div>
+      <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-4">
+        {points.length ? (
+          points.map((point) => (
+            <div className="rounded-lg border border-[#e3ddd3] bg-white p-3" key={point.label}>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-base font-black text-[#11100e]">{point.label}</span>
+                <Tag color={point.snapshot_status === "captured" ? "green" : "default"}>
+                  {point.snapshot_status === "captured" ? "已锁定" : "等待"}
+                </Tag>
+              </div>
+              <div className="mt-1 text-xs text-[#7b756d]">
+                候选 {point.metrics.candidate_count} · 强势 {point.metrics.strong_high_open_count}
+              </div>
+              <div className="mt-3 space-y-2">
+                {point.items.length ? (
+                  point.items.slice(0, 5).map((item, index) => (
+                    <Link
+                      className="block rounded-md border border-[#eee8dc] bg-[#faf7f1] px-2 py-2 no-underline"
+                      href={`/stock/${item.symbol}`}
+                      key={`${point.label}-${item.symbol}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="min-w-0 truncate text-xs font-black text-[#11100e]">
+                          {index + 1}. {item.name || item.symbol}
+                        </span>
+                        <span className="text-xs font-black text-[#d92d20]">{formatPct(item.open_gap_pct)}</span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {appearanceTag(item.symbol, point.label, latestCapturedLabel, appearances)}
+                        <Tag>{item.industry || "未标注"}</Tag>
+                      </div>
+                    </Link>
+                  ))
+                ) : (
+                  <div className="rounded-md border border-dashed border-[#e3ddd3] px-3 py-4 text-center text-xs text-[#7b756d]">
+                    等待后台采样
+                  </div>
+                )}
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="rounded-lg border border-dashed border-[#e3ddd3] px-3 py-5 text-center text-xs text-[#7b756d] md:col-span-2 xl:col-span-4">
+            暂无竞价时间轴快照
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -452,6 +561,44 @@ function SkeletonRows() {
   );
 }
 
+function buildTimelineAppearances(points: AuctionTimelineResponse["points"]): Map<string, number> {
+  const appearances = new Map<string, number>();
+  for (const point of points) {
+    if (point.snapshot_status !== "captured") {
+      continue;
+    }
+    const symbols = new Set(point.items.map((item) => item.symbol));
+    for (const symbol of symbols) {
+      appearances.set(symbol, (appearances.get(symbol) ?? 0) + 1);
+    }
+  }
+  return appearances;
+}
+
+function appearanceTag(
+  symbol: string,
+  pointLabel: string,
+  latestCapturedLabel: string | null,
+  appearances: Map<string, number>,
+) {
+  const count = appearances.get(symbol) ?? 0;
+  if (count >= 2) {
+    return (
+      <Tag color="red" key="continuous">
+        连续出现{count}次
+      </Tag>
+    );
+  }
+  if (pointLabel === latestCapturedLabel) {
+    return (
+      <Tag color="orange" key="new">
+        新晋
+      </Tag>
+    );
+  }
+  return null;
+}
+
 function PctValue({ value }: { value: number | null }) {
   return (
     <span className={value !== null && value >= 0 ? "text-[#d92d20]" : "market-green-text"}>
@@ -522,6 +669,45 @@ function sessionColor(value: string | null | undefined): string {
     return "green";
   }
   return "default";
+}
+
+function snapshotStatusLabel(value: AuctionSnapshotResponse["snapshot_status"] | null | undefined): string {
+  if (value === "fresh") {
+    return "实时刷新";
+  }
+  if (value === "cached") {
+    return "缓存快照";
+  }
+  if (value === "stale") {
+    return "快照偏旧";
+  }
+  if (value === "missing") {
+    return "等待快照";
+  }
+  return "等待快照";
+}
+
+function snapshotStatusColor(value: AuctionSnapshotResponse["snapshot_status"] | null | undefined): string {
+  if (value === "fresh" || value === "cached") {
+    return "green";
+  }
+  if (value === "stale") {
+    return "orange";
+  }
+  return "default";
+}
+
+function formatCacheAge(value: number | null | undefined): string {
+  if (value === null || value === undefined) {
+    return "--";
+  }
+  if (value < 1) {
+    return "<1秒";
+  }
+  if (value < 60) {
+    return `${value.toFixed(0)}秒`;
+  }
+  return `${(value / 60).toFixed(1)}分钟`;
 }
 
 function formatPct(value: number | null): string {

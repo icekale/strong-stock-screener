@@ -3,7 +3,13 @@ from datetime import datetime, timedelta
 
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import (
+    AUCTION_SNAPSHOT_CACHE,
+    MARKET_RANKINGS_CACHE,
+    app,
+    shutdown_auction_sampler,
+    startup_auction_sampler,
+)
 from app.models import (
     KlineBar,
     MarketAdvanceDeclineSummary,
@@ -779,6 +785,11 @@ def _client(
     app.state.quote_provider = quote_provider or FakeQuoteProvider()
     app.state.news_risk_provider = news_risk_provider or FakeNewsRiskProvider()
     app.state.market_overview_provider = market_overview_provider or FakeMarketOverviewProvider()
+    app.state.auction_sampler_disabled = True
+    AUCTION_SNAPSHOT_CACHE.clear()
+    MARKET_RANKINGS_CACHE.clear()
+    if hasattr(app.state, "auction_snapshot_store"):
+        delattr(app.state, "auction_snapshot_store")
     app.state.watchlist_snapshot = WatchlistSnapshot(
         items=[WatchlistItem(symbol="002000.SZ", name="示例股份")]
     )
@@ -1191,6 +1202,69 @@ def test_auction_snapshot_endpoint_reuses_cached_provider_result(tmp_path: Path)
     assert second.status_code == 200
     assert third.status_code == 200
     assert provider.ranking_calls == [100]
+
+
+def test_auction_latest_returns_missing_without_fetching_provider(tmp_path: Path) -> None:
+    provider = CountingMarketRankingsProvider()
+    client = _client(tmp_path, market_overview_provider=provider)
+
+    response = client.get("/api/auction/latest?limit=2")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["snapshot_status"] == "missing"
+    assert payload["metrics"]["candidate_count"] == 0
+    assert payload["items"] == []
+    assert provider.ranking_calls == []
+
+
+def test_auction_snapshot_refresh_updates_latest_snapshot(tmp_path: Path) -> None:
+    provider = CountingMarketRankingsProvider()
+    client = _client(tmp_path, market_overview_provider=provider)
+
+    refresh_response = client.get("/api/auction/snapshot?limit=2&refresh=true")
+    latest_response = client.get("/api/auction/latest?limit=2")
+
+    assert refresh_response.status_code == 200
+    assert latest_response.status_code == 200
+    latest_payload = latest_response.json()
+    assert latest_payload["snapshot_status"] == "cached"
+    assert latest_payload["cache_age_seconds"] is not None
+    assert latest_payload["items"][0]["symbol"] == "300001.SZ"
+    assert provider.ranking_calls == [100]
+
+
+def test_auction_timeline_returns_locked_observation_points(tmp_path: Path) -> None:
+    provider = CountingMarketRankingsProvider()
+    client = _client(tmp_path, market_overview_provider=provider)
+    app.state.auction_now = datetime(2026, 7, 1, 9, 20, 2)
+
+    try:
+        refresh_response = client.get("/api/auction/snapshot?limit=2&refresh=true")
+        timeline_response = client.get("/api/auction/timeline?limit=2")
+    finally:
+        delattr(app.state, "auction_now")
+
+    assert refresh_response.status_code == 200
+    assert timeline_response.status_code == 200
+    payload = timeline_response.json()
+    first_point = payload["points"][0]
+    assert first_point["label"] == "09:20"
+    assert first_point["snapshot_status"] == "captured"
+    assert first_point["items"][0]["symbol"] == "300001.SZ"
+    assert payload["points"][1]["snapshot_status"] == "waiting"
+    assert provider.ranking_calls == [100]
+
+
+def test_startup_auction_sampler_respects_disabled_state(tmp_path: Path) -> None:
+    _client(tmp_path)
+    if hasattr(app.state, "auction_sampler"):
+        delattr(app.state, "auction_sampler")
+
+    startup_auction_sampler()
+
+    assert not hasattr(app.state, "auction_sampler")
+    shutdown_auction_sampler()
 
 
 def test_sector_radar_returns_inflow_and_outflow_rankings(tmp_path: Path) -> None:

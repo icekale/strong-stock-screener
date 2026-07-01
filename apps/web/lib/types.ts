@@ -336,6 +336,8 @@ export type AuctionSnapshotItem = {
 export type AuctionSnapshotResponse = {
   trade_date: string | null;
   session: "call_auction" | "pre_open" | "continuous" | "closed" | "unknown";
+  snapshot_status: "fresh" | "cached" | "stale" | "missing";
+  cache_age_seconds: number | null;
   metrics: {
     candidate_count: number;
     strong_high_open_count: number;
@@ -343,6 +345,21 @@ export type AuctionSnapshotResponse = {
     total_turnover_cny: number | null;
   };
   items: AuctionSnapshotItem[];
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
+export type AuctionTimelinePoint = {
+  label: string;
+  target_time: string;
+  snapshot_status: "captured" | "waiting";
+  captured_at: string | null;
+  metrics: AuctionSnapshotResponse["metrics"];
+  items: AuctionSnapshotItem[];
+};
+
+export type AuctionTimelineResponse = {
+  points: AuctionTimelinePoint[];
   source_status: StrongStockSourceStatus[];
   generated_at: string;
 };

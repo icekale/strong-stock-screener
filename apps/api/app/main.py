@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
+from datetime import datetime
 from time import perf_counter
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from pydantic import BaseModel, Field
 from app.config import get_settings
 from app.models import (
     AuctionSnapshotResponse,
+    AuctionTimelineResponse,
     GsgfAnalysis,
     GsgfBacktestSummary,
     GsgfModelHealth,
@@ -60,6 +62,8 @@ from app.services.gsgf_real_calibration import summarize_gsgf_real_calibration
 from app.services.gsgf_review import GsgfReviewStore
 from app.services.gsgf_trade_plan import build_gsgf_trade_plan
 from app.services.auction import build_auction_snapshot
+from app.services.auction_sampler import AuctionSnapshotSampler
+from app.services.auction_snapshot_store import AuctionSnapshotStore
 from app.services.market_emotion_history import MarketEmotionHistoryStore
 from app.services.runs import RunStore
 from app.services.runtime_settings import (
@@ -175,9 +179,11 @@ def _cors_allow_origins() -> list[str]:
 async def lifespan(_app: FastAPI):
     startup_sentiment_monitor()
     startup_gsgf_auto_review()
+    startup_auction_sampler()
     try:
         yield
     finally:
+        shutdown_auction_sampler()
         shutdown_gsgf_auto_review()
         shutdown_sentiment_monitor()
 
@@ -210,6 +216,22 @@ def shutdown_sentiment_monitor() -> None:
     monitor = getattr(app.state, "sentiment_monitor", None)
     if monitor is not None:
         monitor.stop()
+
+
+def startup_auction_sampler() -> None:
+    if getattr(app.state, "auction_sampler_disabled", False):
+        return
+    sampler = getattr(app.state, "auction_sampler", None)
+    if sampler is None:
+        sampler = AuctionSnapshotSampler(refresh=lambda: _refresh_auction_snapshot(100))
+        app.state.auction_sampler = sampler
+    sampler.start()
+
+
+def shutdown_auction_sampler() -> None:
+    sampler = getattr(app.state, "auction_sampler", None)
+    if sampler is not None:
+        sampler.stop()
 
 
 def startup_gsgf_auto_review() -> None:
@@ -568,11 +590,25 @@ def get_market_rankings(limit: int = 50) -> dict[str, object]:
     return result.model_dump(mode="json")
 
 
+@app.get("/api/auction/latest")
+def get_latest_auction_snapshot(limit: int = 100) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 100))
+    result = _auction_snapshot_store().latest(limit=bounded_limit)
+    return result.model_dump(mode="json")
+
+
+@app.get("/api/auction/timeline")
+def get_auction_timeline(limit: int = 8) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 20))
+    result: AuctionTimelineResponse = _auction_snapshot_store().timeline(limit=bounded_limit)
+    return result.model_dump(mode="json")
+
+
 @app.get("/api/auction/snapshot")
-def get_auction_snapshot(limit: int = 100) -> dict[str, object]:
+def get_auction_snapshot(limit: int = 100, refresh: bool = False) -> dict[str, object]:
     bounded_limit = max(1, min(limit, 100))
     try:
-        result = _cached_auction_snapshot(bounded_limit)
+        result = _refresh_auction_snapshot(bounded_limit) if refresh else _cached_auction_snapshot(bounded_limit)
     except StrongStockDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
@@ -930,10 +966,17 @@ def _cached_market_rankings(limit: int) -> MarketRankingsResponse:
     ).model_copy(deep=True)
 
 
+def _refresh_market_rankings(limit: int) -> MarketRankingsResponse:
+    provider = _market_overview_provider()
+    if not hasattr(provider, "get_market_rankings"):
+        raise StrongStockDataUnavailable("当前市场概览源不支持全A实时排行榜")
+    return provider.get_market_rankings(limit=limit).model_copy(deep=True)
+
+
 def _cached_auction_snapshot(limit: int) -> AuctionSnapshotResponse:
     provider = _market_overview_provider()
     cache_key = f"auction-snapshot:{_provider_cache_key(provider)}:{limit}"
-    return AUCTION_SNAPSHOT_CACHE.get_or_refresh(
+    result = AUCTION_SNAPSHOT_CACHE.get_or_refresh(
         cache_key,
         lambda: build_auction_snapshot(
             _cached_market_rankings(max(limit, 100)),
@@ -941,6 +984,22 @@ def _cached_auction_snapshot(limit: int) -> AuctionSnapshotResponse:
             now=getattr(app.state, "auction_now", None),
         ),
     ).model_copy(deep=True)
+    _auction_snapshot_store().save(result, captured_at=_auction_now())
+    return result
+
+
+def _refresh_auction_snapshot(limit: int) -> AuctionSnapshotResponse:
+    now = _auction_now()
+    result = build_auction_snapshot(
+        _refresh_market_rankings(max(limit, 100)),
+        limit=limit,
+        now=now,
+    )
+    return _auction_snapshot_store().save(result, captured_at=now)
+
+
+def _auction_now() -> datetime:
+    return getattr(app.state, "auction_now", None) or datetime.now().astimezone()
 
 
 def _cached_sector_radar(limit: int) -> SectorRadarResponse:
@@ -1171,6 +1230,15 @@ def _market_overview_provider() -> object:
         ifind_index_provider=_ifind_provider(),
         ifind_stock_provider=_ifind_provider(),
     )
+
+
+def _auction_snapshot_store() -> AuctionSnapshotStore:
+    injected = getattr(app.state, "auction_snapshot_store", None)
+    if injected is not None:
+        return injected
+    store = AuctionSnapshotStore()
+    app.state.auction_snapshot_store = store
+    return store
 
 
 def _watchlist_snapshot() -> WatchlistSnapshot | None:

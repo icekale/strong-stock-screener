@@ -456,8 +456,27 @@ class AuctionSnapshotItem(BaseModel):
 class AuctionSnapshotResponse(BaseModel):
     trade_date: str | None = None
     session: str = "unknown"
+    snapshot_status: str = "fresh"
+    cache_age_seconds: float | None = None
     metrics: AuctionSnapshotMetrics = Field(default_factory=AuctionSnapshotMetrics)
     items: list[AuctionSnapshotItem] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
+class AuctionTimelinePoint(BaseModel):
+    label: str
+    target_time: str
+    snapshot_status: str = "waiting"
+    captured_at: str | None = None
+    metrics: AuctionSnapshotMetrics = Field(default_factory=AuctionSnapshotMetrics)
+    items: list[AuctionSnapshotItem] = Field(default_factory=list)
+
+
+class AuctionTimelineResponse(BaseModel):
+    points: list[AuctionTimelinePoint] = Field(default_factory=list)
     source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
     generated_at: str = Field(
         default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")

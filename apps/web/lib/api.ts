@@ -1,5 +1,6 @@
 import type {
   AuctionSnapshotResponse,
+  AuctionTimelineResponse,
   BackgroundJobState,
   DataSourceStatusResponse,
   GsgfAnalysis,
@@ -70,12 +71,32 @@ export async function getMarketRankings(limit = 30): Promise<MarketRankingsRespo
   return response.json() as Promise<MarketRankingsResponse>;
 }
 
-export async function getAuctionSnapshot(limit = 100): Promise<AuctionSnapshotResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/auction/snapshot?limit=${encodeURIComponent(limit)}`);
+export async function getAuctionLatest(limit = 100): Promise<AuctionSnapshotResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/auction/latest?limit=${encodeURIComponent(limit)}`);
+  if (!response.ok) {
+    throw new Error(`读取竞价雷达快照失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<AuctionSnapshotResponse>;
+}
+
+export async function getAuctionSnapshot(limit = 100, refresh = false): Promise<AuctionSnapshotResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    refresh: String(refresh),
+  });
+  const response = await fetch(`${API_BASE_URL}/api/auction/snapshot?${params.toString()}`);
   if (!response.ok) {
     throw new Error(`读取竞价雷达失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<AuctionSnapshotResponse>;
+}
+
+export async function getAuctionTimeline(limit = 8): Promise<AuctionTimelineResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/auction/timeline?limit=${encodeURIComponent(limit)}`);
+  if (!response.ok) {
+    throw new Error(`读取竞价时间轴失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<AuctionTimelineResponse>;
 }
 
 export async function getSectorRadar(limit = 20): Promise<SectorRadarResponse> {

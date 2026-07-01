@@ -8,6 +8,11 @@ __pycache__
 .ruff_cache
 node_modules
 .next
+apps/api/.venv
+apps/api/data
+apps/web/node_modules
+apps/web/.next
+apps/web/.turbo
 dist
 data
 *.tsbuildinfo

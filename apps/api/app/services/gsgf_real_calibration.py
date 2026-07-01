@@ -40,7 +40,8 @@ class KlineProvider(Protocol):
 
 
 Analyzer = Callable[[list[KlineBar]], GsgfAnalysis]
-ProgressReporter = Callable[[str], None]
+ProgressReporter = Callable[[int, int, str], None]
+CancelChecker = Callable[[], bool]
 
 
 def summarize_gsgf_real_calibration(
@@ -53,6 +54,7 @@ def summarize_gsgf_real_calibration(
     kline_count: int = 260,
     analyzer: Analyzer = analyze_gsgf,
     progress: ProgressReporter | None = None,
+    should_cancel: CancelChecker | None = None,
 ) -> GsgfRealCalibrationSummary:
     clean_windows = _clean_windows(windows)
     samples: list[_CalibrationSample] = []
@@ -60,8 +62,10 @@ def summarize_gsgf_real_calibration(
     skipped_count = 0
     source_status: list[StrongStockSourceStatus] = []
     bars_cache: dict[str, list[KlineBar]] = {}
+    deduped_dates = _dedupe_dates(trade_dates)
+    progress_total = max(1, len(deduped_dates) * scan_limit)
 
-    for trade_date in _dedupe_dates(trade_dates):
+    for trade_date in deduped_dates:
         try:
             candidates = candidate_provider.get_candidates(trade_date)
         except StrongStockDataUnavailable as exc:
@@ -73,11 +77,18 @@ def summarize_gsgf_real_calibration(
                 )
             )
             continue
-        _report(progress, f"{trade_date}: loaded {len(candidates[:scan_limit])} candidates")
+        _report(progress, scanned_count, progress_total, f"{trade_date}: loaded {len(candidates[:scan_limit])} candidates")
         for candidate in candidates[:scan_limit]:
+            if should_cancel is not None and should_cancel():
+                raise RuntimeError("校准任务已取消")
             scanned_count += 1
             if scanned_count == 1 or scanned_count % 25 == 0:
-                _report(progress, f"scanned {scanned_count} candidates, target samples {len(samples)}")
+                _report(
+                    progress,
+                    scanned_count,
+                    progress_total,
+                    f"scanned {scanned_count} candidates, target samples {len(samples)}",
+                )
             try:
                 bars = bars_cache.get(candidate.symbol)
                 if bars is None:
@@ -102,9 +113,14 @@ def summarize_gsgf_real_calibration(
             samples.append(sample)
 
     target_sample_count = sum(1 for sample in samples if sample.bucket_names)
-    _report(progress, f"completed: scanned {scanned_count} candidates, target samples {target_sample_count}, skipped {skipped_count}")
+    _report(
+        progress,
+        scanned_count,
+        progress_total,
+        f"completed: scanned {scanned_count} candidates, target samples {target_sample_count}, skipped {skipped_count}",
+    )
     return GsgfRealCalibrationSummary(
-        trade_dates=_dedupe_dates(trade_dates),
+        trade_dates=deduped_dates,
         windows=clean_windows,
         scanned_count=scanned_count,
         target_sample_count=target_sample_count,
@@ -449,6 +465,11 @@ def _round_or_none(values: list[float]) -> float | None:
     return round(mean(values), 2)
 
 
-def _report(progress: ProgressReporter | None, message: str) -> None:
+def _report(
+    progress: ProgressReporter | None,
+    current: int,
+    total: int,
+    message: str,
+) -> None:
     if progress is not None:
-        progress(message)
+        progress(current, total, message)

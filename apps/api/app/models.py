@@ -29,6 +29,7 @@ ScreenStrategy = Literal["strong_stock", "gsgf", "combined"]
 ShortTermAlertSeverity = Literal["high", "medium", "low"]
 MarketEmotionLevel = Literal["冰点", "一般", "良好", "火爆"]
 SentimentSnapshotStatus = Literal["fresh", "cached", "missing"]
+BackgroundJobStatus = Literal["pending", "running", "success", "failed", "canceled"]
 
 
 class GsgfScoreBreakdown(BaseModel):
@@ -328,6 +329,19 @@ class GsgfRealCalibrationSummary(BaseModel):
     generated_at: str = Field(
         default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
     )
+
+
+class BackgroundJobState(BaseModel):
+    job_id: str
+    type: str
+    status: BackgroundJobStatus = "pending"
+    progress_current: int = 0
+    progress_total: int = 0
+    message: str = ""
+    started_at: str | None = None
+    finished_at: str | None = None
+    error: str | None = None
+    result_path: str | None = None
 
 
 class MarketTurnoverSummary(BaseModel):

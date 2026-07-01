@@ -216,14 +216,14 @@ def test_summarize_gsgf_real_calibration_reports_success_when_some_candidates_sk
 
 
 def test_summarize_gsgf_real_calibration_emits_progress_events() -> None:
-    events: list[str] = []
+    events: list[tuple[int, int, str]] = []
 
     summarize_gsgf_real_calibration(
         candidate_provider=FakeCandidateProvider(),
         kline_provider=FakeKlineProvider(),
         trade_dates=["2026-06-12"],
         windows=[1],
-        progress=events.append,
+        progress=lambda current, total, message: events.append((current, total, message)),
         analyzer=lambda bars: GsgfAnalysis(
             total_score=90,
             final_status="确认买点",
@@ -231,8 +231,26 @@ def test_summarize_gsgf_real_calibration_emits_progress_events() -> None:
         ),
     )
 
-    assert events[0] == "2026-06-12: loaded 2 candidates"
-    assert events[-1] == "completed: scanned 2 candidates, target samples 2, skipped 0"
+    assert events[0] == (0, 80, "2026-06-12: loaded 2 candidates")
+    assert events[-1] == (2, 80, "completed: scanned 2 candidates, target samples 2, skipped 0")
+
+
+def test_summarize_gsgf_real_calibration_honors_cancel_check() -> None:
+    def should_cancel() -> bool:
+        return True
+
+    try:
+        summarize_gsgf_real_calibration(
+            candidate_provider=FakeCandidateProvider(),
+            kline_provider=FakeKlineProvider(),
+            trade_dates=["2026-06-12"],
+            windows=[1],
+            should_cancel=should_cancel,
+        )
+    except RuntimeError as exc:
+        assert "取消" in str(exc)
+    else:
+        raise AssertionError("expected cancellation error")
 
 
 def _bars(entry_close: float, future_closes: list[float]) -> list[KlineBar]:

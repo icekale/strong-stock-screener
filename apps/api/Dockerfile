@@ -11,7 +11,7 @@ WORKDIR /app
 
 COPY pyproject.toml ./
 COPY app ./app
-RUN python -m pip install --no-cache-dir --upgrade pip setuptools wheel
+RUN python -m pip install --no-cache-dir setuptools wheel pydantic-core==2.46.4
 RUN python -m pip install --no-cache-dir --no-build-isolation .
 
 EXPOSE 8010

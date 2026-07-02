@@ -87,6 +87,7 @@ from app.services.screener import StrongStockScreener
 from app.services.short_term_cache import TtlCache
 from app.services.sentiment_snapshot_store import SentimentSnapshotStore
 from app.services.sentiment_monitor import SentimentMonitor, SentimentMonitorConfig
+from app.services.sentiment_decision import build_sentiment_decision
 from app.services.short_term_sentiment import (
     build_missing_sentiment_summary,
     build_market_emotion_snapshot,
@@ -710,6 +711,30 @@ def get_short_term_sentiment_summary(
     except StrongStockDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return result.model_dump(mode="json")
+
+
+@app.get("/api/short-term/sentiment/decision")
+def get_short_term_sentiment_decision(
+    trade_date: str,
+    limit: int = 80,
+    refresh: bool = False,
+) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 100))
+    store = _sentiment_snapshot_store()
+    cached_summary = store.load_summary(trade_date)
+    cached_emotion = store.load_market_emotion(trade_date)
+    if cached_summary is not None and not refresh:
+        return build_sentiment_decision(cached_summary, cached_emotion).model_dump(mode="json")
+    try:
+        sentiment, market_emotion = _build_and_persist_sentiment_snapshots(
+            trade_date,
+            bounded_limit,
+            refresh=refresh,
+        )
+        summary = build_sentiment_summary(sentiment, market_emotion, snapshot_status="fresh")
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return build_sentiment_decision(summary, market_emotion).model_dump(mode="json")
 
 
 @app.get("/api/short-term/sentiment/detail")

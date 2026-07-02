@@ -29,6 +29,9 @@ ScreenStrategy = Literal["strong_stock", "gsgf", "combined"]
 ShortTermAlertSeverity = Literal["high", "medium", "low"]
 MarketEmotionLevel = Literal["冰点", "一般", "良好", "火爆"]
 SentimentSnapshotStatus = Literal["fresh", "cached", "missing"]
+SentimentMarketState = Literal["冰点", "修复", "主升", "高潮", "分歧", "退潮"]
+SentimentTradePermission = Literal["空仓等待", "轻仓试错", "强势进攻", "只低吸", "只卖不追"]
+SentimentRiskLevel = Literal["低", "中", "高"]
 BackgroundJobStatus = Literal["pending", "running", "success", "failed", "canceled"]
 AuctionReviewStatus = Literal["pending", "intraday_done", "day_done", "next_day_done", "data_incomplete"]
 
@@ -778,6 +781,31 @@ class SentimentSummaryResponse(BaseModel):
     hot_industries: list[ShortTermSentimentIndustryItem] = Field(default_factory=list)
     source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
     notes: list[str] = Field(default_factory=list)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
+class SentimentMainSectorSignal(BaseModel):
+    name: str
+    strength_score: float = 0
+    limit_up_count: int = 0
+    break_board_count: int = 0
+    max_consecutive_boards: int = 0
+    leader: str | None = None
+    symbols: list[str] = Field(default_factory=list)
+
+
+class SentimentDecisionResponse(BaseModel):
+    trade_date: str
+    market_state: SentimentMarketState = "冰点"
+    trade_permission: SentimentTradePermission = "空仓等待"
+    risk_level: SentimentRiskLevel = "中"
+    confidence: float = Field(default=0, ge=0, le=100)
+    score_change: float | None = None
+    main_sectors: list[SentimentMainSectorSignal] = Field(default_factory=list)
+    reasons: list[str] = Field(default_factory=list)
+    risks: list[str] = Field(default_factory=list)
     generated_at: str = Field(
         default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
     )

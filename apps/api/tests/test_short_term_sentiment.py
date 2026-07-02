@@ -415,6 +415,27 @@ def test_market_emotion_snapshot_api_uses_configured_sources(tmp_path: Path) -> 
     assert payload["samples"][0]["emotion_score"] == payload["metrics"]["emotion_score"]
 
 
+def test_short_term_sentiment_decision_api_returns_trade_permission(tmp_path: Path) -> None:
+    app.state.candidate_provider = FakeSentimentCandidateProvider()
+    app.state.market_overview_provider = FakeEmotionMarketOverviewProvider()
+    app.state.runs_dir = tmp_path
+    try:
+        response = TestClient(app).get(
+            "/api/short-term/sentiment/decision?trade_date=2026-06-26&limit=20&refresh=true"
+        )
+    finally:
+        delattr(app.state, "candidate_provider")
+        delattr(app.state, "market_overview_provider")
+        delattr(app.state, "runs_dir")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trade_date"] == "2026-06-26"
+    assert payload["market_state"] in ["冰点", "修复", "主升", "高潮", "分歧", "退潮"]
+    assert payload["trade_permission"] in ["空仓等待", "轻仓试错", "强势进攻", "只低吸", "只卖不追"]
+    assert isinstance(payload["reasons"], list)
+
+
 def test_short_term_sentiment_api_reuses_cached_snapshot_for_fast_reload(tmp_path: Path) -> None:
     candidate_provider = FakeSentimentCandidateProvider()
     app.state.candidate_provider = candidate_provider

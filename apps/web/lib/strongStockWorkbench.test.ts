@@ -554,6 +554,10 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(auctionFeatureSource, /阶段快照/);
   assert.match(auctionFeatureSource, /数据源状态/);
   assert.match(auctionFeatureSource, /竞价复盘/);
+  assert.ok(
+    auctionWorkspaceSource.indexOf("<AuctionReviewPanel") > auctionWorkspaceSource.indexOf("竞价强度榜"),
+    "竞价复盘应显示在竞价强度榜下方",
+  );
   assert.match(auctionFeatureSource, /规则统计/);
   assert.match(auctionFeatureSource, /失败样本/);
   assert.match(auctionFeatureSource, /生成\/刷新今日复盘/);

@@ -261,13 +261,6 @@ export function AuctionWorkspace() {
 
       <AuctionTimelinePanel timeline={timeline} />
 
-      <AuctionReviewPanel
-        finalizing={reviewFinalizing}
-        loading={reviewLoading}
-        onFinalize={handleFinalizeReview}
-        summary={reviewSummary}
-      />
-
       <section className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_320px]">
         <section className="workbench-panel rounded-xl border">
           <div className="workbench-panel-divider flex flex-col gap-3 border-b px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
@@ -402,6 +395,13 @@ export function AuctionWorkspace() {
           </section>
         </aside>
       </section>
+
+      <AuctionReviewPanel
+        finalizing={reviewFinalizing}
+        loading={reviewLoading}
+        onFinalize={handleFinalizeReview}
+        summary={reviewSummary}
+      />
     </main>
   );
 }
@@ -419,7 +419,7 @@ function AuctionReviewPanel({
 }) {
   const failures = useMemo(() => buildFailureSamples(summary?.records ?? []), [summary]);
   return (
-    <section className="workbench-panel mb-4 rounded-xl border">
+    <section className="workbench-panel mt-4 rounded-xl border">
       <div className="workbench-panel-divider flex flex-col gap-3 border-b px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <div className="text-sm font-black text-[#11100e]">竞价复盘</div>

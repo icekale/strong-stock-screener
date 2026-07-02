@@ -268,6 +268,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(typesSource, /ShortTermIntradaySignalAlert/);
   assert.match(typesSource, /NotificationChannelConfig/);
   assert.match(typesSource, /NotificationSendResult/);
+  assert.match(typesSource, /SentimentDecisionResponse/);
   assert.match(typesSource, /snapshot_status/);
   assert.match(typesSource, /cache_age_seconds/);
   assert.match(typesSource, /AuctionTimelineResponse/);
@@ -282,11 +283,13 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(apiSource, /getAuctionRuleSummary/);
   assert.match(apiSource, /getSectorRadar/);
   assert.match(apiSource, /getShortTermSentiment/);
+  assert.match(apiSource, /getSentimentDecision/);
   assert.match(apiSource, /getMarketEmotionSnapshot/);
   assert.match(apiSource, /getShortTermIntradaySentiment/);
   assert.match(apiSource, /getShortTermIntradaySignalDigest/);
   assert.match(apiSource, /sendNotificationMessage/);
   assert.match(apiSource, /\/api\/short-term\/sentiment/);
+  assert.match(apiSource, /\/api\/short-term\/sentiment\/decision/);
   assert.match(apiSource, /\/api\/short-term\/market-emotion/);
   assert.match(apiSource, /\/api\/short-term\/sentiment\/intraday/);
   assert.match(apiSource, /\/api\/short-term\/sentiment\/intraday\/digest/);
@@ -549,6 +552,9 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(auctionFeatureSource, /Collapse/);
   assert.match(sentimentPageSource, /SentimentWorkspace/);
   assert.match(sentimentFeatureSource, /短线情绪中心/);
+  assert.match(sentimentFeatureSource, /交易许可/);
+  assert.match(sentimentFeatureSource, /市场状态/);
+  assert.match(sentimentFeatureSource, /风险等级/);
   assert.match(sentimentFeatureSource, /市场情绪仪表盘/);
   assert.match(sentimentFeatureSource, /情绪指标/);
   assert.match(sentimentFeatureSource, /亏钱效应/);

@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from app.main import (
     AUCTION_SNAPSHOT_CACHE,
     MARKET_RANKINGS_CACHE,
+    SECTOR_RADAR_CACHE,
     app,
     shutdown_auction_sampler,
     startup_auction_sampler,
@@ -798,6 +799,13 @@ class FakeTdxSectorRadarProvider:
         )
 
 
+class FailingTdxSectorRadarProvider:
+    source_name = "通达信MCP"
+
+    def get_sector_radar(self, limit: int = 20) -> SectorRadarResponse:
+        raise StrongStockDataUnavailable("tdx unavailable")
+
+
 def _client(
     tmp_path: Path,
     candidate_provider: object | None = None,
@@ -814,6 +822,7 @@ def _client(
     app.state.auction_sampler_disabled = True
     AUCTION_SNAPSHOT_CACHE.clear()
     MARKET_RANKINGS_CACHE.clear()
+    SECTOR_RADAR_CACHE.clear()
     if hasattr(app.state, "auction_snapshot_store"):
         delattr(app.state, "auction_snapshot_store")
     if hasattr(app.state, "auction_review_store"):
@@ -1517,6 +1526,24 @@ def test_sector_radar_falls_back_to_tdx_when_primary_source_is_empty(tmp_path: P
     assert payload["source_status"][0]["source"] == "empty fake板块资金流"
     assert payload["source_status"][1]["source"] == "通达信MCP涨停概念"
     assert provider.calls == [5]
+
+
+def test_sector_radar_falls_back_to_tickflow_industry_aggregation_when_primary_sources_are_empty(tmp_path: Path) -> None:
+    client = _client(tmp_path, market_overview_provider=EmptySectorRadarProvider())
+    app.state.tdx_provider = FailingTdxSectorRadarProvider()
+
+    response = client.get("/api/sectors/radar?limit=5")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["flow_source"] == "TickFlow全A实时行情行业聚合"
+    assert payload["inflow"][0]["name"] == "电池"
+    assert payload["inflow"][0]["net_flow_cny"] > 0
+    assert {item["name"] for item in payload["inflow"]} >= {"机器人", "电池"}
+    assert payload["outflow"] == []
+    assert payload["source_status"][0]["source"] == "empty fake板块资金流"
+    assert payload["source_status"][1]["source"] == "通达信MCP板块兜底"
+    assert payload["source_status"][2]["source"] == "TickFlow行业聚合"
 
 
 def test_screen_run_returns_items_and_persists_latest_without_empty_status(tmp_path: Path) -> None:

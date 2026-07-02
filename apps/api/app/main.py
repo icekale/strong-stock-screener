@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime
 from time import perf_counter
@@ -1219,11 +1220,102 @@ def _cached_sector_radar(limit: int) -> SectorRadarResponse:
                     detail=f"TDX fallback failed: {exc.__class__.__name__}",
                 )
             )
-            return result
+            try:
+                tickflow_result = _tickflow_sector_radar(provider, limit=limit)
+            except Exception as tickflow_exc:
+                result.source_status.append(
+                    StrongStockSourceStatus(
+                        source="TickFlow行业聚合",
+                        status="failed",
+                        detail=f"TickFlow fallback failed: {tickflow_exc.__class__.__name__}",
+                    )
+                )
+                return result
+            tickflow_result.source_status = [*result.source_status, *tickflow_result.source_status]
+            return tickflow_result
         tdx_result.source_status = [*result.source_status, *tdx_result.source_status]
         return tdx_result
 
     return SECTOR_RADAR_CACHE.get_or_set(cache_key, build).model_copy(deep=True)
+
+
+def _tickflow_sector_radar(provider: object, limit: int) -> SectorRadarResponse:
+    if not hasattr(provider, "get_market_rankings"):
+        raise StrongStockDataUnavailable("当前市场概览源不支持 TickFlow 全A实时排行榜")
+    ranking_limit = max(50, min(100, limit * 5))
+    rankings = provider.get_market_rankings(limit=ranking_limit)
+    items_by_symbol = {
+        item.symbol: item
+        for item in [*rankings.pct_change_rank, *rankings.turnover_rank]
+        if item.symbol and item.industry
+    }
+    if not items_by_symbol:
+        raise StrongStockDataUnavailable("TickFlow 全A排行缺少行业分类，无法聚合板块")
+
+    grouped: dict[str, list[object]] = defaultdict(list)
+    for item in items_by_symbol.values():
+        grouped[str(item.industry)].append(item)
+
+    sector_items: list[SectorRadarItem] = []
+    for industry, members in grouped.items():
+        turnover_cny = sum(item.turnover_cny or 0 for item in members)
+        net_flow_cny = sum(
+            (item.turnover_cny or 0) * (item.pct_change or 0) / 100
+            for item in members
+            if item.turnover_cny is not None and item.pct_change is not None
+        )
+        advance_count = sum(1 for item in members if (item.pct_change or 0) > 0)
+        decline_count = sum(1 for item in members if (item.pct_change or 0) < 0)
+        leader = max(
+            members,
+            key=lambda item: (item.pct_change or -999, item.turnover_cny or 0, item.symbol),
+        )
+        avg_change = (
+            sum(item.pct_change or 0 for item in members if item.pct_change is not None)
+            / max(1, sum(1 for item in members if item.pct_change is not None))
+        )
+        strength_score = round(avg_change * 10 + advance_count * 3 - decline_count * 2 + min(turnover_cny / 1_000_000_000, 20), 2)
+        sector_items.append(
+            SectorRadarItem(
+                name=industry,
+                source="TickFlow全A实时行情行业聚合",
+                change_pct=round(avg_change, 2),
+                turnover_cny=round(turnover_cny, 2),
+                advance_count=advance_count,
+                decline_count=decline_count,
+                leader=leader.name or leader.symbol,
+                net_flow_cny=round(net_flow_cny, 2),
+                strength_score=strength_score,
+            )
+        )
+
+    inflow = sorted(
+        [item for item in sector_items if (item.net_flow_cny or 0) > 0],
+        key=lambda item: (item.net_flow_cny or 0, item.strength_score),
+        reverse=True,
+    )[:limit]
+    outflow = sorted(
+        [item for item in sector_items if (item.net_flow_cny or 0) < 0],
+        key=lambda item: (item.net_flow_cny or 0, -item.strength_score),
+    )[:limit]
+    if not inflow and not outflow:
+        raise StrongStockDataUnavailable("TickFlow 行业聚合没有生成有效净流向")
+
+    return SectorRadarResponse(
+        trade_date=rankings.trade_date,
+        capital_flow_status="estimated",
+        flow_source="TickFlow全A实时行情行业聚合",
+        inflow=inflow,
+        outflow=outflow,
+        source_status=[
+            StrongStockSourceStatus(
+                source="TickFlow行业聚合",
+                status="success",
+                detail=f"按 {len(items_by_symbol)} 只全A排行股票聚合 {len(sector_items)} 个行业",
+            ),
+            *rankings.source_status,
+        ],
+    )
 
 
 def _cached_stock_kline(symbol: str, count: int) -> StockKlineResponse:

@@ -319,6 +319,20 @@ class BatchIndustryFallbackHttpClient(FailingAshareIndustryHttpClient):
         return super().get(url, **kwargs)
 
 
+class ThsIndustryFallbackHttpClient(FailingAshareIndustryHttpClient):
+    def get(self, url: str, **kwargs: object) -> FakeResponse:
+        if "files.688798.xyz/ths/industries.json" in url:
+            return FakeResponse(
+                [
+                    {"symbol": "300001.SZ", "name": "创业一", "industries": ["机械设备", "机器人", "机器人零部件"]},
+                    {"symbol": "300002.SZ", "name": "创业二", "industries": ["电力设备", "电池", "电池化学品"]},
+                    {"symbol": "600003.SH", "name": "沪市三", "industries": ["电子", "半导体", "数字芯片设计"]},
+                    {"symbol": "600004.SH", "name": "沪市四", "industries": ["基础化工", "化学制品", "其他化学制品"]},
+                ]
+            )
+        return super().get(url, **kwargs)
+
+
 def test_tickflow_status_reports_missing_key_without_fake_quotes() -> None:
     provider = TickFlowQuoteProvider(api_key="", base_url="https://api.tickflow.org")
 
@@ -604,6 +618,25 @@ def test_market_overview_provider_supplements_missing_industries_from_eastmoney_
     assert [item.industry for item in rankings.pct_change_rank] == ["电网设备", "游戏Ⅱ", "电池", "航空机场"]
     assert any(
         status.source == "东方财富行业补充"
+        and status.status == "success"
+        and "补齐 4/4" in status.detail
+        for status in rankings.source_status
+    )
+
+
+def test_market_overview_provider_supplements_missing_industries_from_ths_reference() -> None:
+    quote_provider = FakeTickFlowRankingQuoteProvider()
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=ThsIndustryFallbackHttpClient(),
+        realtime_quote_provider=quote_provider,
+    )
+
+    rankings = provider.get_market_rankings(limit=4, batch_size=2)
+
+    assert [item.industry for item in rankings.pct_change_rank] == ["机器人", "电池", "半导体", "化学制品"]
+    assert rankings.turnover_rank[0].industry == "半导体"
+    assert any(
+        status.source == "同花顺行业分类参考"
         and status.status == "success"
         and "补齐 4/4" in status.detail
         for status in rankings.source_status

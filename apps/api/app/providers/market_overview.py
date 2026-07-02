@@ -37,6 +37,7 @@ DISPLAY_INDEX_NAMES = {
     "000688.SH": "科创50",
 }
 A_SHARE_STOCK_LIST_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
+THS_INDUSTRIES_URL = "https://files.688798.xyz/ths/industries.json"
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
@@ -61,6 +62,7 @@ class EastmoneyMarketOverviewProvider:
         self._owns_client = http_client is None
         self.http_client = http_client or httpx.Client()
         self._a_share_realtime_rows_cache: list[dict[str, Any]] | None = None
+        self._ths_industry_map_cache: dict[str, str] | None = None
 
     def close(self) -> None:
         if self._owns_client:
@@ -514,6 +516,18 @@ class EastmoneyMarketOverviewProvider:
                 detail=f"补齐 {patched}/{len(missing_symbols)} 只排行股票行业",
             )
 
+        try:
+            industry_by_symbol = self._fetch_ths_industries_by_symbols(missing_symbols)
+        except Exception:
+            industry_by_symbol = {}
+        patched = _patch_rank_industries(pct_change_rank, turnover_rank, industry_by_symbol)
+        if patched:
+            return StrongStockSourceStatus(
+                source="同花顺行业分类参考",
+                status="success",
+                detail=f"补齐 {patched}/{len(missing_symbols)} 只排行股票行业",
+            )
+
         missing_symbols = _dedupe_symbols(
             item.symbol
             for item in [*pct_change_rank, *turnover_rank]
@@ -565,6 +579,36 @@ class EastmoneyMarketOverviewProvider:
                 if symbol and industry:
                     output[symbol] = industry
         return output
+
+    def _fetch_ths_industries_by_symbols(self, symbols: list[str]) -> dict[str, str]:
+        if self._ths_industry_map_cache is None:
+            response = self.http_client.get(
+                THS_INDUSTRIES_URL,
+                headers={"User-Agent": USER_AGENT},
+                timeout=self.timeout_seconds,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, list):
+                raise ValueError("invalid ths industries payload")
+            mapping: dict[str, str] = {}
+            for row in payload:
+                if not isinstance(row, dict):
+                    continue
+                symbol = str(row.get("symbol") or "").strip().upper()
+                industries = row.get("industries")
+                if not symbol or not isinstance(industries, list):
+                    continue
+                names = [_text(item) for item in industries]
+                names = [name for name in names if name]
+                if names:
+                    mapping[symbol] = names[1] if len(names) > 1 else names[0]
+            self._ths_industry_map_cache = mapping
+        return {
+            symbol: self._ths_industry_map_cache[symbol]
+            for symbol in _dedupe_symbols(symbols)
+            if symbol in self._ths_industry_map_cache
+        }
 
     def _fetch_direct_limit_down_count(self, date: str) -> int:
         response = self.http_client.get(

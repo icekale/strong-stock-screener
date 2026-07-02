@@ -94,6 +94,24 @@ export async function getAuctionSnapshot(limit = 100, refresh = false): Promise<
   return response.json() as Promise<AuctionSnapshotResponse>;
 }
 
+export async function createAuctionSnapshotJob(limit = 100): Promise<BackgroundJobState> {
+  const response = await fetch(`${API_BASE_URL}/api/auction/snapshot/jobs?limit=${encodeURIComponent(limit)}`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`启动竞价刷新任务失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<BackgroundJobState>;
+}
+
+export async function getAuctionSnapshotJob(jobId: string): Promise<BackgroundJobState> {
+  const response = await fetch(`${API_BASE_URL}/api/auction/snapshot/jobs/${encodeURIComponent(jobId)}`);
+  if (!response.ok) {
+    throw new Error(`读取竞价刷新任务失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<BackgroundJobState>;
+}
+
 export async function getAuctionTimeline(limit = 8): Promise<AuctionTimelineResponse> {
   const response = await fetch(`${API_BASE_URL}/api/auction/timeline?limit=${encodeURIComponent(limit)}`);
   if (!response.ok) {

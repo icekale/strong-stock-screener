@@ -6,11 +6,12 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addWatchlistPoolItem,
+  createAuctionSnapshotJob,
   finalizeAuctionReview,
   getAuctionLatest,
   getAuctionReviewLatest,
   getAuctionRuleSummary,
-  getAuctionSnapshot,
+  getAuctionSnapshotJob,
   getAuctionTimeline,
 } from "../../lib/api";
 import type {
@@ -20,6 +21,7 @@ import type {
   AuctionSnapshotItem,
   AuctionSnapshotResponse,
   AuctionTimelineResponse,
+  BackgroundJobState,
 } from "../../lib/types";
 
 type AuctionTierFilter = "all" | AuctionSnapshotItem["tier"];
@@ -49,6 +51,7 @@ export function AuctionWorkspace() {
   const [reviewFinalizing, setReviewFinalizing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshJob, setRefreshJob] = useState<BackgroundJobState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tierFilter, setTierFilter] = useState<AuctionTierFilter>("all");
   const [industryFilter, setIndustryFilter] = useState<string>("all");
@@ -105,32 +108,45 @@ export function AuctionWorkspace() {
     }
   }, []);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (showSuccess = true) => {
     if (refreshPromiseRef.current) {
       return refreshPromiseRef.current;
     }
     setRefreshing(true);
     setError(null);
-    const promise = getAuctionSnapshot(100, true)
-      .then((snapshot) => {
-        setData(snapshot);
-        void loadTimeline();
-      })
-      .catch((err) => {
-        setError(err instanceof Error ? err.message : "读取竞价雷达失败");
-      })
-      .finally(() => {
+    const promise = (async () => {
+      try {
+        let job = await createAuctionSnapshotJob(100);
+        setRefreshJob(job);
+        while (job.status === "pending" || job.status === "running") {
+          await sleep(1200);
+          job = await getAuctionSnapshotJob(job.job_id);
+          setRefreshJob(job);
+        }
+        if (job.status !== "success") {
+          throw new Error(job.error || job.message || "竞价刷新失败");
+        }
+        await Promise.all([loadLatest(false), loadTimeline()]);
+        if (showSuccess) {
+          void message.success("竞价刷新完成");
+        }
+      } catch (err) {
+        const errorMessage = err instanceof Error ? err.message : "读取竞价雷达失败";
+        setError(errorMessage);
+        void message.error(errorMessage);
+      } finally {
         setRefreshing(false);
         refreshPromiseRef.current = null;
-      });
+      }
+    })();
     refreshPromiseRef.current = promise;
     return promise;
-  }, [loadTimeline]);
+  }, [loadLatest, loadTimeline, message]);
 
   useEffect(() => {
     void loadLatest(true).then((snapshot) => {
       if (!snapshot || snapshot.snapshot_status === "missing") {
-        void refresh();
+        void refresh(false);
       }
     });
     void loadTimeline();
@@ -223,9 +239,28 @@ export function AuctionWorkspace() {
               <span>自动快照 · TickFlow 全A实时行情</span>
             </div>
           </div>
-          <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void refresh()} type="primary">
-            刷新竞价
-          </Button>
+          <div className="flex min-w-[180px] flex-col items-stretch gap-2 sm:items-end">
+            <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void refresh()} type="primary">
+              刷新竞价
+            </Button>
+            {refreshJob && refreshing && (
+              <div className="w-full max-w-[260px] rounded-lg border border-[#eee7db] bg-white px-3 py-2 text-xs text-[#7b756d]">
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="truncate font-semibold">{refreshJob.message || "竞价刷新运行中"}</span>
+                  <span className="shrink-0 font-black text-[#d92d20]">
+                    {refreshJob.progress_current}/{refreshJob.progress_total || 1}
+                  </span>
+                </div>
+                <Progress
+                  percent={jobProgressPercent(refreshJob)}
+                  showInfo={false}
+                  size="small"
+                  status={refreshJob.status === "failed" ? "exception" : "active"}
+                  strokeColor="#d92d20"
+                />
+              </div>
+            )}
+          </div>
         </div>
       </section>
 
@@ -406,6 +441,15 @@ export function AuctionWorkspace() {
       />
     </main>
   );
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function jobProgressPercent(job: BackgroundJobState): number {
+  const total = Math.max(1, job.progress_total || 1);
+  return Math.max(0, Math.min(100, Math.round((job.progress_current / total) * 100)));
 }
 
 function AuctionReviewPanel({

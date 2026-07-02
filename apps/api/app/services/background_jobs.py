@@ -11,6 +11,7 @@ from app.models import BackgroundJobState, BackgroundJobStatus, GsgfRealCalibrat
 ProgressCallback = Callable[[int, int, str], None]
 CancelCheck = Callable[[], bool]
 CalibrationRunner = Callable[[ProgressCallback, CancelCheck], GsgfRealCalibrationSummary]
+TransientRunner = Callable[[ProgressCallback, CancelCheck], object]
 SuccessCallback = Callable[[GsgfRealCalibrationSummary], object]
 
 
@@ -47,9 +48,47 @@ class BackgroundJobStore:
         thread.start()
         return self.get(job_id)
 
+    def create_transient_job(
+        self,
+        job_type: str,
+        runner: TransientRunner,
+        *,
+        running_message: str,
+        success_message: str,
+        progress_total: int = 1,
+    ) -> BackgroundJobState:
+        job_id = datetime.now().strftime("%Y%m%d%H%M%S") + "-" + uuid4().hex[:8]
+        state = BackgroundJobState(
+            job_id=job_id,
+            type=job_type,
+            progress_total=max(1, progress_total),
+            message="等待执行",
+        )
+        cancel_event = Event()
+        with self._lock:
+            self._jobs[job_id] = state
+            self._cancel_events[job_id] = cancel_event
+        thread = Thread(
+            target=self._run_transient,
+            args=(job_id, runner, cancel_event, running_message, success_message),
+            name=f"{job_type}-{job_id}",
+            daemon=True,
+        )
+        with self._lock:
+            self._threads[job_id] = thread
+        thread.start()
+        return self.get(job_id)
+
     def get(self, job_id: str) -> BackgroundJobState:
         with self._lock:
             return self._jobs[job_id].model_copy(deep=True)
+
+    def get_active(self, job_type: str) -> BackgroundJobState | None:
+        with self._lock:
+            for job in reversed(list(self._jobs.values())):
+                if job.type == job_type and job.status in {"pending", "running"}:
+                    return job.model_copy(deep=True)
+        return None
 
     def cancel(self, job_id: str) -> BackgroundJobState:
         with self._lock:
@@ -114,6 +153,45 @@ class BackgroundJobStore:
                 status=status,
                 error=str(exc),
                 message="校准任务已取消" if status == "canceled" else "校准任务失败",
+                finished_at=_now(),
+            )
+
+    def _run_transient(
+        self,
+        job_id: str,
+        runner: TransientRunner,
+        cancel_event: Event,
+        running_message: str,
+        success_message: str,
+    ) -> None:
+        self._set_state(job_id, status="running", started_at=_now(), message=running_message)
+
+        def progress(current: int, total: int, message: str) -> None:
+            self._set_state(
+                job_id,
+                progress_current=max(0, int(current)),
+                progress_total=max(1, int(total)),
+                message=message,
+            )
+
+        try:
+            runner(progress, cancel_event.is_set)
+            total = max(1, self.get(job_id).progress_total)
+            self._set_state(
+                job_id,
+                status="success",
+                progress_current=total,
+                progress_total=total,
+                message=success_message,
+                finished_at=_now(),
+            )
+        except Exception as exc:
+            status: BackgroundJobStatus = "canceled" if cancel_event.is_set() else "failed"
+            self._set_state(
+                job_id,
+                status=status,
+                error=str(exc),
+                message="任务已取消" if status == "canceled" else "任务失败",
                 finished_at=_now(),
             )
 

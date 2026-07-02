@@ -1,5 +1,7 @@
 from pathlib import Path
 from datetime import datetime, timedelta
+from threading import Event
+from time import sleep
 
 from fastapi.testclient import TestClient
 
@@ -724,6 +726,21 @@ class CountingMarketRankingsProvider(FakeMarketOverviewProvider):
         return super().get_market_rankings(limit=limit)
 
 
+class BlockingMarketRankingsProvider(FakeMarketOverviewProvider):
+    source_name = "blocking fake全A排行"
+
+    def __init__(self) -> None:
+        self.started = Event()
+        self.release = Event()
+        self.ranking_calls: list[int] = []
+
+    def get_market_rankings(self, limit: int = 50) -> MarketRankingsResponse:
+        self.ranking_calls.append(limit)
+        self.started.set()
+        self.release.wait(timeout=3)
+        return super().get_market_rankings(limit=limit)
+
+
 class EmptySectorRadarProvider(FakeMarketOverviewProvider):
     source_name = "empty fake板块雷达"
 
@@ -1255,6 +1272,66 @@ def test_auction_snapshot_refresh_updates_latest_snapshot(tmp_path: Path) -> Non
     assert latest_payload["snapshot_status"] == "cached"
     assert latest_payload["cache_age_seconds"] is not None
     assert latest_payload["items"][0]["symbol"] == "300001.SZ"
+    assert provider.ranking_calls == [100]
+
+
+def test_auction_snapshot_refresh_job_runs_in_background_and_saves_latest(
+    tmp_path: Path,
+) -> None:
+    provider = BlockingMarketRankingsProvider()
+    client = _client(tmp_path, market_overview_provider=provider)
+
+    job_response = client.post("/api/auction/snapshot/jobs?limit=2")
+
+    assert job_response.status_code == 200
+    job_payload = job_response.json()
+    assert job_payload["type"] == "auction_snapshot_refresh"
+    assert job_payload["status"] in {"pending", "running"}
+    assert provider.started.wait(timeout=1) is True
+    latest_before_release = client.get("/api/auction/latest?limit=2").json()
+    assert latest_before_release["snapshot_status"] == "missing"
+
+    provider.release.set()
+    job_id = job_payload["job_id"]
+    completed_payload = job_payload
+    for _ in range(30):
+        completed_payload = client.get(f"/api/auction/snapshot/jobs/{job_id}").json()
+        if completed_payload["status"] == "success":
+            break
+        sleep(0.05)
+
+    assert completed_payload["status"] == "success"
+    latest_response = client.get("/api/auction/latest?limit=2")
+    latest_payload = latest_response.json()
+    assert latest_response.status_code == 200
+    assert latest_payload["snapshot_status"] == "cached"
+    assert latest_payload["items"][0]["symbol"] == "300001.SZ"
+    assert provider.ranking_calls == [100]
+
+
+def test_auction_snapshot_refresh_job_reuses_active_job(tmp_path: Path) -> None:
+    provider = BlockingMarketRankingsProvider()
+    client = _client(tmp_path, market_overview_provider=provider)
+
+    first_response = client.post("/api/auction/snapshot/jobs?limit=2")
+    assert provider.started.wait(timeout=1) is True
+    second_response = client.post("/api/auction/snapshot/jobs?limit=2")
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+    first_payload = first_response.json()
+    second_payload = second_response.json()
+    assert second_payload["job_id"] == first_payload["job_id"]
+
+    provider.release.set()
+    for _ in range(30):
+        completed_payload = client.get(
+            f"/api/auction/snapshot/jobs/{first_payload['job_id']}"
+        ).json()
+        if completed_payload["status"] == "success":
+            break
+        sleep(0.05)
+
     assert provider.ranking_calls == [100]
 
 

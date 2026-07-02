@@ -56,7 +56,7 @@ from app.providers.watchlist import (
     upsert_watchlist_item,
 )
 from app.services.intraday import IntradayMonitor
-from app.services.background_jobs import BackgroundJobStore
+from app.services.background_jobs import BackgroundJobStore, CancelCheck, ProgressCallback
 from app.services.gsgf_backtest import summarize_gsgf_backtest
 from app.services.gsgf_auto_review import GsgfAutoReviewService
 from app.services.gsgf_model_health import build_gsgf_model_health
@@ -627,6 +627,36 @@ def get_auction_snapshot(limit: int = 100, refresh: bool = False) -> dict[str, o
     return result.model_dump(mode="json")
 
 
+@app.post("/api/auction/snapshot/jobs")
+def create_auction_snapshot_job(limit: int = 100) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 100))
+    store = _background_job_store()
+    active_job = store.get_active("auction_snapshot_refresh")
+    if active_job is not None:
+        return active_job.model_dump(mode="json")
+    job = store.create_transient_job(
+        "auction_snapshot_refresh",
+        lambda progress, should_cancel: _run_auction_snapshot_refresh_job(
+            bounded_limit,
+            progress,
+            should_cancel,
+        ),
+        running_message="竞价刷新运行中",
+        success_message="竞价刷新完成",
+        progress_total=3,
+    )
+    return job.model_dump(mode="json")
+
+
+@app.get("/api/auction/snapshot/jobs/{job_id}")
+def get_auction_snapshot_job(job_id: str) -> dict[str, object]:
+    try:
+        job = _background_job_store().get(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="auction snapshot job not found") from exc
+    return job.model_dump(mode="json")
+
+
 @app.get("/api/auction/review/latest")
 def get_latest_auction_review() -> dict[str, object]:
     summary = _auction_review_store().load_latest_summary()
@@ -1145,6 +1175,22 @@ def _refresh_auction_snapshot(limit: int) -> AuctionSnapshotResponse:
         now=now,
     )
     return _auction_snapshot_store().save(result, captured_at=now)
+
+
+def _run_auction_snapshot_refresh_job(
+    limit: int,
+    progress: ProgressCallback,
+    should_cancel: CancelCheck,
+) -> AuctionSnapshotResponse:
+    if should_cancel():
+        raise RuntimeError("竞价刷新已取消")
+    progress(0, 3, "准备刷新竞价快照")
+    progress(1, 3, "读取 TickFlow 全A实时行情")
+    result = _refresh_auction_snapshot(limit)
+    if should_cancel():
+        raise RuntimeError("竞价刷新已取消")
+    progress(2, 3, f"已保存 {len(result.items)} 只竞价候选")
+    return result
 
 
 def _auction_now() -> datetime:

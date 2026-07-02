@@ -11,6 +11,7 @@ import {
   getSentimentDetail,
   getSentimentMonitorStatus,
   getSentimentSummary,
+  getSentimentWatchlistAlerts,
   getShortTermIntradaySentiment,
   getShortTermIntradaySignalDigest,
   runSentimentMonitorOnce,
@@ -29,6 +30,8 @@ import type {
   SentimentDetailResponse,
   SentimentMonitorStatus,
   SentimentSummaryResponse,
+  SentimentWatchlistAlert,
+  SentimentWatchlistAlertsResponse,
   ShortTermIntradaySentimentResponse,
   ShortTermIntradaySignalDigest,
   ShortTermSentimentIndustryItem,
@@ -64,6 +67,7 @@ export function SentimentWorkspace() {
   const [marketEmotion, setMarketEmotion] = useState<MarketEmotionSnapshotResponse | null>(null);
   const [marketRankings, setMarketRankings] = useState<MarketRankingsResponse | null>(null);
   const [decision, setDecision] = useState<SentimentDecisionResponse | null>(null);
+  const [watchlistAlerts, setWatchlistAlerts] = useState<SentimentWatchlistAlertsResponse | null>(null);
   const [intraday, setIntraday] = useState<ShortTermIntradaySentimentResponse | null>(null);
   const [digest, setDigest] = useState<ShortTermIntradaySignalDigest | null>(null);
   const [monitorStatus, setMonitorStatus] = useState<SentimentMonitorStatus | null>(null);
@@ -71,6 +75,7 @@ export function SentimentWorkspace() {
   const [detailLoading, setDetailLoading] = useState(true);
   const [rankingsLoading, setRankingsLoading] = useState(true);
   const [decisionLoading, setDecisionLoading] = useState(true);
+  const [watchlistAlertsLoading, setWatchlistAlertsLoading] = useState(true);
   const [intradayLoading, setIntradayLoading] = useState(false);
   const [digestLoading, setDigestLoading] = useState(false);
   const [sendingDigest, setSendingDigest] = useState(false);
@@ -90,6 +95,7 @@ export function SentimentWorkspace() {
       const nextSummary = await getSentimentSummary(date, 80, forceRefresh);
       setSummary(nextSummary);
       void loadSentimentDecision(date, forceRefresh);
+      void loadSentimentWatchlistAlerts(date, forceRefresh);
       void loadSentimentDetail(date, forceRefresh);
       void loadMarketRankings();
     } catch (err) {
@@ -98,7 +104,9 @@ export function SentimentWorkspace() {
       setData(null);
       setMarketEmotion(null);
       setDecision(null);
+      setWatchlistAlerts(null);
       setDecisionLoading(false);
+      setWatchlistAlertsLoading(false);
       setDetailLoading(false);
     } finally {
       setSummaryLoading(false);
@@ -114,6 +122,17 @@ export function SentimentWorkspace() {
         setError(err instanceof Error ? err.message : "读取情绪交易许可失败");
       })
       .finally(() => setDecisionLoading(false));
+  }
+
+  async function loadSentimentWatchlistAlerts(date = tradeDate, forceRefresh = false) {
+    setWatchlistAlertsLoading(true);
+    await getSentimentWatchlistAlerts(date, 80, forceRefresh)
+      .then((nextAlerts) => setWatchlistAlerts(nextAlerts))
+      .catch((err: unknown) => {
+        setWatchlistAlerts(null);
+        setError(err instanceof Error ? err.message : "读取自选股情绪联动失败");
+      })
+      .finally(() => setWatchlistAlertsLoading(false));
   }
 
   async function loadMarketRankings() {
@@ -307,6 +326,7 @@ export function SentimentWorkspace() {
       ) : summary || data ? (
         <div className="space-y-4">
           <SentimentDecisionCard decision={decision} loading={decisionLoading} />
+          <SentimentWatchlistAlertsCard alerts={watchlistAlerts?.items ?? []} loading={watchlistAlertsLoading} />
           <MarketEmotionDashboard data={marketEmotion} loading={detailLoading} summary={summary} />
           <MarketRankingsGrid loading={rankingsLoading} rankings={marketRankings} />
           <SentimentMonitorPanel
@@ -471,6 +491,99 @@ function SentimentDecisionCard({
         </div>
       </div>
     </section>
+  );
+}
+
+function SentimentWatchlistAlertsCard({
+  alerts,
+  loading,
+}: {
+  alerts: SentimentWatchlistAlert[];
+  loading: boolean;
+}) {
+  const groups = useMemo(
+    () =>
+      (["重点盯", "等确认", "风险回避"] as const).map((action) => ({
+        action,
+        items: alerts.filter((item) => item.action === action),
+      })),
+    [alerts],
+  );
+
+  if (loading && alerts.length === 0) {
+    return (
+      <section className="workbench-panel rounded-xl border p-4">
+        <Skeleton active paragraph={{ rows: 3 }} />
+      </section>
+    );
+  }
+
+  return (
+    <section className="workbench-panel rounded-xl border">
+      <div className="workbench-panel-divider flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+        <div>
+          <div className="text-sm font-black text-[#11100e]">自选股联动</div>
+          <div className="text-xs text-[#7b756d]">把当前情绪许可和主线方向映射到自选股池，优先处理需要盯盘的股票。</div>
+        </div>
+        <Space wrap>
+          <Tag color="red">重点盯 {groups[0].items.length}</Tag>
+          <Tag>等确认 {groups[1].items.length}</Tag>
+          <Tag color="orange">风险回避 {groups[2].items.length}</Tag>
+        </Space>
+      </div>
+      {alerts.length === 0 ? (
+        <div className="p-6">
+          <Empty description="暂无自选股联动结果，请先维护自选股池" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+        </div>
+      ) : (
+        <div className="grid gap-3 p-4 xl:grid-cols-3">
+          {groups.map((group) => (
+            <div className="rounded-lg border border-[#e3ddd3] bg-white" key={group.action}>
+              <div className="flex items-center justify-between border-b border-[#efe8dd] px-3 py-2">
+                <span className="text-sm font-black text-[#11100e]">{group.action}</span>
+                <Tag color={watchlistActionColor(group.action)}>{group.items.length} 只</Tag>
+              </div>
+              <div className="space-y-2 p-3">
+                {group.items.length ? (
+                  group.items.slice(0, 8).map((item) => <WatchlistAlertRow item={item} key={item.symbol} />)
+                ) : (
+                  <div className="rounded-md bg-[#f7f3ed] px-3 py-4 text-center text-xs text-[#7b756d]">暂无股票</div>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function WatchlistAlertRow({ item }: { item: SentimentWatchlistAlert }) {
+  return (
+    <div className="rounded-md border border-[#efe8dd] bg-[#fffdf9] px-3 py-2">
+      <div className="flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <Link className="block truncate text-sm font-black text-[#11100e]" href={`/stock/${item.symbol}`}>
+            {item.name}
+          </Link>
+          <div className="mt-0.5 text-xs text-[#7b756d]">{item.symbol}</div>
+        </div>
+        {item.matched_sector ? <Tag color="red">{item.matched_sector}</Tag> : null}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1">
+        {item.group ? <Tag>{item.group}</Tag> : null}
+        {item.tags.slice(0, 3).map((tag) => (
+          <Tag key={tag}>{tag}</Tag>
+        ))}
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1">
+        {item.reasons.slice(0, 3).map((reason) => (
+          <Tag color={item.action === "风险回避" ? "orange" : item.action === "重点盯" ? "red" : "default"} key={reason}>
+            {reason}
+          </Tag>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -735,6 +848,16 @@ function permissionTextClass(value: SentimentDecisionResponse["trade_permission"
     return "text-[#d92d20]";
   }
   return "text-[#11100e]";
+}
+
+function watchlistActionColor(value: SentimentWatchlistAlert["action"]): string {
+  if (value === "重点盯") {
+    return "red";
+  }
+  if (value === "风险回避") {
+    return "orange";
+  }
+  return "default";
 }
 
 function summaryFromDetail(detail: SentimentDetailResponse): SentimentSummaryResponse {

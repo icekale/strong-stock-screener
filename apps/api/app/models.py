@@ -32,6 +32,7 @@ SentimentSnapshotStatus = Literal["fresh", "cached", "missing"]
 SentimentMarketState = Literal["冰点", "修复", "主升", "高潮", "分歧", "退潮"]
 SentimentTradePermission = Literal["空仓等待", "轻仓试错", "强势进攻", "只低吸", "只卖不追"]
 SentimentRiskLevel = Literal["低", "中", "高"]
+SentimentWatchlistAction = Literal["重点盯", "等确认", "风险回避"]
 BackgroundJobStatus = Literal["pending", "running", "success", "failed", "canceled"]
 AuctionReviewStatus = Literal["pending", "intraday_done", "day_done", "next_day_done", "data_incomplete"]
 
@@ -809,6 +810,16 @@ class SentimentDecisionResponse(BaseModel):
     generated_at: str = Field(
         default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
     )
+
+
+class SentimentWatchlistAlert(BaseModel):
+    symbol: str
+    name: str
+    group: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    action: SentimentWatchlistAction = "等确认"
+    matched_sector: str | None = None
+    reasons: list[str] = Field(default_factory=list)
 
 
 class SentimentDetailResponse(BaseModel):

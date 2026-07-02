@@ -1,91 +1,106 @@
-# A 股强势股 / GSGF 选股工作台
+# StockMaster A 股强势股选股工作台
 
-一个面向 A 股短线交易复盘的独立选股工作台。它把强势股筛选、`股是股非` GSGF V2 结构模型、TickFlow 行情、自选股管理、自动复盘和真实样本校准整合在一个可本地部署的 Web 应用里。
+StockMaster 是一个面向 A 股短线交易者的本地化选股工作台。它把强势股筛选、竞价雷达、板块资金流、短线情绪、自选股观察池和个股 K 线复盘放在一个独立 Web 系统里，帮助你把“看盘灵感”沉淀成可追踪、可复盘、可验证的交易流程。
 
-项目目标不是做“大而全”的行情软件，而是把一套偏短线强势股的交易纪律固化成可解释、可复盘、可追踪、可部署的工作台。
+它不是大而全行情软件，也不做自动交易。它更像一张短线作战台：盘前看竞价，盘中看板块和情绪，盘后复盘选股逻辑，长期维护自己的观察池。
 
-> 风险提示：本项目只做数据整理和规则辅助，不构成投资建议。A 股交易风险高，请自行判断并控制仓位。
+> 风险提示：本项目只做数据整理、规则辅助和复盘记录，不构成投资建议。A 股交易风险高，请自行判断并控制仓位。
 
-## 项目入口
+## 适合谁
 
-- GitHub 仓库：https://github.com/icekale/strong-stock-screener
-- GitHub Releases：https://github.com/icekale/strong-stock-screener/releases
-- Docker Hub 单容器镜像：https://hub.docker.com/r/icekale/strong-stock-screener
-- Docker Hub API 镜像（旧双容器模式）：https://hub.docker.com/r/icekale/strong-stock-screener-api
-- Docker Hub Web 镜像（旧双容器模式）：https://hub.docker.com/r/icekale/strong-stock-screener-web
-- Docker 标签：`latest`，并保留构建时的提交标签，例如 `4d3bf4a`
+- 想把强势股筛选规则固化下来，而不是每天靠手感翻股票。
+- 需要维护自选股观察池，记录加入理由、计划买点、失效条件和复盘结论。
+- 关注竞价强度、涨停情绪、板块资金流和个股 K 线结构。
+- 希望 TickFlow、iFinD、东方财富、TDX 等数据源状态透明可见，知道本次结果是否可信。
+- 想用 Docker / Unraid 快速部署一个私有选股工作台。
 
-## 功能概览
+## 核心能力
 
-- 强势股筛选：默认只从近 20 个交易日出现过涨停的股票中筛选。
-- GSGF V2：把《股是股非》拆书后的结构规则转成量化评分，覆盖三度、量时空、均线归位、A/B/C 区、星线触发、确认买点、低吸观察和风险失效。
-- 趋势规则：结合 K 线实体、量能、MA5/10/20/60、200 日新高、放量上涨、放量滞涨等指标评分。
-- 板块强度：给强势行业/板块候选更高权重。
-- 风险提示：展示严重异动、负面新闻、均线破位、实体阴线等风险信号。
-- 自选股管理：支持分组、标签、行业、备注、批量移动、删除。
-- K 线详情页：使用 TickFlow 日 K 数据，支持缩放、均线开关、十字定位线、成交量和 KDJ。
-- GSGF 图表证据：在个股 K 线页展示策略命中的结构证据，辅助复盘“为什么选中 / 为什么回避”。
-- 自动复盘：保存 GSGF 信号快照，定期复查确认买点、低吸观察、B 区 A 点、放量突破确认等分桶表现。
-- 真实样本校准：用 TickFlow 数据跑真实样本，生成模型健康摘要和信号退化提醒。
-- 数据源设置页：可在 UI 查看 TickFlow、iFinD key 状态、数据源健康检查、请求延迟和 fallback 情况。
-- 独立部署：后端 FastAPI，前端 Next.js，默认使用 Docker Hub 单容器镜像，也保留双容器本地构建方式。
+| 模块 | 作用 |
+| --- | --- |
+| 选股工作台 | 按近 20 个交易日涨停池、趋势、量能、均线、200 日新高、板块强度和风险信号筛选强势股。 |
+| GSGF 模型 | 将“股是股非”结构规则量化，输出三度、量时空、A/B/C 区、星线触发、确认买点和低吸观察等证据。 |
+| 竞价雷达 | 聚合 09:20、09:23、09:24:50、09:25 等竞价快照，识别强势高开、过热风险、低开转强和行业集中度。 |
+| 板块资金流 | 展示板块净流入/净流出排行；东方财富失效时可 fallback 到 TDX 或 TickFlow 全 A 实时行情行业聚合。 |
+| 短线情绪 | 跟踪涨停、跌停、炸板、连板、高度板、涨跌分布等情绪指标，并支持后台采样和 Telegram 通知配置。 |
+| 自选股观察池 | 支持分组、标签、多分组、状态、行业、加入理由、计划买点、失效条件、复盘结论和风险提示。 |
+| 个股详情页 | 使用 TickFlow K 线，支持缩放、均线开关、十字光标、成交量、MACD/KDJ/RSI 等副图指标和 GSGF 证据标注。 |
+| 数据源设置 | 在 UI 中配置 TickFlow、iFinD 等 key，查看权限、延迟、最近错误和 fallback 状态。 |
 
-## 技术栈
+## 页面入口
 
-- 后端：FastAPI、Pydantic、AKShare、TickFlow、httpx
-- 前端：Next.js 15、React 19、Tailwind CSS
-- 包管理：uv、pnpm
-- 部署：Docker / Docker Compose
+启动后访问 `http://localhost:3110`：
 
-## 项目结构
+- `/`：选股工作台
+- `/watchlist`：自选股观察池
+- `/sectors`：板块资金流
+- `/auction`：竞价雷达
+- `/sentiment`：短线情绪
+- `/stock/{symbol}`：个股详情，例如 `/stock/002080.SZ`
+- `/settings`：数据源和通知配置
 
-```text
-.
-├── apps
-│   ├── api          # FastAPI 后端，默认端口 8010
-│   └── web          # Next.js 前端，默认端口 3110
-├── Dockerfile       # 单容器镜像，内部同时启动 API 和 Web
-├── docker-compose.yml
-├── docker-compose.dual.yml
-├── .env.example
-└── README.md
-```
+## 快速部署
 
-## 数据源说明
+推荐使用 Docker Hub 单容器镜像。一个容器内同时运行 FastAPI 后端和 Next.js 前端，外部只需要暴露 `3110` 端口。
 
-默认数据源组合：
-
-- 候选池：AKShare / 东方财富近 20 个交易日涨停池。
-- 日 K：TickFlow 日 K。
-- 实时行情/分钟线：TickFlow。
-- 研究增强：iFinD MCP，用于后续接入行业板块、公告新闻、财务估值和风险事件。
-- 新闻风险：东方财富个股新闻。
-
-TickFlow key 和 iFinD MCP key 可以通过环境变量配置，也可以启动后在 UI 的“数据源设置”页面中配置。公开仓库不会提交 `.env`、历史筛选记录、自选股文件或 runtime 配置。
-Docker Compose 默认把后端数据保存到项目目录的 `data/`，用于持久化 UI 保存的数据源配置、自选股和筛选记录。
-
-## Docker Compose 部署
-
-默认推荐使用单容器镜像：一个 Docker Hub 镜像内同时运行 FastAPI 和 Next.js。Unraid 只需要从 Docker Hub 拉取 `icekale/strong-stock-screener:latest`，不需要在 NAS 上本地构建。
-
-### 1. 准备环境变量
+### 1. 创建目录
 
 ```bash
-cp .env.example .env
+mkdir -p strong-stock-screener
+cd strong-stock-screener
 ```
 
-编辑 `.env`：
+### 2. 编写 `docker-compose.yml`
+
+```yaml
+services:
+  strong-stock-screener:
+    image: icekale/strong-stock-screener:${STRONG_STOCK_IMAGE_TAG:-latest}
+    container_name: strong-stock-screener
+    pull_policy: always
+    env_file:
+      - .env
+    environment:
+      STRONG_STOCK_DATA_DIR: /app/data
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "3110:3110"
+    volumes:
+      - ./data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/opt/strong-stock-api-venv/bin/python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8010/health', timeout=3).read()",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+```
+
+### 3. 编写 `.env`
 
 ```bash
-STRONG_STOCK_TICKFLOW_API_KEY=你的_tickflow_key
+STRONG_STOCK_TICKFLOW_API_KEY=你的_TickFlow_Key
 STRONG_STOCK_TICKFLOW_BASE_URL=https://api.tickflow.org
-STRONG_STOCK_IFIND_API_KEY=你的_ifind_mcp_key
+
+STRONG_STOCK_IFIND_API_KEY=你的_iFinD_MCP_Key
 STRONG_STOCK_IFIND_BASE_URL=https://api-mcp.51ifind.com:8643
 STRONG_STOCK_IFIND_SERVICE_ID=hexin-ifind-ds-stock-mcp
+
 STRONG_STOCK_CANDIDATE_PROVIDER=recent_limit_up
 STRONG_STOCK_DATA_DIR=./data
 STRONG_STOCK_CORS_ALLOW_ORIGINS=http://localhost:3110,http://127.0.0.1:3110
 TZ=Asia/Shanghai
+
 STRONG_STOCK_SCREEN_RUN_RETENTION_COUNT=120
 STRONG_STOCK_GSGF_REVIEW_RETENTION_RECORDS=5000
 STRONG_STOCK_SENTIMENT_SNAPSHOT_RETENTION_DAYS=30
@@ -93,73 +108,108 @@ STRONG_STOCK_MARKET_EMOTION_HISTORY_RETENTION_DAYS=30
 STRONG_STOCK_MARKET_EMOTION_SAMPLES_PER_DAY=360
 ```
 
-如果暂时不填 TickFlow key，后端会显示 `missing_key`，选股和 K 线能力会受限。
-如果暂时不填 iFinD key，研究增强能力会显示 `missing_key`，但不会影响 TickFlow 行情和现有选股主流程。
+TickFlow 是核心行情源，建议配置。iFinD 用于行业、公告、新闻、财务、估值和风险事件增强，不配置也可以使用主流程。
 
-单容器镜像内置同源 API 代理，浏览器访问 `http://服务器IP:3110` 即可，前端会通过 `/api/*` 代理到容器内部 FastAPI，不需要额外暴露 `8010` 端口。
-
-### 2. 启动
+### 4. 启动
 
 ```bash
 docker compose up -d
-# 或者：docker-compose up -d
 ```
 
-启动后访问：
-
-- 前端工作台：http://localhost:3110
-- 后端健康检查：http://localhost:3110/health
-- 数据源设置：http://localhost:3110/settings
-- 自选股管理：http://localhost:3110/watchlist
-
-### 3. 固定镜像标签
-
-`docker-compose.yml` 默认使用：
-
-```yaml
-image: icekale/strong-stock-screener:${STRONG_STOCK_IMAGE_TAG:-latest}
-```
-
-如需固定版本，可以在 `.env` 中设置：
+如果环境只有旧版 Compose：
 
 ```bash
-STRONG_STOCK_IMAGE_TAG=提交短哈希
+docker-compose up -d
 ```
 
-### 4. 查看日志
+打开：
 
-`docker-compose.yml` 已配置 Docker 日志滚动，默认单文件 10MB、最多 3 个文件，避免长期运行时容器日志占满磁盘。
+```text
+http://localhost:3110
+```
+
+健康检查：
 
 ```bash
-docker compose logs -f strong-stock-screener
-# 或者：docker-compose logs -f strong-stock-screener
+curl http://localhost:3110/health
 ```
 
-### 5. 停止
+### 5. 更新
 
 ```bash
-docker compose down
-# 或者：docker-compose down
+docker compose pull
+docker compose up -d
 ```
 
-如需清空筛选记录、自选股和 UI 保存的运行时配置，停止服务后删除项目目录下的 `data/`。公开仓库已忽略该目录，请不要把 key 或运行数据提交到 Git。
+Unraid 推荐直接从 Docker Hub 拉取 `icekale/strong-stock-screener:latest`，不要在 NAS 上本地构建。项目数据挂载到容器内 `/app/data`，时区设置为 `Asia/Shanghai`。
 
-### 6. 旧双容器本地构建
+## 首次使用流程
 
-如果需要回滚到 API/Web 双容器开发模式，可以使用：
+1. 打开 `/settings`，填写 TickFlow 和 iFinD key。
+2. 点击数据源健康检查，确认日 K、实时行情、分钟线、iFinD 状态和 fallback 状态。
+3. 打开首页 `/`，点击运行筛选，查看选股结果和风险提示。
+4. 点击股票名称进入个股详情，检查 K 线、均线、副图指标和 GSGF 证据。
+5. 对感兴趣的股票点击加入自选，并补充加入理由、计划买点和失效条件。
+6. 交易日上午打开 `/auction`，观察竞价强度榜、行业集中度和风险提示。
+7. 盘中打开 `/sectors` 和 `/sentiment`，确认主线板块、情绪温度和涨跌分布。
+8. 盘后回到自选股观察池和个股详情页，更新复盘结论。
 
-```bash
-docker compose -f docker-compose.dual.yml up -d --build
+## 选股规则概览
+
+默认模型围绕短线强势股设计：
+
+- 只从近 20 个交易日出现过涨停的股票中筛选。
+- 趋势优先，重点看股价是否在关键均线上方，是否接近或突破 200 日新高。
+- K 线要求红肥绿瘦，上涨时量能饱满，回调时缩量。
+- 放量上涨继续观察，放量滞涨提高风险权重。
+- 强势板块和高辨识度个股加分。
+- 严重异动、负面新闻、均线破位、实体阴线、连板断板未修复等信号会进入风险提示。
+- 空仓纪律只用于持仓或自选股风险判断，不用于初始选股过滤。
+
+## 数据源策略
+
+StockMaster 尽量让数据源透明，而不是把结果包装成黑盒结论。
+
+| 数据类别 | 默认来源 | 说明 |
+| --- | --- | --- |
+| 日 K / 个股 K 线 | TickFlow | 个股详情页和策略计算优先使用。 |
+| 实时行情 / 竞价 / 分钟线 | TickFlow | 用于竞价雷达、情绪、排行和盘中观察。 |
+| 涨停候选池 | 东方财富 / AKShare | 默认从近 20 日涨停池构建候选。 |
+| 板块资金流 | 东方财富行业资金流 | 直连失败时 fallback 到估算、TDX、TickFlow 行业聚合。 |
+| 行业分类 | 东方财富 / 同花顺分类参考 / iFinD | 同花顺分类参考来自 `https://files.688798.xyz/ths/industries.json`。 |
+| 研究增强 | iFinD MCP | 行业、公告、新闻、财务、估值、风险事件。 |
+| 新闻风险 | 东方财富 / iFinD | 用于负面新闻和风险提示。 |
+
+板块资金流的 fallback 顺序：
+
+```text
+东方财富行业资金流
+→ 东方财富行业涨跌额估算
+→ TDX MCP 涨停概念集中度
+→ TickFlow 全 A 实时行情行业聚合
 ```
 
-双容器模式会暴露：
+## 持久化数据
 
-- Web：http://localhost:3110
-- API：http://localhost:8010/health
+Docker Compose 默认挂载：
+
+```text
+./data:/app/data
+```
+
+这里保存：
+
+- UI 保存的数据源配置
+- 自选股和分组
+- 选股记录
+- GSGF 复盘记录
+- 情绪和竞价快照
+
+公开仓库已忽略 `data/`、`.env` 和运行时配置。不要把 key、自选股或历史记录提交到 Git。
 
 ## 本地开发
 
-### 后端
+后端：
 
 ```bash
 cd apps/api
@@ -167,7 +217,7 @@ uv sync
 .venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8010
 ```
 
-### 前端
+前端：
 
 ```bash
 cd apps/web
@@ -175,15 +225,11 @@ corepack pnpm install
 corepack pnpm dev -- -p 3110
 ```
 
-打开：http://localhost:3110
-
-如果只是本机拉起工作台，推荐使用仓库脚本：
+也可以用脚本启动本地 Web：
 
 ```bash
 python3 scripts/start-local-web.py
 ```
-
-该脚本会停止旧的 `3110` 前端进程、清理开发态 `.next-dev` 目录并后台启动 Web。生产构建仍使用 `.next`，本地开发使用 `.next-dev`，避免 `next build` 覆盖正在运行的开发服务资源。
 
 ## 常用检查
 
@@ -191,15 +237,15 @@ python3 scripts/start-local-web.py
 
 ```bash
 cd apps/api
-.venv/bin/python -m pytest -q
-.venv/bin/python -m ruff check app tests
+uv run pytest
 ```
 
 前端：
 
 ```bash
 cd apps/web
-corepack pnpm test
+node ./node_modules/typescript/bin/tsc --noEmit
+node --experimental-strip-types --test lib/*.test.ts
 ```
 
 Docker：
@@ -207,45 +253,48 @@ Docker：
 ```bash
 docker compose up -d
 curl http://localhost:3110/health
-# 如果你的环境只支持旧版命令，把 docker compose 换成 docker-compose
+docker compose logs -f strong-stock-screener
 ```
 
-## 使用流程
+## 镜像和仓库
 
-1. 打开 `http://localhost:3110/settings`，确认 TickFlow 和数据源状态。
-2. 回到首页，选择交易日和扫描候选数。
-3. 点击“运行筛选”。
-4. 查看候选决策表、板块强度、风险提示和 K 线详情。
-5. 对感兴趣的股票点击“加入自选”。
-6. 在自选股管理页维护分组、标签、行业和备注。
+- GitHub：https://github.com/icekale/strong-stock-screener
+- Docker Hub：https://hub.docker.com/r/icekale/strong-stock-screener
+- 默认镜像：`icekale/strong-stock-screener:latest`
+- 可通过 `.env` 设置 `STRONG_STOCK_IMAGE_TAG` 固定版本。
 
-## 规则边界
+旧双容器开发模式仍保留：
 
-- 新股筛选结果不会使用 `empty` 作为状态。
-- 空仓纪律只用于自选股/持仓风险判断，对应 `risk_action = "empty"`。
-- 当前版本不包含后台实时监控任务流，实时监控和提醒系统放在后续版本。
-- 严重异动标记依赖候选源是否返回相关字段，后续可继续接入监管公告源增强。
+```bash
+docker compose -f docker-compose.dual.yml up -d --build
+```
 
-## 环境变量
+双容器模式会暴露：
 
-| 变量 | 默认值 | 说明 |
-| --- | --- | --- |
-| `STRONG_STOCK_TICKFLOW_API_KEY` | 空 | TickFlow API Key |
-| `TICKFLOW_API_KEY` | 空 | TickFlow API Key 兼容变量 |
-| `STRONG_STOCK_TICKFLOW_BASE_URL` | `https://api.tickflow.org` | TickFlow API 地址 |
-| `STRONG_STOCK_IFIND_API_KEY` | 空 | iFinD MCP Key |
-| `IFIND_API_KEY` | 空 | iFinD MCP Key 兼容变量 |
-| `STRONG_STOCK_IFIND_BASE_URL` | `https://api-mcp.51ifind.com:8643` | iFinD MCP API 地址 |
-| `STRONG_STOCK_IFIND_SERVICE_ID` | `hexin-ifind-ds-stock-mcp` | 默认 iFinD MCP 服务 |
-| `STRONG_STOCK_CANDIDATE_PROVIDER` | `recent_limit_up` | 候选池来源，可选 `recent_limit_up` / `thsdk` |
-| `STRONG_STOCK_DATA_DIR` | `./data` | 后端数据目录 |
-| `STRONG_STOCK_CORS_ALLOW_ORIGINS` | `http://localhost:3110,http://127.0.0.1:3110` | CORS 允许来源 |
-| `TZ` | `Asia/Shanghai` | 容器系统时区，建议保持上海时间 |
-| `STRONG_STOCK_SCREEN_RUN_RETENTION_COUNT` | `120` | 历史选股记录最多保留次数，不影响 `latest.json` |
-| `STRONG_STOCK_GSGF_REVIEW_RETENTION_RECORDS` | `5000` | 股是股非复盘样本最多保留条数 |
-| `STRONG_STOCK_SENTIMENT_SNAPSHOT_RETENTION_DAYS` | `30` | 情绪摘要快照最多保留交易日数 |
-| `STRONG_STOCK_MARKET_EMOTION_HISTORY_RETENTION_DAYS` | `30` | 情绪分时历史最多保留交易日数 |
-| `STRONG_STOCK_MARKET_EMOTION_SAMPLES_PER_DAY` | `360` | 单日情绪分时样本最多保留条数 |
+- Web：`http://localhost:3110`
+- API：`http://localhost:8010/health`
+
+## 常见问题
+
+### TickFlow 没配置还能用吗？
+
+可以打开系统，但 K 线、竞价、实时排行、情绪和部分板块能力会明显受限。建议至少配置 TickFlow。
+
+### iFinD 是必须的吗？
+
+不是。iFinD 用于研究增强和风险事件补充，不影响基本选股、K 线和自选股管理。
+
+### 为什么板块页显示估算资金流？
+
+当东方财富行业资金流不可用时，系统会自动 fallback。页面会显示当前数据口径，例如“东方财富行业板块资金净额”或“TickFlow全A实时行情行业聚合”。
+
+### 数据会不会越积越多？
+
+系统提供保留策略环境变量，例如筛选记录数量、GSGF 复盘记录数、情绪历史天数和单日样本数。默认配置已经限制长期运行的数据增长。
+
+### 这是交易系统吗？
+
+不是。它只做筛选、观察、复盘和提醒，不下单，不保证收益。
 
 ## 开源协议
 

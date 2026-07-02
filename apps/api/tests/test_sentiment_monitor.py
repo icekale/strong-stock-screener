@@ -20,6 +20,7 @@ from app.services.sentiment_monitor import (
     SentimentMonitorConfig,
     detect_sentiment_mutations,
     is_trading_session,
+    sentiment_timeline_label,
 )
 
 
@@ -69,6 +70,24 @@ def test_detect_sentiment_mutations_flags_score_break_and_seal_rate_changes() ->
     assert "limit_down_jump" in alert_types
     assert "seal_rate_drop" in alert_types
     assert any(alert.severity == "high" for alert in alerts)
+
+
+def test_sentiment_timeline_label_maps_key_trading_windows() -> None:
+    assert sentiment_timeline_label("09:25") == "竞价定调"
+    assert sentiment_timeline_label("09:35") == "开盘承接"
+    assert sentiment_timeline_label("10:00") == "情绪确认"
+    assert sentiment_timeline_label("11:30") == "上午定性"
+    assert sentiment_timeline_label("14:30") == "尾盘风险"
+
+
+def test_sentiment_monitor_alert_includes_trade_permission() -> None:
+    previous = _sample("09:35", score=62, break_board=4, limit_down=1, seal_rate=82)
+    current = _sample("10:00", score=31, break_board=16, limit_down=11, seal_rate=55)
+
+    alerts = detect_sentiment_mutations([previous, current], SentimentMonitorConfig())
+
+    assert alerts
+    assert any("交易许可" in alert.message for alert in alerts)
 
 
 def test_sentiment_monitor_run_once_sends_alert_once_during_cooldown() -> None:

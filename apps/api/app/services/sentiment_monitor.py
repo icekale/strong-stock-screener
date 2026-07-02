@@ -73,6 +73,20 @@ def is_trading_session(now: datetime | None = None) -> bool:
     )
 
 
+def sentiment_timeline_label(hhmm: str) -> str:
+    if hhmm <= "09:25":
+        return "竞价定调"
+    if hhmm <= "09:35":
+        return "开盘承接"
+    if hhmm <= "10:00":
+        return "情绪确认"
+    if hhmm <= "11:30":
+        return "上午定性"
+    if hhmm <= "14:30":
+        return "尾盘风险"
+    return "收盘复盘"
+
+
 def detect_sentiment_mutations(
     samples: list[MarketEmotionSample],
     config: SentimentMonitorConfig,
@@ -206,7 +220,23 @@ def detect_sentiment_mutations(
             )
         )
 
-    return alerts
+    permission_hint = _trade_permission_hint(current)
+    return [
+        alert.model_copy(update={"message": f"{alert.message} {permission_hint}"})
+        for alert in alerts
+    ]
+
+
+def _trade_permission_hint(current: MarketEmotionSample) -> str:
+    if current.emotion_score < 25 or (current.limit_down_count or 0) >= 20:
+        return "交易许可：空仓等待。"
+    if current.break_board_count >= 15 or (current.seal_rate_pct or 100) < 60:
+        return "交易许可：只低吸，不追高。"
+    if current.emotion_score >= 78:
+        return "交易许可：只卖不追。"
+    if current.emotion_score >= 60:
+        return "交易许可：轻仓进攻。"
+    return "交易许可：轻仓试错。"
 
 
 class SentimentMonitor:

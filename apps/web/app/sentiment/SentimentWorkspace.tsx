@@ -7,6 +7,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, type ComponentType } from "react";
 import {
   getMarketRankings,
+  getSentimentDecision,
   getSentimentDetail,
   getSentimentMonitorStatus,
   getSentimentSummary,
@@ -24,6 +25,7 @@ import type {
   MarketEmotionSnapshotResponse,
   MarketRankingItem,
   MarketRankingsResponse,
+  SentimentDecisionResponse,
   SentimentDetailResponse,
   SentimentMonitorStatus,
   SentimentSummaryResponse,
@@ -61,12 +63,14 @@ export function SentimentWorkspace() {
   const [data, setData] = useState<ShortTermSentimentResponse | null>(null);
   const [marketEmotion, setMarketEmotion] = useState<MarketEmotionSnapshotResponse | null>(null);
   const [marketRankings, setMarketRankings] = useState<MarketRankingsResponse | null>(null);
+  const [decision, setDecision] = useState<SentimentDecisionResponse | null>(null);
   const [intraday, setIntraday] = useState<ShortTermIntradaySentimentResponse | null>(null);
   const [digest, setDigest] = useState<ShortTermIntradaySignalDigest | null>(null);
   const [monitorStatus, setMonitorStatus] = useState<SentimentMonitorStatus | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(true);
   const [rankingsLoading, setRankingsLoading] = useState(true);
+  const [decisionLoading, setDecisionLoading] = useState(true);
   const [intradayLoading, setIntradayLoading] = useState(false);
   const [digestLoading, setDigestLoading] = useState(false);
   const [sendingDigest, setSendingDigest] = useState(false);
@@ -85,6 +89,7 @@ export function SentimentWorkspace() {
     try {
       const nextSummary = await getSentimentSummary(date, 80, forceRefresh);
       setSummary(nextSummary);
+      void loadSentimentDecision(date, forceRefresh);
       void loadSentimentDetail(date, forceRefresh);
       void loadMarketRankings();
     } catch (err) {
@@ -92,10 +97,23 @@ export function SentimentWorkspace() {
       setSummary(null);
       setData(null);
       setMarketEmotion(null);
+      setDecision(null);
+      setDecisionLoading(false);
       setDetailLoading(false);
     } finally {
       setSummaryLoading(false);
     }
+  }
+
+  async function loadSentimentDecision(date = tradeDate, forceRefresh = false) {
+    setDecisionLoading(true);
+    await getSentimentDecision(date, 80, forceRefresh)
+      .then((nextDecision) => setDecision(nextDecision))
+      .catch((err: unknown) => {
+        setDecision(null);
+        setError(err instanceof Error ? err.message : "读取情绪交易许可失败");
+      })
+      .finally(() => setDecisionLoading(false));
   }
 
   async function loadMarketRankings() {
@@ -288,6 +306,7 @@ export function SentimentWorkspace() {
         </div>
       ) : summary || data ? (
         <div className="space-y-4">
+          <SentimentDecisionCard decision={decision} loading={decisionLoading} />
           <MarketEmotionDashboard data={marketEmotion} loading={detailLoading} summary={summary} />
           <MarketRankingsGrid loading={rankingsLoading} rankings={marketRankings} />
           <SentimentMonitorPanel
@@ -381,6 +400,77 @@ export function SentimentWorkspace() {
         </div>
       )}
     </main>
+  );
+}
+
+function SentimentDecisionCard({
+  decision,
+  loading,
+}: {
+  decision: SentimentDecisionResponse | null;
+  loading: boolean;
+}) {
+  if (loading && !decision) {
+    return (
+      <section className="workbench-panel rounded-xl border p-4">
+        <Skeleton active paragraph={{ rows: 3 }} />
+      </section>
+    );
+  }
+  const sectors = decision?.main_sectors ?? [];
+  const risks = decision?.risks.length ? decision.risks : ["暂无硬风险"];
+  return (
+    <section className="workbench-panel rounded-xl border">
+      <div className="workbench-panel-divider flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+        <div>
+          <div className="text-sm font-black text-[#11100e]">情绪交易许可</div>
+          <div className="text-xs text-[#7b756d]">市场状态、交易许可和风险等级先行，下面再展开原始情绪数据。</div>
+        </div>
+        <Space wrap>
+          <Tag color={marketStateColor(decision?.market_state)}>市场状态：{decision?.market_state ?? "--"}</Tag>
+          <Tag color={riskLevelColor(decision?.risk_level)}>风险等级：{decision?.risk_level ?? "--"}</Tag>
+          <Tag>置信度 {decision ? decision.confidence.toFixed(0) : "--"}/100</Tag>
+        </Space>
+      </div>
+      <div className="grid gap-3 p-4 lg:grid-cols-[260px_minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="rounded-lg border border-[#e3ddd3] bg-white px-4 py-3">
+          <div className="text-xs font-black text-[#7b756d]">交易许可</div>
+          <div className={`mt-2 text-2xl font-black ${permissionTextClass(decision?.trade_permission)}`}>
+            {decision?.trade_permission ?? "--"}
+          </div>
+          <div className="mt-1 text-xs text-[#7b756d]">
+            情绪变化 {decision?.score_change === null || decision?.score_change === undefined ? "--" : formatSigned(decision.score_change)}
+          </div>
+        </div>
+        <div className="rounded-lg border border-[#e3ddd3] bg-white px-4 py-3">
+          <div className="text-xs font-black text-[#7b756d]">成立原因</div>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {(decision?.reasons.length ? decision.reasons : ["等待情绪快照"]).map((item) => (
+              <Tag key={item}>{item}</Tag>
+            ))}
+          </div>
+          {sectors.length ? (
+            <div className="mt-3 flex flex-wrap gap-1">
+              {sectors.slice(0, 4).map((sector) => (
+                <Tag color="red" key={sector.name}>
+                  {sector.name} · {sector.limit_up_count}涨停
+                </Tag>
+              ))}
+            </div>
+          ) : null}
+        </div>
+        <div className="rounded-lg border border-[#e3ddd3] bg-white px-4 py-3">
+          <div className="text-xs font-black text-[#7b756d]">风险提示</div>
+          <div className="mt-2 flex flex-wrap gap-1">
+            {risks.map((item) => (
+              <Tag color={item === "暂无硬风险" ? "green" : "orange"} key={item}>
+                {item}
+              </Tag>
+            ))}
+          </div>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -602,6 +692,49 @@ function formatDateTime(value: string | null | undefined): string {
     minute: "2-digit",
     hour12: false,
   }).format(date);
+}
+
+function formatSigned(value: number): string {
+  return `${value > 0 ? "+" : ""}${value.toFixed(2)}`;
+}
+
+function marketStateColor(value: SentimentDecisionResponse["market_state"] | undefined): string {
+  if (value === "退潮" || value === "冰点") {
+    return "green";
+  }
+  if (value === "高潮" || value === "分歧") {
+    return "orange";
+  }
+  if (value === "主升" || value === "修复") {
+    return "red";
+  }
+  return "default";
+}
+
+function riskLevelColor(value: SentimentDecisionResponse["risk_level"] | undefined): string {
+  if (value === "高") {
+    return "red";
+  }
+  if (value === "中") {
+    return "orange";
+  }
+  if (value === "低") {
+    return "green";
+  }
+  return "default";
+}
+
+function permissionTextClass(value: SentimentDecisionResponse["trade_permission"] | undefined): string {
+  if (value === "空仓等待" || value === "只低吸") {
+    return "market-green-text";
+  }
+  if (value === "只卖不追") {
+    return "text-[#b45309]";
+  }
+  if (value === "强势进攻" || value === "轻仓试错") {
+    return "text-[#d92d20]";
+  }
+  return "text-[#11100e]";
 }
 
 function summaryFromDetail(detail: SentimentDetailResponse): SentimentSummaryResponse {

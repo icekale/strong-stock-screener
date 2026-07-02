@@ -598,6 +598,33 @@ export type SentimentDetailResponse = {
   market_emotion: MarketEmotionSnapshotResponse;
 };
 
+export type SentimentMarketState = "冰点" | "修复" | "主升" | "高潮" | "分歧" | "退潮";
+export type SentimentTradePermission = "空仓等待" | "轻仓试错" | "强势进攻" | "只低吸" | "只卖不追";
+export type SentimentRiskLevel = "低" | "中" | "高";
+
+export type SentimentMainSectorSignal = {
+  name: string;
+  strength_score: number;
+  limit_up_count: number;
+  break_board_count: number;
+  max_consecutive_boards: number;
+  leader: string | null;
+  symbols: string[];
+};
+
+export type SentimentDecisionResponse = {
+  trade_date: string;
+  market_state: SentimentMarketState;
+  trade_permission: SentimentTradePermission;
+  risk_level: SentimentRiskLevel;
+  confidence: number;
+  score_change: number | null;
+  main_sectors: SentimentMainSectorSignal[];
+  reasons: string[];
+  risks: string[];
+  generated_at: string;
+};
+
 export type ShortTermIntradaySentimentItem = {
   symbol: string;
   name: string;

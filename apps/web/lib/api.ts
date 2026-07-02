@@ -23,6 +23,7 @@ import type {
   ScreenStrategy,
   SectorRadarResponse,
   SentimentDetailResponse,
+  SentimentDecisionResponse,
   SentimentSummaryResponse,
   SentimentMonitorConfig,
   SentimentMonitorStatus,
@@ -157,6 +158,23 @@ export async function getShortTermSentiment(tradeDate: string, limit = 50): Prom
     throw new Error(`读取短线情绪失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<ShortTermSentimentResponse>;
+}
+
+export async function getSentimentDecision(
+  tradeDate: string,
+  limit = 80,
+  refresh = false,
+): Promise<SentimentDecisionResponse> {
+  const params = new URLSearchParams({
+    trade_date: tradeDate,
+    limit: String(limit),
+    refresh: String(refresh),
+  });
+  const response = await fetch(`${API_BASE_URL}/api/short-term/sentiment/decision?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取情绪交易许可失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SentimentDecisionResponse>;
 }
 
 export async function getSentimentSummary(

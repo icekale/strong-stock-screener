@@ -24,6 +24,7 @@ import type {
   SectorRadarResponse,
   SentimentDetailResponse,
   SentimentDecisionResponse,
+  SentimentWatchlistAlertsResponse,
   SentimentSummaryResponse,
   SentimentMonitorConfig,
   SentimentMonitorStatus,
@@ -175,6 +176,23 @@ export async function getSentimentDecision(
     throw new Error(`读取情绪交易许可失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<SentimentDecisionResponse>;
+}
+
+export async function getSentimentWatchlistAlerts(
+  tradeDate: string,
+  limit = 80,
+  refresh = false,
+): Promise<SentimentWatchlistAlertsResponse> {
+  const params = new URLSearchParams({
+    trade_date: tradeDate,
+    limit: String(limit),
+    refresh: String(refresh),
+  });
+  const response = await fetch(`${API_BASE_URL}/api/short-term/sentiment/watchlist-alerts?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取自选股情绪联动失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SentimentWatchlistAlertsResponse>;
 }
 
 export async function getSentimentSummary(

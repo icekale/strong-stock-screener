@@ -625,6 +625,21 @@ export type SentimentDecisionResponse = {
   generated_at: string;
 };
 
+export type SentimentWatchlistAlert = {
+  symbol: string;
+  name: string;
+  group: string | null;
+  tags: string[];
+  action: "重点盯" | "等确认" | "风险回避";
+  matched_sector: string | null;
+  reasons: string[];
+};
+
+export type SentimentWatchlistAlertsResponse = {
+  trade_date: string;
+  items: SentimentWatchlistAlert[];
+};
+
 export type ShortTermIntradaySentimentItem = {
   symbol: string;
   name: string;

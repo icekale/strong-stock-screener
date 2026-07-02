@@ -33,6 +33,33 @@ def test_auction_snapshot_separates_open_gap_from_current_pct_change() -> None:
     assert "高开需防冲高回落" in snapshot.items[0].risk_flags
 
 
+def test_auction_snapshot_treats_zero_open_price_as_missing() -> None:
+    rankings = MarketRankingsResponse(
+        trade_date="2026-07-02",
+        pct_change_rank=[
+            MarketRankingItem(
+                symbol="688679.SH",
+                name="通源环境",
+                industry="环境治理",
+                last_price=42.98,
+                open_price=0.0,
+                prev_close=40.3,
+                pct_change=6.6501,
+                current_pct_change=6.6501,
+                turnover_rate=0.0,
+                turnover_cny=0.0,
+                quote_time="1782955195000",
+            )
+        ],
+    )
+
+    snapshot = build_auction_snapshot(rankings, limit=1, now=datetime(2026, 7, 2, 9, 20))
+
+    assert snapshot.items[0].open_gap_pct == 6.6501
+    assert snapshot.items[0].auction_score > 0
+    assert "竞价低开偏弱" not in snapshot.items[0].risk_flags
+
+
 def test_auction_snapshot_classifies_reversal_watch_and_weak_low_open() -> None:
     rankings = MarketRankingsResponse(
         trade_date="2026-07-01",

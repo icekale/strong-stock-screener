@@ -1,7 +1,7 @@
 "use client";
 
 import { ReloadOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Collapse, Empty, InputNumber, Progress, Select, Table, Tag, Typography } from "antd";
+import { Alert, App, Button, Collapse, Empty, InputNumber, Progress, Table, Tag, Typography } from "antd";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addWatchlistPoolItem, getAuctionLatest, getAuctionSnapshot, getAuctionTimeline } from "../../lib/api";
@@ -224,19 +224,14 @@ export function AuctionWorkspace() {
                   {item.label}
                 </Button>
               ))}
-              <span className="text-xs font-black text-[#7b756d]">行业筛选</span>
-              <Select
-                className="min-w-[160px]"
-                onChange={setIndustryFilter}
-                options={[
-                  { label: "全部行业", value: "all" },
-                  ...industryStats.map((item) => ({ label: item.industry, value: item.industry })),
-                ]}
-                size="small"
-                value={industryFilter}
-              />
             </div>
           </div>
+          <IndustryQuickFilter
+            activeIndustry={industryFilter}
+            industryStats={industryStats}
+            onSelectIndustry={setIndustryFilter}
+            totalCount={data?.items.length ?? 0}
+          />
           <div className="workbench-panel-divider flex flex-wrap items-center gap-3 border-b px-4 py-2.5 text-xs text-[#7b756d]">
             <span className="font-black text-[#11100e]">高开风险阈值</span>
             <InputNumber
@@ -344,6 +339,50 @@ export function AuctionWorkspace() {
         </aside>
       </section>
     </main>
+  );
+}
+
+function IndustryQuickFilter({
+  activeIndustry,
+  industryStats,
+  onSelectIndustry,
+  totalCount,
+}: {
+  activeIndustry: string;
+  industryStats: IndustryAuctionStat[];
+  onSelectIndustry: (industry: string) => void;
+  totalCount: number;
+}) {
+  const options = [
+    { count: totalCount, label: "全部行业", value: "all" },
+    ...industryStats.map((item) => ({ count: item.count, label: item.industry, value: item.industry })),
+  ];
+  return (
+    <div className="workbench-panel-divider border-b px-4 py-2.5">
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="shrink-0 text-xs font-black text-[#7b756d]">行业筛选</span>
+        <div
+          aria-label="行业快捷筛选"
+          className="-my-1 flex min-w-0 flex-1 gap-1 overflow-x-auto py-1"
+          role="group"
+        >
+          {options.map((item) => (
+            <Button
+              className="shrink-0"
+              key={item.value}
+              onClick={() => onSelectIndustry(item.value)}
+              size="small"
+              type={activeIndustry === item.value ? "primary" : "default"}
+            >
+              {item.label}
+              <span className={activeIndustry === item.value ? "ml-1 opacity-80" : "ml-1 text-[#7b756d]"}>
+                {item.count}
+              </span>
+            </Button>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 

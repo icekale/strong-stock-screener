@@ -515,6 +515,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(auctionFeatureSource, /风险与观察/);
   assert.match(auctionFeatureSource, /行业聚合/);
   assert.match(auctionFeatureSource, /行业筛选/);
+  assert.match(auctionFeatureSource, /IndustryQuickFilter/);
+  assert.doesNotMatch(auctionWorkspaceSource, /<Select/);
   assert.match(auctionFeatureSource, /主线集中度/);
   assert.match(auctionFeatureSource, /高开风险阈值/);
   assert.match(auctionFeatureSource, /加入自选/);

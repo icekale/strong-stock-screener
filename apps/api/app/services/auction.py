@@ -124,7 +124,7 @@ def _auction_score(
 
 
 def _open_gap_pct(open_price: float | None, prev_close: float | None) -> float | None:
-    if open_price is None or prev_close is None or prev_close <= 0:
+    if open_price is None or open_price <= 0 or prev_close is None or prev_close <= 0:
         return None
     return round((open_price - prev_close) / prev_close * 100, 4)
 

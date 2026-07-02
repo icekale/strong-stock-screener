@@ -180,10 +180,12 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(dockerignoreSource, /apps\/web\/node_modules/);
   assert.match(dockerignoreSource, /apps\/web\/\.next/);
   assert.match(singleStartSource, /uvicorn app\.main:app/);
-  assert.match(singleStartSource, /next.*start/);
+  assert.match(singleStartSource, /node server\.js/);
+  assert.doesNotMatch(singleStartSource, /next.*start/);
   assert.match(nextConfigSource, /\/api\/:path\*/);
   assert.match(nextConfigSource, /http:\/\/127\.0\.0\.1:8010\/api\/:path\*/);
   assert.match(nextConfigSource, /distDir: process\.env\.NEXT_DIST_DIR \|\| "\.next"/);
+  assert.match(nextConfigSource, /output: "standalone"/);
   assert.match(webPackageSource, /NEXT_DIST_DIR=\.next-dev next dev/);
   assert.match(localWebStartSource, /\.next-dev/);
   assert.match(localWebStartSource, /lsof/);

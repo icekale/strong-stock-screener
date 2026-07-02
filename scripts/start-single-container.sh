@@ -9,7 +9,9 @@ cd /app/api
 api_pid="$!"
 
 cd /app/web
-node node_modules/next/dist/bin/next start -p "${PORT:-3110}" -H "${HOSTNAME:-0.0.0.0}" &
+export PORT="${PORT:-3110}"
+export HOSTNAME="${HOSTNAME:-0.0.0.0}"
+node server.js &
 web_pid="$!"
 
 shutdown() {

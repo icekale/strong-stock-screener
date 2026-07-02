@@ -572,6 +572,11 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(sentimentFeatureSource, /日内情绪落点/);
   assert.match(sentimentFeatureSource, /EmotionHistoryChart/);
   assert.match(sentimentFeatureSource, /真实采样曲线/);
+  assert.match(sentimentFeatureSource, /竞价定调/);
+  assert.match(sentimentFeatureSource, /开盘承接/);
+  assert.match(sentimentFeatureSource, /情绪确认/);
+  assert.match(sentimentFeatureSource, /上午定性/);
+  assert.match(sentimentFeatureSource, /尾盘风险/);
   assert.match(sentimentFeatureSource, /getSentimentSummary/);
   assert.match(sentimentFeatureSource, /getSentimentDetail/);
   assert.match(sentimentFeatureSource, /涨停池/);

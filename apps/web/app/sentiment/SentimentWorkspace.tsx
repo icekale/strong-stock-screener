@@ -1110,6 +1110,7 @@ function EmotionHistoryChart({
     { label: "良好", width: "25%", className: "bg-[#fef3c7]", text: "text-[#92400e]" },
     { label: "火爆", width: "25%", className: "bg-[#fee2e2]", text: "text-[#b91c1c]" },
   ];
+  const timelineLabels = ["竞价定调", "开盘承接", "情绪确认", "上午定性", "尾盘风险"];
   return (
     <div className="rounded-lg border border-[#e3ddd3] bg-white p-3">
       <div className="mb-3 flex items-center justify-between gap-3">
@@ -1156,6 +1157,13 @@ function EmotionHistoryChart({
             {score.toFixed(0)} · {level}
           </div>
         </div>
+      </div>
+      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-5">
+        {timelineLabels.map((label) => (
+          <Tag className="m-0 text-center" key={label}>
+            {label}
+          </Tag>
+        ))}
       </div>
     </div>
   );

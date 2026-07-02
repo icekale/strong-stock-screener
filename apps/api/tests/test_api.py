@@ -1124,6 +1124,19 @@ def test_market_overview_returns_full_a_share_metrics(tmp_path: Path) -> None:
     assert payload["source_status"][0]["source"] == "东方财富全A指数"
 
 
+def test_short_term_sentiment_archive_persists_decision(tmp_path: Path) -> None:
+    client = _client(tmp_path, market_overview_provider=FakeMarketOverviewProvider())
+
+    response = client.post("/api/short-term/sentiment/review/archive?trade_date=2026-06-26&limit=5")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trade_date"] == "2026-06-26"
+    archived = tmp_path / "sentiment_reviews" / "2026-06-26.jsonl"
+    assert archived.exists()
+    assert '"trade_date":"2026-06-26"' in archived.read_text(encoding="utf-8")
+
+
 def test_stock_quote_returns_tickflow_turnover_rate(tmp_path: Path) -> None:
     client = _client(tmp_path, quote_provider=FakeLiveQuoteProvider())
 

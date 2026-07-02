@@ -178,6 +178,20 @@ export async function getSentimentDecision(
   return response.json() as Promise<SentimentDecisionResponse>;
 }
 
+export async function archiveSentimentDecision(tradeDate: string, limit = 80): Promise<SentimentDecisionResponse> {
+  const params = new URLSearchParams({
+    trade_date: tradeDate,
+    limit: String(limit),
+  });
+  const response = await fetch(`${API_BASE_URL}/api/short-term/sentiment/review/archive?${params.toString()}`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`归档情绪结论失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SentimentDecisionResponse>;
+}
+
 export async function getSentimentWatchlistAlerts(
   tradeDate: string,
   limit = 80,

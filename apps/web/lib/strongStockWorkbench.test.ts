@@ -269,6 +269,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(typesSource, /NotificationChannelConfig/);
   assert.match(typesSource, /NotificationSendResult/);
   assert.match(typesSource, /SentimentDecisionResponse/);
+  assert.match(typesSource, /SentimentDecisionOutcome/);
+  assert.match(typesSource, /SentimentReviewSummary/);
   assert.match(typesSource, /SentimentWatchlistAlert/);
   assert.match(typesSource, /SentimentWatchlistAlertsResponse/);
   assert.match(typesSource, /snapshot_status/);
@@ -286,6 +288,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(apiSource, /getSectorRadar/);
   assert.match(apiSource, /getShortTermSentiment/);
   assert.match(apiSource, /getSentimentDecision/);
+  assert.match(apiSource, /archiveSentimentDecision/);
   assert.match(apiSource, /getSentimentWatchlistAlerts/);
   assert.match(apiSource, /getMarketEmotionSnapshot/);
   assert.match(apiSource, /getShortTermIntradaySentiment/);
@@ -293,6 +296,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(apiSource, /sendNotificationMessage/);
   assert.match(apiSource, /\/api\/short-term\/sentiment/);
   assert.match(apiSource, /\/api\/short-term\/sentiment\/decision/);
+  assert.match(apiSource, /\/api\/short-term\/sentiment\/review\/archive/);
   assert.match(apiSource, /\/api\/short-term\/sentiment\/watchlist-alerts/);
   assert.match(apiSource, /\/api\/short-term\/market-emotion/);
   assert.match(apiSource, /\/api\/short-term\/sentiment\/intraday/);
@@ -599,6 +603,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(sentimentFeatureSource, /startSentimentMonitor/);
   assert.match(sentimentFeatureSource, /stopSentimentMonitor/);
   assert.match(sentimentFeatureSource, /runSentimentMonitorOnce/);
+  assert.match(sentimentFeatureSource, /规则校准/);
+  assert.match(sentimentFeatureSource, /每日归档情绪结论/);
   assert.doesNotMatch(sentimentFeatureSource, /<Alert[^>]*message=/);
   assert.doesNotMatch(sectorsFeatureSource, /<Alert[^>]*message=/);
   assert.match(sentimentFeatureSource, /ShortTermSentimentResponse/);

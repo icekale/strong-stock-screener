@@ -812,6 +812,25 @@ class SentimentDecisionResponse(BaseModel):
     )
 
 
+class SentimentDecisionOutcome(BaseModel):
+    trade_date: str
+    next_day_index_pct: float | None = None
+    next_day_limit_up_count: int | None = None
+    next_day_limit_down_count: int | None = None
+    hit: bool = False
+    score: float = 0
+    reason: str = ""
+
+
+class SentimentReviewSummary(BaseModel):
+    trade_date: str
+    sample_count: int = 0
+    hit_count: int = 0
+    hit_rate_pct: float = 0
+    avg_score: float = 0
+    outcomes: list[SentimentDecisionOutcome] = Field(default_factory=list)
+
+
 class SentimentWatchlistAlert(BaseModel):
     symbol: str
     name: str

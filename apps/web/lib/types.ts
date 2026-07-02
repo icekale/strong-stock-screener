@@ -625,6 +625,25 @@ export type SentimentDecisionResponse = {
   generated_at: string;
 };
 
+export type SentimentDecisionOutcome = {
+  trade_date: string;
+  next_day_index_pct: number | null;
+  next_day_limit_up_count: number | null;
+  next_day_limit_down_count: number | null;
+  hit: boolean;
+  score: number;
+  reason: string;
+};
+
+export type SentimentReviewSummary = {
+  trade_date: string;
+  sample_count: number;
+  hit_count: number;
+  hit_rate_pct: number;
+  avg_score: number;
+  outcomes: SentimentDecisionOutcome[];
+};
+
 export type SentimentWatchlistAlert = {
   symbol: string;
   name: string;

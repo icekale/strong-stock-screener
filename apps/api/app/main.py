@@ -88,6 +88,7 @@ from app.services.short_term_cache import TtlCache
 from app.services.sentiment_snapshot_store import SentimentSnapshotStore
 from app.services.sentiment_monitor import SentimentMonitor, SentimentMonitorConfig
 from app.services.sentiment_decision import build_sentiment_decision
+from app.services.sentiment_review_store import SentimentReviewStore
 from app.services.sentiment_watchlist import build_sentiment_watchlist_alerts
 from app.services.short_term_sentiment import (
     build_missing_sentiment_summary,
@@ -736,6 +737,23 @@ def get_short_term_sentiment_decision(
     except StrongStockDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return build_sentiment_decision(summary, market_emotion).model_dump(mode="json")
+
+
+@app.post("/api/short-term/sentiment/review/archive")
+def archive_sentiment_decision(trade_date: str, limit: int = 80) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 200))
+    try:
+        sentiment, market_emotion = _build_and_persist_sentiment_snapshots(
+            trade_date,
+            bounded_limit,
+            refresh=True,
+        )
+        summary = build_sentiment_summary(sentiment, market_emotion, snapshot_status="fresh")
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    decision = build_sentiment_decision(summary, market_emotion)
+    _sentiment_review_store().save_decision(decision)
+    return decision.model_dump(mode="json")
 
 
 @app.get("/api/short-term/sentiment/watchlist-alerts")
@@ -1403,6 +1421,18 @@ def _gsgf_review_store() -> GsgfReviewStore:
     if data_dir is not None:
         return GsgfReviewStore(Path(data_dir))
     return GsgfReviewStore(settings.data_dir, max_records=settings.gsgf_review_retention_records)
+
+
+def _sentiment_review_store() -> SentimentReviewStore:
+    data_dir = Path(getattr(app.state, "runs_dir", get_settings().data_dir))
+    injected = getattr(app.state, "sentiment_review_store", None)
+    injected_data_dir = getattr(app.state, "sentiment_review_store_data_dir", None)
+    if injected is not None and injected_data_dir == data_dir:
+        return injected
+    store = SentimentReviewStore(data_dir)
+    app.state.sentiment_review_store = store
+    app.state.sentiment_review_store_data_dir = data_dir
+    return store
 
 
 def _background_job_store() -> BackgroundJobStore:

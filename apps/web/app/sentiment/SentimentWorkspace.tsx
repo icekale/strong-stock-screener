@@ -338,6 +338,12 @@ export function SentimentWorkspace() {
             onStop={() => void handleMonitorAction("stop")}
             status={monitorStatus}
           />
+          <section className="workbench-panel rounded-xl border p-4">
+            <div className="text-sm font-black text-[#11100e]">规则校准</div>
+            <div className="mt-1 text-xs text-[#7b756d]">
+              每日归档情绪结论，后续对照次日表现统计命中率。
+            </div>
+          </section>
           {summary?.snapshot_status === "missing" ? (
             <Alert
               title="暂无本交易日情绪快照"

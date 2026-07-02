@@ -250,6 +250,9 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(typesSource, /MarketRankingItem/);
   assert.match(typesSource, /MarketRankingsResponse/);
   assert.match(typesSource, /AuctionSnapshotResponse/);
+  assert.match(typesSource, /AuctionReviewSummary/);
+  assert.match(typesSource, /AuctionReviewRecord/);
+  assert.match(typesSource, /AuctionRuleBucket/);
   assert.match(typesSource, /SectorRadarResponse/);
   assert.match(typesSource, /ShortTermSentimentResponse/);
   assert.match(typesSource, /ShortTermSentimentStockItem/);
@@ -273,6 +276,10 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(apiSource, /getAuctionSnapshot/);
   assert.match(apiSource, /getAuctionLatest/);
   assert.match(apiSource, /getAuctionTimeline/);
+  assert.match(apiSource, /getAuctionReviewLatest/);
+  assert.match(apiSource, /getAuctionReview/);
+  assert.match(apiSource, /finalizeAuctionReview/);
+  assert.match(apiSource, /getAuctionRuleSummary/);
   assert.match(apiSource, /getSectorRadar/);
   assert.match(apiSource, /getShortTermSentiment/);
   assert.match(apiSource, /getMarketEmotionSnapshot/);
@@ -287,6 +294,9 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(apiSource, /\/api\/auction\/latest/);
   assert.match(apiSource, /\/api\/auction\/timeline/);
   assert.match(apiSource, /\/api\/auction\/snapshot/);
+  assert.match(apiSource, /\/api\/auction\/review\/latest/);
+  assert.match(apiSource, /\/api\/auction\/review\/finalize/);
+  assert.match(apiSource, /\/api\/auction\/rules\/summary/);
   assert.match(apiSource, /\/api\/notifications\/send/);
   assert.match(homeFeatureSource, /marketOverview/);
   assert.match(homeFeatureSource, /refreshMarketOverview/);
@@ -532,6 +542,10 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(auctionFeatureSource, /主线行业 Top/);
   assert.match(auctionFeatureSource, /阶段快照/);
   assert.match(auctionFeatureSource, /数据源状态/);
+  assert.match(auctionFeatureSource, /竞价复盘/);
+  assert.match(auctionFeatureSource, /规则统计/);
+  assert.match(auctionFeatureSource, /失败样本/);
+  assert.match(auctionFeatureSource, /生成\/刷新今日复盘/);
   assert.match(auctionFeatureSource, /Collapse/);
   assert.match(sentimentPageSource, /SentimentWorkspace/);
   assert.match(sentimentFeatureSource, /短线情绪中心/);

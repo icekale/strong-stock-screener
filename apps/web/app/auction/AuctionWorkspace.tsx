@@ -4,8 +4,23 @@ import { ReloadOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Collapse, Empty, InputNumber, Progress, Table, Tag, Typography } from "antd";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { addWatchlistPoolItem, getAuctionLatest, getAuctionSnapshot, getAuctionTimeline } from "../../lib/api";
-import type { AuctionSnapshotItem, AuctionSnapshotResponse, AuctionTimelineResponse } from "../../lib/types";
+import {
+  addWatchlistPoolItem,
+  finalizeAuctionReview,
+  getAuctionLatest,
+  getAuctionReviewLatest,
+  getAuctionRuleSummary,
+  getAuctionSnapshot,
+  getAuctionTimeline,
+} from "../../lib/api";
+import type {
+  AuctionReviewRecord,
+  AuctionReviewSummary,
+  AuctionRuleBucket,
+  AuctionSnapshotItem,
+  AuctionSnapshotResponse,
+  AuctionTimelineResponse,
+} from "../../lib/types";
 
 type AuctionTierFilter = "all" | AuctionSnapshotItem["tier"];
 type IndustryAuctionStat = {
@@ -29,6 +44,9 @@ export function AuctionWorkspace() {
   const { message } = App.useApp();
   const [data, setData] = useState<AuctionSnapshotResponse | null>(null);
   const [timeline, setTimeline] = useState<AuctionTimelineResponse | null>(null);
+  const [reviewSummary, setReviewSummary] = useState<AuctionReviewSummary | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewFinalizing, setReviewFinalizing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +62,27 @@ export function AuctionWorkspace() {
       setTimeline(snapshotTimeline);
     } catch {
       setTimeline(null);
+    }
+  }, []);
+
+  const loadReview = useCallback(async () => {
+    setReviewLoading(true);
+    try {
+      const [latestResult, rulesResult] = await Promise.allSettled([
+        getAuctionReviewLatest(),
+        getAuctionRuleSummary(2000),
+      ]);
+      if (latestResult.status === "fulfilled") {
+        const latest = latestResult.value;
+        const ruleBuckets = rulesResult.status === "fulfilled" ? rulesResult.value.buckets : latest.buckets;
+        setReviewSummary({ ...latest, buckets: ruleBuckets.length ? ruleBuckets : latest.buckets });
+      } else if (rulesResult.status === "fulfilled") {
+        setReviewSummary(rulesResult.value);
+      } else {
+        setReviewSummary(null);
+      }
+    } finally {
+      setReviewLoading(false);
     }
   }, []);
 
@@ -102,6 +141,10 @@ export function AuctionWorkspace() {
     return () => window.clearInterval(timer);
   }, [loadLatest, loadTimeline, refresh]);
 
+  useEffect(() => {
+    void loadReview();
+  }, [loadReview]);
+
   const observationItems = useMemo(
     () =>
       (data?.items ?? [])
@@ -143,6 +186,20 @@ export function AuctionWorkspace() {
       setError(err instanceof Error ? err.message : "加入自选股失败");
     } finally {
       setWatchlistSavingSymbol(null);
+    }
+  }
+
+  async function handleFinalizeReview() {
+    const tradeDate = data?.trade_date || todayDate();
+    setReviewFinalizing(true);
+    try {
+      const summary = await finalizeAuctionReview(tradeDate);
+      setReviewSummary(summary);
+      void message.success(`竞价复盘已生成：${tradeDate}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "生成竞价复盘失败");
+    } finally {
+      setReviewFinalizing(false);
     }
   }
 
@@ -203,6 +260,13 @@ export function AuctionWorkspace() {
       </section>
 
       <AuctionTimelinePanel timeline={timeline} />
+
+      <AuctionReviewPanel
+        finalizing={reviewFinalizing}
+        loading={reviewLoading}
+        onFinalize={handleFinalizeReview}
+        summary={reviewSummary}
+      />
 
       <section className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_320px]">
         <section className="workbench-panel rounded-xl border">
@@ -339,6 +403,120 @@ export function AuctionWorkspace() {
         </aside>
       </section>
     </main>
+  );
+}
+
+function AuctionReviewPanel({
+  finalizing,
+  loading,
+  onFinalize,
+  summary,
+}: {
+  finalizing: boolean;
+  loading: boolean;
+  onFinalize: () => void;
+  summary: AuctionReviewSummary | null;
+}) {
+  const failures = useMemo(() => buildFailureSamples(summary?.records ?? []), [summary]);
+  return (
+    <section className="workbench-panel mb-4 rounded-xl border">
+      <div className="workbench-panel-divider flex flex-col gap-3 border-b px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="text-sm font-black text-[#11100e]">竞价复盘</div>
+          <div className="text-xs text-[#7b756d]">
+            按 10:00 强度、当日结果和次日反馈归因，持续校准竞价规则。
+          </div>
+        </div>
+        <Button icon={<ReloadOutlined />} loading={finalizing} onClick={onFinalize} type="primary">
+          生成/刷新今日复盘
+        </Button>
+      </div>
+      <div className="grid gap-3 p-3 xl:grid-cols-[320px_minmax(0,1fr)_320px]">
+        <div className="grid grid-cols-2 gap-2">
+          <MetricCard compact label="复盘样本" value={summary?.record_count ?? null} suffix="只" />
+          <MetricCard compact label="已完成" value={summary?.completed_count ?? null} suffix="只" tone="red" />
+          <MetricCard compact label="待归因" value={summary?.pending_count ?? null} suffix="只" />
+          <MetricCard compact label="数据缺口" value={summary?.data_incomplete_count ?? null} suffix="只" tone="amber" />
+        </div>
+        <section className="rounded-lg border border-[#e3ddd3] bg-white">
+          <div className="flex items-center justify-between gap-3 border-b border-[#eee7db] px-3 py-2">
+            <div>
+              <div className="text-sm font-black text-[#11100e]">规则统计</div>
+              <div className="text-xs text-[#7b756d]">{summary?.trade_date ?? "暂无复盘日期"} · 规则分桶表现</div>
+            </div>
+            <Tag color={summary?.buckets.length ? "red" : "default"}>{summary?.buckets.length ?? 0} 组</Tag>
+          </div>
+          <Table<AuctionRuleBucket>
+            columns={[
+              {
+                title: "规则",
+                dataIndex: "rule_tag",
+                width: 110,
+                render: (value: string) => <span className="font-black text-[#11100e]">{value}</span>,
+              },
+              {
+                title: "样本",
+                dataIndex: "sample_count",
+                align: "right",
+                width: 70,
+              },
+              {
+                title: "胜率",
+                dataIndex: "win_rate",
+                align: "right",
+                width: 82,
+                render: (value: number | null) => (value === null ? "--" : `${(value * 100).toFixed(0)}%`),
+              },
+              {
+                title: "均分",
+                dataIndex: "avg_score",
+                align: "right",
+                width: 82,
+                render: (value: number | null) => formatNumber(value),
+              },
+              {
+                title: "建议",
+                dataIndex: "suggestion",
+                render: (value: string) => <span className="text-xs text-[#7b756d]">{value}</span>,
+              },
+            ]}
+            dataSource={summary?.buckets ?? []}
+            loading={loading}
+            locale={{ emptyText: "暂无规则统计" }}
+            pagination={false}
+            rowKey="rule_tag"
+            size="small"
+          />
+        </section>
+        <section className="rounded-lg border border-[#e3ddd3] bg-white">
+          <div className="border-b border-[#eee7db] px-3 py-2">
+            <div className="text-sm font-black text-[#11100e]">失败样本</div>
+            <div className="text-xs text-[#7b756d]">高分但当日表现偏弱的样本，用来反推过滤条件。</div>
+          </div>
+          <div className="space-y-2 p-3">
+            {loading ? (
+              <SkeletonRows />
+            ) : failures.length ? (
+              failures.map((item) => (
+                <Link className="block rounded-lg border border-[#eee7db] p-2 hover:border-[#d92d20]" href={`/stock/${item.symbol}`} key={`${item.trade_date}-${item.symbol}-${item.selected_at_label}`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate text-sm font-black text-[#11100e]">{item.name || item.symbol}</span>
+                    <Tag color="orange">{formatNumber(item.score.total_score)}</Tag>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs text-[#7b756d]">
+                    <span>{item.selected_at_label}</span>
+                    <span>收盘 {formatPct(item.day_result.close_pct)}</span>
+                    <span>回撤 {formatPct(item.day_result.drawdown_pct)}</span>
+                  </div>
+                </Link>
+              ))
+            ) : (
+              <Empty description="暂无失败样本" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+            )}
+          </div>
+        </section>
+      </div>
+    </section>
   );
 }
 
@@ -922,6 +1100,13 @@ function formatPct(value: number | null): string {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
+function formatNumber(value: number | null | undefined): string {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return "--";
+  }
+  return value.toFixed(1);
+}
+
 function formatCny(value: number | null): string {
   if (value === null) {
     return "--";
@@ -994,6 +1179,21 @@ function buildIndustryConcentration(stats: IndustryAuctionStat[], totalCount: nu
   return { label, message: "主线集中度分散，早盘不要急着押单一方向。" };
 }
 
+function buildFailureSamples(records: AuctionReviewRecord[]): AuctionReviewRecord[] {
+  return records
+    .filter(
+      (item) =>
+        (item.score.total_score ?? 0) >= 45 &&
+        ((item.day_result.close_pct ?? 0) < 0 || (item.day_result.drawdown_pct ?? 0) <= -5),
+    )
+    .sort(
+      (left, right) =>
+        (right.score.total_score ?? -999) - (left.score.total_score ?? -999) ||
+        (left.day_result.close_pct ?? 0) - (right.day_result.close_pct ?? 0),
+    )
+    .slice(0, 5);
+}
+
 function buildAuctionWatchlistNote(item: AuctionSnapshotItem): string {
   return [
     "来源：竞价雷达",
@@ -1004,4 +1204,12 @@ function buildAuctionWatchlistNote(item: AuctionSnapshotItem): string {
     `分层：${tierLabel(item.tier)}`,
     `操作备注：${item.action_note || "--"}`,
   ].join("；");
+}
+
+function todayDate(): string {
+  const now = new Date();
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
 }

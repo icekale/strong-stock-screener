@@ -1364,6 +1364,28 @@ def test_auction_review_finalize_seeds_records_from_latest_snapshot(tmp_path: Pa
     assert payload["records"][0]["selected_at_label"] == "manual"
 
 
+def test_auction_review_finalize_expands_existing_manual_records(tmp_path: Path) -> None:
+    client = _client(
+        tmp_path,
+        kline_provider=AuctionReviewKlineProvider(),
+        market_overview_provider=CountingMarketRankingsProvider(),
+    )
+    app.state.auction_now = datetime(2026, 7, 1, 10, 0, 0)
+
+    try:
+        client.get("/api/auction/snapshot?limit=1&refresh=true")
+        first_response = client.post("/api/auction/review/finalize?trade_date=2026-06-26")
+        client.get("/api/auction/snapshot?limit=2&refresh=true")
+        second_response = client.post("/api/auction/review/finalize?trade_date=2026-06-26")
+    finally:
+        delattr(app.state, "auction_now")
+
+    assert first_response.status_code == 200
+    assert first_response.json()["record_count"] == 1
+    assert second_response.status_code == 200
+    assert second_response.json()["record_count"] == 2
+
+
 def test_auction_review_backfill_reports_unavailable_without_verified_source(tmp_path: Path) -> None:
     client = _client(tmp_path)
 

@@ -647,9 +647,15 @@ def get_auction_review(trade_date: str | None = None, limit: int = 100) -> dict[
 def finalize_auction_review(trade_date: str) -> dict[str, object]:
     store = _auction_review_store()
     records = store.load_records(trade_date)
-    if not records:
-        latest_snapshot = _auction_snapshot_store().latest(max_age_seconds=24 * 3600, limit=100)
-        if latest_snapshot.snapshot_status == "missing" or latest_snapshot.trade_date != trade_date:
+    latest_snapshot = _auction_snapshot_store().latest(max_age_seconds=24 * 3600, limit=100)
+    can_seed_from_latest = latest_snapshot.snapshot_status != "missing" and latest_snapshot.trade_date == trade_date
+    should_seed_manual = not records or (
+        can_seed_from_latest
+        and all(record.selected_at_label == "manual" for record in records)
+        and len(latest_snapshot.items) > len(records)
+    )
+    if should_seed_manual:
+        if not can_seed_from_latest:
             raise HTTPException(status_code=404, detail="no auction review records")
         records = build_auction_review_records(
             latest_snapshot,
@@ -658,6 +664,9 @@ def finalize_auction_review(trade_date: str) -> dict[str, object]:
             limit=100,
         )
         store.upsert_records(records)
+        records = store.load_records(trade_date)
+    if not records:
+        raise HTTPException(status_code=404, detail="no auction review records")
     provider = _kline_provider()
     symbol_bars = {
         symbol: provider.get_klines(symbol, count=260)

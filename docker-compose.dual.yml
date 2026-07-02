@@ -8,6 +8,7 @@ services:
     environment:
       STRONG_STOCK_DATA_DIR: /app/data
       STRONG_STOCK_CORS_ALLOW_ORIGINS: ${STRONG_STOCK_CORS_ALLOW_ORIGINS:-http://localhost:3110,http://127.0.0.1:3110}
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
       - "8010:8010"
     volumes:
@@ -41,6 +42,7 @@ services:
         condition: service_healthy
     environment:
       NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL: ${NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL:-http://localhost:8010}
+      TZ: ${TZ:-Asia/Shanghai}
     ports:
       - "3110:3110"
     logging:

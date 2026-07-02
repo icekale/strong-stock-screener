@@ -96,6 +96,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   const nextConfigSource = readFileSync(new URL("../next.config.ts", import.meta.url), "utf8");
   const webPackageSource = readFileSync(new URL("../package.json", import.meta.url), "utf8");
   const localWebStartSource = readFileSync(new URL("../../../scripts/start-local-web.py", import.meta.url), "utf8");
+  const dualComposeSource = readFileSync(new URL("../../../docker-compose.dual.yml", import.meta.url), "utf8");
+  const envExampleSource = readFileSync(new URL("../../../.env.example", import.meta.url), "utf8");
 
   assert.match(typesSource, /StrongStockScreeningResponse/);
   assert.match(typesSource, /GsgfAnalysis/);
@@ -165,9 +167,13 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(apiSource, /getStockResearch/);
   assert.match(composeSource, /image: icekale\/strong-stock-screener:\$\{STRONG_STOCK_IMAGE_TAG:-latest\}/);
   assert.doesNotMatch(composeSource, /build:/);
+  assert.match(composeSource, /TZ: \$\{TZ:-Asia\/Shanghai\}/);
+  assert.match(dualComposeSource, /TZ: \$\{TZ:-Asia\/Shanghai\}/);
+  assert.match(envExampleSource, /TZ=Asia\/Shanghai/);
   assert.match(rootDockerfileSource, /apps\/api/);
   assert.match(rootDockerfileSource, /apps\/web/);
   assert.match(rootDockerfileSource, /start-single-container\.sh/);
+  assert.match(rootDockerfileSource, /TZ=Asia\/Shanghai/);
   assert.match(rootDockerfileSource, /ARG PIP_INDEX_URL=/);
   assert.match(rootDockerfileSource, /PIP_INDEX_URL=\$PIP_INDEX_URL/);
   assert.match(dockerignoreSource, /apps\/api\/\.venv/);

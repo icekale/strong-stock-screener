@@ -85,6 +85,7 @@ STRONG_STOCK_IFIND_SERVICE_ID=hexin-ifind-ds-stock-mcp
 STRONG_STOCK_CANDIDATE_PROVIDER=recent_limit_up
 STRONG_STOCK_DATA_DIR=./data
 STRONG_STOCK_CORS_ALLOW_ORIGINS=http://localhost:3110,http://127.0.0.1:3110
+TZ=Asia/Shanghai
 STRONG_STOCK_SCREEN_RUN_RETENTION_COUNT=120
 STRONG_STOCK_GSGF_REVIEW_RETENTION_RECORDS=5000
 STRONG_STOCK_SENTIMENT_SNAPSHOT_RETENTION_DAYS=30
@@ -239,6 +240,7 @@ curl http://localhost:3110/health
 | `STRONG_STOCK_CANDIDATE_PROVIDER` | `recent_limit_up` | 候选池来源，可选 `recent_limit_up` / `thsdk` |
 | `STRONG_STOCK_DATA_DIR` | `./data` | 后端数据目录 |
 | `STRONG_STOCK_CORS_ALLOW_ORIGINS` | `http://localhost:3110,http://127.0.0.1:3110` | CORS 允许来源 |
+| `TZ` | `Asia/Shanghai` | 容器系统时区，建议保持上海时间 |
 | `STRONG_STOCK_SCREEN_RUN_RETENTION_COUNT` | `120` | 历史选股记录最多保留次数，不影响 `latest.json` |
 | `STRONG_STOCK_GSGF_REVIEW_RETENTION_RECORDS` | `5000` | 股是股非复盘样本最多保留条数 |
 | `STRONG_STOCK_SENTIMENT_SNAPSHOT_RETENTION_DAYS` | `30` | 情绪摘要快照最多保留交易日数 |

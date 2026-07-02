@@ -542,9 +542,12 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.doesNotMatch(auctionWorkspaceSource, /getAuctionSnapshot\(/);
   assert.match(auctionFeatureSource, /竞价强度榜/);
   assert.match(auctionFeatureSource, /风险与观察/);
-  assert.match(auctionFeatureSource, /行业聚合/);
   assert.match(auctionFeatureSource, /行业筛选/);
   assert.match(auctionFeatureSource, /IndustryQuickFilter/);
+  assert.match(auctionFeatureSource, /auction-command-strip/);
+  assert.match(auctionFeatureSource, /auction-primary-grid/);
+  assert.match(auctionFeatureSource, /auction-side-rail/);
+  assert.match(auctionFeatureSource, /AuctionControlBar/);
   assert.doesNotMatch(auctionWorkspaceSource, /<Select/);
   assert.match(auctionFeatureSource, /主线集中度/);
   assert.match(auctionFeatureSource, /高开风险阈值/);
@@ -555,7 +558,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(auctionFeatureSource, /强势高开/);
   assert.match(auctionFeatureSource, /低开观察/);
   assert.match(auctionFeatureSource, /auction-status-strip/);
-  assert.match(auctionFeatureSource, /auction-command-grid/);
+  assert.doesNotMatch(auctionFeatureSource, /auction-command-grid/);
   assert.match(auctionFeatureSource, /主线行业 Top/);
   assert.match(auctionFeatureSource, /阶段快照/);
   assert.match(auctionFeatureSource, /数据源状态/);

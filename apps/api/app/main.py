@@ -64,7 +64,11 @@ from app.services.gsgf_real_calibration import summarize_gsgf_real_calibration
 from app.services.gsgf_review import GsgfReviewStore
 from app.services.gsgf_trade_plan import build_gsgf_trade_plan
 from app.services.auction import build_auction_snapshot
-from app.services.auction_review import build_auction_rule_buckets, finalize_auction_records
+from app.services.auction_review import (
+    build_auction_review_records,
+    build_auction_rule_buckets,
+    finalize_auction_records,
+)
 from app.services.auction_review_store import AuctionReviewStore
 from app.services.auction_sampler import AuctionSnapshotSampler
 from app.services.auction_snapshot_store import AuctionSnapshotStore
@@ -644,7 +648,16 @@ def finalize_auction_review(trade_date: str) -> dict[str, object]:
     store = _auction_review_store()
     records = store.load_records(trade_date)
     if not records:
-        raise HTTPException(status_code=404, detail="no auction review records")
+        latest_snapshot = _auction_snapshot_store().latest(max_age_seconds=24 * 3600, limit=100)
+        if latest_snapshot.snapshot_status == "missing" or latest_snapshot.trade_date != trade_date:
+            raise HTTPException(status_code=404, detail="no auction review records")
+        records = build_auction_review_records(
+            latest_snapshot,
+            selected_at_label="manual",
+            selected_at=_auction_review_selected_at(trade_date),
+            limit=100,
+        )
+        store.upsert_records(records)
     provider = _kline_provider()
     symbol_bars = {
         symbol: provider.get_klines(symbol, count=260)
@@ -1389,6 +1402,11 @@ def _auction_review_summary(records: list, *, trade_date: str | None) -> Auction
         records=records,
         buckets=build_auction_rule_buckets(records),
     )
+
+
+def _auction_review_selected_at(trade_date: str) -> datetime:
+    current = _auction_now()
+    return datetime.fromisoformat(f"{trade_date}T{current.hour:02d}:{current.minute:02d}:{current.second:02d}+08:00")
 
 
 def _watchlist_snapshot() -> WatchlistSnapshot | None:

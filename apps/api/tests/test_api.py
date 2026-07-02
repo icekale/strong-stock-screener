@@ -1343,6 +1343,27 @@ def test_auction_review_finalize_saves_latest_summary(tmp_path: Path) -> None:
     assert payload["buckets"]
 
 
+def test_auction_review_finalize_seeds_records_from_latest_snapshot(tmp_path: Path) -> None:
+    client = _client(
+        tmp_path,
+        kline_provider=AuctionReviewKlineProvider(),
+        market_overview_provider=CountingMarketRankingsProvider(),
+    )
+    app.state.auction_now = datetime(2026, 7, 1, 10, 0, 0)
+
+    try:
+        client.get("/api/auction/snapshot?limit=2&refresh=true")
+        finalize_response = client.post("/api/auction/review/finalize?trade_date=2026-06-26")
+    finally:
+        delattr(app.state, "auction_now")
+
+    assert finalize_response.status_code == 200
+    payload = finalize_response.json()
+    assert payload["trade_date"] == "2026-06-26"
+    assert payload["record_count"] == 2
+    assert payload["records"][0]["selected_at_label"] == "manual"
+
+
 def test_auction_review_backfill_reports_unavailable_without_verified_source(tmp_path: Path) -> None:
     client = _client(tmp_path)
 

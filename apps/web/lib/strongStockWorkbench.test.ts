@@ -561,6 +561,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(auctionFeatureSource, /规则统计/);
   assert.match(auctionFeatureSource, /失败样本/);
   assert.match(auctionFeatureSource, /生成\/刷新今日复盘/);
+  assert.match(auctionFeatureSource, /message\.error/);
   assert.match(auctionFeatureSource, /Collapse/);
   assert.match(sentimentPageSource, /SentimentWorkspace/);
   assert.match(sentimentFeatureSource, /短线情绪中心/);

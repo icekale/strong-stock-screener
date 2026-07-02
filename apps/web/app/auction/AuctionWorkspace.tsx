@@ -197,7 +197,9 @@ export function AuctionWorkspace() {
       setReviewSummary(summary);
       void message.success(`竞价复盘已生成：${tradeDate}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "生成竞价复盘失败");
+      const errorMessage = err instanceof Error ? err.message : "生成竞价复盘失败";
+      setError(errorMessage);
+      void message.error(errorMessage);
     } finally {
       setReviewFinalizing(false);
     }

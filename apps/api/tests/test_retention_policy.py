@@ -3,12 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.models import (
+    AuctionReviewRecord,
+    AuctionReviewSnapshot,
     GsgfAnalysis,
     MarketEmotionSnapshotResponse,
     ShortTermSentimentResponse,
     StrongStockScreeningItem,
     StrongStockScreeningResult,
 )
+from app.services.auction_review_store import AuctionReviewStore
 from app.services.gsgf_review import GsgfReviewStore
 from app.services.market_emotion_history import MarketEmotionHistoryStore
 from app.services.runs import RunStore
@@ -69,6 +72,16 @@ def test_market_emotion_history_store_prunes_days_and_samples(tmp_path: Path) ->
     assert len(store.load("2026-06-12", limit=10)) == 2
 
 
+def test_auction_review_store_prunes_old_trade_dates(tmp_path: Path) -> None:
+    store = AuctionReviewStore(tmp_path, retention_days=2)
+
+    for trade_date in ["2026-06-29", "2026-06-30", "2026-07-01"]:
+        store.upsert_records([_auction_review_record(trade_date, f"{trade_date}.SZ", "09:25")])
+
+    remaining = sorted(path.stem for path in (tmp_path / "auction_reviews" / "records").glob("*.jsonl"))
+    assert remaining == ["2026-06-30", "2026-07-01"]
+
+
 def _screen_result(trade_date: str, symbol: str) -> StrongStockScreeningResult:
     return StrongStockScreeningResult(
         trade_date=trade_date,
@@ -91,4 +104,22 @@ def _screen_result(trade_date: str, symbol: str) -> StrongStockScreeningResult:
                 ),
             )
         ],
+    )
+
+
+def _auction_review_record(trade_date: str, symbol: str, selected_at_label: str) -> AuctionReviewRecord:
+    return AuctionReviewRecord(
+        trade_date=trade_date,
+        symbol=symbol,
+        name=symbol,
+        selected_at_label=selected_at_label,
+        selected_at=f"{trade_date}T09:25:00+08:00",
+        auction_snapshot=AuctionReviewSnapshot(
+            open_gap_pct=3.2,
+            current_pct_change=3.8,
+            auction_score=66,
+            rank=1,
+            tier="strong_high_open",
+        ),
+        rule_tags=["温和高开"],
     )

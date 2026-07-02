@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field
 
 from app.config import get_settings
 from app.models import (
+    AuctionBackfillResponse,
+    AuctionReviewSummary,
     AuctionSnapshotResponse,
     AuctionTimelineResponse,
     GsgfAnalysis,
@@ -62,6 +64,8 @@ from app.services.gsgf_real_calibration import summarize_gsgf_real_calibration
 from app.services.gsgf_review import GsgfReviewStore
 from app.services.gsgf_trade_plan import build_gsgf_trade_plan
 from app.services.auction import build_auction_snapshot
+from app.services.auction_review import build_auction_rule_buckets, finalize_auction_records
+from app.services.auction_review_store import AuctionReviewStore
 from app.services.auction_sampler import AuctionSnapshotSampler
 from app.services.auction_snapshot_store import AuctionSnapshotStore
 from app.services.market_emotion_history import MarketEmotionHistoryStore
@@ -614,6 +618,57 @@ def get_auction_snapshot(limit: int = 100, refresh: bool = False) -> dict[str, o
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"竞价雷达获取失败: {exc.__class__.__name__}") from exc
     return result.model_dump(mode="json")
+
+
+@app.get("/api/auction/review/latest")
+def get_latest_auction_review() -> dict[str, object]:
+    summary = _auction_review_store().load_latest_summary()
+    if summary is None:
+        raise HTTPException(status_code=404, detail="no auction review summary")
+    return summary.model_dump(mode="json")
+
+
+@app.get("/api/auction/review")
+def get_auction_review(trade_date: str | None = None, limit: int = 100) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 500))
+    records = _auction_review_store().load_records(trade_date, limit=bounded_limit)
+    summary = _auction_review_summary(records, trade_date=trade_date)
+    return summary.model_dump(mode="json")
+
+
+@app.post("/api/auction/review/finalize")
+def finalize_auction_review(trade_date: str) -> dict[str, object]:
+    store = _auction_review_store()
+    records = store.load_records(trade_date)
+    if not records:
+        raise HTTPException(status_code=404, detail="no auction review records")
+    provider = _kline_provider()
+    symbol_bars = {
+        symbol: provider.get_klines(symbol, count=260)
+        for symbol in sorted({record.symbol for record in records})
+    }
+    summary = finalize_auction_records(records, symbol_bars=symbol_bars)
+    store.upsert_records(summary.records)
+    store.save_summary(summary)
+    return summary.model_dump(mode="json")
+
+
+@app.post("/api/auction/review/backfill")
+def backfill_auction_review(
+    start_date: str,
+    end_date: str,
+    max_days: int = 20,
+) -> dict[str, object]:
+    _ = (start_date, end_date, max_days)
+    return AuctionBackfillResponse().model_dump(mode="json")
+
+
+@app.get("/api/auction/rules/summary")
+def get_auction_rules_summary(limit: int = 2000) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 10000))
+    records = _auction_review_store().load_records(limit=bounded_limit)
+    summary = _auction_review_summary(records, trade_date=None)
+    return summary.model_dump(mode="json")
 
 
 @app.get("/api/sectors/radar")
@@ -1236,9 +1291,32 @@ def _auction_snapshot_store() -> AuctionSnapshotStore:
     injected = getattr(app.state, "auction_snapshot_store", None)
     if injected is not None:
         return injected
-    store = AuctionSnapshotStore()
+    store = AuctionSnapshotStore(review_store=_auction_review_store())
     app.state.auction_snapshot_store = store
     return store
+
+
+def _auction_review_store() -> AuctionReviewStore:
+    injected = getattr(app.state, "auction_review_store", None)
+    if injected is not None:
+        return injected
+    settings = get_settings()
+    data_dir = Path(getattr(app.state, "runs_dir", get_settings().data_dir))
+    store = AuctionReviewStore(data_dir, retention_days=settings.auction_review_retention_days)
+    app.state.auction_review_store = store
+    return store
+
+
+def _auction_review_summary(records: list, *, trade_date: str | None) -> AuctionReviewSummary:
+    return AuctionReviewSummary(
+        trade_date=trade_date,
+        record_count=len(records),
+        pending_count=sum(1 for record in records if record.review_status == "pending"),
+        completed_count=sum(1 for record in records if record.review_status == "next_day_done"),
+        data_incomplete_count=sum(1 for record in records if record.review_status == "data_incomplete"),
+        records=records,
+        buckets=build_auction_rule_buckets(records),
+    )
 
 
 def _watchlist_snapshot() -> WatchlistSnapshot | None:

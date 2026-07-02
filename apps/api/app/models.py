@@ -30,6 +30,7 @@ ShortTermAlertSeverity = Literal["high", "medium", "low"]
 MarketEmotionLevel = Literal["冰点", "一般", "良好", "火爆"]
 SentimentSnapshotStatus = Literal["fresh", "cached", "missing"]
 BackgroundJobStatus = Literal["pending", "running", "success", "failed", "canceled"]
+AuctionReviewStatus = Literal["pending", "intraday_done", "day_done", "next_day_done", "data_incomplete"]
 
 
 class GsgfScoreBreakdown(BaseModel):
@@ -167,6 +168,87 @@ class StrongStockSourceStatus(BaseModel):
     source: str
     status: SourceStatusValue
     detail: str
+
+
+class AuctionReviewSnapshot(BaseModel):
+    open_gap_pct: float | None = None
+    current_pct_change: float | None = None
+    turnover_rate: float | None = None
+    turnover_cny: float | None = None
+    volume: float | None = None
+    auction_score: float = 0
+    rank: int | None = None
+    tier: str = "neutral"
+    signals: list[str] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    quote_time: str | None = None
+
+
+class AuctionReviewOutcome(BaseModel):
+    peak_pct: float | None = None
+    close_pct: float | None = None
+    drawdown_pct: float | None = None
+    limit_up: bool | None = None
+    open_pct: float | None = None
+    strong_follow: bool | None = None
+    status: str = "pending"
+
+
+class AuctionReviewScore(BaseModel):
+    intraday_score: float | None = None
+    day_score: float | None = None
+    next_day_score: float | None = None
+    total_score: float | None = None
+
+
+class AuctionReviewRecord(BaseModel):
+    trade_date: str
+    symbol: str
+    name: str | None = None
+    industry: str | None = None
+    selected_at_label: str = "manual"
+    selected_at: str | None = None
+    auction_snapshot: AuctionReviewSnapshot = Field(default_factory=AuctionReviewSnapshot)
+    rule_tags: list[str] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    intraday_result: AuctionReviewOutcome = Field(default_factory=AuctionReviewOutcome)
+    day_result: AuctionReviewOutcome = Field(default_factory=AuctionReviewOutcome)
+    next_day_result: AuctionReviewOutcome = Field(default_factory=AuctionReviewOutcome)
+    score: AuctionReviewScore = Field(default_factory=AuctionReviewScore)
+    review_status: AuctionReviewStatus = "pending"
+
+
+class AuctionRuleBucket(BaseModel):
+    rule_tag: str
+    sample_count: int = 0
+    win_rate: float | None = None
+    avg_score: float | None = None
+    avg_intraday_peak_pct: float | None = None
+    avg_close_pct: float | None = None
+    avg_next_open_pct: float | None = None
+    avg_drawdown_pct: float | None = None
+    failure_count: int = 0
+    suggestion: str = "样本不足，不建议调整。"
+
+
+class AuctionReviewSummary(BaseModel):
+    trade_date: str | None = None
+    record_count: int = 0
+    pending_count: int = 0
+    completed_count: int = 0
+    data_incomplete_count: int = 0
+    records: list[AuctionReviewRecord] = Field(default_factory=list)
+    buckets: list[AuctionRuleBucket] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
+class AuctionBackfillResponse(BaseModel):
+    status: str = "data_unavailable"
+    saved_count: int = 0
+    message: str = "历史集合竞价数据源尚未验证，未生成回填样本。"
 
 
 class StockQuoteResponse(BaseModel):

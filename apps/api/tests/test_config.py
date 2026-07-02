@@ -69,3 +69,4 @@ def test_settings_defaults_storage_retention_limits() -> None:
     assert settings.sentiment_snapshot_retention_days == 30
     assert settings.market_emotion_history_retention_days == 30
     assert settings.market_emotion_samples_per_day == 360
+    assert settings.auction_review_retention_days == 120

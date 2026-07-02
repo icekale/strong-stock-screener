@@ -364,6 +364,79 @@ export type AuctionTimelineResponse = {
   generated_at: string;
 };
 
+export type AuctionReviewSnapshot = {
+  open_gap_pct: number | null;
+  current_pct_change: number | null;
+  turnover_rate: number | null;
+  turnover_cny: number | null;
+  volume: number | null;
+  auction_score: number;
+  rank: number | null;
+  tier: string;
+  signals: string[];
+  risk_flags: string[];
+  quote_time: string | null;
+};
+
+export type AuctionReviewOutcome = {
+  peak_pct: number | null;
+  close_pct: number | null;
+  drawdown_pct: number | null;
+  limit_up: boolean | null;
+  open_pct: number | null;
+  strong_follow: boolean | null;
+  status: string;
+};
+
+export type AuctionReviewScore = {
+  intraday_score: number | null;
+  day_score: number | null;
+  next_day_score: number | null;
+  total_score: number | null;
+};
+
+export type AuctionReviewRecord = {
+  trade_date: string;
+  symbol: string;
+  name: string | null;
+  industry: string | null;
+  selected_at_label: string;
+  selected_at: string | null;
+  auction_snapshot: AuctionReviewSnapshot;
+  rule_tags: string[];
+  source_status: StrongStockSourceStatus[];
+  intraday_result: AuctionReviewOutcome;
+  day_result: AuctionReviewOutcome;
+  next_day_result: AuctionReviewOutcome;
+  score: AuctionReviewScore;
+  review_status: "pending" | "intraday_done" | "day_done" | "next_day_done" | "data_incomplete";
+};
+
+export type AuctionRuleBucket = {
+  rule_tag: string;
+  sample_count: number;
+  win_rate: number | null;
+  avg_score: number | null;
+  avg_intraday_peak_pct: number | null;
+  avg_close_pct: number | null;
+  avg_next_open_pct: number | null;
+  avg_drawdown_pct: number | null;
+  failure_count: number;
+  suggestion: string;
+};
+
+export type AuctionReviewSummary = {
+  trade_date: string | null;
+  record_count: number;
+  pending_count: number;
+  completed_count: number;
+  data_incomplete_count: number;
+  records: AuctionReviewRecord[];
+  buckets: AuctionRuleBucket[];
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
 export type SectorRadarItem = {
   name: string;
   source: string;

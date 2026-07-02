@@ -1,4 +1,5 @@
 import type {
+  AuctionReviewSummary,
   AuctionSnapshotResponse,
   AuctionTimelineResponse,
   BackgroundJobState,
@@ -97,6 +98,45 @@ export async function getAuctionTimeline(limit = 8): Promise<AuctionTimelineResp
     throw new Error(`读取竞价时间轴失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<AuctionTimelineResponse>;
+}
+
+export async function getAuctionReviewLatest(): Promise<AuctionReviewSummary> {
+  const response = await fetch(`${API_BASE_URL}/api/auction/review/latest`);
+  if (!response.ok) {
+    throw new Error(`读取竞价复盘失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<AuctionReviewSummary>;
+}
+
+export async function getAuctionReview(tradeDate?: string, limit = 100): Promise<AuctionReviewSummary> {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (tradeDate) {
+    params.set("trade_date", tradeDate);
+  }
+  const response = await fetch(`${API_BASE_URL}/api/auction/review?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取竞价复盘记录失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<AuctionReviewSummary>;
+}
+
+export async function finalizeAuctionReview(tradeDate: string): Promise<AuctionReviewSummary> {
+  const params = new URLSearchParams({ trade_date: tradeDate });
+  const response = await fetch(`${API_BASE_URL}/api/auction/review/finalize?${params.toString()}`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`生成竞价复盘失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<AuctionReviewSummary>;
+}
+
+export async function getAuctionRuleSummary(limit = 2000): Promise<AuctionReviewSummary> {
+  const response = await fetch(`${API_BASE_URL}/api/auction/rules/summary?limit=${encodeURIComponent(limit)}`);
+  if (!response.ok) {
+    throw new Error(`读取竞价规则统计失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<AuctionReviewSummary>;
 }
 
 export async function getSectorRadar(limit = 20): Promise<SectorRadarResponse> {

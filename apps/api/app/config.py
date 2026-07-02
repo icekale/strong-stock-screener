@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     sentiment_snapshot_retention_days: int = Field(default=30, ge=1, le=365)
     market_emotion_history_retention_days: int = Field(default=30, ge=1, le=365)
     market_emotion_samples_per_day: int = Field(default=360, ge=1, le=2000)
+    auction_review_retention_days: int = Field(default=120, ge=1, le=365)
 
     model_config = SettingsConfigDict(
         env_prefix="STRONG_STOCK_",

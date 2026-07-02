@@ -286,6 +286,15 @@ class CountingKlineProvider(FakeKlineProvider):
         return super().get_klines(symbol, count=count)
 
 
+class AuctionReviewKlineProvider(FakeKlineProvider):
+    def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
+        return [
+            KlineBar(date="2026-06-30", open=9.8, close=10.0, high=10.2, low=9.7, volume=100),
+            KlineBar(date="2026-07-01", open=10.4, close=10.8, high=11.3, low=10.2, volume=300),
+            KlineBar(date="2026-07-02", open=11.0, close=11.2, high=11.5, low=10.7, volume=280),
+        ]
+
+
 class FakeQuoteProvider:
     source_name = "TickFlow"
 
@@ -790,6 +799,8 @@ def _client(
     MARKET_RANKINGS_CACHE.clear()
     if hasattr(app.state, "auction_snapshot_store"):
         delattr(app.state, "auction_snapshot_store")
+    if hasattr(app.state, "auction_review_store"):
+        delattr(app.state, "auction_review_store")
     app.state.watchlist_snapshot = WatchlistSnapshot(
         items=[WatchlistItem(symbol="002000.SZ", name="示例股份")]
     )
@@ -1265,6 +1276,67 @@ def test_startup_auction_sampler_respects_disabled_state(tmp_path: Path) -> None
 
     assert not hasattr(app.state, "auction_sampler")
     shutdown_auction_sampler()
+
+
+def test_auction_review_latest_returns_404_before_summary(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.get("/api/auction/review/latest")
+
+    assert response.status_code == 404
+
+
+def test_auction_review_returns_archived_records_for_trade_date(tmp_path: Path) -> None:
+    client = _client(tmp_path, market_overview_provider=CountingMarketRankingsProvider())
+    app.state.auction_now = datetime(2026, 7, 1, 9, 25, 0)
+
+    try:
+        snapshot_response = client.get("/api/auction/snapshot?limit=2&refresh=true")
+        review_response = client.get("/api/auction/review?trade_date=2026-07-01")
+    finally:
+        delattr(app.state, "auction_now")
+
+    assert snapshot_response.status_code == 200
+    assert review_response.status_code == 200
+    payload = review_response.json()
+    assert payload["trade_date"] == "2026-07-01"
+    assert payload["record_count"] == 2
+    assert payload["records"][0]["symbol"] == "300001.SZ"
+    assert "量能活跃" in payload["records"][0]["rule_tags"]
+
+
+def test_auction_review_finalize_saves_latest_summary(tmp_path: Path) -> None:
+    client = _client(
+        tmp_path,
+        kline_provider=AuctionReviewKlineProvider(),
+        market_overview_provider=CountingMarketRankingsProvider(),
+    )
+    app.state.auction_now = datetime(2026, 7, 1, 9, 25, 0)
+
+    try:
+        client.get("/api/auction/snapshot?limit=2&refresh=true")
+        finalize_response = client.post("/api/auction/review/finalize?trade_date=2026-07-01")
+        latest_response = client.get("/api/auction/review/latest")
+    finally:
+        delattr(app.state, "auction_now")
+
+    assert finalize_response.status_code == 200
+    assert latest_response.status_code == 200
+    payload = latest_response.json()
+    assert payload["trade_date"] == "2026-07-01"
+    assert payload["record_count"] == 2
+    assert payload["data_incomplete_count"] == 2
+    assert payload["records"][0]["day_result"]["close_pct"] == 8.0
+    assert payload["buckets"]
+
+
+def test_auction_review_backfill_reports_unavailable_without_verified_source(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.post("/api/auction/review/backfill?start_date=2026-06-01&end_date=2026-06-05&max_days=3")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "data_unavailable"
 
 
 def test_sector_radar_returns_inflow_and_outflow_rankings(tmp_path: Path) -> None:

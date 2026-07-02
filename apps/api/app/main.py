@@ -62,6 +62,7 @@ from app.services.gsgf_real_calibration import summarize_gsgf_real_calibration
 from app.services.gsgf_review import GsgfReviewStore
 from app.services.gsgf_trade_plan import build_gsgf_trade_plan
 from app.services.auction import build_auction_snapshot
+from app.services.auction_review_store import AuctionReviewStore
 from app.services.auction_sampler import AuctionSnapshotSampler
 from app.services.auction_snapshot_store import AuctionSnapshotStore
 from app.services.market_emotion_history import MarketEmotionHistoryStore
@@ -1236,8 +1237,18 @@ def _auction_snapshot_store() -> AuctionSnapshotStore:
     injected = getattr(app.state, "auction_snapshot_store", None)
     if injected is not None:
         return injected
-    store = AuctionSnapshotStore()
+    store = AuctionSnapshotStore(review_store=_auction_review_store())
     app.state.auction_snapshot_store = store
+    return store
+
+
+def _auction_review_store() -> AuctionReviewStore:
+    injected = getattr(app.state, "auction_review_store", None)
+    if injected is not None:
+        return injected
+    data_dir = Path(getattr(app.state, "runs_dir", get_settings().data_dir))
+    store = AuctionReviewStore(data_dir, retention_days=120)
+    app.state.auction_review_store = store
     return store
 
 

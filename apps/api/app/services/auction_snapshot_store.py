@@ -10,6 +10,8 @@ from app.models import (
     AuctionTimelineResponse,
     StrongStockSourceStatus,
 )
+from app.services.auction_review import build_auction_review_records
+from app.services.auction_review_store import AuctionReviewStore
 
 
 AUCTION_TIMELINE_TARGETS: tuple[tuple[str, str, int, int], ...] = (
@@ -29,11 +31,12 @@ def auction_timeline_label(captured_at: datetime) -> str | None:
 
 
 class AuctionSnapshotStore:
-    def __init__(self) -> None:
+    def __init__(self, review_store: AuctionReviewStore | None = None) -> None:
         self._lock = RLock()
         self._saved_at: float | None = None
         self._snapshot: AuctionSnapshotResponse | None = None
         self._timeline: dict[str, tuple[str, AuctionSnapshotResponse]] = {}
+        self._review_store = review_store
 
     def save(
         self,
@@ -49,6 +52,15 @@ class AuctionSnapshotStore:
             self._saved_at = monotonic()
             if timeline_label is not None:
                 self._timeline[timeline_label] = (current.isoformat(timespec="seconds"), stored)
+                if self._review_store is not None:
+                    self._review_store.upsert_records(
+                        build_auction_review_records(
+                            stored,
+                            selected_at_label=timeline_label,
+                            selected_at=current,
+                            limit=100,
+                        )
+                    )
         return stored.model_copy(deep=True)
 
     def latest(self, *, max_age_seconds: float = 120, limit: int | None = None) -> AuctionSnapshotResponse:

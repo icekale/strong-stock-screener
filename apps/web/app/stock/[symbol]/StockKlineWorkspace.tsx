@@ -29,6 +29,7 @@ import {
   type KlineSubPaneCount,
 } from "../../../lib/klineIndicatorLayout";
 import { filterStockList, stockListStatusOptions, type StockListStatus } from "../../../lib/stockListFilter";
+import { mergeStockIdentity, type StockIdentity } from "../../../lib/stockIdentity";
 import {
   buildStockDetailHref,
   resolveStockDetailContext,
@@ -214,7 +215,14 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
   const dailyBars = useMemo(() => buildMovingAverageBars(bars), [bars]);
   const weeklyBars = useMemo(() => buildMovingAverageBars(buildWeeklyBars(bars)), [bars]);
   const chartBars = activeChartTab === "week" ? weeklyBars : dailyBars;
-  const stockList = useMemo(() => buildStockList(symbol, screenItems, stockDetailContext), [screenItems, stockDetailContext, symbol]);
+  const quoteIdentity = useMemo(
+    () => ({ industry: realtimeQuote?.industry ?? null, name: realtimeQuote?.name ?? null }),
+    [realtimeQuote?.industry, realtimeQuote?.name],
+  );
+  const stockList = useMemo(
+    () => buildStockList(symbol, screenItems, stockDetailContext, quoteIdentity),
+    [screenItems, stockDetailContext, symbol, quoteIdentity],
+  );
   const currentStock = stockList.find((item) => item.symbol === symbol) ?? stockList[0] ?? null;
   const currentCandidate = useMemo(
     () => screenItems.find((item) => item.symbol === symbol) ?? null,
@@ -1101,18 +1109,27 @@ function buildQuote(bars: KlineBar[], realtimeQuote: StockQuoteResponse | null):
   };
 }
 
-function buildStockList(symbol: string, items: StrongStockScreeningItem[], context: StockDetailContext): StockListItem[] {
-  const rows: StockListItem[] = items.map((item) => ({
-    industry: item.symbol === symbol ? item.industry ?? context.industry : item.industry,
-    name: item.symbol === symbol ? item.name ?? context.name : item.name,
-    score: item.score,
-    status: item.status,
-    symbol: item.symbol,
-  }));
+function buildStockList(
+  symbol: string,
+  items: StrongStockScreeningItem[],
+  context: StockDetailContext,
+  quoteIdentity: StockIdentity,
+): StockListItem[] {
+  const rows: StockListItem[] = items.map((item) => {
+    const identity = item.symbol === symbol ? mergeStockIdentity(item, context, quoteIdentity) : mergeStockIdentity(item);
+    return {
+      industry: identity.industry,
+      name: identity.name,
+      score: item.score,
+      status: item.status,
+      symbol: item.symbol,
+    };
+  });
   if (!rows.some((item) => item.symbol === symbol)) {
+    const identity = mergeStockIdentity(context, quoteIdentity);
     rows.unshift({
-      industry: context.industry,
-      name: context.name,
+      industry: identity.industry,
+      name: identity.name,
       score: null,
       status: null,
       symbol,

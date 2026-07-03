@@ -670,6 +670,11 @@ class CountingMarketOverviewProvider(FakeMarketOverviewProvider):
         return super().get_overview()
 
 
+class FakeStockIndustryProvider(FakeMarketOverviewProvider):
+    def get_stock_industries(self, symbols: list[str]) -> dict[str, str]:
+        return {symbol: "贵金属" for symbol in symbols if symbol == "000506.SZ"}
+
+
 class CountingSectorRadarProvider(FakeMarketOverviewProvider):
     source_name = "counting fake板块雷达"
 
@@ -1174,6 +1179,21 @@ def test_stock_quote_returns_tickflow_turnover_rate(tmp_path: Path) -> None:
     assert payload["last_price"] == 16.55
     assert payload["turnover_rate"] == 12.34
     assert payload["source_status"]["source"] == "TickFlow"
+
+
+def test_stock_quote_supplements_industry_from_market_provider(tmp_path: Path) -> None:
+    client = _client(
+        tmp_path,
+        quote_provider=FakeLiveQuoteProvider(),
+        market_overview_provider=FakeStockIndustryProvider(),
+    )
+
+    response = client.get("/api/stocks/000506.SZ/quote")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["name"] == "示例股份"
+    assert payload["industry"] == "贵金属"
 
 
 def test_market_overview_endpoint_reuses_cached_snapshot(tmp_path: Path) -> None:

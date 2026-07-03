@@ -258,6 +258,7 @@ class AuctionBackfillResponse(BaseModel):
 class StockQuoteResponse(BaseModel):
     symbol: str
     name: str | None = None
+    industry: str | None = None
     last_price: float | None = None
     prev_close: float | None = None
     open_price: float | None = None

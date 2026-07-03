@@ -918,6 +918,7 @@ export type StockKlineResponse = {
 export type StockQuoteResponse = {
   symbol: string;
   name: string | null;
+  industry: string | null;
   last_price: number | null;
   prev_close: number | null;
   open_price: number | null;

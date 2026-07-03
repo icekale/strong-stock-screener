@@ -985,6 +985,7 @@ def get_stock_quote(symbol: str) -> dict[str, object]:
     if not quotes:
         raise HTTPException(status_code=503, detail="实时行情未返回数据")
     quote = quotes[0]
+    industry = _stock_industry_for_symbol(quote.symbol)
     source_status = (
         quote_provider.status()
         if hasattr(quote_provider, "status")
@@ -993,6 +994,7 @@ def get_stock_quote(symbol: str) -> dict[str, object]:
     return StockQuoteResponse(
         symbol=quote.symbol,
         name=quote.name,
+        industry=industry,
         last_price=quote.last_price,
         prev_close=quote.prev_close,
         open_price=quote.open_price,
@@ -1517,6 +1519,19 @@ def _market_overview_provider() -> object:
         ifind_index_provider=_ifind_provider(),
         ifind_stock_provider=_ifind_provider(),
     )
+
+
+def _stock_industry_for_symbol(symbol: str) -> str | None:
+    provider = _market_overview_provider()
+    if not hasattr(provider, "get_stock_industries"):
+        return None
+    normalized_symbol = symbol.strip().upper()
+    try:
+        industries = provider.get_stock_industries([normalized_symbol])
+    except Exception:
+        return None
+    industry = industries.get(normalized_symbol)
+    return industry.strip() if isinstance(industry, str) and industry.strip() else None
 
 
 def _auction_snapshot_store() -> AuctionSnapshotStore:

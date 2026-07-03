@@ -554,6 +554,36 @@ class EastmoneyMarketOverviewProvider:
             detail=f"补齐 {unique_patched}/{len(missing_symbols)} 只排行股票行业",
         )
 
+    def get_stock_industries(self, symbols: list[str]) -> dict[str, str]:
+        missing_symbols = _dedupe_symbols(symbols)
+        output: dict[str, str] = {}
+        if not missing_symbols:
+            return output
+
+        try:
+            output.update(self._fetch_stock_industries_by_symbols(missing_symbols))
+        except Exception:
+            pass
+        missing_symbols = [symbol for symbol in missing_symbols if symbol not in output]
+        if not missing_symbols:
+            return output
+
+        try:
+            output.update(self._fetch_ths_industries_by_symbols(missing_symbols))
+        except Exception:
+            pass
+        missing_symbols = [symbol for symbol in missing_symbols if symbol not in output]
+        if (
+            missing_symbols
+            and self.ifind_stock_provider is not None
+            and hasattr(self.ifind_stock_provider, "get_stock_industries")
+        ):
+            try:
+                output.update(self.ifind_stock_provider.get_stock_industries(missing_symbols))
+            except Exception:
+                pass
+        return output
+
     def _fetch_stock_industries_by_symbols(self, symbols: list[str], batch_size: int = 100) -> dict[str, str]:
         output: dict[str, str] = {}
         bounded_batch_size = max(1, min(batch_size, 100))

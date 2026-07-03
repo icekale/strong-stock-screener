@@ -1,4 +1,4 @@
-export type StockDetailFrom = "auction" | "home";
+export type StockDetailFrom = "auction" | "home" | "sectors";
 
 export type StockDetailLinkContext = {
   from?: StockDetailFrom;
@@ -20,8 +20,8 @@ type ReadableSearchParams = {
 
 export function buildStockDetailHref(symbol: string, context: StockDetailLinkContext = {}): string {
   const query = new URLSearchParams();
-  if (context.from === "auction") {
-    query.set("from", "auction");
+  if (context.from === "auction" || context.from === "sectors") {
+    query.set("from", context.from);
   }
   const name = cleanText(context.name);
   const industry = cleanText(context.industry);
@@ -36,13 +36,14 @@ export function buildStockDetailHref(symbol: string, context: StockDetailLinkCon
 }
 
 export function resolveStockDetailContext(params: ReadableSearchParams): StockDetailContext {
-  const from: StockDetailFrom = params.get("from") === "auction" ? "auction" : "home";
+  const source = params.get("from");
+  const from: StockDetailFrom = source === "auction" || source === "sectors" ? source : "home";
   return {
     from,
     industry: cleanText(params.get("industry")),
     name: cleanText(params.get("name")),
-    returnHref: from === "auction" ? "/auction" : "/",
-    returnLabel: from === "auction" ? "返回竞价雷达" : "返回选股工作台",
+    returnHref: from === "auction" ? "/auction" : from === "sectors" ? "/sectors" : "/",
+    returnLabel: from === "auction" ? "返回竞价雷达" : from === "sectors" ? "返回题材工作台" : "返回选股工作台",
   };
 }
 

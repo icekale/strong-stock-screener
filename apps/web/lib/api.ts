@@ -22,6 +22,9 @@ import type {
   ScreenRunFilters,
   ScreenStrategy,
   SectorRadarResponse,
+  SectorWorkbenchMode,
+  SectorWorkbenchResponse,
+  SectorWorkbenchScopeRequest,
   SentimentDetailResponse,
   SentimentDecisionResponse,
   SentimentWatchlistAlertsResponse,
@@ -165,6 +168,39 @@ export async function getSectorRadar(limit = 20): Promise<SectorRadarResponse> {
     throw new Error(`读取板块资金流失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<SectorRadarResponse>;
+}
+
+export async function getSectorWorkbench(
+  options: {
+    mode?: SectorWorkbenchMode;
+    scope?: SectorWorkbenchScopeRequest;
+    selected?: string[];
+    limit?: number;
+    stockLimit?: number;
+  } = {},
+): Promise<SectorWorkbenchResponse> {
+  const params = new URLSearchParams();
+  if (options.mode) {
+    params.set("mode", options.mode);
+  }
+  if (options.scope) {
+    params.set("scope", options.scope);
+  }
+  if (options.selected?.length) {
+    params.set("selected", options.selected.join(","));
+  }
+  if (options.limit) {
+    params.set("limit", String(options.limit));
+  }
+  if (options.stockLimit) {
+    params.set("stock_limit", String(options.stockLimit));
+  }
+  const suffix = params.toString();
+  const response = await fetch(`${API_BASE_URL}/api/sectors/workbench${suffix ? `?${suffix}` : ""}`);
+  if (!response.ok) {
+    throw new Error(`读取题材工作台失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SectorWorkbenchResponse>;
 }
 
 export async function getShortTermSentiment(tradeDate: string, limit = 50): Promise<ShortTermSentimentResponse> {

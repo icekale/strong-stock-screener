@@ -848,6 +848,26 @@ class FailingTdxSectorRadarProvider:
         raise StrongStockDataUnavailable("tdx unavailable")
 
 
+class FakeTdxThemeRowsProvider(FakeTdxSectorRadarProvider):
+    def query_rows(self, question: str, size: int = 50, page: int = 1, market_range: str = "AG") -> list[dict[str, object]]:
+        return [
+            {
+                "代码": "300001.SZ",
+                "名称": "涨幅一号",
+                "所属概念": "机器人;减速器",
+                "连续涨停天数": 2,
+                "封单金额": 12000,
+            },
+            {
+                "代码": "300002.SZ",
+                "名称": "涨幅二号",
+                "所属概念": "电池;储能",
+                "连续涨停天数": 1,
+                "封单金额": 3000,
+            },
+        ]
+
+
 def _client(
     tmp_path: Path,
     candidate_provider: object | None = None,
@@ -869,12 +889,15 @@ def _client(
         delattr(app.state, "auction_snapshot_store")
     if hasattr(app.state, "auction_review_store"):
         delattr(app.state, "auction_review_store")
+    if hasattr(app.state, "sector_workbench_store"):
+        delattr(app.state, "sector_workbench_store")
     app.state.watchlist_snapshot = WatchlistSnapshot(
         items=[WatchlistItem(symbol="002000.SZ", name="示例股份")]
     )
     app.state.runs_dir = tmp_path
     app.state.watchlist_path = tmp_path / "watchlist.txt"
     app.state.runtime_config_path = tmp_path / "runtime_config.json"
+    app.state.sector_workbench_dir = tmp_path / "sectors"
     return TestClient(app)
 
 
@@ -1645,6 +1668,23 @@ def test_sector_radar_falls_back_to_tickflow_industry_aggregation_when_primary_s
     assert payload["source_status"][0]["source"] == "empty fake板块资金流"
     assert payload["source_status"][1]["source"] == "通达信MCP板块兜底"
     assert payload["source_status"][2]["source"] == "TickFlow行业聚合"
+
+
+def test_sector_workbench_endpoint_returns_theme_mode_and_source_status(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    app.state.tdx_provider = FakeTdxThemeRowsProvider()
+
+    response = client.get("/api/sectors/workbench?mode=strength&scope=auto&limit=5&stock_limit=10")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["mode"] == "strength"
+    assert payload["scope"] == "theme"
+    assert payload["themes"][0]["name"] == "机器人"
+    assert payload["selected_themes"][0] == "机器人"
+    assert payload["series"][0]["points"]
+    assert payload["stocks"][0]["symbol"] == "300001.SZ"
+    assert payload["source_status"][0]["status"] == "success"
 
 
 def test_screen_run_returns_items_and_persists_latest_without_empty_status(tmp_path: Path) -> None:

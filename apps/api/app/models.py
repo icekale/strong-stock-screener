@@ -12,6 +12,10 @@ IntradayAction = Literal["watch", "low_buy_watch", "reduce", "avoid_chase", "dat
 GsgfIntradayConfirmation = Literal["盘中确认", "等待确认", "低吸确认", "减仓确认", "风险失效", "无GSGF上下文"]
 SourceStatusValue = Literal["success", "failed", "disabled", "missing_key", "stale"]
 CapitalFlowStatus = Literal["direct", "estimated", "unavailable"]
+SectorWorkbenchMode = Literal["strength", "main_flow"]
+SectorWorkbenchScope = Literal["theme", "industry"]
+SectorWorkbenchScopeRequest = Literal["theme", "industry", "auto"]
+SectorFlowStatus = Literal["direct", "estimated", "unavailable"]
 IndustryStrength = Literal["strong", "neutral", "weak"]
 RiskCheckStatus = Literal["triggered", "clear", "unknown"]
 GsgfAction = Literal["strong_candidate", "watch_candidate", "wait_trigger", "avoid"]
@@ -588,6 +592,64 @@ class SectorRadarResponse(BaseModel):
     flow_source: str
     inflow: list[SectorRadarItem] = Field(default_factory=list)
     outflow: list[SectorRadarItem] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
+class SectorWorkbenchTheme(BaseModel):
+    name: str
+    scope: SectorWorkbenchScope
+    limit_up_count: int = 0
+    strength_score: float = 0
+    main_flow_cny: float | None = None
+    turnover_cny: float | None = None
+    change_pct: float | None = None
+    leader: str | None = None
+    member_count: int = 0
+    source: str
+    flow_status: SectorFlowStatus = "unavailable"
+
+
+class SectorWorkbenchPoint(BaseModel):
+    time: str
+    value: float
+    sampled_at: str
+
+
+class SectorWorkbenchSeries(BaseModel):
+    name: str
+    scope: SectorWorkbenchScope
+    metric: SectorWorkbenchMode
+    points: list[SectorWorkbenchPoint] = Field(default_factory=list)
+
+
+class SectorWorkbenchStock(BaseModel):
+    symbol: str
+    name: str | None = None
+    industry: str | None = None
+    themes: list[str] = Field(default_factory=list)
+    pct_change: float | None = None
+    turnover_cny: float | None = None
+    turnover_rate: float | None = None
+    limit_up: bool = False
+    board_count: int = 0
+    auction_pct_change: float | None = None
+    auction_turnover_cny: float | None = None
+    seal_amount_cny: float | None = None
+    risk_flags: list[str] = Field(default_factory=list)
+
+
+class SectorWorkbenchResponse(BaseModel):
+    scope: SectorWorkbenchScope
+    mode: SectorWorkbenchMode
+    trade_date: str | None = None
+    themes: list[SectorWorkbenchTheme] = Field(default_factory=list)
+    selected_themes: list[str] = Field(default_factory=list)
+    series: list[SectorWorkbenchSeries] = Field(default_factory=list)
+    related_tags: list[str] = Field(default_factory=list)
+    stocks: list[SectorWorkbenchStock] = Field(default_factory=list)
     source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
     generated_at: str = Field(
         default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")

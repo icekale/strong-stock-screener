@@ -459,6 +459,67 @@ export type SectorRadarResponse = {
   generated_at: string;
 };
 
+export type SectorWorkbenchMode = "strength" | "main_flow";
+export type SectorWorkbenchScope = "theme" | "industry";
+export type SectorWorkbenchScopeRequest = SectorWorkbenchScope | "auto";
+export type SectorFlowStatus = "direct" | "estimated" | "unavailable";
+
+export type SectorWorkbenchTheme = {
+  name: string;
+  scope: SectorWorkbenchScope;
+  limit_up_count: number;
+  strength_score: number;
+  main_flow_cny: number | null;
+  turnover_cny: number | null;
+  change_pct: number | null;
+  leader: string | null;
+  member_count: number;
+  source: string;
+  flow_status: SectorFlowStatus;
+};
+
+export type SectorWorkbenchPoint = {
+  time: string;
+  value: number;
+  sampled_at: string;
+};
+
+export type SectorWorkbenchSeries = {
+  name: string;
+  scope: SectorWorkbenchScope;
+  metric: SectorWorkbenchMode;
+  points: SectorWorkbenchPoint[];
+};
+
+export type SectorWorkbenchStock = {
+  symbol: string;
+  name: string | null;
+  industry: string | null;
+  themes: string[];
+  pct_change: number | null;
+  turnover_cny: number | null;
+  turnover_rate: number | null;
+  limit_up: boolean;
+  board_count: number;
+  auction_pct_change: number | null;
+  auction_turnover_cny: number | null;
+  seal_amount_cny: number | null;
+  risk_flags: string[];
+};
+
+export type SectorWorkbenchResponse = {
+  scope: SectorWorkbenchScope;
+  mode: SectorWorkbenchMode;
+  trade_date: string | null;
+  themes: SectorWorkbenchTheme[];
+  selected_themes: string[];
+  series: SectorWorkbenchSeries[];
+  related_tags: string[];
+  stocks: SectorWorkbenchStock[];
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
 export type ShortTermSentimentStockItem = {
   symbol: string;
   name: string;

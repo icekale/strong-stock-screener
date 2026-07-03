@@ -30,8 +30,10 @@ from app.models import (
     MarketRankingsResponse,
     MarketSectorStrengthItem,
     ScreenStrategy,
+    SectorWorkbenchMode,
     SectorRadarItem,
     SectorRadarResponse,
+    SectorWorkbenchScopeRequest,
     SentimentDetailResponse,
     ShortTermIntradaySentimentResponse,
     ShortTermIntradaySignalDigest,
@@ -89,6 +91,8 @@ from app.services.notification_channels import (
     send_notification_message,
 )
 from app.services.screener import StrongStockScreener
+from app.services.sector_workbench import build_sector_workbench_response
+from app.services.sector_workbench_store import SectorWorkbenchSampleStore
 from app.services.short_term_cache import TtlCache
 from app.services.sentiment_snapshot_store import SentimentSnapshotStore
 from app.services.sentiment_monitor import SentimentMonitor, SentimentMonitorConfig
@@ -731,6 +735,51 @@ def get_auction_rules_summary(limit: int = 2000) -> dict[str, object]:
 def get_sector_radar(limit: int = 20) -> dict[str, object]:
     bounded_limit = max(1, min(limit, 50))
     result = _cached_sector_radar(bounded_limit)
+    return result.model_dump(mode="json")
+
+
+@app.get("/api/sectors/workbench")
+def get_sector_workbench(
+    mode: SectorWorkbenchMode = "strength",
+    scope: SectorWorkbenchScopeRequest = "auto",
+    selected: str = "",
+    limit: int = 20,
+    stock_limit: int = 50,
+) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 50))
+    bounded_stock_limit = max(1, min(stock_limit, 200))
+    selected_names = [part.strip() for part in selected.split(",") if part.strip()]
+    try:
+        rankings = _cached_market_rankings(100)
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"题材工作台行情获取失败: {exc.__class__.__name__}") from exc
+
+    limit_up_rows, theme_status = _sector_theme_rows()
+    result = build_sector_workbench_response(
+        rankings=rankings,
+        limit_up_rows=limit_up_rows,
+        mode=mode,
+        scope=scope,
+        selected=selected_names,
+        limit=bounded_limit,
+        stock_limit=bounded_stock_limit,
+        sampled_at=datetime.now().astimezone(),
+    )
+    if theme_status is not None and result.scope == "industry":
+        result.source_status.insert(0, theme_status)
+    store = _sector_workbench_store()
+    store.append(result)
+    history = store.series_for(
+        trade_date=result.trade_date,
+        mode=result.mode,
+        scope=result.scope,
+        selected=result.selected_themes,
+        metric=result.mode,
+    )
+    if history:
+        result.series = history
     return result.model_dump(mode="json")
 
 
@@ -1553,6 +1602,48 @@ def _auction_review_store() -> AuctionReviewStore:
     store = AuctionReviewStore(data_dir, retention_days=settings.auction_review_retention_days)
     app.state.auction_review_store = store
     return store
+
+
+def _sector_workbench_store() -> SectorWorkbenchSampleStore:
+    injected = getattr(app.state, "sector_workbench_store", None)
+    if injected is not None:
+        return injected
+    data_dir = Path(
+        getattr(
+            app.state,
+            "sector_workbench_dir",
+            Path(getattr(app.state, "runs_dir", get_settings().data_dir)) / "sectors",
+        )
+    )
+    store = SectorWorkbenchSampleStore(data_dir)
+    app.state.sector_workbench_store = store
+    return store
+
+
+def _sector_theme_rows() -> tuple[list[dict[str, object]], StrongStockSourceStatus | None]:
+    try:
+        provider = getattr(app.state, "tdx_provider", None) or _tdx_provider()
+        if not hasattr(provider, "query_rows"):
+            return [], StrongStockSourceStatus(
+                source="通达信MCP涨停概念映射",
+                status="disabled",
+                detail="当前 TDX provider 不支持 query_rows，使用行业兜底",
+            )
+        rows = provider.query_rows(
+            "今日涨停股列表 封单金额 首次涨停时间 涨停原因 连续涨停天数 板型 封成比 所属概念 所属通达信风格",
+            size=100,
+        )
+        return rows, StrongStockSourceStatus(
+            source="通达信MCP涨停概念映射",
+            status="success",
+            detail=f"返回 {len(rows)} 只涨停股概念映射",
+        )
+    except Exception as exc:
+        return [], StrongStockSourceStatus(
+            source="通达信MCP涨停概念映射",
+            status="failed",
+            detail=f"题材映射获取失败: {exc.__class__.__name__}",
+        )
 
 
 def _auction_review_summary(records: list, *, trade_date: str | None) -> AuctionReviewSummary:

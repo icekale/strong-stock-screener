@@ -38,3 +38,22 @@ test("stock detail context returns to auction only for the trusted auction sourc
     returnLabel: "返回选股工作台",
   });
 });
+
+test("stock detail context can return to the sector workbench", () => {
+  assert.equal(
+    buildStockDetailHref("603690.SH", {
+      from: "sectors",
+      industry: "半导体",
+      name: "至纯科技",
+    }),
+    "/stock/603690.SH?from=sectors&name=%E8%87%B3%E7%BA%AF%E7%A7%91%E6%8A%80&industry=%E5%8D%8A%E5%AF%BC%E4%BD%93",
+  );
+
+  assert.deepEqual(resolveStockDetailContext(new URLSearchParams("from=sectors")), {
+    from: "sectors",
+    industry: null,
+    name: null,
+    returnHref: "/sectors",
+    returnLabel: "返回题材工作台",
+  });
+});

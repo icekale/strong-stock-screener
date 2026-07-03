@@ -52,6 +52,7 @@ type ScreenerWorkbenchProps = {
   result: StrongStockScreeningResponse | null;
   intraday: StrongStockIntradaySnapshot | null;
   marketOverview: MarketOverviewResponse | null;
+  marketSupportLoading: boolean;
   sectorRadar: SectorRadarResponse | null;
   sentimentSummary: SentimentSummaryResponse | null;
   reviewSummary: GsgfReviewSummary | null;
@@ -85,6 +86,7 @@ type ScreenerWorkbenchProps = {
     count: number;
   }) => void;
   onCancelGsgfCalibration: () => void;
+  onLoadMarketSupport: () => void;
   onLoadDiagnostics: () => void;
   onRecheckGsgfReview: () => void;
   onRefreshSources: () => void;
@@ -96,6 +98,7 @@ export function ScreenerWorkbench({
   sources,
   result,
   marketOverview,
+  marketSupportLoading,
   sectorRadar,
   sentimentSummary,
   reviewSummary,
@@ -124,6 +127,7 @@ export function ScreenerWorkbench({
   onRun,
   onRunGsgfCalibration,
   onCancelGsgfCalibration,
+  onLoadMarketSupport,
   onLoadDiagnostics,
   onRecheckGsgfReview,
   onRefreshSources,
@@ -207,7 +211,11 @@ export function ScreenerWorkbench({
           <ScreenerResultsPlaceholder />
         )}
 
-        <HomepageMarketSupportPanel sectorRadar={sectorRadar} />
+        <HomepageMarketSupportPanel
+          marketSupportLoading={marketSupportLoading}
+          onLoadMarketSupport={onLoadMarketSupport}
+          sectorRadar={sectorRadar}
+        />
 
         <HomepageDiagnosticsPanel diagnosticsLoading={diagnosticsLoading} onLoadDiagnostics={onLoadDiagnostics}>
           <GsgfReviewPanel
@@ -276,10 +284,28 @@ function CoreWorkflowNav({ sourceOk }: { sourceOk: boolean }) {
   );
 }
 
-function HomepageMarketSupportPanel({ sectorRadar }: { sectorRadar: SectorRadarResponse | null }) {
+function HomepageMarketSupportPanel({
+  marketSupportLoading,
+  onLoadMarketSupport,
+  sectorRadar,
+}: {
+  marketSupportLoading: boolean;
+  onLoadMarketSupport: () => void;
+  sectorRadar: SectorRadarResponse | null;
+}) {
+  const [marketSupportOpen, setMarketSupportOpen] = useState(false);
+
+  function handleToggle(event: SyntheticEvent<HTMLDetailsElement>) {
+    const isOpen = event.currentTarget.open;
+    setMarketSupportOpen(isOpen);
+    if (isOpen) {
+      onLoadMarketSupport();
+    }
+  }
+
   return (
     <section className="mt-4">
-      <details className="rounded-xl border border-[#ddd8d0] bg-[#f8f7f4]">
+      <details className="rounded-xl border border-[#ddd8d0] bg-[#f8f7f4]" onToggle={handleToggle}>
         <summary className="cursor-pointer list-none px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -289,15 +315,19 @@ function HomepageMarketSupportPanel({ sectorRadar }: { sectorRadar: SectorRadarR
               </p>
             </div>
             <span className="rounded-full border border-[#ddd8d0] bg-white px-3 py-1 text-xs font-bold text-[#7b756d]">
-              展开查看
+              {marketSupportLoading ? "正在加载" : marketSupportOpen ? "收起辅助" : "展开查看"}
             </span>
           </div>
         </summary>
         <div className="border-t border-[#ddd8d0] px-4 pb-4">
-          <div className="mt-4 grid items-stretch gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(360px,1fr)]">
-            <SectorFlowHeatmapPanel sectorRadar={sectorRadar} />
-            <SectorStrengthPanel />
-          </div>
+          {marketSupportOpen ? (
+            <div className="mt-4 grid items-stretch gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(360px,1fr)]">
+              <SectorFlowHeatmapPanel sectorRadar={sectorRadar} />
+              <SectorStrengthPanel />
+            </div>
+          ) : (
+            <p className="mt-4 text-sm font-medium text-[#7b756d]">展开后加载板块资金流辅助数据。</p>
+          )}
         </div>
       </details>
     </section>

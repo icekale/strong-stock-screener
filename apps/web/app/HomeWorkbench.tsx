@@ -60,6 +60,8 @@ export function HomeWorkbench() {
   const [calibrationRunning, setCalibrationRunning] = useState(false);
   const [calibrationJob, setCalibrationJob] = useState<BackgroundJobState | null>(null);
   const [gsgfHealth, setGsgfHealth] = useState<GsgfModelHealth | null>(null);
+  const [marketSupportLoaded, setMarketSupportLoaded] = useState(false);
+  const [marketSupportLoading, setMarketSupportLoading] = useState(false);
   const [diagnosticsLoaded, setDiagnosticsLoaded] = useState(false);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [running, setRunning] = useState(false);
@@ -73,7 +75,6 @@ export function HomeWorkbench() {
     setScreenFilters(loadSavedScreenFilters());
     void refreshSources();
     void refreshMarketOverview();
-    void refreshSectorRadar();
     void refreshSentimentSummary();
     void refreshLatest();
     void refreshWatchlistPool();
@@ -111,6 +112,19 @@ export function HomeWorkbench() {
     } catch (err) {
       setSectorRadar(null);
       setError(err instanceof Error ? err.message : "读取板块资金流失败");
+    }
+  }
+
+  async function handleLoadMarketSupport() {
+    if (marketSupportLoaded || marketSupportLoading) {
+      return;
+    }
+    setMarketSupportLoading(true);
+    try {
+      await refreshSectorRadar();
+      setMarketSupportLoaded(true);
+    } finally {
+      setMarketSupportLoading(false);
     }
   }
 
@@ -378,12 +392,14 @@ export function HomeWorkbench() {
       gsgfHealth={gsgfHealth}
       intraday={intraday}
       marketOverview={marketOverview}
+      marketSupportLoading={marketSupportLoading}
       sectorRadar={sectorRadar}
       sentimentSummary={sentimentSummary}
       onRefreshSources={() => void Promise.all([refreshSources(), refreshMarketOverview(), refreshSectorRadar(), refreshSentimentSummary()])}
       onRun={() => void handleRun()}
       onRunGsgfCalibration={(options) => void handleRunGsgfCalibration(options)}
       onCancelGsgfCalibration={() => void handleCancelGsgfCalibration()}
+      onLoadMarketSupport={() => void handleLoadMarketSupport()}
       onLoadDiagnostics={() => void handleLoadDiagnostics()}
       onRecheckGsgfReview={() => void handleRecheckGsgfReview()}
       onAddToWatchlist={(item, group, tags) => void handleAddToWatchlist(item, group, tags)}

@@ -20,6 +20,7 @@ import type {
   RuntimeSettingsHealthResponse,
   RuntimeSettingsResponse,
   ScreenRunFilters,
+  ScreenRunJobState,
   ScreenStrategy,
   SectorRadarResponse,
   SectorWorkbenchMode,
@@ -488,6 +489,36 @@ export async function createScreenRun(
     throw new Error(`运行筛选失败：${response.status} ${detail}`);
   }
   return response.json() as Promise<StrongStockScreeningResponse>;
+}
+
+export async function createScreenRunJob(
+  tradeDate: string,
+  limit = 30,
+  scanLimit = 160,
+  filters: ScreenRunFilters = {},
+  options: {
+    strategy?: ScreenStrategy;
+    include_gsgf?: boolean;
+    exclude_gsgf_hard_risk?: boolean;
+  } = {},
+): Promise<ScreenRunJobState> {
+  const response = await fetch(`${API_BASE_URL}/api/screen/runs/jobs`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ trade_date: tradeDate, limit, scan_limit: scanLimit, filters, ...options }),
+  });
+  if (!response.ok) {
+    throw new Error(`启动筛选任务失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ScreenRunJobState>;
+}
+
+export async function getScreenRunJob(jobId: string): Promise<ScreenRunJobState> {
+  const response = await fetch(`${API_BASE_URL}/api/screen/runs/jobs/${encodeURIComponent(jobId)}`);
+  if (!response.ok) {
+    throw new Error(`读取筛选任务失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ScreenRunJobState>;
 }
 
 export async function getLatestScreenRun(): Promise<StrongStockScreeningResponse> {

@@ -46,6 +46,7 @@ from app.models import (
     StockQuoteResponse,
     StockResearchResponse,
     StrongStockDataUnavailable,
+    StrongStockScreeningResult,
     StrongStockSourceStatus,
 )
 from app.gsgf_rules import analyze_gsgf, build_gsgf_chart_annotations
@@ -457,28 +458,86 @@ def settings_health(symbol: str = "605289.SH") -> dict[str, object]:
 
 @app.post("/api/screen/runs")
 def create_screen_run(request: ScreenRunRequest) -> dict[str, object]:
+    try:
+        result = _execute_screen_run(request)
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return result.model_dump(mode="json")
+
+
+@app.post("/api/screen/runs/jobs")
+def create_screen_run_job(request: ScreenRunRequest) -> dict[str, object]:
+    store = _background_job_store()
+    active_job = store.get_active("screen_run")
+    if active_job is not None:
+        return active_job.model_dump(mode="json")
+    job_request = request.model_copy(deep=True)
+    job = store.create_transient_job(
+        "screen_run",
+        lambda progress, should_cancel: _execute_screen_run_job(job_request, progress, should_cancel),
+        running_message="选股任务运行中",
+        success_message="选股任务完成",
+        progress_total=4,
+    )
+    return job.model_dump(mode="json")
+
+
+@app.get("/api/screen/runs/jobs/{job_id}")
+def get_screen_run_job(job_id: str) -> dict[str, object]:
+    try:
+        job = _background_job_store().get(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="screen run job not found") from exc
+    return job.model_dump(mode="json")
+
+
+def _execute_screen_run_job(
+    request: ScreenRunRequest,
+    progress: ProgressCallback,
+    should_cancel: CancelCheck,
+) -> dict[str, object]:
+    if should_cancel():
+        raise RuntimeError("筛选任务已取消")
+    result = _execute_screen_run(request, progress=progress, should_cancel=should_cancel)
+    return result.model_dump(mode="json")
+
+
+def _execute_screen_run(
+    request: ScreenRunRequest,
+    progress: ProgressCallback | None = None,
+    should_cancel: CancelCheck | None = None,
+) -> StrongStockScreeningResult:
+    if progress is not None:
+        progress(1, 4, "准备候选池和数据源")
+    if should_cancel is not None and should_cancel():
+        raise RuntimeError("筛选任务已取消")
     screener = StrongStockScreener(
         candidate_provider=_candidate_provider(),
         kline_provider=_kline_provider(),
         news_risk_provider=_news_risk_provider(),
     )
-    try:
-        result = screener.screen(
-            trade_date=request.trade_date,
-            limit=request.limit,
-            scan_limit=request.scan_limit,
-            filters=request.filters,
-            watchlist_snapshot=_watchlist_snapshot(),
-            strategy=request.strategy,
-            exclude_gsgf_hard_risk=request.exclude_gsgf_hard_risk,
-        )
-    except StrongStockDataUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    if progress is not None:
+        progress(2, 4, f"扫描 {request.scan_limit} 只候选并计算K线结构")
+    if should_cancel is not None and should_cancel():
+        raise RuntimeError("筛选任务已取消")
+    result = screener.screen(
+        trade_date=request.trade_date,
+        limit=request.limit,
+        scan_limit=request.scan_limit,
+        filters=request.filters,
+        watchlist_snapshot=_watchlist_snapshot(),
+        strategy=request.strategy,
+        exclude_gsgf_hard_risk=request.exclude_gsgf_hard_risk,
+    )
+    if progress is not None:
+        progress(3, 4, "保存筛选记录")
     _run_store().save(result)
     auto_review_config = load_runtime_settings(_runtime_config_path()).gsgf_auto_review
     if auto_review_config.auto_snapshot_enabled and any(item.gsgf is not None for item in result.items):
         _gsgf_review_store().persist_snapshot(result, dedupe=True)
-    return result.model_dump(mode="json")
+    if progress is not None:
+        progress(4, 4, "筛选完成")
+    return result
 
 
 @app.get("/api/screen/runs/latest")

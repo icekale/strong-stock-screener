@@ -6,7 +6,7 @@ import {
   addWatchlistPoolItem,
   cancelGsgfCalibrationJob,
   createGsgfCalibrationJob,
-  createScreenRun,
+  createScreenRunJob,
   getDataSourceStatus,
   getGsgfCalibrationJob,
   getGsgfModelHealth,
@@ -14,6 +14,7 @@ import {
   getLatestGsgfReview,
   getLatestScreenRun,
   getMarketOverview,
+  getScreenRunJob,
   getSectorRadar,
   getSentimentSummary,
   getWatchlistPool,
@@ -28,6 +29,7 @@ import type {
   GsgfReviewSummary,
   MarketOverviewResponse,
   ScreenRunFilters,
+  ScreenRunJobState,
   ScreenStrategy,
   SectorRadarResponse,
   SentimentSummaryResponse,
@@ -59,8 +61,10 @@ export function HomeWorkbench() {
   const [calibrationJob, setCalibrationJob] = useState<BackgroundJobState | null>(null);
   const [gsgfHealth, setGsgfHealth] = useState<GsgfModelHealth | null>(null);
   const [running, setRunning] = useState(false);
+  const [screenJob, setScreenJob] = useState<ScreenRunJobState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [watchlistMessage, setWatchlistMessage] = useState<string | null>(null);
+  const screenRunPollerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const calibrationPollerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -74,6 +78,9 @@ export function HomeWorkbench() {
     void refreshWatchlistPool();
 
     return () => {
+      if (screenRunPollerRef.current) {
+        clearTimeout(screenRunPollerRef.current);
+      }
       if (calibrationPollerRef.current) {
         clearTimeout(calibrationPollerRef.current);
       }
@@ -143,18 +150,56 @@ export function HomeWorkbench() {
   }
 
   async function handleRun() {
+    if (screenRunPollerRef.current) {
+      clearTimeout(screenRunPollerRef.current);
+    }
     setRunning(true);
     setError(null);
+    setScreenJob(null);
     try {
-      const response = await createScreenRun(tradeDate, 30, scanLimit, screenFilters, { strategy });
-      setResult(response);
-      setIntraday(null);
-      await Promise.all([refreshSources(), refreshMarketOverview(), refreshSectorRadar(), refreshSentimentSummary()]);
+      const job = await createScreenRunJob(tradeDate, 30, scanLimit, screenFilters, { strategy });
+      handleScreenRunJobState(job);
     } catch (err) {
       setError(err instanceof Error ? err.message : "运行筛选失败");
-    } finally {
       setRunning(false);
     }
+  }
+
+  function handleScreenRunJobState(job: ScreenRunJobState) {
+    setScreenJob(job);
+    if (job.status === "success") {
+      setRunning(false);
+      if (job.result) {
+        setResult(job.result);
+        setIntraday(null);
+      } else {
+        void refreshLatest();
+      }
+      void Promise.all([refreshSources(), refreshMarketOverview(), refreshSectorRadar(), refreshSentimentSummary()]);
+      return;
+    }
+    if (job.status === "failed" || job.status === "canceled") {
+      setRunning(false);
+      setError(job.error ?? (job.status === "canceled" ? "筛选任务已取消" : "筛选任务失败"));
+      return;
+    }
+    pollScreenRunJob(job.job_id);
+  }
+
+  function pollScreenRunJob(jobId: string) {
+    if (screenRunPollerRef.current) {
+      clearTimeout(screenRunPollerRef.current);
+    }
+    screenRunPollerRef.current = setTimeout(() => {
+      void (async () => {
+        try {
+          handleScreenRunJobState(await getScreenRunJob(jobId));
+        } catch (err) {
+          setRunning(false);
+          setError(err instanceof Error ? err.message : "读取筛选任务失败");
+        }
+      })();
+    }, 2000);
   }
 
   function handleSaveScreenFilters() {
@@ -334,6 +379,7 @@ export function HomeWorkbench() {
       reviewSummary={reviewSummary}
       running={running}
       scanLimit={scanLimit}
+      screenJob={screenJob}
       screenFilters={screenFilters}
       screenFiltersSaved={screenFiltersSaved}
       sources={sources}

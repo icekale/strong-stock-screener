@@ -235,6 +235,11 @@ export type BackgroundJobState = {
   finished_at: string | null;
   error: string | null;
   result_path: string | null;
+  result: unknown | null;
+};
+
+export type ScreenRunJobState = BackgroundJobState & {
+  result: StrongStockScreeningResponse | null;
 };
 
 export type GsgfModelHealth = {

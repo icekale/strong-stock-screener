@@ -158,6 +158,11 @@ test("standalone strong stock workbench is wired without daily-report modules", 
     /action: .*"empty"/,
   );
   assert.match(apiSource, /createScreenRun/);
+  assert.match(apiSource, /createScreenRunJob/);
+  assert.match(apiSource, /getScreenRunJob/);
+  assert.match(homeFeatureSource, /pollScreenRunJob/);
+  assert.match(screenerFeatureSource, /screenJob/);
+  assert.match(screenerFeatureSource, /筛选任务/);
   assert.match(apiSource, /createIntradaySnapshot/);
   assert.match(apiSource, /watchlist_text/);
   assert.match(apiSource, /use_watchlist_pool/);

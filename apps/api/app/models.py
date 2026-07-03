@@ -433,6 +433,7 @@ class BackgroundJobState(BaseModel):
     finished_at: str | None = None
     error: str | None = None
     result_path: str | None = None
+    result: dict[str, Any] | None = None
 
 
 class GsgfModelHealth(BaseModel):

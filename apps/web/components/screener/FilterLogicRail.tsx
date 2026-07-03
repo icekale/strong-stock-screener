@@ -4,6 +4,7 @@ import { Alert, Button, Card, Checkbox, Collapse, Empty, Form, Input, InputNumbe
 import type {
   DataSourceStatusResponse,
   ScreenRunFilters,
+  ScreenRunJobState,
   ScreenStrategy,
   WatchlistPoolItem,
 } from "../../lib/types";
@@ -32,6 +33,7 @@ export function FilterLogicRail({
   onTradeDateChange,
   running,
   scanLimit,
+  screenJob,
   screenFiltersSaved,
   sources,
   strategy,
@@ -48,6 +50,7 @@ export function FilterLogicRail({
   onTradeDateChange: (value: string) => void;
   running: boolean;
   scanLimit: number;
+  screenJob: ScreenRunJobState | null;
   screenFiltersSaved: boolean;
   sources: DataSourceStatusResponse | null;
   strategy: ScreenStrategy;
@@ -74,6 +77,24 @@ export function FilterLogicRail({
           <Button onClick={() => onScreenFiltersChange({})} size="small">Reset</Button>
         </div>
       </div>
+
+      {screenJob && (
+        <div className="mt-3 rounded-lg border border-[#ddd8d0] bg-white px-3 py-2">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span className="font-black text-[#11100e]">筛选任务</span>
+            <span className="font-bold text-[#7b756d]">{screenJob.message || jobStatusLabel(screenJob.status)}</span>
+            <span className="font-mono text-[#7b756d]">
+              {Math.min(screenJob.progress_current, screenJob.progress_total)}/{Math.max(1, screenJob.progress_total)}
+            </span>
+          </div>
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#ece7df]">
+            <div
+              className="h-full rounded-full bg-[#11100e] transition-all"
+              style={{ width: `${screenJobProgressPercent(screenJob)}%` }}
+            />
+          </div>
+        </div>
+      )}
 
       <details className="mt-3 border-t border-[#ddd8d0] pt-3">
         <summary className="cursor-pointer text-xs font-bold text-[#7b756d]">编辑筛选参数</summary>
@@ -108,6 +129,30 @@ export function FilterLogicRail({
       </details>
     </section>
   );
+}
+
+function screenJobProgressPercent(job: ScreenRunJobState): number {
+  const total = Math.max(1, job.progress_total);
+  if (job.status === "success") {
+    return 100;
+  }
+  return Math.max(5, Math.min(100, Math.round((job.progress_current / total) * 100)));
+}
+
+function jobStatusLabel(status: ScreenRunJobState["status"]): string {
+  if (status === "pending") {
+    return "等待执行";
+  }
+  if (status === "running") {
+    return "运行中";
+  }
+  if (status === "success") {
+    return "已完成";
+  }
+  if (status === "canceled") {
+    return "已取消";
+  }
+  return "失败";
 }
 
 function FilterChip({ active, label }: { active: boolean; label: string }) {

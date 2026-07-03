@@ -175,7 +175,7 @@ class BackgroundJobStore:
             )
 
         try:
-            runner(progress, cancel_event.is_set)
+            result = runner(progress, cancel_event.is_set)
             total = max(1, self.get(job_id).progress_total)
             self._set_state(
                 job_id,
@@ -184,6 +184,7 @@ class BackgroundJobStore:
                 progress_total=total,
                 message=success_message,
                 finished_at=_now(),
+                result=result if isinstance(result, dict) else None,
             )
         except Exception as exc:
             status: BackgroundJobStatus = "canceled" if cancel_event.is_set() else "failed"

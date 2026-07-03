@@ -295,6 +295,19 @@ class CountingKlineProvider(FakeKlineProvider):
         return super().get_klines(symbol, count=count)
 
 
+class BlockingKlineProvider(FakeKlineProvider):
+    source_name = "blocking fake K线"
+
+    def __init__(self) -> None:
+        self.started = Event()
+        self.release = Event()
+
+    def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
+        self.started.set()
+        assert self.release.wait(timeout=2) is True
+        return super().get_klines(symbol, count=count)
+
+
 class AuctionReviewKlineProvider(FakeKlineProvider):
     def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
         return [
@@ -2048,6 +2061,59 @@ def test_screen_run_uses_wider_default_scan_limit(tmp_path: Path) -> None:
     payload = response.json()
     assert payload["gsgf_funnel"]["scan_limit_count"] == 160
     assert "本次分析 160/200" in payload["source_status"][0]["detail"]
+
+
+def test_screen_run_job_runs_in_background_and_persists_latest(tmp_path: Path) -> None:
+    kline_provider = BlockingKlineProvider()
+    client = _client(tmp_path, kline_provider=kline_provider)
+
+    response = client.post(
+        "/api/screen/runs/jobs",
+        json={"trade_date": "2026-06-11", "limit": 10, "scan_limit": 4},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["type"] == "screen_run"
+    assert payload["status"] in {"pending", "running"}
+    assert payload["result"] is None
+    assert kline_provider.started.wait(timeout=1) is True
+
+    kline_provider.release.set()
+    completed_payload = payload
+    for _ in range(30):
+        completed_payload = client.get(f"/api/screen/runs/jobs/{payload['job_id']}").json()
+        if completed_payload["status"] == "success":
+            break
+        sleep(0.05)
+
+    assert completed_payload["status"] == "success"
+    assert completed_payload["result"]["trade_date"] == "2026-06-11"
+    assert len(completed_payload["result"]["items"]) > 0
+    latest_response = client.get("/api/screen/runs/latest")
+    assert latest_response.status_code == 200
+    assert latest_response.json()["trade_date"] == "2026-06-11"
+
+
+def test_screen_run_job_reuses_active_job(tmp_path: Path) -> None:
+    kline_provider = BlockingKlineProvider()
+    client = _client(tmp_path, kline_provider=kline_provider)
+
+    first_response = client.post(
+        "/api/screen/runs/jobs",
+        json={"trade_date": "2026-06-11", "limit": 10, "scan_limit": 4},
+    )
+    assert first_response.status_code == 200
+    assert kline_provider.started.wait(timeout=1) is True
+
+    second_response = client.post(
+        "/api/screen/runs/jobs",
+        json={"trade_date": "2026-06-11", "limit": 10, "scan_limit": 4},
+    )
+
+    assert second_response.status_code == 200
+    assert second_response.json()["job_id"] == first_response.json()["job_id"]
+    kline_provider.release.set()
 
 
 def test_screen_run_is_stable_when_candidate_source_order_changes(tmp_path: Path) -> None:

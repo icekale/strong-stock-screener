@@ -11,6 +11,7 @@ import type {
   GsgfReviewSummary,
   MarketOverviewResponse,
   ScreenRunFilters,
+  ScreenRunJobState,
   ScreenStrategy,
   SectorRadarResponse,
   SentimentSummaryResponse,
@@ -56,6 +57,7 @@ type ScreenerWorkbenchProps = {
   calibrationJob: BackgroundJobState | null;
   gsgfHealth: GsgfModelHealth | null;
   running: boolean;
+  screenJob: ScreenRunJobState | null;
   reviewRunning: boolean;
   calibrationRunning: boolean;
   watchlistPoolItems: WatchlistPoolItem[];
@@ -97,6 +99,7 @@ export function ScreenerWorkbench({
   calibrationJob,
   gsgfHealth,
   running,
+  screenJob,
   reviewRunning,
   calibrationRunning,
   watchlistPoolItems,
@@ -175,6 +178,7 @@ export function ScreenerWorkbench({
           onTradeDateChange={onTradeDateChange}
           running={running}
           scanLimit={scanLimit}
+          screenJob={screenJob}
           screenFiltersSaved={screenFiltersSaved}
           sources={sources}
           strategy={strategy}

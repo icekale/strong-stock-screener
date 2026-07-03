@@ -14,6 +14,7 @@ import {
   Tag,
   Typography,
 } from "antd";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { TickFlowKlineChart, type KlineChartDataSourceMode } from "../../../components/TickFlowKlineChart";
 import { getLatestScreenRun, getStockKline, getStockQuote, getStockResearch } from "../../../lib/api";
@@ -28,6 +29,12 @@ import {
   type KlineSubPaneCount,
 } from "../../../lib/klineIndicatorLayout";
 import { filterStockList, stockListStatusOptions, type StockListStatus } from "../../../lib/stockListFilter";
+import {
+  buildStockDetailHref,
+  resolveStockDetailContext,
+  type StockDetailContext,
+  type StockDetailFrom,
+} from "../../../lib/stockNavigation";
 import type {
   GsgfChartAnnotation,
   KlineBar,
@@ -76,6 +83,7 @@ const GSGF_MODEL_CONDITIONS = [
 ];
 
 export function StockKlineWorkspace({ symbol }: { symbol: string }) {
+  const searchParams = useSearchParams();
   const [data, setData] = useState<StockKlineResponse | null>(null);
   const [realtimeQuote, setRealtimeQuote] = useState<StockQuoteResponse | null>(null);
   const [research, setResearch] = useState<StockResearchResponse | null>(null);
@@ -97,6 +105,7 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
     buildKlineIndicatorState({ paneCount: 1, subIndicators: [] }),
   );
   const shouldLoadResearch = activeChartTab === "info" || activeChartTab === "strategy" || activeChartTab === "concept";
+  const stockDetailContext = useMemo(() => resolveStockDetailContext(searchParams), [searchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -205,7 +214,7 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
   const dailyBars = useMemo(() => buildMovingAverageBars(bars), [bars]);
   const weeklyBars = useMemo(() => buildMovingAverageBars(buildWeeklyBars(bars)), [bars]);
   const chartBars = activeChartTab === "week" ? weeklyBars : dailyBars;
-  const stockList = useMemo(() => buildStockList(symbol, screenItems), [screenItems, symbol]);
+  const stockList = useMemo(() => buildStockList(symbol, screenItems, stockDetailContext), [screenItems, stockDetailContext, symbol]);
   const currentStock = stockList.find((item) => item.symbol === symbol) ?? stockList[0] ?? null;
   const currentCandidate = useMemo(
     () => screenItems.find((item) => item.symbol === symbol) ?? null,
@@ -248,6 +257,9 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
           items={stockList}
           loading={listLoading}
           onToggleCollapsed={() => setCandidateListCollapsed((value) => !value)}
+          returnHref={stockDetailContext.returnHref}
+          returnLabel={stockDetailContext.returnLabel}
+          sourceFrom={stockDetailContext.from}
         />
 
         <section className="min-w-0 border-l border-slate-200">
@@ -327,6 +339,7 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
                       sameIndustryItems={stockList.filter(
                         (item) => item.industry && item.industry === currentStock?.industry,
                       )}
+                      sourceFrom={stockDetailContext.from}
                     />
                   )}
                 </div>
@@ -593,12 +606,18 @@ function StockListPanel({
   items,
   loading,
   onToggleCollapsed,
+  returnHref,
+  returnLabel,
+  sourceFrom,
 }: {
   collapsed: boolean;
   currentSymbol: string;
   items: StockListItem[];
   loading: boolean;
   onToggleCollapsed: () => void;
+  returnHref: string;
+  returnLabel: string;
+  sourceFrom: StockDetailFrom;
 }) {
   const [searchText, setSearchText] = useState("");
   const [statusFilter, setStatusFilter] = useState<StockListStatus>("all");
@@ -613,8 +632,8 @@ function StockListPanel({
         <div className={`${collapsed ? "px-3 py-3" : "px-4 py-4"} border-b border-slate-100`}>
           <div className="flex items-center justify-between gap-2">
             {!collapsed && (
-              <Button href="/" size="small" type="link">
-                返回选股工作台
+              <Button href={returnHref} size="small" type="link">
+                {returnLabel}
               </Button>
             )}
             {collapsed && (
@@ -691,7 +710,11 @@ function StockListPanel({
                         ? "border-slate-950 bg-slate-100"
                         : "border-transparent bg-white hover:border-slate-200 hover:bg-slate-50"
                     } ${collapsed ? "px-2 py-2" : "px-3 py-3"}`}
-                    href={`/stock/${encodeURIComponent(item.symbol)}`}
+                    href={buildStockDetailHref(item.symbol, {
+                      from: sourceFrom,
+                      industry: item.industry,
+                      name: item.name,
+                    })}
                     key={item.symbol}
                     title={`${item.name ?? item.symbol} ${item.symbol}`}
                   >
@@ -763,6 +786,7 @@ function QuoteSummary({
               {currentStock?.name ?? symbol}
             </Typography.Title>
             <Tag className="m-0" color="red">{marketPrefix(symbol)}</Tag>
+            {currentStock?.industry && <Tag className="m-0">{currentStock.industry}</Tag>}
             <Typography.Text className="text-sm font-bold text-slate-500">{symbol}</Typography.Text>
           </div>
           <div className="mt-2 flex items-end gap-3">
@@ -815,6 +839,7 @@ function StockDetailPanel({
   quote,
   research,
   sameIndustryItems,
+  sourceFrom,
 }: {
   activeTab: ChartTab;
   bars: KlineBar[];
@@ -823,6 +848,7 @@ function StockDetailPanel({
   quote: QuoteSnapshot | null;
   research: StockResearchResponse | null;
   sameIndustryItems: StockListItem[];
+  sourceFrom: StockDetailFrom;
 }) {
   const latest = bars[bars.length - 1] ?? null;
 
@@ -873,7 +899,11 @@ function StockDetailPanel({
           {sameIndustryItems.slice(0, 9).map((item) => (
             <a
               className="flex items-center justify-between rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-700 transition hover:border-slate-300 hover:bg-white"
-              href={`/stock/${encodeURIComponent(item.symbol)}`}
+              href={buildStockDetailHref(item.symbol, {
+                from: sourceFrom,
+                industry: item.industry,
+                name: item.name,
+              })}
               key={item.symbol}
             >
               <span className="truncate">{item.name ?? item.symbol}</span>
@@ -1071,18 +1101,18 @@ function buildQuote(bars: KlineBar[], realtimeQuote: StockQuoteResponse | null):
   };
 }
 
-function buildStockList(symbol: string, items: StrongStockScreeningItem[]): StockListItem[] {
+function buildStockList(symbol: string, items: StrongStockScreeningItem[], context: StockDetailContext): StockListItem[] {
   const rows: StockListItem[] = items.map((item) => ({
-    industry: item.industry,
-    name: item.name,
+    industry: item.symbol === symbol ? item.industry ?? context.industry : item.industry,
+    name: item.symbol === symbol ? item.name ?? context.name : item.name,
     score: item.score,
     status: item.status,
     symbol: item.symbol,
   }));
   if (!rows.some((item) => item.symbol === symbol)) {
     rows.unshift({
-      industry: null,
-      name: null,
+      industry: context.industry,
+      name: context.name,
       score: null,
       status: null,
       symbol,

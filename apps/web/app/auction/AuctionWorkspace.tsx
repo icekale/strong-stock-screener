@@ -15,6 +15,7 @@ import {
   getAuctionTimeline,
 } from "../../lib/api";
 import { selectAuctionMainlineTopItems, selectAuctionRiskFocusItems } from "../../lib/auctionPanelLimits";
+import { buildStockDetailHref } from "../../lib/stockNavigation";
 import type {
   AuctionReviewRecord,
   AuctionReviewSummary,
@@ -530,7 +531,7 @@ function AuctionReviewPanel({
               <SkeletonRows />
             ) : failures.length ? (
               failures.map((item) => (
-                <Link className="block rounded-lg border border-[#eee7db] p-2 hover:border-[#d92d20]" href={`/stock/${item.symbol}`} key={`${item.trade_date}-${item.symbol}-${item.selected_at_label}`}>
+                <Link className="block rounded-lg border border-[#eee7db] p-2 hover:border-[#d92d20]" href={auctionStockHref(item)} key={`${item.trade_date}-${item.symbol}-${item.selected_at_label}`}>
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-sm font-black text-[#11100e]">{item.name || item.symbol}</span>
                     <Tag color="orange">{formatNumber(item.score.total_score)}</Tag>
@@ -684,7 +685,7 @@ function RiskFocusPanel({
           selectAuctionRiskFocusItems(items).map((item) => (
             <Link
               className="block rounded-lg border border-[#e3ddd3] bg-white px-3 py-2 no-underline transition hover:border-[#c9bca8]"
-              href={`/stock/${item.symbol}`}
+              href={auctionStockHref(item)}
               key={item.symbol}
             >
               <div className="flex items-center justify-between gap-2">
@@ -738,7 +739,7 @@ function AuctionTimelinePanel({ timeline }: { timeline: AuctionTimelineResponse 
               {point.items[0] ? (
                 <Link
                   className="mt-2 block rounded-md border border-[#eee8dc] bg-[#faf7f1] px-2 py-1.5 no-underline"
-                  href={`/stock/${point.items[0].symbol}`}
+                  href={auctionStockHref(point.items[0])}
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="min-w-0 truncate text-xs font-black text-[#11100e]">
@@ -790,7 +791,7 @@ function AuctionTable({
           fixed: "left",
           width: 190,
           render: (_, item) => (
-            <Link className="font-black text-[#11100e]" href={`/stock/${item.symbol}`}>
+            <Link className="font-black text-[#11100e]" href={auctionStockHref(item)}>
               {item.name || item.symbol}
               <span className="ml-2 text-xs font-semibold text-[#7b756d]">{item.symbol}</span>
             </Link>
@@ -881,7 +882,7 @@ function RiskRow({ item }: { item: AuctionSnapshotItem }) {
   return (
     <Link
       className="block rounded-lg border border-[#e3ddd3] bg-white p-3 no-underline transition hover:border-[#c9bca8]"
-      href={`/stock/${item.symbol}`}
+      href={auctionStockHref(item)}
     >
       <div className="flex items-center justify-between gap-2">
         <span className="min-w-0 truncate text-sm font-black text-[#11100e]">{item.name || item.symbol}</span>
@@ -1200,6 +1201,14 @@ function buildAuctionWatchlistNote(item: AuctionSnapshotItem): string {
     `分层：${tierLabel(item.tier)}`,
     `操作备注：${item.action_note || "--"}`,
   ].join("；");
+}
+
+function auctionStockHref(item: { industry?: string | null; name?: string | null; symbol: string }): string {
+  return buildStockDetailHref(item.symbol, {
+    from: "auction",
+    industry: item.industry,
+    name: item.name,
+  });
 }
 
 function todayDate(): string {

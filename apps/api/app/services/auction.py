@@ -46,7 +46,7 @@ def build_auction_snapshot(
             StrongStockSourceStatus(
                 source="竞价雷达模型",
                 status="success",
-                detail="基于 TickFlow 全A实时行情快照计算竞价高开、量能和风险提示",
+                detail="基于 TickFlow 全A实时行情快照计算竞价高开、量能和风险提示；09:25 后主榜锁定",
             ),
         ],
     )

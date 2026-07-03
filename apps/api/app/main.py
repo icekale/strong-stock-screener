@@ -1538,7 +1538,8 @@ def _auction_snapshot_store() -> AuctionSnapshotStore:
     injected = getattr(app.state, "auction_snapshot_store", None)
     if injected is not None:
         return injected
-    store = AuctionSnapshotStore(review_store=_auction_review_store())
+    data_dir = Path(getattr(app.state, "runs_dir", get_settings().data_dir))
+    store = AuctionSnapshotStore(review_store=_auction_review_store(), data_dir=data_dir)
     app.state.auction_snapshot_store = store
     return store
 

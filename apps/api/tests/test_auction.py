@@ -2,6 +2,7 @@ from datetime import datetime
 
 from app.models import MarketRankingItem, MarketRankingsResponse
 from app.services.auction import build_auction_snapshot
+from app.services.auction_sampler import is_auction_sample_window
 
 
 def test_auction_snapshot_separates_open_gap_from_current_pct_change() -> None:
@@ -97,3 +98,10 @@ def test_auction_snapshot_classifies_reversal_watch_and_weak_low_open() -> None:
     assert "低开转强观察" in items_by_symbol["002002.SZ"].signals
     assert items_by_symbol["002003.SZ"].tier == "weak_low_open"
     assert "竞价低开偏弱" in items_by_symbol["002003.SZ"].risk_flags
+
+
+def test_auction_sampler_stops_after_0925_lock_window() -> None:
+    assert is_auction_sample_window(datetime(2026, 7, 1, 9, 24, 50)) is True
+    assert is_auction_sample_window(datetime(2026, 7, 1, 9, 25, 30)) is True
+    assert is_auction_sample_window(datetime(2026, 7, 1, 9, 25, 31)) is False
+    assert is_auction_sample_window(datetime(2026, 7, 1, 9, 30, 1)) is False

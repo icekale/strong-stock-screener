@@ -97,6 +97,33 @@ def test_auction_snapshot_store_records_timeline_points() -> None:
     assert captured[1].items[0].symbol == "300002.SZ"
 
 
+def test_auction_snapshot_store_keeps_0925_snapshot_locked_after_open() -> None:
+    store = AuctionSnapshotStore()
+
+    store.save(_snapshot("300025.SZ", 92), captured_at=datetime(2026, 7, 1, 9, 25, 0))
+    returned = store.save(_snapshot("300930.SZ", 99), captured_at=datetime(2026, 7, 1, 9, 30, 1))
+    latest = store.latest(limit=5)
+
+    assert returned.items[0].symbol == "300025.SZ"
+    assert latest.items[0].symbol == "300025.SZ"
+    assert latest.source_status[-1].source == "竞价雷达缓存"
+    assert "09:25" in latest.source_status[-1].detail
+
+
+def test_auction_snapshot_store_restores_locked_0925_snapshot_after_restart(tmp_path) -> None:
+    store = AuctionSnapshotStore(data_dir=tmp_path)
+    store.save(_snapshot("300025.SZ", 92), captured_at=datetime(2026, 7, 1, 9, 25, 0))
+
+    reloaded = AuctionSnapshotStore(data_dir=tmp_path)
+    latest = reloaded.latest(limit=5)
+    returned = reloaded.save(_snapshot("300930.SZ", 99), captured_at=datetime(2026, 7, 1, 9, 30, 1))
+
+    assert latest.items[0].symbol == "300025.SZ"
+    assert latest.snapshot_status == "cached"
+    assert "09:25" in latest.source_status[-1].detail
+    assert returned.items[0].symbol == "300025.SZ"
+
+
 def test_auction_review_store_persists_and_dedupes_records(tmp_path) -> None:
     store = AuctionReviewStore(tmp_path, retention_days=120)
     record = _auction_review_record("2026-07-01", "300001.SZ", "09:25")

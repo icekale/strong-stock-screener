@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 def is_auction_sample_window(now: datetime | None = None) -> bool:
     current = now or datetime.now(ZoneInfo("Asia/Shanghai"))
     seconds = current.hour * 3600 + current.minute * 60 + current.second
-    return (9 * 3600 + 14 * 60 + 30) <= seconds <= (9 * 3600 + 30 * 60 + 30)
+    return (9 * 3600 + 14 * 60 + 30) <= seconds <= (9 * 3600 + 25 * 60 + 30)
 
 
 class AuctionSnapshotSampler:

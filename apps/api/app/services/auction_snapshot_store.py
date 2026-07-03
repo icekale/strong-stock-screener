@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from threading import RLock
 from time import monotonic
 
@@ -20,6 +21,7 @@ AUCTION_TIMELINE_TARGETS: tuple[tuple[str, str, int, int], ...] = (
     ("09:24:50", "09:24:50", 9 * 3600 + 24 * 60 + 45, 9 * 3600 + 24 * 60 + 59),
     ("09:25", "09:25", 9 * 3600 + 25 * 60, 9 * 3600 + 25 * 60 + 30),
 )
+AUCTION_LOCK_SECONDS = 9 * 3600 + 25 * 60 + 30
 
 
 def auction_timeline_label(captured_at: datetime) -> str | None:
@@ -31,12 +33,15 @@ def auction_timeline_label(captured_at: datetime) -> str | None:
 
 
 class AuctionSnapshotStore:
-    def __init__(self, review_store: AuctionReviewStore | None = None) -> None:
+    def __init__(self, review_store: AuctionReviewStore | None = None, data_dir: Path | None = None) -> None:
         self._lock = RLock()
         self._saved_at: float | None = None
         self._snapshot: AuctionSnapshotResponse | None = None
+        self._locked_trade_date: str | None = None
         self._timeline: dict[str, tuple[str, AuctionSnapshotResponse]] = {}
         self._review_store = review_store
+        self._root_dir = data_dir / "auction_snapshots" if data_dir is not None else None
+        self._load_locked_snapshot()
 
     def save(
         self,
@@ -48,10 +53,20 @@ class AuctionSnapshotStore:
         current = captured_at or datetime.now().astimezone()
         timeline_label = auction_timeline_label(current)
         with self._lock:
+            if (
+                self._snapshot is not None
+                and self._locked_trade_date is not None
+                and _is_after_auction_lock(current)
+                and self._locked_trade_date == snapshot.trade_date
+            ):
+                return self._snapshot.model_copy(deep=True)
             self._snapshot = stored
             self._saved_at = monotonic()
             if timeline_label is not None:
                 self._timeline[timeline_label] = (current.isoformat(timespec="seconds"), stored)
+                if timeline_label == "09:25":
+                    self._locked_trade_date = stored.trade_date
+                    self._persist_locked_snapshot(stored)
                 if self._review_store is not None:
                     self._review_store.upsert_records(
                         build_auction_review_records(
@@ -83,6 +98,12 @@ class AuctionSnapshotStore:
         status = "cached" if age <= max_age_seconds else "stale"
         source_status = "success" if status == "cached" else "stale"
         items = snapshot.items[:limit] if limit is not None else snapshot.items
+        is_locked = snapshot.trade_date is not None and snapshot.trade_date == self._locked_trade_date
+        cache_detail = (
+            f"返回 09:25 竞价锁定快照，盘中刷新不会覆盖主榜，缓存年龄 {age:.1f} 秒"
+            if is_locked
+            else f"返回最新竞价快照，缓存年龄 {age:.1f} 秒"
+        )
         return snapshot.model_copy(
             deep=True,
             update={
@@ -94,7 +115,7 @@ class AuctionSnapshotStore:
                     StrongStockSourceStatus(
                         source="竞价雷达缓存",
                         status=source_status,
-                        detail=f"返回最新竞价快照，缓存年龄 {age:.1f} 秒",
+                        detail=cache_detail,
                     ),
                 ],
             },
@@ -140,3 +161,31 @@ class AuctionSnapshotStore:
                 )
             ],
         )
+
+    @property
+    def _locked_snapshot_path(self) -> Path | None:
+        return self._root_dir / "locked_0925.json" if self._root_dir is not None else None
+
+    def _persist_locked_snapshot(self, snapshot: AuctionSnapshotResponse) -> None:
+        path = self._locked_snapshot_path
+        if path is None:
+            return
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(snapshot.model_dump_json(indent=2), encoding="utf-8")
+
+    def _load_locked_snapshot(self) -> None:
+        path = self._locked_snapshot_path
+        if path is None or not path.exists():
+            return
+        try:
+            snapshot = AuctionSnapshotResponse.model_validate_json(path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        self._snapshot = snapshot.model_copy(deep=True, update={"snapshot_status": "fresh", "cache_age_seconds": 0.0})
+        self._saved_at = monotonic()
+        self._locked_trade_date = snapshot.trade_date
+
+
+def _is_after_auction_lock(current: datetime) -> bool:
+    seconds = current.hour * 3600 + current.minute * 60 + current.second
+    return seconds > AUCTION_LOCK_SECONDS

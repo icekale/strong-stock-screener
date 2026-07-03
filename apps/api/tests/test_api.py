@@ -732,6 +732,43 @@ class CountingMarketRankingsProvider(FakeMarketOverviewProvider):
         return super().get_market_rankings(limit=limit)
 
 
+class SequenceMarketRankingsProvider(FakeMarketOverviewProvider):
+    source_name = "sequence fake全A排行"
+
+    def __init__(self) -> None:
+        self.ranking_calls: list[int] = []
+
+    def get_market_rankings(self, limit: int = 50) -> MarketRankingsResponse:
+        self.ranking_calls.append(limit)
+        symbol = "300025.SZ" if len(self.ranking_calls) == 1 else "300930.SZ"
+        name = "九点二五" if len(self.ranking_calls) == 1 else "九点三零"
+        return MarketRankingsResponse(
+            trade_date="2026-06-26",
+            pct_change_rank=[
+                MarketRankingItem(
+                    symbol=symbol,
+                    name=name,
+                    industry="机器人",
+                    last_price=11.2,
+                    open_price=10.8,
+                    prev_close=10.0,
+                    pct_change=12.0,
+                    current_pct_change=12.0,
+                    turnover_cny=300_000_000,
+                    turnover_rate=6.0,
+                    quote_time="2026-06-26T10:00:00+08:00",
+                )
+            ][:limit],
+            source_status=[
+                StrongStockSourceStatus(
+                    source="TickFlow 全A实时行情",
+                    status="success",
+                    detail="fake sequence rankings",
+                )
+            ],
+        )
+
+
 class BlockingMarketRankingsProvider(FakeMarketOverviewProvider):
     source_name = "blocking fake全A排行"
 
@@ -1302,6 +1339,50 @@ def test_auction_snapshot_refresh_updates_latest_snapshot(tmp_path: Path) -> Non
     assert latest_payload["cache_age_seconds"] is not None
     assert latest_payload["items"][0]["symbol"] == "300001.SZ"
     assert provider.ranking_calls == [100]
+
+
+def test_auction_snapshot_refresh_after_open_keeps_0925_locked_snapshot(tmp_path: Path) -> None:
+    provider = SequenceMarketRankingsProvider()
+    client = _client(tmp_path, market_overview_provider=provider)
+    app.state.auction_now = datetime(2026, 6, 26, 9, 25, 0)
+
+    try:
+        lock_response = client.get("/api/auction/snapshot?limit=2&refresh=true")
+        app.state.auction_now = datetime(2026, 6, 26, 9, 30, 1)
+        after_open_response = client.get("/api/auction/snapshot?limit=2&refresh=true")
+        latest_response = client.get("/api/auction/latest?limit=2")
+    finally:
+        delattr(app.state, "auction_now")
+
+    assert lock_response.status_code == 200
+    assert after_open_response.status_code == 200
+    assert latest_response.status_code == 200
+    assert lock_response.json()["items"][0]["symbol"] == "300025.SZ"
+    assert after_open_response.json()["items"][0]["symbol"] == "300025.SZ"
+    latest_payload = latest_response.json()
+    assert latest_payload["items"][0]["symbol"] == "300025.SZ"
+    assert "09:25" in latest_payload["source_status"][-1]["detail"]
+    assert provider.ranking_calls == [100, 100]
+
+
+def test_auction_latest_restores_0925_locked_snapshot_after_store_restart(tmp_path: Path) -> None:
+    provider = SequenceMarketRankingsProvider()
+    client = _client(tmp_path, market_overview_provider=provider)
+    app.state.auction_now = datetime(2026, 6, 26, 9, 25, 0)
+
+    try:
+        lock_response = client.get("/api/auction/snapshot?limit=2&refresh=true")
+        delattr(app.state, "auction_snapshot_store")
+        latest_response = client.get("/api/auction/latest?limit=2")
+    finally:
+        delattr(app.state, "auction_now")
+
+    assert lock_response.status_code == 200
+    assert latest_response.status_code == 200
+    latest_payload = latest_response.json()
+    assert latest_payload["items"][0]["symbol"] == "300025.SZ"
+    assert latest_payload["snapshot_status"] == "cached"
+    assert "09:25" in latest_payload["source_status"][-1]["detail"]
 
 
 def test_auction_snapshot_refresh_job_runs_in_background_and_saves_latest(

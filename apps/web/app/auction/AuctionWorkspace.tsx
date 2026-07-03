@@ -251,7 +251,7 @@ export function AuctionWorkspace() {
             <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-[#7b756d]">
               <span>{data?.trade_date ?? "等待数据"}</span>
               <span>缓存年龄 {formatCacheAge(data?.cache_age_seconds)}</span>
-              <span>自动快照 · TickFlow 全A实时行情</span>
+              <span>自动快照 · TickFlow 全A实时行情 · 09:25 锁定主榜</span>
               <span>{concentration.message}</span>
             </div>
           </div>
@@ -297,7 +297,7 @@ export function AuctionWorkspace() {
               <div>
                 <div className="text-sm font-black text-[#11100e]">竞价强度榜</div>
                 <div className="text-xs text-[#7b756d]">
-                  当前显示 {visibleItems.length}/{data?.items.length ?? 0} 只，{getAuctionSortDescription(auctionSortMode)}
+                  当前显示 {visibleItems.length}/{data?.items.length ?? 0} 只，09:25 后主榜不再被盘中行情覆盖，{getAuctionSortDescription(auctionSortMode)}
                 </div>
               </div>
               <Tag color="red">第一屏主视野</Tag>

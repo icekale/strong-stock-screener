@@ -1,7 +1,7 @@
 "use client";
 
 import { ReloadOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Collapse, Empty, InputNumber, Progress, Select, Table, Tag, Typography } from "antd";
+import { Alert, App, Button, Collapse, Empty, InputNumber, Progress, Segmented, Select, Table, Tag, Typography } from "antd";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -16,6 +16,13 @@ import {
 } from "../../lib/api";
 import { selectAuctionFocusIndustryItems, selectAuctionHotIndustryItems } from "../../lib/auctionIndustryFilters";
 import { selectAuctionMainlineTopItems, selectAuctionRiskFocusItems } from "../../lib/auctionPanelLimits";
+import {
+  AUCTION_SORT_OPTIONS,
+  getAuctionLiquidityWarning,
+  getAuctionSortDescription,
+  sortAuctionItems,
+  type AuctionSortMode,
+} from "../../lib/auctionSort";
 import { buildStockDetailHref } from "../../lib/stockNavigation";
 import type {
   AuctionReviewRecord,
@@ -58,6 +65,7 @@ export function AuctionWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [tierFilter, setTierFilter] = useState<AuctionTierFilter>("all");
   const [industryFilter, setIndustryFilter] = useState<string>("all");
+  const [auctionSortMode, setAuctionSortMode] = useState<AuctionSortMode>("score");
   const [highOpenRiskThreshold, setHighOpenRiskThreshold] = useState(7);
   const [watchlistSavingSymbol, setWatchlistSavingSymbol] = useState<string | null>(null);
   const refreshPromiseRef = useRef<Promise<void> | null>(null);
@@ -178,12 +186,15 @@ export function AuctionWorkspace() {
   );
   const visibleItems = useMemo(
     () =>
-      (data?.items ?? []).filter(
-        (item) =>
-          (tierFilter === "all" || item.tier === tierFilter) &&
-          (industryFilter === "all" || (item.industry || "未标注") === industryFilter),
+      sortAuctionItems(
+        (data?.items ?? []).filter(
+          (item) =>
+            (tierFilter === "all" || item.tier === tierFilter) &&
+            (industryFilter === "all" || (item.industry || "未标注") === industryFilter),
+        ),
+        auctionSortMode,
       ),
-    [data, industryFilter, tierFilter],
+    [auctionSortMode, data, industryFilter, tierFilter],
   );
   const industryStats = useMemo(() => buildIndustryStats(data?.items ?? []), [data]);
   const concentration = useMemo(() => buildIndustryConcentration(industryStats, data?.items.length ?? 0), [data, industryStats]);
@@ -286,17 +297,19 @@ export function AuctionWorkspace() {
               <div>
                 <div className="text-sm font-black text-[#11100e]">竞价强度榜</div>
                 <div className="text-xs text-[#7b756d]">
-                  当前显示 {visibleItems.length}/{data?.items.length ?? 0} 只，按开盘幅度、当前涨幅、成交额和换手强度综合排序。
+                  当前显示 {visibleItems.length}/{data?.items.length ?? 0} 只，{getAuctionSortDescription(auctionSortMode)}
                 </div>
               </div>
               <Tag color="red">第一屏主视野</Tag>
             </div>
             <AuctionControlBar
               activeIndustry={industryFilter}
+              auctionSortMode={auctionSortMode}
               concentrationMessage={concentration.message}
               highOpenRiskThreshold={highOpenRiskThreshold}
               industryStats={industryStats}
               onHighOpenRiskThresholdChange={setHighOpenRiskThreshold}
+              onSelectAuctionSortMode={setAuctionSortMode}
               onSelectIndustry={setIndustryFilter}
               onSelectTier={setTierFilter}
               tierFilter={tierFilter}
@@ -384,20 +397,24 @@ function jobProgressPercent(job: BackgroundJobState): number {
 
 function AuctionControlBar({
   activeIndustry,
+  auctionSortMode,
   concentrationMessage,
   highOpenRiskThreshold,
   industryStats,
   onHighOpenRiskThresholdChange,
+  onSelectAuctionSortMode,
   onSelectIndustry,
   onSelectTier,
   tierFilter,
   totalCount,
 }: {
   activeIndustry: string;
+  auctionSortMode: AuctionSortMode;
   concentrationMessage: string;
   highOpenRiskThreshold: number;
   industryStats: IndustryAuctionStat[];
   onHighOpenRiskThresholdChange: (value: number) => void;
+  onSelectAuctionSortMode: (mode: AuctionSortMode) => void;
   onSelectIndustry: (industry: string) => void;
   onSelectTier: (tier: AuctionTierFilter) => void;
   tierFilter: AuctionTierFilter;
@@ -405,6 +422,17 @@ function AuctionControlBar({
 }) {
   return (
     <div className="workbench-panel-divider flex flex-col gap-2 border-b px-4 py-2.5">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span className="shrink-0 text-xs font-black text-[#7b756d]">排序</span>
+        <Segmented
+          className="max-w-full overflow-x-auto"
+          onChange={(value) => onSelectAuctionSortMode(value as AuctionSortMode)}
+          options={AUCTION_SORT_OPTIONS}
+          size="small"
+          value={auctionSortMode}
+        />
+        <span className="text-xs text-[#7b756d]">{getAuctionSortDescription(auctionSortMode)}</span>
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         <span className="shrink-0 text-xs font-black text-[#7b756d]">分层</span>
         {TIER_FILTERS.map((item) => (
@@ -899,12 +927,18 @@ function AuctionTable({
           title: "分层",
           dataIndex: "tier",
           width: 220,
-          render: (_, item) => (
-            <div className="min-w-[180px]">
-              <Tag color={tierColor(item.tier)}>{tierLabel(item.tier)}</Tag>
-              <div className="mt-1 line-clamp-2 text-xs leading-5 text-[#7b756d]">{item.action_note}</div>
-            </div>
-          ),
+          render: (_, item) => {
+            const liquidityWarning = getAuctionLiquidityWarning(item);
+            return (
+              <div className="min-w-[180px]">
+                <div className="flex flex-wrap gap-1">
+                  <Tag color={tierColor(item.tier)}>{tierLabel(item.tier)}</Tag>
+                  {liquidityWarning ? <Tag color="orange">{liquidityWarning}</Tag> : null}
+                </div>
+                <div className="mt-1 line-clamp-2 text-xs leading-5 text-[#7b756d]">{item.action_note}</div>
+              </div>
+            );
+          },
         },
         {
           title: "操作",

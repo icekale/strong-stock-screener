@@ -140,7 +140,7 @@ export function GsgfCalibrationPanel({
             用 TickFlow 历史日K复盘“确认买点 / 低吸观察 / B区A点 / 放量突破确认”的分桶命中率
           </p>
         </div>
-        <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_120px_92px_92px_auto] xl:min-w-[760px]">
+        <div className="grid min-w-0 gap-2 sm:grid-cols-[minmax(220px,1fr)_120px_92px_92px_auto] xl:min-w-[760px]">
           <Input
             onChange={(event) => setTradeDatesText(event.target.value)}
             placeholder="样本日，逗号分隔"
@@ -214,7 +214,7 @@ export function GsgfCalibrationPanel({
           <CalibrationBucketTable buckets={calibrationSummary.unique_symbol_buckets} title="去重股票分桶" />
           {calibrationSummary.diagnostic_groups.length > 0 && (
             <div className="xl:col-span-2">
-              <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-sm font-black text-[#11100e]">诊断分桶</h3>
                 <Tag className="m-0">确认信号 / 准备形态 / 结构区间 / 评分段</Tag>
               </div>
@@ -332,14 +332,14 @@ function CalibrationBucketTable({
   title: string;
 }) {
   return (
-    <div className="min-w-0 rounded-lg border border-[#ddd8d0] bg-[#f5f3f0] p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
+    <div className="min-w-0 max-w-full overflow-hidden rounded-lg border border-[#ddd8d0] bg-[#f5f3f0] p-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-black text-[#11100e]">{title}</h3>
         <Tag className="m-0">{buckets.length || "待数据"}</Tag>
       </div>
       {buckets.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-xs">
+        <div className="max-w-full overflow-x-auto">
+          <table className="min-w-[520px] text-left text-xs">
             <thead className="text-[#7b756d]">
               <tr>
                 <th className="px-2 py-2 font-black">分桶</th>

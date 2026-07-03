@@ -284,6 +284,7 @@ export function AuctionWorkspace() {
           <MetricCard compact label="高开风险" value={data?.metrics.high_risk_count ?? null} suffix="只" tone="amber" />
           <MetricCard compact label="候选成交额" value={data?.metrics.total_turnover_cny ?? null} formatter={formatCny} />
         </div>
+        <AuctionTrustStrip data={data} />
       </section>
 
       {error && <Alert className="mb-4" showIcon title={error} type="error" />}
@@ -388,6 +389,35 @@ export function AuctionWorkspace() {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function AuctionTrustStrip({ data }: { data: AuctionSnapshotResponse | null }) {
+  const sourceStatus = data?.source_status ?? [];
+  const failedCount = sourceStatus.filter((item) => item.status === "failed" || item.status === "missing_key").length;
+  const staleCount = sourceStatus.filter((item) => item.status === "stale").length;
+  const trustText =
+    failedCount > 0
+      ? "竞价可信度：降级"
+      : data?.snapshot_status === "missing"
+        ? "竞价可信度：等待快照"
+        : staleCount > 0 || data?.snapshot_status === "stale"
+          ? "竞价可信度：缓存/待刷新"
+          : "竞价可信度：可用";
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-[#e3ddd3] bg-white px-3 py-2 text-xs">
+      <span className="font-black text-[#7b756d]">数据可信度</span>
+      <Tag className="m-0" color={snapshotStatusColor(data?.snapshot_status)}>
+        {snapshotStatusLabel(data?.snapshot_status)}
+      </Tag>
+      <Tag className="m-0" color={failedCount > 0 ? "red" : staleCount > 0 ? "orange" : "green"}>
+        {trustText}
+      </Tag>
+      <Tag className="m-0" color={sourceStatus.length ? "blue" : "default"}>
+        数据源 {sourceStatus.length || "--"}
+      </Tag>
+      <span className="text-[#7b756d]">缓存年龄 {formatCacheAge(data?.cache_age_seconds)}</span>
+    </div>
+  );
 }
 
 function jobProgressPercent(job: BackgroundJobState): number {
@@ -885,6 +915,26 @@ function AuctionTable({
           width: 120,
           render: (value: string | null) => (
             <Typography.Text className="text-xs text-[#7b756d]">{value || "--"}</Typography.Text>
+          ),
+        },
+        {
+          title: "热门题材",
+          dataIndex: "themes",
+          width: 190,
+          render: (_, item) => (
+            <div className="min-w-[150px]">
+              {item.themes.length ? (
+                <div className="flex flex-wrap gap-1">
+                  {item.theme_resonance ? <Tag color="red">题材共振</Tag> : null}
+                  <Tag color={item.hot_theme_rank !== null && item.hot_theme_rank <= 10 ? "orange" : "default"}>
+                    {item.themes[0]} #{item.hot_theme_rank ?? "--"}
+                  </Tag>
+                  {item.theme_auction_rank ? <Tag>题材内 {item.theme_auction_rank}</Tag> : null}
+                </div>
+              ) : (
+                <span className="text-xs text-[#7b756d]">--</span>
+              )}
+            </div>
           ),
         },
         {

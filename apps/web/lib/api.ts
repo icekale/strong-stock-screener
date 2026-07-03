@@ -17,6 +17,8 @@ import type {
   MarketRankingsResponse,
   NotificationChannelConfig,
   NotificationSendResult,
+  PlateRotationReferenceResponse,
+  PlateRotationSource,
   RuntimeSettingsHealthResponse,
   RuntimeSettingsResponse,
   ScreenRunFilters,
@@ -26,6 +28,7 @@ import type {
   SectorWorkbenchMode,
   SectorWorkbenchResponse,
   SectorWorkbenchScopeRequest,
+  SectorWorkbenchStatusResponse,
   SentimentDetailResponse,
   SentimentDecisionResponse,
   SentimentWatchlistAlertsResponse,
@@ -202,6 +205,36 @@ export async function getSectorWorkbench(
     throw new Error(`读取题材工作台失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<SectorWorkbenchResponse>;
+}
+
+export async function getSectorWorkbenchStatus(tradeDate?: string | null): Promise<SectorWorkbenchStatusResponse> {
+  const params = new URLSearchParams();
+  if (tradeDate) {
+    params.set("trade_date", tradeDate);
+  }
+  const suffix = params.toString();
+  const response = await fetch(`${API_BASE_URL}/api/sectors/workbench/status${suffix ? `?${suffix}` : ""}`);
+  if (!response.ok) {
+    throw new Error(`读取板块采样状态失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SectorWorkbenchStatusResponse>;
+}
+
+export async function getPlateRotationReference(
+  limit = 10,
+  source: PlateRotationSource = "kaipan",
+  days = 20,
+): Promise<PlateRotationReferenceResponse> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    source,
+    days: String(days),
+  });
+  const response = await fetch(`${API_BASE_URL}/api/sectors/plate-reference?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取短线题材参考榜失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<PlateRotationReferenceResponse>;
 }
 
 export async function getShortTermSentiment(tradeDate: string, limit = 50): Promise<ShortTermSentimentResponse> {

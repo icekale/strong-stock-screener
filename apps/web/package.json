@@ -6,6 +6,7 @@
     "dev": "NEXT_DIST_DIR=.next-dev next dev",
     "build": "next build",
     "lint": "tsc --noEmit",
+    "smoke:ui": "node ../../scripts/smoke-ui.mjs",
     "test": "tsc --noEmit && node --experimental-strip-types --test lib/*.test.ts"
   },
   "dependencies": {

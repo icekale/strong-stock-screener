@@ -35,6 +35,7 @@ from app.models import (
 )
 from app.providers.watchlist import WatchlistSnapshot, WatchlistItem
 from app.providers.tickflow import TickFlowIntradayBar, TickFlowQuote
+from app.services.plate_rotation_reference import PlateRotationReferenceResponse, PlateRotationThemeItem
 from app.services.sector_workbench_store import SectorThemeRowsStore
 from app.providers.news_risk import NegativeNewsRisk
 
@@ -943,6 +944,34 @@ class FailingIfCalledCandidateProvider(FakeCandidateProvider):
         raise AssertionError("candidate provider should not be called synchronously")
 
 
+class FakePlateRotationReferenceProvider:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, str, int]] = []
+
+    def get_today_themes(
+        self,
+        *,
+        limit: int = 20,
+        source: str = "kaipan",
+        days: int = 20,
+    ) -> PlateRotationReferenceResponse:
+        self.calls.append((limit, source, days))
+        return PlateRotationReferenceResponse(
+            source=source,
+            themes=[
+                PlateRotationThemeItem(rank=1, code="801159", name="机器人", score=35630, value_type="score", color="red"),
+                PlateRotationThemeItem(rank=2, code="801314", name="ST板块", score=12964, value_type="score", color="red"),
+            ][:limit],
+            source_status=[
+                StrongStockSourceStatus(
+                    source="短线侠/开盘啦题材榜单",
+                    status="success",
+                    detail="fake",
+                )
+            ],
+        )
+
+
 def _client(
     tmp_path: Path,
     candidate_provider: object | None = None,
@@ -987,6 +1016,8 @@ def _client(
         delattr(app.state, "sector_intraday_async_refresh_disabled")
     if hasattr(app.state, "sector_now"):
         delattr(app.state, "sector_now")
+    if hasattr(app.state, "plate_rotation_reference_provider"):
+        delattr(app.state, "plate_rotation_reference_provider")
     app.state.watchlist_snapshot = WatchlistSnapshot(
         items=[WatchlistItem(symbol="002000.SZ", name="示例股份")]
     )
@@ -1448,6 +1479,24 @@ def test_auction_snapshot_returns_opening_auction_candidates(tmp_path: Path) -> 
     assert payload["source_status"][0]["source"] == "TickFlow 全A实时行情"
 
 
+def test_auction_snapshot_links_candidates_to_hot_plate_reference(tmp_path: Path) -> None:
+    client = _client(tmp_path, market_overview_provider=FakeMarketOverviewProvider())
+    app.state.plate_rotation_reference_provider = FakePlateRotationReferenceProvider()
+
+    response = client.get("/api/auction/snapshot?limit=2&refresh=true")
+
+    assert response.status_code == 200
+    payload = response.json()
+    first = payload["items"][0]
+    assert first["industry"] == "机器人"
+    assert first["themes"] == ["机器人"]
+    assert first["hot_theme_rank"] == 1
+    assert first["theme_auction_rank"] == 1
+    assert first["theme_resonance"] is True
+    assert "题材共振" in first["signals"]
+    assert any(item["source"] == "短线题材联动" for item in payload["source_status"])
+
+
 def test_auction_snapshot_endpoint_reuses_cached_provider_result(tmp_path: Path) -> None:
     provider = CountingMarketRankingsProvider()
     client = _client(tmp_path, market_overview_provider=provider)
@@ -1827,6 +1876,21 @@ def test_sector_workbench_endpoint_returns_theme_mode_and_source_status(tmp_path
     assert payload["source_status"][0]["status"] == "success"
 
 
+def test_sector_workbench_endpoint_explicit_industry_scope_ignores_theme_snapshot_status(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    _seed_sector_theme_rows(tmp_path)
+    app.state.sector_now = datetime(2026, 7, 3, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    response = client.get("/api/sectors/workbench?mode=strength&scope=industry&limit=5&stock_limit=10")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["scope"] == "industry"
+    assert payload["themes"][0]["scope"] == "industry"
+    assert payload["source_status"][0]["source"] == "TickFlow行业聚合"
+    assert all(item["source"] != "题材快照" for item in payload["source_status"])
+
+
 def test_sector_workbench_endpoint_falls_back_to_concept_tags_when_tdx_theme_rows_unavailable(tmp_path: Path) -> None:
     client = _client(tmp_path, concept_provider=FakeConceptTagProvider())
     _seed_sector_theme_rows(
@@ -1861,6 +1925,23 @@ def test_sector_workbench_endpoint_falls_back_to_concept_tags_when_tdx_theme_row
     assert {item["name"] for item in payload["themes"]} >= {"AI眼镜", "机器人概念", "存储芯片"}
     assert all(not item["name"].endswith("板块") for item in payload["themes"])
     assert payload["source_status"][0]["source"] == "东财 slist 概念归属"
+
+
+def test_plate_rotation_reference_endpoint_returns_theme_system(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    provider = FakePlateRotationReferenceProvider()
+    app.state.plate_rotation_reference_provider = provider
+
+    response = client.get("/api/sectors/plate-reference?limit=2")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["source"] == "kaipan"
+    assert [item["name"] for item in payload["themes"]] == ["机器人", "ST板块"]
+    assert payload["themes"][0]["code"] == "801159"
+    assert payload["themes"][0]["score"] == 35630
+    assert payload["source_status"][0]["status"] == "success"
+    assert provider.calls == [(2, "kaipan", 20)]
 
 
 def test_sector_workbench_endpoint_does_not_block_on_theme_refresh_when_snapshot_missing(tmp_path: Path) -> None:
@@ -1983,6 +2064,31 @@ def test_sector_workbench_endpoint_caches_tickflow_intraday_failure(tmp_path: Pa
         and "rate limited" in item["detail"]
         for item in second.json()["source_status"]
     )
+
+
+def test_sector_workbench_status_endpoint_reports_local_cache_without_heavy_refresh(tmp_path: Path) -> None:
+    quote_provider = CountingIntradayQuoteProvider()
+    client = _client(tmp_path, quote_provider=quote_provider)
+    _seed_sector_theme_rows(tmp_path)
+    app.state.sector_intraday_async_refresh_disabled = True
+    app.state.sector_now = datetime(2026, 7, 3, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    workbench = client.get("/api/sectors/workbench?mode=strength&scope=auto&limit=5&stock_limit=10")
+    workbench_payload = workbench.json()
+    response = client.get(f"/api/sectors/workbench/status?trade_date={workbench_payload['trade_date']}")
+
+    assert workbench.status_code == 200
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trade_date"] == workbench_payload["trade_date"]
+    assert payload["sample_window_open"] is True
+    assert payload["sampler_enabled"] is False
+    assert payload["sampler_running"] is False
+    assert payload["cache"]["sample_count"] > 0
+    assert payload["cache"]["latest_sampled_at"] == "2026-07-03T10:30:00+08:00"
+    assert payload["cache"]["sample_sources"] == ["snapshot"]
+    assert payload["source_status"][0]["source"] == "板块分时持久化"
+    assert quote_provider.intraday_calls == 0
 
 
 def test_sector_workbench_endpoint_falls_back_to_sector_radar_when_rankings_fail(tmp_path: Path) -> None:

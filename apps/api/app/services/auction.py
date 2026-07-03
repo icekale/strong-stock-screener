@@ -12,13 +12,17 @@ from app.models import (
     StrongStockSourceStatus,
 )
 
+HotThemeRef = tuple[str, int, float]
+
 
 def build_auction_snapshot(
     rankings: MarketRankingsResponse,
     limit: int = 30,
     now: datetime | None = None,
+    hot_themes: list[HotThemeRef] | None = None,
 ) -> AuctionSnapshotResponse:
     bounded_limit = max(1, min(limit, 100))
+    hot_theme_refs = _normalize_hot_theme_refs(hot_themes or [])
     items = [_auction_item(item) for item in rankings.pct_change_rank]
     items = [item for item in items if item.open_gap_pct is not None]
     items = sorted(
@@ -31,6 +35,24 @@ def build_auction_snapshot(
         ),
         reverse=True,
     )[:bounded_limit]
+    items = _enrich_hot_theme_links(items, hot_theme_refs)
+    source_status = [
+        *rankings.source_status,
+        StrongStockSourceStatus(
+            source="竞价雷达模型",
+            status="success",
+            detail="基于 TickFlow 全A实时行情快照计算竞价高开、量能和风险提示；09:25 后主榜锁定",
+        ),
+    ]
+    if hot_theme_refs:
+        linked_count = sum(1 for item in items if item.hot_theme_rank is not None)
+        source_status.append(
+            StrongStockSourceStatus(
+                source="短线题材联动",
+                status="success",
+                detail=f"参考短线题材 Top{len(hot_theme_refs)}，匹配 {linked_count} 只竞价候选",
+            )
+        )
     return AuctionSnapshotResponse(
         trade_date=rankings.trade_date,
         session=_auction_session(now),
@@ -41,14 +63,7 @@ def build_auction_snapshot(
             total_turnover_cny=round(sum(item.turnover_cny or 0 for item in items), 2),
         ),
         items=items,
-        source_status=[
-            *rankings.source_status,
-            StrongStockSourceStatus(
-                source="竞价雷达模型",
-                status="success",
-                detail="基于 TickFlow 全A实时行情快照计算竞价高开、量能和风险提示；09:25 后主榜锁定",
-            ),
-        ],
+        source_status=source_status,
     )
 
 
@@ -109,6 +124,98 @@ def _auction_item(item: MarketRankingItem) -> AuctionSnapshotItem:
         signals=signals,
         risk_flags=risk_flags,
         quote_time=item.quote_time,
+    )
+
+
+def _normalize_hot_theme_refs(hot_themes: list[HotThemeRef]) -> list[HotThemeRef]:
+    output: list[HotThemeRef] = []
+    seen: set[str] = set()
+    for name, rank, score in hot_themes:
+        clean_name = str(name).strip()
+        if not clean_name or clean_name in seen:
+            continue
+        seen.add(clean_name)
+        output.append((clean_name, int(rank), float(score)))
+    return sorted(output, key=lambda item: item[1])[:10]
+
+
+def _enrich_hot_theme_links(
+    items: list[AuctionSnapshotItem],
+    hot_theme_refs: list[HotThemeRef],
+) -> list[AuctionSnapshotItem]:
+    if not hot_theme_refs:
+        return items
+
+    matched_theme_by_symbol: dict[str, HotThemeRef] = {}
+    for item in items:
+        match = _best_hot_theme_match(item, hot_theme_refs)
+        if match is not None:
+            matched_theme_by_symbol[item.symbol] = match
+
+    theme_members: dict[str, list[AuctionSnapshotItem]] = {}
+    for item in items:
+        match = matched_theme_by_symbol.get(item.symbol)
+        if match is None:
+            continue
+        theme_members.setdefault(match[0], []).append(item)
+    theme_rank_by_symbol: dict[str, int] = {}
+    for members in theme_members.values():
+        ranked = sorted(
+            members,
+            key=lambda item: (item.auction_score, item.open_gap_pct or -999, item.turnover_cny or 0, item.symbol),
+            reverse=True,
+        )
+        for index, item in enumerate(ranked, start=1):
+            theme_rank_by_symbol[item.symbol] = index
+
+    output: list[AuctionSnapshotItem] = []
+    for item in items:
+        match = matched_theme_by_symbol.get(item.symbol)
+        if match is None:
+            output.append(item)
+            continue
+        theme_name, theme_rank, theme_score = match
+        theme_auction_rank = theme_rank_by_symbol.get(item.symbol)
+        resonance = theme_rank <= 10 and theme_auction_rank is not None and theme_auction_rank <= 3
+        signals = list(item.signals)
+        if resonance and "题材共振" not in signals:
+            signals.append("题材共振")
+        output.append(
+            item.model_copy(
+                update={
+                    "themes": [theme_name],
+                    "hot_theme_rank": theme_rank,
+                    "hot_theme_score": theme_score,
+                    "theme_auction_rank": theme_auction_rank,
+                    "theme_resonance": resonance,
+                    "signals": signals,
+                }
+            )
+        )
+    return output
+
+
+def _best_hot_theme_match(item: AuctionSnapshotItem, hot_theme_refs: list[HotThemeRef]) -> HotThemeRef | None:
+    industry = _normalize_theme_text(item.industry or "")
+    if not industry:
+        return None
+    for theme in hot_theme_refs:
+        theme_text = _normalize_theme_text(theme[0])
+        if not theme_text:
+            continue
+        if industry in theme_text or theme_text in industry:
+            return theme
+    return None
+
+
+def _normalize_theme_text(value: str) -> str:
+    return (
+        value.replace("概念", "")
+        .replace("板块", "")
+        .replace("行业", "")
+        .replace("指数", "")
+        .replace(" ", "")
+        .strip()
     )
 
 

@@ -324,6 +324,11 @@ export type AuctionSnapshotItem = {
   symbol: string;
   name: string | null;
   industry: string | null;
+  themes: string[];
+  hot_theme_rank: number | null;
+  hot_theme_score: number | null;
+  theme_auction_rank: number | null;
+  theme_resonance: boolean;
   last_price: number | null;
   current_pct_change: number | null;
   open_gap_pct: number | null;
@@ -523,6 +528,46 @@ export type SectorWorkbenchResponse = {
   stocks: SectorWorkbenchStock[];
   source_status: StrongStockSourceStatus[];
   generated_at: string;
+};
+
+export type SectorWorkbenchCacheSummary = {
+  trade_date: string | null;
+  sample_count: number;
+  latest_sampled_at: string | null;
+  modes: SectorWorkbenchMode[];
+  scopes: SectorWorkbenchScope[];
+  metrics: SectorWorkbenchMode[];
+  sample_sources: string[];
+  names: string[];
+};
+
+export type SectorWorkbenchStatusResponse = {
+  trade_date: string;
+  sample_window_open: boolean;
+  sampler_enabled: boolean;
+  sampler_running: boolean;
+  interval_seconds: number | null;
+  idle_seconds: number | null;
+  cache: SectorWorkbenchCacheSummary;
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
+export type PlateRotationSource = "kaipan" | "ths";
+
+export type PlateRotationThemeItem = {
+  rank: number;
+  code: string;
+  name: string;
+  score: number;
+  value_type: "score" | "pct" | string;
+  color: "red" | "green" | string;
+};
+
+export type PlateRotationReferenceResponse = {
+  source: PlateRotationSource | string;
+  themes: PlateRotationThemeItem[];
+  source_status: StrongStockSourceStatus[];
 };
 
 export type ShortTermSentimentStockItem = {

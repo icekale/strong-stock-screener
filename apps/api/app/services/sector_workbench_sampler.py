@@ -42,6 +42,18 @@ class SectorWorkbenchSampler:
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=2)
 
+    @property
+    def running(self) -> bool:
+        return self._thread is not None and self._thread.is_alive()
+
+    @property
+    def interval_seconds(self) -> float:
+        return self._interval_seconds
+
+    @property
+    def idle_seconds(self) -> float:
+        return self._idle_seconds
+
     def sample_once(self) -> bool:
         if not is_sector_workbench_sample_window(self._clock()):
             return False

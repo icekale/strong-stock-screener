@@ -115,6 +115,12 @@ export function SettingsWorkspace() {
     void loadSettings();
   }, []);
 
+  useEffect(() => {
+    if (!loading) {
+      form.setFieldsValue(draft);
+    }
+  }, [draft, form, loading]);
+
   async function loadSettings() {
     setLoading(true);
     setError(null);
@@ -205,7 +211,6 @@ export function SettingsWorkspace() {
 
   function applyDraft(nextDraft: SettingsDraft) {
     setDraft(nextDraft);
-    form.setFieldsValue(nextDraft);
   }
 
   function updateDraft(value: Partial<SettingsDraft>) {
@@ -292,8 +297,8 @@ export function SettingsWorkspace() {
                 </Descriptions>
               </Card>
 
-              <Card className="workbench-panel" title="行情与候选源">
-                <Form form={form} layout="vertical" onValuesChange={(_, values) => updateDraft(values)}>
+              <Form className="space-y-4" form={form} layout="vertical" onValuesChange={(_, values) => updateDraft(values)}>
+                <Card className="workbench-panel" title="行情与候选源">
                   <Row gutter={12}>
                     <Col md={12} xs={24}>
                       <Form.Item label="候选源" name="candidate_provider">
@@ -334,17 +339,15 @@ export function SettingsWorkspace() {
                       </Form.Item>
                     </Col>
                   </Row>
-                </Form>
-              </Card>
+                </Card>
 
-              <Card className="workbench-panel" title="iFinD 研究增强">
+                <Card className="workbench-panel" title="iFinD 研究增强">
                 <Alert
                   className="mb-4"
                   showIcon
                   title="iFinD 用于行业板块、公告新闻、财务估值和风险事件，不替代 TickFlow 行情。"
                   type="info"
                 />
-                <Form form={form} layout="vertical" onValuesChange={(_, values) => updateDraft(values)}>
                   <Row gutter={12}>
                     <Col md={12} xs={24}>
                       <Form.Item label="iFinD Base URL" name="ifind_base_url">
@@ -377,17 +380,15 @@ export function SettingsWorkspace() {
                       </Descriptions>
                     </Col>
                   </Row>
-                </Form>
-              </Card>
+                </Card>
 
-              <Card className="workbench-panel" title="通达信 MCP 补充源">
+                <Card className="workbench-panel" title="通达信 MCP 补充源">
                 <Alert
                   className="mb-4"
                   showIcon
                   title="通达信 MCP 用于补充涨跌停、短线情绪和板块主线集中度；主行情仍优先使用 TickFlow。"
                   type="info"
                 />
-                <Form form={form} layout="vertical" onValuesChange={(_, values) => updateDraft(values)}>
                   <Row gutter={12}>
                     <Col md={12} xs={24}>
                       <Form.Item label="通达信 MCP Base URL" name="tdx_base_url">
@@ -409,17 +410,15 @@ export function SettingsWorkspace() {
                       </Descriptions>
                     </Col>
                   </Row>
-                </Form>
-              </Card>
+                </Card>
 
-              <Card className="workbench-panel" title="GSGF 自动复盘">
+                <Card className="workbench-panel" title="GSGF 自动复盘">
                 <Alert
                   className="mb-4"
                   showIcon
                   title="自动复盘会在后台保存筛选信号、复查真实走势，并在信号退化时通过已启用通知渠道提醒。"
                   type="info"
                 />
-                <Form form={form} layout="vertical" onValuesChange={(_, values) => updateDraft(values)}>
                   <Row gutter={12}>
                     <Col md={8} xs={24}>
                       <Form.Item label="筛选后自动保存快照" name="gsgf_auto_snapshot_enabled" valuePropName="checked">
@@ -472,17 +471,15 @@ export function SettingsWorkspace() {
                       </Form.Item>
                     </Col>
                   </Row>
-                </Form>
-              </Card>
+                </Card>
 
-              <Card className="workbench-panel" title="通知渠道">
+                <Card className="workbench-panel" title="通知渠道">
                 <Alert
                   className="mb-4"
                   showIcon
                   title="用于手动发送短线情绪提醒草稿；后台定时任务会在下一版接入。"
                   type="info"
                 />
-                <Form form={form} layout="vertical" onValuesChange={(_, values) => updateDraft(values)}>
                   <Row gutter={12}>
                     <Col md={12} xs={24}>
                       <Form.Item label="企业微信启用" name="notification_wechat_enabled" valuePropName="checked">
@@ -544,8 +541,8 @@ export function SettingsWorkspace() {
                       </Form.Item>
                     </Col>
                   </Row>
-                </Form>
-              </Card>
+                </Card>
+              </Form>
             </Space>
           </Col>
 

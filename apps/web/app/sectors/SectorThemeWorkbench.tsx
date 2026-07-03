@@ -6,12 +6,13 @@ import type { ColumnsType } from "antd/es/table";
 import * as echarts from "echarts";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { addWatchlistPoolItem, getSectorWorkbench } from "../../lib/api";
+import { addWatchlistPoolItem, getSectorWorkbench, getSectorWorkbenchStatus } from "../../lib/api";
 import { buildStockDetailHref } from "../../lib/stockNavigation";
 import type {
   SectorWorkbenchMode,
   SectorWorkbenchResponse,
   SectorWorkbenchSeries,
+  SectorWorkbenchStatusResponse,
   SectorWorkbenchStock,
   SectorWorkbenchTheme,
   StrongStockSourceStatus,
@@ -27,6 +28,8 @@ export function SectorThemeWorkbench() {
   const [mode, setMode] = useState<SectorWorkbenchMode>("strength");
   const [selectedThemes, setSelectedThemes] = useState<string[]>([]);
   const [data, setData] = useState<SectorWorkbenchResponse | null>(null);
+  const [status, setStatus] = useState<SectorWorkbenchStatusResponse | null>(null);
+  const [statusLoading, setStatusLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -42,7 +45,7 @@ export function SectorThemeWorkbench() {
         const response = await getSectorWorkbench({
           limit: 30,
           mode,
-          scope: "auto",
+          scope: "industry",
           selected: selectedThemes,
           stockLimit: 80,
         });
@@ -50,12 +53,13 @@ export function SectorThemeWorkbench() {
           return;
         }
         setData(response);
+        void loadWorkbenchStatus(response.trade_date);
         if (response.selected_themes.length > 0 && response.selected_themes.join(",") !== selectedThemes.join(",")) {
           setSelectedThemes(response.selected_themes);
         }
       } catch (err) {
         if (!ignore) {
-          setError(err instanceof Error ? err.message : "读取题材工作台失败");
+          setError(err instanceof Error ? err.message : "读取行业工作台失败");
         }
       } finally {
         if (!ignore) {
@@ -69,6 +73,17 @@ export function SectorThemeWorkbench() {
       ignore = true;
     };
   }, [mode, refreshKey, selectedKey]);
+
+  async function loadWorkbenchStatus(tradeDate?: string | null) {
+    setStatusLoading(true);
+    try {
+      setStatus(await getSectorWorkbenchStatus(tradeDate));
+    } catch {
+      setStatus(null);
+    } finally {
+      setStatusLoading(false);
+    }
+  }
 
   const sourceSummary = useMemo(() => {
     const first = data?.source_status.find((item) => item.status === "success") ?? data?.source_status[0];
@@ -90,7 +105,7 @@ export function SectorThemeWorkbench() {
         return current;
       }
       if (current.length >= 5) {
-        void messageApi.warning("最多同时对比 5 个题材");
+        void messageApi.warning("最多同时对比 5 个行业");
         return current;
       }
       return [...current, name];
@@ -101,12 +116,12 @@ export function SectorThemeWorkbench() {
     setAddingSymbol(item.symbol);
     try {
       await addWatchlistPoolItem({
-        group: "题材观察",
+        group: "行业观察",
         industry: item.industry,
         name: item.name,
-        note: "从题材强度工作台加入",
+        note: "从行业强度工作台加入",
         symbol: item.symbol,
-        tags: ["题材", ...item.themes.slice(0, 6)],
+        tags: ["行业", ...item.themes.slice(0, 6)],
       });
       void messageApi.success(`${item.name ?? item.symbol} 已加入自选`);
     } catch (err) {
@@ -136,11 +151,11 @@ export function SectorThemeWorkbench() {
         </div>
         <div className="border-b border-[#ddd8d0] px-3 py-2.5">
           <div className="flex items-end justify-between gap-2">
-            <div className="text-sm font-black text-[#11100e]">题材多选</div>
+            <div className="text-sm font-black text-[#11100e]">行业多选</div>
             <div className="text-[11px] font-bold text-[#7b756d]">{selectedThemes.length}/5</div>
           </div>
           <div className="mt-0.5 text-xs text-[#7b756d]">
-            {mode === "strength" ? "按强度、涨停和扩散度排序" : "按资金确认强弱排序"}
+            {mode === "strength" ? "按强度、涨幅和扩散度排序" : "按资金确认强弱排序"}
           </div>
         </div>
 
@@ -159,12 +174,12 @@ export function SectorThemeWorkbench() {
                 theme={theme}
               />
             ))}
-            {data && data.themes.length === 0 && <Empty description="暂无题材数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
+            {data && data.themes.length === 0 && <Empty description="暂无行业数据" image={Empty.PRESENTED_IMAGE_SIMPLE} />}
           </div>
         )}
 
         <div className="border-t border-[#ddd8d0] bg-[#fff7ed] px-3 py-3 text-xs leading-5 text-[#8a4b12]">
-          {data?.scope === "industry" ? "行业兜底：概念映射不可用，当前按行业聚合。" : "概念/题材优先：行情来自 TickFlow，题材映射来自补充数据源。"}
+          行业指数：当前按全A行业聚合；稳定同花顺概念指数接入后再开放概念模式。
         </div>
       </aside>
 
@@ -183,23 +198,24 @@ export function SectorThemeWorkbench() {
               </div>
             </div>
             <Space wrap>
-              <Tag color={data?.scope === "theme" ? "red" : "orange"}>{data?.scope === "theme" ? "概念/题材" : "行业兜底"}</Tag>
+              <Tag color={data?.scope === "theme" ? "red" : "orange"}>{data?.scope === "theme" ? "概念/题材" : "行业指数"}</Tag>
               <Tag color={mode === "strength" ? "blue" : "purple"}>{mode === "strength" ? "强度口径" : "资金口径"}</Tag>
               {data?.themes.some((item) => item.flow_status === "estimated") && <Tag color="orange">估算口径</Tag>}
             </Space>
           </div>
+          <SectorSamplingStatus sourceStatus={data?.source_status ?? []} status={status} statusLoading={statusLoading} />
           <div className="bg-white px-3 py-3">
             <SectorIntradayChart mode={mode} series={data?.series ?? []} sourceStatus={intradayStatus} />
           </div>
           <div className="border-t border-[#ece7df] bg-[#faf8f5] px-4 py-2.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-black text-[#7b756d]">关联子题材</span>
+              <span className="text-xs font-black text-[#7b756d]">相关板块</span>
               {(data?.related_tags ?? []).slice(0, 12).map((tag) => (
                 <Tag className="m-0" key={tag}>
                   {tag}
                 </Tag>
               ))}
-              {data && data.related_tags.length === 0 && <span className="text-xs text-[#7b756d]">暂无关联题材</span>}
+              {data && data.related_tags.length === 0 && <span className="text-xs text-[#7b756d]">暂无相关板块</span>}
             </div>
           </div>
         </div>
@@ -207,8 +223,8 @@ export function SectorThemeWorkbench() {
         <div className="workbench-panel rounded-xl border">
           <div className="flex items-center justify-between border-b border-[#ddd8d0] px-4 py-3">
             <div>
-              <div className="text-sm font-black text-[#11100e]">选中题材成分股</div>
-              <div className="text-xs text-[#7b756d]">点击股票看 K 线，也可以直接加入题材观察自选组。</div>
+              <div className="text-sm font-black text-[#11100e]">选中行业成分股</div>
+              <div className="text-xs text-[#7b756d]">点击股票看 K 线，也可以直接加入行业观察自选组。</div>
             </div>
             <div className="text-xs font-black text-[#7b756d]">{data?.stocks.length ?? 0} 只</div>
           </div>
@@ -226,6 +242,50 @@ export function SectorThemeWorkbench() {
         </div>
       </section>
     </section>
+  );
+}
+
+function SectorSamplingStatus({
+  sourceStatus,
+  status,
+  statusLoading,
+}: {
+  sourceStatus: StrongStockSourceStatus[];
+  status: SectorWorkbenchStatusResponse | null;
+  statusLoading: boolean;
+}) {
+  const cacheCount = status?.cache.sample_count ?? 0;
+  const latestSample = formatDateTime(status?.cache.latest_sampled_at ?? null);
+  const hasFailedSource = [...sourceStatus, ...(status?.source_status ?? [])].some((item) =>
+    ["failed", "missing_key"].includes(item.status),
+  );
+  const hasStaleSource = [...sourceStatus, ...(status?.source_status ?? [])].some((item) => item.status === "stale");
+  const trustLabel = hasFailedSource
+    ? "可信度：降级"
+    : cacheCount > 0
+      ? "可信度：缓存可追溯"
+      : hasStaleSource
+        ? "可信度：等待采样"
+        : "可信度：正常";
+  return (
+    <div className="border-b border-[#ece7df] bg-[#faf8f5] px-4 py-2.5">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="font-black text-[#7b756d]">采样状态</span>
+        <Tag className="m-0" color={status?.sample_window_open ? "blue" : "default"}>
+          {status?.sample_window_open ? "交易时段" : "非采样窗口"}
+        </Tag>
+        <Tag className="m-0" color={status?.sampler_running ? "green" : status?.sampler_enabled ? "orange" : "default"}>
+          {status?.sampler_running ? "后台采样运行中" : status?.sampler_enabled ? "采样器待启动" : "采样器禁用"}
+        </Tag>
+        <Tag className="m-0" color={cacheCount > 0 ? "green" : "orange"}>
+          缓存点 {statusLoading ? "..." : cacheCount}
+        </Tag>
+        <Tag className="m-0" color={hasFailedSource ? "red" : hasStaleSource ? "orange" : "green"}>
+          {trustLabel}
+        </Tag>
+        <span className="text-[#7b756d]">最近采样 {latestSample ?? "--"}</span>
+      </div>
+    </div>
   );
 }
 
@@ -414,11 +474,11 @@ function SectorIntradayChart({
 }
 
 function isKeyTradingTime(value: string): boolean {
-  return ["09:30", "10:00", "10:30", "11:00", "11:30", "13:00", "13:30", "14:00", "14:30", "15:00"].includes(value);
+  return ["09:15", "09:25", "09:30", "10:00", "10:30", "11:00", "11:30", "13:00", "13:30", "14:00", "14:30", "15:00"].includes(value);
 }
 
 function buildTradingTimeAxis(): string[] {
-  return [...buildMinuteRange("09:30", "11:30"), ...buildMinuteRange("13:00", "15:00")];
+  return [...buildMinuteRange("09:15", "09:25"), ...buildMinuteRange("09:30", "11:30"), ...buildMinuteRange("13:00", "15:00")];
 }
 
 function buildMinuteRange(start: string, end: string): string[] {
@@ -436,6 +496,13 @@ function buildMinuteRange(start: string, end: string): string[] {
 function tradingMinuteValue(value: string): number {
   const [hour, minute] = value.split(":").map((part) => Number.parseInt(part, 10));
   return hour * 60 + minute;
+}
+
+function formatDateTime(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  return value.replace("T", " ").slice(0, 16);
 }
 
 function stockColumns({
@@ -468,7 +535,7 @@ function stockColumns({
     },
     { title: "行业", dataIndex: "industry", width: 110, render: (value: string | null) => value ?? "--" },
     {
-      title: "题材",
+      title: "板块",
       dataIndex: "themes",
       width: 170,
       render: (themes: string[]) => (

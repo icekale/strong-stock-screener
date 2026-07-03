@@ -97,6 +97,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   const singleStartSource = readFileSync(new URL("../../../scripts/start-single-container.sh", import.meta.url), "utf8");
   const nextConfigSource = readFileSync(new URL("../next.config.ts", import.meta.url), "utf8");
   const webPackageSource = readFileSync(new URL("../package.json", import.meta.url), "utf8");
+  const smokeUiSource = readFileSync(new URL("../../../scripts/smoke-ui.mjs", import.meta.url), "utf8");
   const localWebStartSource = readFileSync(new URL("../../../scripts/start-local-web.py", import.meta.url), "utf8");
   const dualComposeSource = readFileSync(new URL("../../../docker-compose.dual.yml", import.meta.url), "utf8");
   const envExampleSource = readFileSync(new URL("../../../.env.example", import.meta.url), "utf8");
@@ -254,6 +255,11 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(homeFeatureSource, /localStorage/);
   assert.match(homeFeatureSource, /onSaveScreenFilters/);
   assert.match(homeFeatureSource, /setScreenFiltersSaved/);
+  assert.match(screenerFeatureSource, /今日选股/);
+  assert.match(screenerFeatureSource, /竞价雷达/);
+  assert.match(screenerFeatureSource, /题材强度/);
+  assert.match(screenerFeatureSource, /自选观察池/);
+  assert.match(screenerFeatureSource, /可信度/);
   assert.match(apiSource, /getDataSourceStatus/);
   assert.match(typesSource, /MarketOverviewResponse/);
   assert.match(typesSource, /MarketIndexSnapshot/);
@@ -261,6 +267,11 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(typesSource, /MarketRankingItem/);
   assert.match(typesSource, /MarketRankingsResponse/);
   assert.match(typesSource, /AuctionSnapshotResponse/);
+  assert.match(typesSource, /themes: string\[\]/);
+  assert.match(typesSource, /hot_theme_rank: number \| null/);
+  assert.match(typesSource, /hot_theme_score: number \| null/);
+  assert.match(typesSource, /theme_auction_rank: number \| null/);
+  assert.match(typesSource, /theme_resonance: boolean/);
   assert.match(typesSource, /AuctionReviewSummary/);
   assert.match(typesSource, /AuctionReviewRecord/);
   assert.match(typesSource, /AuctionRuleBucket/);
@@ -356,6 +367,18 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(screenerFeatureSource, /行业/);
   assert.match(screenerFeatureSource, /板块强度/);
   assert.match(screenerFeatureSource, /选股结果 · Screener Results/);
+  assert.ok(
+    componentSource.indexOf("<CandidateResults") < componentSource.indexOf("<GsgfReviewPanel"),
+    "homepage should show screener results before model review diagnostics",
+  );
+  assert.ok(
+    componentSource.indexOf("<CandidateResults") < componentSource.indexOf("<GsgfCalibrationPanel"),
+    "homepage should show screener results before calibration diagnostics",
+  );
+  assert.ok(
+    componentSource.indexOf("<CandidateResults") < componentSource.indexOf("<GsgfFunnelPanel"),
+    "homepage should show screener results before funnel diagnostics",
+  );
   assert.match(screenerFeatureSource, /数据源：/);
   assert.match(screenerFeatureSource, /CandidateTable/);
   assert.match(screenerFeatureSource, /from "antd"/);
@@ -483,6 +506,9 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(screenerFeatureSource, /hidden overflow-x-auto lg:block/);
   assert.match(screenerFeatureSource, /max-w-none/);
   assert.match(screenerFeatureSource, /grid items-stretch gap-4 xl:grid-cols-\[minmax\(0,2fr\)_minmax\(360px,1fr\)\]/);
+  assert.match(componentSource, /HomepageDiagnosticsPanel/);
+  assert.match(componentSource, /模型诊断/);
+  assert.match(componentSource, /overflow-x-auto max-w-full/);
   assert.match(screenerFeatureSource, /grid gap-4 md:grid-cols-2 xl:grid-cols-4/);
   assert.doesNotMatch(screenerFeatureSource, /xl:grid-cols-\[280px_minmax\(0,1fr\)_320px\]/);
   assert.match(screenerFeatureSource, /点击股票名称查看 K 线详情/);
@@ -527,12 +553,27 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(settingsPageSource, /dynamic[<(]/);
   assert.match(settingsPageSource, /SettingsWorkspace/);
   assert.match(typesSource, /SectorWorkbenchResponse/);
+  assert.match(typesSource, /SectorWorkbenchStatusResponse/);
+  assert.match(typesSource, /SectorWorkbenchCacheSummary/);
   assert.match(typesSource, /SectorWorkbenchTheme/);
   assert.match(typesSource, /SectorWorkbenchStock/);
+  assert.match(typesSource, /PlateRotationReferenceResponse/);
+  assert.match(typesSource, /PlateRotationThemeItem/);
   assert.match(apiSource, /getSectorWorkbench/);
-  assert.match(sectorsFeatureSource, /题材强度工作台/);
+  assert.match(apiSource, /getSectorWorkbenchStatus/);
+  assert.match(apiSource, /getPlateRotationReference/);
+  assert.match(apiSource, /\/api\/sectors\/plate-reference/);
+  assert.match(sectorsFeatureSource, /行业强度工作台/);
+  assert.match(sectorsFeatureSource, /短线题材参考榜/);
+  assert.match(sectorsFeatureSource, /PlateReferencePanel/);
   assert.match(sectorsFeatureSource, /SectorThemeWorkbench/);
   assert.match(sectorsFeatureSource, /getSectorWorkbench/);
+  assert.match(sectorsFeatureSource, /getSectorWorkbenchStatus/);
+  assert.match(sectorsFeatureSource, /scope: "industry"/);
+  assert.match(sectorsFeatureSource, /行业多选/);
+  assert.match(sectorsFeatureSource, /采样状态/);
+  assert.match(sectorsFeatureSource, /缓存点/);
+  assert.match(sectorsFeatureSource, /可信度/);
   assert.match(sectorsFeatureSource, /板块强度/);
   assert.match(sectorsFeatureSource, /主力流入/);
   assert.match(sectorsFeatureSource, /工作模式/);
@@ -543,6 +584,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(sectorsFeatureSource, /热度曲线/);
   assert.match(sectorsFeatureSource, /formatHeatValue/);
   assert.match(sectorsFeatureSource, /buildTradingTimeAxis/);
+  assert.match(sectorsFeatureSource, /09:15/);
+  assert.match(sectorsFeatureSource, /09:25/);
   assert.match(sectorsFeatureSource, /09:30/);
   assert.match(sectorsFeatureSource, /15:00/);
   assert.match(sectorsFeatureSource, /connectNulls/);
@@ -552,7 +595,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(sectorsFeatureSource, /h-\[520px\]/);
   assert.doesNotMatch(sectorsFeatureSource, /max: isStrength \\? 100/);
   assert.match(sectorsFeatureSource, /加入自选/);
-  assert.match(sectorsFeatureSource, /行业兜底/);
+  assert.doesNotMatch(sectorsFeatureSource, /题材多选/);
+  assert.doesNotMatch(sectorsFeatureSource, /概念\/题材优先/);
   assert.doesNotMatch(sectorsFeatureSource, /trailColor/);
   assert.match(sectorsPageSource, /dynamic[<(]/);
   assert.match(sectorsPageSource, /SectorPageWorkspace/);
@@ -564,12 +608,17 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(auctionFeatureSource, /连续出现/);
   assert.match(auctionFeatureSource, /新晋/);
   assert.match(auctionFeatureSource, /缓存年龄/);
+  assert.match(auctionFeatureSource, /竞价可信度/);
+  assert.match(auctionFeatureSource, /AuctionTrustStrip/);
   assert.match(auctionFeatureSource, /自动快照/);
   assert.match(auctionFeatureSource, /createAuctionSnapshotJob/);
   assert.match(auctionFeatureSource, /getAuctionSnapshotJob/);
   assert.match(auctionFeatureSource, /refreshJob/);
   assert.doesNotMatch(auctionWorkspaceSource, /getAuctionSnapshot\(/);
   assert.match(auctionFeatureSource, /竞价强度榜/);
+  assert.match(auctionFeatureSource, /热门题材/);
+  assert.match(auctionFeatureSource, /题材共振/);
+  assert.match(auctionFeatureSource, /theme_auction_rank/);
   assert.match(auctionFeatureSource, /风险与观察/);
   assert.match(auctionFeatureSource, /行业筛选/);
   assert.match(auctionFeatureSource, /IndustryQuickFilter/);
@@ -656,6 +705,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(sentimentFeatureSource, /ShortTermIntradaySignalDigest/);
   assert.match(sentimentPageSource, /dynamic[<(]/);
   assert.match(sentimentFeatureSource, /IntradaySentimentPanel/);
+  assert.match(sentimentIntradaySource, /overflow-x-auto/);
+  assert.match(sentimentIntradaySource, /max-w-full/);
   assert.match(sentimentFeatureSource, /StockPoolTable/);
   assert.match(stockPageSource, /dynamic[<(]/);
   assert.match(stockPageSource, /StockKlineWorkspace/);
@@ -812,4 +863,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(settingsFeatureSource, /ifind_base_url/);
   assert.match(settingsFeatureSource, /hexin-ifind-ds-stock-mcp/);
   assert.match(settingsFeatureSource, /不替代 TickFlow 行情/);
+  assert.equal(settingsWorkspaceSource.match(/form=\{form\}/g)?.length ?? 0, 1);
+  assert.ok(webPackageSource.includes('"smoke:ui": "node ../../scripts/smoke-ui.mjs"'));
+  assert.match(smokeUiSource, /hasHorizontalOverflow/);
+  assert.match(smokeUiSource, /Next\.js error overlay detected/);
 });

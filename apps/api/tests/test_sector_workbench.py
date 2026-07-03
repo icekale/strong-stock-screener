@@ -185,6 +185,38 @@ def test_sector_workbench_store_dedupes_same_minute_and_builds_series(tmp_path: 
     assert series[0].points[0].time == "10:30"
 
 
+def test_sector_workbench_store_summarizes_local_samples(tmp_path: Path) -> None:
+    store = SectorWorkbenchSampleStore(tmp_path)
+    response = build_sector_workbench_response(
+        rankings=_rankings(),
+        limit_up_rows=[
+            {
+                "代码": "603690.SH",
+                "名称": "至纯科技",
+                "所属概念": "CPO;半导体设备",
+                "连续涨停天数": 2,
+                "封单金额": 12000,
+            }
+        ],
+        mode="strength",
+        scope="auto",
+        selected=["CPO"],
+        limit=10,
+        stock_limit=10,
+        sampled_at=datetime(2026, 7, 3, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+
+    store.append(response)
+
+    summary = store.summary(response.trade_date)
+
+    assert summary["sample_count"] == 1
+    assert summary["latest_sampled_at"] == "2026-07-03T10:30:00+08:00"
+    assert summary["modes"] == ["strength"]
+    assert summary["scopes"] == ["theme"]
+    assert summary["sample_sources"] == ["snapshot"]
+
+
 def test_sector_theme_rows_store_persists_latest_theme_snapshot(tmp_path: Path) -> None:
     store = SectorThemeRowsStore(tmp_path)
     rows = [
@@ -253,7 +285,7 @@ def test_sector_workbench_store_ignores_stale_heat_unit_samples(tmp_path: Path) 
           "samples": [
             {
               "trade_date": "2026-07-03",
-              "schema_version": 3,
+              "schema_version": 4,
               "mode": "strength",
               "scope": "industry",
               "name": "自动化设备",
@@ -287,7 +319,7 @@ def test_sector_workbench_store_ignores_after_hours_samples(tmp_path: Path) -> N
           "samples": [
             {
               "trade_date": "2026-07-03",
-              "schema_version": 4,
+              "schema_version": 8,
               "mode": "strength",
               "scope": "industry",
               "name": "汽车零部件",
@@ -299,7 +331,7 @@ def test_sector_workbench_store_ignores_after_hours_samples(tmp_path: Path) -> N
             },
             {
               "trade_date": "2026-07-03",
-              "schema_version": 4,
+              "schema_version": 8,
               "mode": "strength",
               "scope": "industry",
               "name": "汽车零部件",
@@ -527,6 +559,106 @@ def test_sector_intraday_strength_curve_uses_signed_heat_score_like_reference_ch
     assert series[0].points[0].value > 50
 
 
+def test_sector_intraday_strength_curve_uses_duanxianxia_style_scale_and_preopen_points() -> None:
+    items = [
+        MarketRankingItem(
+            symbol=f"30{index:04d}.SZ",
+            name=f"机器人{index}",
+            industry="机器人",
+            pct_change=9.9 if index < 2 else 6.8,
+            current_pct_change=9.9 if index < 2 else 6.8,
+            turnover_cny=500_000_000,
+            turnover_rate=8,
+            quote_time="2026-07-03 10:30:00",
+        )
+        for index in range(6)
+    ]
+    response = build_sector_workbench_response(
+        rankings=MarketRankingsResponse(
+            trade_date="2026-07-03",
+            pct_change_rank=items,
+            turnover_rank=items,
+        ),
+        limit_up_rows=[],
+        mode="strength",
+        scope="industry",
+        selected=["机器人"],
+        limit=10,
+        stock_limit=10,
+        sampled_at=datetime(2026, 7, 3, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+
+    series, status = build_sector_intraday_series(
+        response=response,
+        quote_provider=_FakeIntradayProvider(
+            {
+                item.symbol: [
+                    _bar("2026-07-03 09:15", close=10.25, amount=5_000_000, prev_close=10),
+                    _bar("2026-07-03 09:25", close=10.55, amount=20_000_000, prev_close=10),
+                    _bar("2026-07-03 09:30", close=10.85, amount=80_000_000, prev_close=10),
+                ]
+                for item in items
+            }
+        ),
+        mode="strength",
+        count=260,
+    )
+
+    assert status.status == "success"
+    assert [point.time for point in series[0].points] == ["09:15", "09:25", "09:30"]
+    assert 20_000 < series[0].points[-1].value < 60_000
+    assert series[0].points[-1].value > series[0].points[0].value
+
+
+def test_sector_intraday_strength_curve_uses_first_bar_base_when_later_prev_close_drifts() -> None:
+    items = [
+        MarketRankingItem(
+            symbol=f"60{index:04d}.SH",
+            name=f"强势设备{index}",
+            industry="自动化设备",
+            pct_change=6.0,
+            current_pct_change=6.0,
+            turnover_cny=300_000_000,
+            turnover_rate=6,
+            quote_time="2026-07-03 10:30:00",
+        )
+        for index in range(4)
+    ]
+    response = build_sector_workbench_response(
+        rankings=MarketRankingsResponse(
+            trade_date="2026-07-03",
+            pct_change_rank=items,
+            turnover_rank=items,
+        ),
+        limit_up_rows=[],
+        mode="strength",
+        scope="industry",
+        selected=["自动化设备"],
+        limit=10,
+        stock_limit=10,
+        sampled_at=datetime(2026, 7, 3, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+
+    series, status = build_sector_intraday_series(
+        response=response,
+        quote_provider=_FakeIntradayProvider(
+            {
+                item.symbol: [
+                    _bar("2026-07-03 09:30", close=10.2, amount=20_000_000, prev_close=10),
+                    _bar("2026-07-03 09:31", close=10.6, amount=80_000_000, prev_close=10.5),
+                ]
+                for item in items
+            }
+        ),
+        mode="strength",
+        count=260,
+    )
+
+    assert status.status == "success"
+    assert series[0].points[1].value > 9_000
+    assert series[0].points[1].value > series[0].points[0].value
+
+
 def test_sector_intraday_strength_curve_can_drop_below_zero() -> None:
     response = build_sector_workbench_response(
         rankings=_rankings(),
@@ -557,6 +689,35 @@ def test_sector_intraday_strength_curve_can_drop_below_zero() -> None:
 
     assert status.status == "success"
     assert series[0].points[0].value < 0
+
+
+def test_sector_workbench_store_keeps_preopen_intraday_strength_samples(tmp_path: Path) -> None:
+    store = SectorWorkbenchSampleStore(tmp_path)
+    response = build_sector_workbench_response(
+        rankings=_rankings(),
+        limit_up_rows=[],
+        mode="strength",
+        scope="industry",
+        selected=["半导体"],
+        limit=10,
+        stock_limit=10,
+        sampled_at=datetime(2026, 7, 3, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+    response.series[0].points[0].time = "09:15"
+    response.series[0].points[0].sampled_at = "2026-07-03 09:15:00+08:00"
+
+    store.append(response, sample_source="intraday")
+
+    series = store.series_for(
+        trade_date="2026-07-03",
+        mode="strength",
+        scope="industry",
+        selected=["半导体"],
+        metric="strength",
+        sample_source="intraday",
+    )
+
+    assert series[0].points[0].time == "09:15"
 
 
 def _rankings() -> MarketRankingsResponse:

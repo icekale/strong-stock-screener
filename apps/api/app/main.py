@@ -35,9 +35,11 @@ from app.models import (
     SectorWorkbenchMode,
     SectorRadarItem,
     SectorRadarResponse,
+    SectorWorkbenchCacheSummary,
     SectorWorkbenchScopeRequest,
     SectorWorkbenchResponse,
     SectorWorkbenchSeries,
+    SectorWorkbenchStatusResponse,
     SentimentDetailResponse,
     ShortTermIntradaySentimentResponse,
     ShortTermIntradaySignalDigest,
@@ -83,6 +85,10 @@ from app.services.auction_sampler import AuctionSnapshotSampler
 from app.services.sector_workbench_sampler import SectorWorkbenchSampler, is_sector_workbench_sample_window
 from app.services.auction_snapshot_store import AuctionSnapshotStore
 from app.services.market_emotion_history import MarketEmotionHistoryStore
+from app.services.plate_rotation_reference import (
+    PlateRotationReferenceProvider,
+    PlateRotationReferenceResponse,
+)
 from app.services.runs import RunStore
 from app.services.runtime_settings import (
     SettingsUpdate,
@@ -233,6 +239,7 @@ MARKET_OVERVIEW_CACHE: TtlCache[MarketOverviewResponse] = TtlCache(ttl_seconds=4
 MARKET_RANKINGS_CACHE: TtlCache[MarketRankingsResponse] = TtlCache(ttl_seconds=45)
 AUCTION_SNAPSHOT_CACHE: TtlCache[AuctionSnapshotResponse] = TtlCache(ttl_seconds=15)
 SECTOR_RADAR_CACHE: TtlCache[SectorRadarResponse] = TtlCache(ttl_seconds=45)
+PLATE_ROTATION_REFERENCE_CACHE: TtlCache[PlateRotationReferenceResponse] = TtlCache(ttl_seconds=120)
 SECTOR_INTRADAY_CACHE: TtlCache[tuple[list[SectorWorkbenchSeries], StrongStockSourceStatus]] = TtlCache(
     ttl_seconds=90
 )
@@ -832,6 +839,27 @@ def get_sector_radar(limit: int = 20) -> dict[str, object]:
     return result.model_dump(mode="json")
 
 
+@app.get("/api/sectors/plate-reference")
+def get_plate_rotation_reference(
+    limit: int = 20,
+    source: str = "kaipan",
+    days: int = 20,
+) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 50))
+    bounded_days = max(1, min(days, 50))
+    normalized_source = "ths" if source == "ths" else "kaipan"
+    cache_key = f"plate-reference:{normalized_source}:{bounded_days}:{bounded_limit}:{_provider_cache_key(_plate_rotation_reference_provider())}"
+    result = PLATE_ROTATION_REFERENCE_CACHE.get_or_set(
+        cache_key,
+        lambda: _plate_rotation_reference_provider().get_today_themes(
+            limit=bounded_limit,
+            source=normalized_source,
+            days=bounded_days,
+        ),
+    )
+    return result.model_dump(mode="json")
+
+
 @app.get("/api/sectors/workbench")
 def get_sector_workbench(
     mode: SectorWorkbenchMode = "strength",
@@ -857,7 +885,10 @@ def get_sector_workbench(
             sampled_at=sampled_at,
         )
     else:
-        limit_up_rows, theme_status = _sector_theme_rows()
+        limit_up_rows: list[dict[str, object]] = []
+        theme_status: StrongStockSourceStatus | None = None
+        if scope in ("auto", "theme"):
+            limit_up_rows, theme_status = _sector_theme_rows()
         result = build_sector_workbench_response(
             rankings=rankings,
             limit_up_rows=limit_up_rows,
@@ -869,7 +900,7 @@ def get_sector_workbench(
             sampled_at=sampled_at,
             theme_source=theme_status.source if theme_status is not None else "通达信MCP涨停概念映射",
         )
-        if theme_status is not None and result.scope == "industry":
+        if theme_status is not None and result.scope == "industry" and scope != "industry":
             result.source_status.insert(0, theme_status)
     snapshot_result = result.model_copy(deep=True)
     store = _sector_workbench_store()
@@ -952,6 +983,69 @@ def get_sector_workbench(
     if is_trading_sample_time:
         store.append(snapshot_result, sample_source="snapshot")
     return result.model_dump(mode="json")
+
+
+@app.get("/api/sectors/workbench/status")
+def get_sector_workbench_status(trade_date: str | None = None) -> dict[str, object]:
+    current = _sector_now()
+    date_text = (trade_date or current.date().isoformat()).strip()
+    sample_window_open = is_sector_workbench_sample_window(current)
+    sampler_disabled = bool(getattr(app.state, "sector_workbench_sampler_disabled", False))
+    sampler = getattr(app.state, "sector_workbench_sampler", None)
+    sampler_running = bool(getattr(sampler, "running", False))
+    interval_seconds = getattr(sampler, "interval_seconds", None)
+    idle_seconds = getattr(sampler, "idle_seconds", None)
+    cache_summary = SectorWorkbenchCacheSummary.model_validate(
+        _sector_workbench_store().summary(date_text)
+    )
+    if cache_summary.sample_count > 0:
+        cache_detail = (
+            f"本地缓存 {cache_summary.sample_count} 个采样点"
+            f"，最近 {cache_summary.latest_sampled_at or '--'}"
+        )
+        cache_status = StrongStockSourceStatus(
+            source="板块分时持久化",
+            status="success",
+            detail=cache_detail,
+        )
+    else:
+        cache_status = StrongStockSourceStatus(
+            source="板块分时持久化",
+            status="stale",
+            detail=f"{date_text} 暂无本地采样曲线",
+        )
+    if sampler_disabled:
+        sampler_status = StrongStockSourceStatus(
+            source="板块后台采样器",
+            status="disabled",
+            detail="当前测试或配置禁用了后台采样",
+        )
+    elif sampler_running:
+        sampler_status = StrongStockSourceStatus(
+            source="板块后台采样器",
+            status="success",
+            detail=(
+                f"采样器运行中；交易时段约 {interval_seconds or '--'} 秒一次，"
+                f"非交易时段约 {idle_seconds or '--'} 秒巡检"
+            ),
+        )
+    else:
+        sampler_status = StrongStockSourceStatus(
+            source="板块后台采样器",
+            status="stale",
+            detail="采样器未运行，页面仅能读取已有缓存或当前快照",
+        )
+    response = SectorWorkbenchStatusResponse(
+        trade_date=date_text,
+        sample_window_open=sample_window_open,
+        sampler_enabled=not sampler_disabled,
+        sampler_running=sampler_running,
+        interval_seconds=interval_seconds,
+        idle_seconds=idle_seconds,
+        cache=cache_summary,
+        source_status=[cache_status, sampler_status],
+    )
+    return response.model_dump(mode="json")
 
 
 @app.get("/api/short-term/sentiment")
@@ -1377,27 +1471,67 @@ def _refresh_market_rankings(limit: int) -> MarketRankingsResponse:
 
 def _cached_auction_snapshot(limit: int) -> AuctionSnapshotResponse:
     provider = _market_overview_provider()
-    cache_key = f"auction-snapshot:{_provider_cache_key(provider)}:{limit}"
+    hot_themes, hot_theme_status = _auction_hot_theme_refs()
+    cache_key = (
+        f"auction-snapshot:{_provider_cache_key(provider)}:"
+        f"{_provider_cache_key(_plate_rotation_reference_provider())}:"
+        f"{json.dumps(hot_themes, ensure_ascii=False, sort_keys=True)}:{limit}"
+    )
     result = AUCTION_SNAPSHOT_CACHE.get_or_refresh(
         cache_key,
         lambda: build_auction_snapshot(
             _cached_market_rankings(max(limit, 100)),
             limit=limit,
             now=getattr(app.state, "auction_now", None),
+            hot_themes=hot_themes,
         ),
     ).model_copy(deep=True)
+    _append_empty_hot_theme_status(result, hot_themes, hot_theme_status)
     _auction_snapshot_store().save(result, captured_at=_auction_now())
     return result
 
 
 def _refresh_auction_snapshot(limit: int) -> AuctionSnapshotResponse:
     now = _auction_now()
+    hot_themes, hot_theme_status = _auction_hot_theme_refs()
     result = build_auction_snapshot(
         _refresh_market_rankings(max(limit, 100)),
         limit=limit,
         now=now,
+        hot_themes=hot_themes,
     )
+    _append_empty_hot_theme_status(result, hot_themes, hot_theme_status)
     return _auction_snapshot_store().save(result, captured_at=now)
+
+
+def _auction_hot_theme_refs() -> tuple[list[tuple[str, int, float]], StrongStockSourceStatus | None]:
+    try:
+        reference = _plate_rotation_reference_provider().get_today_themes(limit=10, source="kaipan", days=20)
+    except Exception as exc:
+        return [], StrongStockSourceStatus(
+            source="短线题材联动",
+            status="failed",
+            detail=f"读取短线题材参考榜失败: {exc.__class__.__name__}",
+        )
+    refs = [(item.name, item.rank, item.score) for item in reference.themes[:10]]
+    status = reference.source_status[0] if reference.source_status else None
+    return refs, status
+
+
+def _append_empty_hot_theme_status(
+    result: AuctionSnapshotResponse,
+    hot_themes: list[tuple[str, int, float]],
+    status: StrongStockSourceStatus | None,
+) -> None:
+    if hot_themes or status is None:
+        return
+    result.source_status.append(
+        StrongStockSourceStatus(
+            source="短线题材联动",
+            status=status.status,
+            detail=status.detail,
+        )
+    )
 
 
 def _run_auction_snapshot_refresh_job(
@@ -1707,6 +1841,7 @@ def _clear_data_source_caches() -> None:
         MARKET_RANKINGS_CACHE,
         AUCTION_SNAPSHOT_CACHE,
         SECTOR_RADAR_CACHE,
+        PLATE_ROTATION_REFERENCE_CACHE,
         SECTOR_INTRADAY_CACHE,
         SECTOR_THEME_ROWS_CACHE,
         STOCK_KLINE_CACHE,
@@ -1868,6 +2003,16 @@ def _market_overview_provider() -> object:
         ifind_index_provider=_ifind_provider(),
         ifind_stock_provider=_ifind_provider(),
     )
+
+
+def _plate_rotation_reference_provider() -> object:
+    injected = getattr(app.state, "plate_rotation_reference_provider", None)
+    if injected is not None:
+        return injected
+    settings = _effective_settings()
+    provider = PlateRotationReferenceProvider(timeout_seconds=settings.provider_timeout_seconds)
+    app.state.plate_rotation_reference_provider = provider
+    return provider
 
 
 def _stock_industry_for_symbol(symbol: str) -> str | None:

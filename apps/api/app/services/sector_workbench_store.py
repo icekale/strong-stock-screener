@@ -14,6 +14,8 @@ from app.models import (
     StrongStockSourceStatus,
 )
 
+SECTOR_WORKBENCH_SAMPLE_SCHEMA_VERSION = 8
+
 
 class SectorThemeRowsStore:
     def __init__(self, base_dir: Path) -> None:
@@ -96,7 +98,7 @@ class SectorWorkbenchSampleStore:
             for point in series.points:
                 sample = {
                     "trade_date": response.trade_date,
-                    "schema_version": 4,
+                    "schema_version": SECTOR_WORKBENCH_SAMPLE_SCHEMA_VERSION,
                     "mode": response.mode,
                     "scope": response.scope,
                     "name": series.name,
@@ -161,7 +163,7 @@ class SectorWorkbenchSampleStore:
             points = [
                 point
                 for point, version in raw_points
-                if metric != "strength" or version >= 4
+                if metric != "strength" or version >= SECTOR_WORKBENCH_SAMPLE_SCHEMA_VERSION
             ]
             points.sort(key=lambda point: point.sampled_at)
             if points:
@@ -187,8 +189,43 @@ class SectorWorkbenchSampleStore:
             if trade_date < cutoff:
                 path.unlink(missing_ok=True)
 
+    def summary(self, trade_date: str | None) -> dict[str, Any]:
+        if not trade_date:
+            return self._empty_summary(trade_date)
+        samples = [
+            sample
+            for sample in self._read(self._path(trade_date)).get("samples", [])
+            if isinstance(sample, dict)
+        ]
+        if not samples:
+            return self._empty_summary(trade_date)
+        latest_sampled_at = max(str(sample.get("sampled_at") or "") for sample in samples) or None
+        return {
+            "trade_date": trade_date,
+            "sample_count": len(samples),
+            "latest_sampled_at": latest_sampled_at,
+            "modes": self._unique_sorted(sample.get("mode") for sample in samples),
+            "scopes": self._unique_sorted(sample.get("scope") for sample in samples),
+            "metrics": self._unique_sorted(sample.get("metric") for sample in samples),
+            "sample_sources": self._unique_sorted(sample.get("sample_source") or "snapshot" for sample in samples),
+            "names": self._unique_sorted(sample.get("name") for sample in samples),
+        }
+
     def _path(self, trade_date: str) -> Path:
         return self.base_dir / f"{trade_date}.json"
+
+    @staticmethod
+    def _empty_summary(trade_date: str | None) -> dict[str, Any]:
+        return {
+            "trade_date": trade_date,
+            "sample_count": 0,
+            "latest_sampled_at": None,
+            "modes": [],
+            "scopes": [],
+            "metrics": [],
+            "sample_sources": [],
+            "names": [],
+        }
 
     @staticmethod
     def _sample_key(sample: dict[str, Any]) -> tuple[str, str, str, str, str]:
@@ -201,6 +238,15 @@ class SectorWorkbenchSampleStore:
             str(sample.get("metric") or ""),
             minute,
         )
+
+    @staticmethod
+    def _unique_sorted(values: object) -> list[str]:
+        output = {
+            str(value).strip()
+            for value in values
+            if str(value or "").strip()
+        }
+        return sorted(output)
 
     @staticmethod
     def _read(path: Path) -> dict[str, Any]:
@@ -237,9 +283,10 @@ class SectorWorkbenchSampleStore:
         except ValueError:
             return False
         seconds = hour * 3600 + minute * 60
+        preopen = (9 * 3600 + 15 * 60) <= seconds <= (9 * 3600 + 25 * 60)
         morning = (9 * 3600 + 30 * 60) <= seconds <= (11 * 3600 + 30 * 60)
         afternoon = (13 * 3600) <= seconds <= (15 * 3600)
-        return morning or afternoon
+        return preopen or morning or afternoon
 
     def _write(self, path: Path, payload: dict[str, Any]) -> None:
         self.base_dir.mkdir(parents=True, exist_ok=True)

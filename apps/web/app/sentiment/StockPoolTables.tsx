@@ -13,23 +13,25 @@ export type StockPoolTableProps = {
 
 export function StockPoolTable({ dataSource, loading, title }: StockPoolTableProps) {
   return (
-    <section className="workbench-panel rounded-xl border">
-      <div className="workbench-panel-divider flex items-center justify-between border-b px-4 py-3">
+    <section className="workbench-panel min-w-0 overflow-hidden rounded-xl border">
+      <div className="workbench-panel-divider flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
         <div>
           <div className="text-sm font-black text-[#11100e]">{title}</div>
           <div className="text-xs text-[#7b756d]">点击股票名称进入 K 线详情页。</div>
         </div>
         <Tag color={title === "涨停池" ? "red" : "green"}>{dataSource.length} 只</Tag>
       </div>
-      <Table
-        columns={stockColumns}
-        dataSource={dataSource}
-        loading={loading}
-        pagination={{ pageSize: 10, showSizeChanger: false }}
-        rowKey={(item) => `${title}-${item.symbol}`}
-        scroll={{ x: 680 }}
-        size="small"
-      />
+      <div className="w-full max-w-full overflow-x-auto">
+        <Table
+          columns={stockColumns}
+          dataSource={dataSource}
+          loading={loading}
+          pagination={{ pageSize: 10, showSizeChanger: false }}
+          rowKey={(item) => `${title}-${item.symbol}`}
+          scroll={{ x: 680 }}
+          size="small"
+        />
+      </div>
     </section>
   );
 }

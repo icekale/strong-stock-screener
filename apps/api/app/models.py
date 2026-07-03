@@ -531,6 +531,11 @@ class AuctionSnapshotItem(BaseModel):
     symbol: str
     name: str | None = None
     industry: str | None = None
+    themes: list[str] = Field(default_factory=list)
+    hot_theme_rank: int | None = None
+    hot_theme_score: float | None = None
+    theme_auction_rank: int | None = None
+    theme_resonance: bool = False
     last_price: float | None = None
     current_pct_change: float | None = None
     open_gap_pct: float | None = None
@@ -651,6 +656,31 @@ class SectorWorkbenchResponse(BaseModel):
     series: list[SectorWorkbenchSeries] = Field(default_factory=list)
     related_tags: list[str] = Field(default_factory=list)
     stocks: list[SectorWorkbenchStock] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
+class SectorWorkbenchCacheSummary(BaseModel):
+    trade_date: str | None = None
+    sample_count: int = 0
+    latest_sampled_at: str | None = None
+    modes: list[SectorWorkbenchMode] = Field(default_factory=list)
+    scopes: list[SectorWorkbenchScope] = Field(default_factory=list)
+    metrics: list[SectorWorkbenchMode] = Field(default_factory=list)
+    sample_sources: list[str] = Field(default_factory=list)
+    names: list[str] = Field(default_factory=list)
+
+
+class SectorWorkbenchStatusResponse(BaseModel):
+    trade_date: str
+    sample_window_open: bool = False
+    sampler_enabled: bool = False
+    sampler_running: bool = False
+    interval_seconds: float | None = None
+    idle_seconds: float | None = None
+    cache: SectorWorkbenchCacheSummary = Field(default_factory=SectorWorkbenchCacheSummary)
     source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
     generated_at: str = Field(
         default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")

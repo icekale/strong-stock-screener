@@ -415,7 +415,7 @@ export function SentimentWorkspace() {
             </section>
           </section>
 
-          <section className="grid gap-4 xl:grid-cols-2">
+          <section className="grid min-w-0 gap-4 xl:grid-cols-2">
             <StockPoolTable dataSource={data?.limit_up_pool ?? []} loading={detailLoading && !data} title="涨停池" />
             <StockPoolTable dataSource={data?.break_board_pool ?? []} loading={detailLoading && !data} title="炸板池" />
           </section>

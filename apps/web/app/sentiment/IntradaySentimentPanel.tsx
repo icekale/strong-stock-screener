@@ -33,7 +33,7 @@ export function IntradaySentimentPanel({
   sendingDigest,
 }: IntradaySentimentPanelProps) {
   return (
-    <section className="workbench-panel rounded-xl border">
+    <section className="workbench-panel min-w-0 overflow-hidden rounded-xl border">
       <div className="workbench-panel-divider flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
         <div>
           <div className="text-sm font-black text-[#11100e]">盘中情绪快照</div>
@@ -93,16 +93,18 @@ export function IntradaySentimentPanel({
           </div>
         </div>
       </div>
-      <Table
-        columns={intradayColumns}
-        dataSource={data?.items ?? []}
-        loading={loading}
-        locale={{ emptyText: "点击刷新盘中，读取 TickFlow 实时行情" }}
-        pagination={{ pageSize: 8, showSizeChanger: false }}
-        rowKey={(item) => item.symbol}
-        scroll={{ x: 900 }}
-        size="small"
-      />
+      <div className="w-full max-w-full overflow-x-auto">
+        <Table
+          columns={intradayColumns}
+          dataSource={data?.items ?? []}
+          loading={loading}
+          locale={{ emptyText: "点击刷新盘中，读取 TickFlow 实时行情" }}
+          pagination={{ pageSize: 8, showSizeChanger: false }}
+          rowKey={(item) => item.symbol}
+          scroll={{ x: 900 }}
+          size="small"
+        />
+      </div>
     </section>
   );
 }

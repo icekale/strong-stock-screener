@@ -1,7 +1,7 @@
 "use client";
 
 import { ReloadOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Collapse, Empty, InputNumber, Progress, Table, Tag, Typography } from "antd";
+import { Alert, App, Button, Collapse, Empty, InputNumber, Progress, Select, Table, Tag, Typography } from "antd";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -14,6 +14,7 @@ import {
   getAuctionSnapshotJob,
   getAuctionTimeline,
 } from "../../lib/api";
+import { selectAuctionFocusIndustryItems, selectAuctionHotIndustryItems } from "../../lib/auctionIndustryFilters";
 import { selectAuctionMainlineTopItems, selectAuctionRiskFocusItems } from "../../lib/auctionPanelLimits";
 import { buildStockDetailHref } from "../../lib/stockNavigation";
 import type {
@@ -564,33 +565,86 @@ function IndustryQuickFilter({
   onSelectIndustry: (industry: string) => void;
   totalCount: number;
 }) {
-  const options = [
-    { count: totalCount, label: "全部行业", value: "all" },
-    ...industryStats.map((item) => ({ count: item.count, label: item.industry, value: item.industry })),
-  ];
+  const hotIndustryStats = selectAuctionHotIndustryItems(industryStats);
+  const focusIndustryStats = selectAuctionFocusIndustryItems(industryStats, hotIndustryStats);
+  const pinnedIndustryValues = new Set(hotIndustryStats.map((item) => item.industry));
+  for (const item of focusIndustryStats) {
+    pinnedIndustryValues.add(item.industry);
+  }
+  const moreValue =
+    activeIndustry !== "all" && !pinnedIndustryValues.has(activeIndustry) ? activeIndustry : undefined;
+  const moreOptions = industryStats.map((item) => ({
+    label: `${item.industry} ${item.count}`,
+    value: item.industry,
+  }));
   return (
-    <div className="flex min-w-0 items-center gap-2">
-      <span className="shrink-0 text-xs font-black text-[#7b756d]">行业筛选</span>
-      <div
-        aria-label="行业快捷筛选"
-        className="-my-1 flex min-w-0 flex-1 gap-1 overflow-x-auto py-1"
-        role="group"
-      >
-        {options.map((item) => (
+    <div className="flex min-w-0 flex-col gap-1.5">
+      <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <span className="shrink-0 text-xs font-black text-[#7b756d]">行业筛选</span>
+        <div
+          aria-label="热门行业快捷筛选"
+          className="-my-1 flex min-w-0 flex-1 gap-1 overflow-x-auto py-1"
+          role="group"
+        >
           <Button
             className="shrink-0"
-            key={item.value}
-            onClick={() => onSelectIndustry(item.value)}
+            onClick={() => onSelectIndustry("all")}
             size="small"
-            type={activeIndustry === item.value ? "primary" : "default"}
+            type={activeIndustry === "all" ? "primary" : "default"}
           >
-            {item.label}
-            <span className={activeIndustry === item.value ? "ml-1 opacity-80" : "ml-1 text-[#7b756d]"}>
-              {item.count}
+            全部行业
+            <span className={activeIndustry === "all" ? "ml-1 opacity-80" : "ml-1 text-[#7b756d]"}>
+              {totalCount}
             </span>
           </Button>
-        ))}
+          {hotIndustryStats.map((item) => (
+            <Button
+              className="shrink-0"
+              key={item.industry}
+              onClick={() => onSelectIndustry(item.industry)}
+              size="small"
+              type={activeIndustry === item.industry ? "primary" : "default"}
+            >
+              {item.industry}
+              <span className={activeIndustry === item.industry ? "ml-1 opacity-80" : "ml-1 text-[#7b756d]"}>
+                {item.count}
+              </span>
+            </Button>
+          ))}
+        </div>
+        <Select
+          allowClear
+          className="min-w-[150px] shrink-0"
+          onChange={(value) => onSelectIndustry(value ?? "all")}
+          optionFilterProp="label"
+          options={moreOptions}
+          placeholder="更多行业"
+          showSearch
+          size="small"
+          value={moreValue}
+        />
       </div>
+      {focusIndustryStats.length ? (
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="shrink-0 text-xs font-black text-[#7b756d]">关注</span>
+          <div className="-my-1 flex min-w-0 flex-1 gap-1 overflow-x-auto py-1" role="group" aria-label="关注行业筛选">
+            {focusIndustryStats.map((item) => (
+              <Button
+                className="shrink-0"
+                key={item.industry}
+                onClick={() => onSelectIndustry(item.industry)}
+                size="small"
+                type={activeIndustry === item.industry ? "primary" : "default"}
+              >
+                {item.industry}
+                <span className={activeIndustry === item.industry ? "ml-1 opacity-80" : "ml-1 text-[#7b756d]"}>
+                  {item.count}
+                </span>
+              </Button>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1156,8 +1210,7 @@ function buildIndustryStats(items: AuctionSnapshotItem[]): IndustryAuctionStat[]
         return right.count - left.count;
       }
       return right.turnoverCny - left.turnoverCny;
-    })
-    .slice(0, 8);
+    });
 }
 
 function buildIndustryConcentration(stats: IndustryAuctionStat[], totalCount: number): { label: string; message: string } {

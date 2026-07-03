@@ -14,6 +14,7 @@ import {
   getAuctionSnapshotJob,
   getAuctionTimeline,
 } from "../../lib/api";
+import { selectAuctionMainlineTopItems, selectAuctionRiskFocusItems } from "../../lib/auctionPanelLimits";
 import type {
   AuctionReviewRecord,
   AuctionReviewSummary,
@@ -621,7 +622,7 @@ function MainlineTopPanel({
         {loading ? (
           <SkeletonRows />
         ) : industryStats.length ? (
-          industryStats.slice(0, 3).map((item, index) => {
+          selectAuctionMainlineTopItems(industryStats).map((item, index) => {
             const percent = totalCount > 0 ? Math.round((item.count / totalCount) * 100) : 0;
             return (
               <button
@@ -680,7 +681,7 @@ function RiskFocusPanel({
         {loading ? (
           <SkeletonRows />
         ) : items.length ? (
-          items.slice(0, 3).map((item) => (
+          selectAuctionRiskFocusItems(items).map((item) => (
             <Link
               className="block rounded-lg border border-[#e3ddd3] bg-white px-3 py-2 no-underline transition hover:border-[#c9bca8]"
               href={`/stock/${item.symbol}`}

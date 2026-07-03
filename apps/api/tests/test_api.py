@@ -769,6 +769,13 @@ class SequenceMarketRankingsProvider(FakeMarketOverviewProvider):
         )
 
 
+class FailingMarketRankingsProvider(FakeMarketOverviewProvider):
+    source_name = "failing fake全A排行"
+
+    def get_market_rankings(self, limit: int = 50) -> MarketRankingsResponse:
+        raise StrongStockDataUnavailable("rankings unavailable")
+
+
 class BlockingMarketRankingsProvider(FakeMarketOverviewProvider):
     source_name = "blocking fake全A排行"
 
@@ -1685,6 +1692,18 @@ def test_sector_workbench_endpoint_returns_theme_mode_and_source_status(tmp_path
     assert payload["series"][0]["points"]
     assert payload["stocks"][0]["symbol"] == "300001.SZ"
     assert payload["source_status"][0]["status"] == "success"
+
+
+def test_sector_workbench_endpoint_falls_back_to_sector_radar_when_rankings_fail(tmp_path: Path) -> None:
+    client = _client(tmp_path, market_overview_provider=FailingMarketRankingsProvider())
+
+    response = client.get("/api/sectors/workbench?mode=strength&scope=auto&limit=5")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["themes"][0]["name"] == "存储芯片"
+    assert payload["stocks"] == []
+    assert payload["source_status"][0]["source"] == "板块雷达兜底"
 
 
 def test_screen_run_returns_items_and_persists_latest_without_empty_status(tmp_path: Path) -> None:

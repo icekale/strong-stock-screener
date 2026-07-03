@@ -91,7 +91,7 @@ from app.services.notification_channels import (
     send_notification_message,
 )
 from app.services.screener import StrongStockScreener
-from app.services.sector_workbench import build_sector_workbench_response
+from app.services.sector_workbench import build_sector_workbench_from_radar, build_sector_workbench_response
 from app.services.sector_workbench_store import SectorWorkbenchSampleStore
 from app.services.short_term_cache import TtlCache
 from app.services.sentiment_snapshot_store import SentimentSnapshotStore
@@ -749,26 +749,33 @@ def get_sector_workbench(
     bounded_limit = max(1, min(limit, 50))
     bounded_stock_limit = max(1, min(stock_limit, 200))
     selected_names = [part.strip() for part in selected.split(",") if part.strip()]
+    sampled_at = datetime.now().astimezone()
     try:
         rankings = _cached_market_rankings(100)
-    except StrongStockDataUnavailable as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"题材工作台行情获取失败: {exc.__class__.__name__}") from exc
-
-    limit_up_rows, theme_status = _sector_theme_rows()
-    result = build_sector_workbench_response(
-        rankings=rankings,
-        limit_up_rows=limit_up_rows,
-        mode=mode,
-        scope=scope,
-        selected=selected_names,
-        limit=bounded_limit,
-        stock_limit=bounded_stock_limit,
-        sampled_at=datetime.now().astimezone(),
-    )
-    if theme_status is not None and result.scope == "industry":
-        result.source_status.insert(0, theme_status)
+    except Exception:
+        radar = _cached_sector_radar(bounded_limit)
+        result = build_sector_workbench_from_radar(
+            radar=radar,
+            mode=mode,
+            scope=scope,
+            selected=selected_names,
+            limit=bounded_limit,
+            sampled_at=sampled_at,
+        )
+    else:
+        limit_up_rows, theme_status = _sector_theme_rows()
+        result = build_sector_workbench_response(
+            rankings=rankings,
+            limit_up_rows=limit_up_rows,
+            mode=mode,
+            scope=scope,
+            selected=selected_names,
+            limit=bounded_limit,
+            stock_limit=bounded_stock_limit,
+            sampled_at=sampled_at,
+        )
+        if theme_status is not None and result.scope == "industry":
+            result.source_status.insert(0, theme_status)
     store = _sector_workbench_store()
     store.append(result)
     history = store.series_for(

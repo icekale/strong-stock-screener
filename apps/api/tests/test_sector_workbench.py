@@ -4,9 +4,9 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from app.models import MarketRankingItem, MarketRankingsResponse
+from app.models import MarketRankingItem, MarketRankingsResponse, SectorRadarItem, SectorRadarResponse
 from app.services.sector_workbench_store import SectorWorkbenchSampleStore
-from app.services.sector_workbench import build_sector_workbench_response
+from app.services.sector_workbench import build_sector_workbench_from_radar, build_sector_workbench_response
 
 
 def test_sector_workbench_prefers_theme_rows_over_industry_fallback() -> None:
@@ -109,6 +109,38 @@ def test_sector_workbench_store_dedupes_same_minute_and_builds_series(tmp_path: 
     assert series[0].name == "CPO"
     assert len(series[0].points) == 1
     assert series[0].points[0].time == "10:30"
+
+
+def test_sector_workbench_can_fall_back_to_sector_radar_without_rankings() -> None:
+    response = build_sector_workbench_from_radar(
+        radar=SectorRadarResponse(
+            trade_date="2026-07-03",
+            capital_flow_status="estimated",
+            flow_source="通达信MCP涨停概念集中度估算",
+            inflow=[
+                SectorRadarItem(
+                    name="机器人",
+                    source="通达信MCP涨停概念",
+                    advance_count=5,
+                    leader="涨幅一号",
+                    net_flow_cny=500_000_000,
+                    turnover_cny=1_200_000_000,
+                    strength_score=88,
+                )
+            ],
+            outflow=[],
+        ),
+        mode="strength",
+        scope="auto",
+        selected=[],
+        limit=10,
+        sampled_at=datetime(2026, 7, 3, 10, 32, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+
+    assert response.scope == "theme"
+    assert response.themes[0].name == "机器人"
+    assert response.stocks == []
+    assert response.series[0].points[0].time == "10:32"
 
 
 def _rankings() -> MarketRankingsResponse:

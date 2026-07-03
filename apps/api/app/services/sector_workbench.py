@@ -8,6 +8,7 @@ from typing import Any
 from app.models import (
     MarketRankingItem,
     MarketRankingsResponse,
+    SectorRadarResponse,
     SectorWorkbenchMode,
     SectorWorkbenchPoint,
     SectorWorkbenchResponse,
@@ -18,6 +19,67 @@ from app.models import (
     SectorWorkbenchTheme,
     StrongStockSourceStatus,
 )
+
+
+def build_sector_workbench_from_radar(
+    *,
+    radar: SectorRadarResponse,
+    mode: SectorWorkbenchMode,
+    scope: SectorWorkbenchScopeRequest,
+    selected: list[str],
+    limit: int,
+    sampled_at: datetime,
+) -> SectorWorkbenchResponse:
+    effective_scope: SectorWorkbenchScope = (
+        "theme"
+        if scope in ("auto", "theme") and any(token in radar.flow_source for token in ("概念", "题材"))
+        else "industry"
+    )
+    items = [*radar.inflow, *radar.outflow]
+    themes = [
+        SectorWorkbenchTheme(
+            name=item.name,
+            scope=effective_scope,
+            limit_up_count=item.advance_count or 0,
+            strength_score=item.strength_score,
+            main_flow_cny=item.net_flow_cny,
+            turnover_cny=item.turnover_cny,
+            change_pct=item.change_pct,
+            leader=item.leader,
+            member_count=(item.advance_count or 0) + (item.decline_count or 0),
+            source=item.source,
+            flow_status=radar.capital_flow_status,
+        )
+        for item in items
+    ]
+    themes = sorted(themes, key=lambda item: _theme_sort_key(item, mode=mode), reverse=True)[: max(1, min(limit, 50))]
+    selected_themes = _selected_theme_names(selected, themes)
+    series = _current_series(
+        themes=themes,
+        selected=selected_themes,
+        scope=effective_scope,
+        mode=mode,
+        sampled_at=sampled_at,
+    )
+    return SectorWorkbenchResponse(
+        scope=effective_scope,
+        mode=mode,
+        trade_date=radar.trade_date or sampled_at.date().isoformat(),
+        themes=themes,
+        selected_themes=selected_themes,
+        series=series,
+        related_tags=[],
+        stocks=[],
+        source_status=[
+            StrongStockSourceStatus(
+                source="板块雷达兜底",
+                status="success",
+                detail=f"实时排行榜不可用，使用 {radar.flow_source} 生成题材工作台",
+            ),
+            *radar.source_status,
+        ],
+        generated_at=sampled_at.isoformat(timespec="seconds"),
+    )
 
 
 def build_sector_workbench_response(

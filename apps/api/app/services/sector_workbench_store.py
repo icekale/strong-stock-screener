@@ -11,14 +11,77 @@ from app.models import (
     SectorWorkbenchScope,
     SectorWorkbenchSeries,
     SectorWorkbenchPoint,
+    StrongStockSourceStatus,
 )
+
+
+class SectorThemeRowsStore:
+    def __init__(self, base_dir: Path) -> None:
+        self.base_dir = base_dir
+
+    def save(
+        self,
+        *,
+        trade_date: str,
+        rows: list[dict[str, Any]],
+        status_source: str,
+        status_detail: str,
+        status: str = "success",
+    ) -> None:
+        if not trade_date:
+            return
+        payload = {
+            "schema_version": 1,
+            "trade_date": trade_date,
+            "rows": rows,
+            "source_status": {
+                "source": status_source,
+                "status": status,
+                "detail": status_detail,
+            },
+        }
+        self._write(self._path(trade_date), payload)
+
+    def load(self, trade_date: str) -> tuple[list[dict[str, Any]], StrongStockSourceStatus | None]:
+        if not trade_date:
+            return [], None
+        payload = self._read(self._path(trade_date))
+        rows = payload.get("rows")
+        status_payload = payload.get("source_status")
+        status = None
+        if isinstance(status_payload, dict):
+            try:
+                status = StrongStockSourceStatus.model_validate(status_payload)
+            except Exception:
+                status = None
+        return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else [], status
+
+    def _path(self, trade_date: str) -> Path:
+        return self.base_dir / f"{trade_date}.json"
+
+    @staticmethod
+    def _read(path: Path) -> dict[str, Any]:
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
+    def _write(self, path: Path, payload: dict[str, Any]) -> None:
+        self.base_dir.mkdir(parents=True, exist_ok=True)
+        path.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
 
 
 class SectorWorkbenchSampleStore:
     def __init__(self, base_dir: Path) -> None:
         self.base_dir = base_dir
 
-    def append(self, response: SectorWorkbenchResponse) -> None:
+    def append(self, response: SectorWorkbenchResponse, *, sample_source: str = "snapshot") -> None:
         if not response.trade_date:
             return
         path = self._path(response.trade_date)
@@ -33,10 +96,12 @@ class SectorWorkbenchSampleStore:
             for point in series.points:
                 sample = {
                     "trade_date": response.trade_date,
+                    "schema_version": 4,
                     "mode": response.mode,
                     "scope": response.scope,
                     "name": series.name,
                     "metric": series.metric,
+                    "sample_source": sample_source,
                     "time": point.time,
                     "value": point.value,
                     "sampled_at": point.sampled_at,
@@ -61,24 +126,39 @@ class SectorWorkbenchSampleStore:
         scope: SectorWorkbenchScope,
         selected: list[str],
         metric: SectorWorkbenchMode,
+        sample_source: str | None = None,
     ) -> list[SectorWorkbenchSeries]:
         if not trade_date:
             return []
         samples = self._read(self._path(trade_date)).get("samples", [])
         output: list[SectorWorkbenchSeries] = []
         for name in selected:
-            points = [
-                SectorWorkbenchPoint(
-                    time=str(sample.get("time") or ""),
-                    value=float(sample.get("value") or 0),
-                    sampled_at=str(sample.get("sampled_at") or ""),
+            raw_points: list[tuple[SectorWorkbenchPoint, int]] = []
+            for sample in samples:
+                if (
+                    not isinstance(sample, dict)
+                    or sample.get("mode") != mode
+                    or sample.get("scope") != scope
+                    or sample.get("metric") != metric
+                    or sample.get("name") != name
+                ):
+                    continue
+                if sample_source is not None and not self._sample_source_matches(sample, sample_source):
+                    continue
+                raw_points.append(
+                    (
+                        SectorWorkbenchPoint(
+                            time=str(sample.get("time") or ""),
+                            value=float(sample.get("value") or 0),
+                            sampled_at=str(sample.get("sampled_at") or ""),
+                        ),
+                        self._sample_version(sample),
+                    )
                 )
-                for sample in samples
-                if isinstance(sample, dict)
-                and sample.get("mode") == mode
-                and sample.get("scope") == scope
-                and sample.get("metric") == metric
-                and sample.get("name") == name
+            points = [
+                point
+                for point, version in raw_points
+                if metric != "strength" or version >= 4
             ]
             points.sort(key=lambda point: point.sampled_at)
             if points:
@@ -128,6 +208,20 @@ class SectorWorkbenchSampleStore:
         except (json.JSONDecodeError, OSError):
             return {"samples": []}
         return payload if isinstance(payload, dict) else {"samples": []}
+
+    @staticmethod
+    def _sample_version(sample: dict[str, Any]) -> int:
+        try:
+            return int(sample.get("schema_version") or 1)
+        except (TypeError, ValueError):
+            return 1
+
+    @staticmethod
+    def _sample_source_matches(sample: dict[str, Any], expected: str) -> bool:
+        actual = str(sample.get("sample_source") or "")
+        if expected == "snapshot":
+            return actual in {"", "snapshot"}
+        return actual == expected
 
     def _write(self, path: Path, payload: dict[str, Any]) -> None:
         self.base_dir.mkdir(parents=True, exist_ok=True)

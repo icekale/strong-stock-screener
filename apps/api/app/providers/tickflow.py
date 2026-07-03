@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from time import sleep
 from typing import Any
 
 import httpx
@@ -106,12 +107,16 @@ class TickFlowQuoteProvider:
         base_url: str,
         timeout_seconds: float = 12,
         http_client: object | None = None,
+        intraday_batch_size: int = 20,
+        intraday_batch_interval_seconds: float = 0.2,
     ) -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
         self._owns_client = http_client is None
         self.http_client = http_client or httpx.Client()
+        self.intraday_batch_size = max(1, intraday_batch_size)
+        self.intraday_batch_interval_seconds = max(0.0, intraday_batch_interval_seconds)
 
     def close(self) -> None:
         if self._owns_client:
@@ -174,7 +179,7 @@ class TickFlowQuoteProvider:
             raise StrongStockDataUnavailable("STRONG_STOCK_TICKFLOW_API_KEY 或 TICKFLOW_API_KEY 未配置")
         unique_symbols = _dedupe_symbols(symbols)
         try:
-            return self._get_intraday_bars_batch(unique_symbols, period=period, count=count)
+            return self._get_intraday_bars_batched(unique_symbols, period=period, count=count)
         except StrongStockDataUnavailable:
             raise
         except httpx.HTTPStatusError as exc:
@@ -214,6 +219,20 @@ class TickFlowQuoteProvider:
         )
         response.raise_for_status()
         return parse_tickflow_intraday_payload(response.json())
+
+    def _get_intraday_bars_batched(
+        self,
+        symbols: list[str],
+        period: str,
+        count: int,
+    ) -> dict[str, list[TickFlowIntradayBar]]:
+        bars_by_symbol: dict[str, list[TickFlowIntradayBar]] = {}
+        for start in range(0, len(symbols), self.intraday_batch_size):
+            if start > 0 and self.intraday_batch_interval_seconds > 0:
+                sleep(self.intraday_batch_interval_seconds)
+            batch = symbols[start : start + self.intraday_batch_size]
+            bars_by_symbol.update(self._get_intraday_bars_batch(batch, period=period, count=count))
+        return bars_by_symbol
 
     def _get_intraday_bars_one_by_one(
         self,

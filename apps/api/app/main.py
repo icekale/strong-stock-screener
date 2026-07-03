@@ -4,6 +4,7 @@ import json
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime
+from threading import Thread
 from time import perf_counter
 from pathlib import Path
 
@@ -34,6 +35,8 @@ from app.models import (
     SectorRadarItem,
     SectorRadarResponse,
     SectorWorkbenchScopeRequest,
+    SectorWorkbenchResponse,
+    SectorWorkbenchSeries,
     SentimentDetailResponse,
     ShortTermIntradaySentimentResponse,
     ShortTermIntradaySignalDigest,
@@ -47,6 +50,7 @@ from app.models import (
 from app.gsgf_rules import analyze_gsgf, build_gsgf_chart_annotations
 from app.providers.ifind import IfindMcpProvider
 from app.providers.market_overview import EastmoneyMarketOverviewProvider
+from app.providers.concept_blocks import EastmoneyConceptBlockProvider
 from app.providers.news_risk import EastmoneyNewsRiskProvider
 from app.providers.recent_limit_up_candidates import RecentLimitUpCandidateProvider
 from app.providers.thsdk_candidates import ThsdkCandidateProvider
@@ -74,6 +78,7 @@ from app.services.auction_review import (
 )
 from app.services.auction_review_store import AuctionReviewStore
 from app.services.auction_sampler import AuctionSnapshotSampler
+from app.services.sector_workbench_sampler import SectorWorkbenchSampler
 from app.services.auction_snapshot_store import AuctionSnapshotStore
 from app.services.market_emotion_history import MarketEmotionHistoryStore
 from app.services.runs import RunStore
@@ -91,8 +96,13 @@ from app.services.notification_channels import (
     send_notification_message,
 )
 from app.services.screener import StrongStockScreener
-from app.services.sector_workbench import build_sector_workbench_from_radar, build_sector_workbench_response
-from app.services.sector_workbench_store import SectorWorkbenchSampleStore
+from app.services.sector_workbench import (
+    build_limit_up_theme_rows_from_candidates,
+    build_sector_workbench_from_radar,
+    build_sector_workbench_response,
+)
+from app.services.sector_workbench_intraday import build_sector_intraday_series
+from app.services.sector_workbench_store import SectorThemeRowsStore, SectorWorkbenchSampleStore
 from app.services.short_term_cache import TtlCache
 from app.services.sentiment_snapshot_store import SentimentSnapshotStore
 from app.services.sentiment_monitor import SentimentMonitor, SentimentMonitorConfig
@@ -196,9 +206,11 @@ async def lifespan(_app: FastAPI):
     startup_sentiment_monitor()
     startup_gsgf_auto_review()
     startup_auction_sampler()
+    startup_sector_workbench_sampler()
     try:
         yield
     finally:
+        shutdown_sector_workbench_sampler()
         shutdown_auction_sampler()
         shutdown_gsgf_auto_review()
         shutdown_sentiment_monitor()
@@ -219,6 +231,12 @@ MARKET_OVERVIEW_CACHE: TtlCache[MarketOverviewResponse] = TtlCache(ttl_seconds=4
 MARKET_RANKINGS_CACHE: TtlCache[MarketRankingsResponse] = TtlCache(ttl_seconds=45)
 AUCTION_SNAPSHOT_CACHE: TtlCache[AuctionSnapshotResponse] = TtlCache(ttl_seconds=15)
 SECTOR_RADAR_CACHE: TtlCache[SectorRadarResponse] = TtlCache(ttl_seconds=45)
+SECTOR_INTRADAY_CACHE: TtlCache[tuple[list[SectorWorkbenchSeries], StrongStockSourceStatus]] = TtlCache(
+    ttl_seconds=90
+)
+SECTOR_THEME_ROWS_CACHE: TtlCache[tuple[list[dict[str, object]], StrongStockSourceStatus | None]] = TtlCache(
+    ttl_seconds=300
+)
 STOCK_KLINE_CACHE: TtlCache[StockKlineResponse] = TtlCache(ttl_seconds=300)
 STOCK_RESEARCH_CACHE: TtlCache[StockResearchResponse] = TtlCache(ttl_seconds=900)
 
@@ -246,6 +264,22 @@ def startup_auction_sampler() -> None:
 
 def shutdown_auction_sampler() -> None:
     sampler = getattr(app.state, "auction_sampler", None)
+    if sampler is not None:
+        sampler.stop()
+
+
+def startup_sector_workbench_sampler() -> None:
+    if getattr(app.state, "sector_workbench_sampler_disabled", False):
+        return
+    sampler = getattr(app.state, "sector_workbench_sampler", None)
+    if sampler is None:
+        sampler = SectorWorkbenchSampler(refresh=_sample_sector_workbench)
+        app.state.sector_workbench_sampler = sampler
+    sampler.start()
+
+
+def shutdown_sector_workbench_sampler() -> None:
+    sampler = getattr(app.state, "sector_workbench_sampler", None)
     if sampler is not None:
         sampler.stop()
 
@@ -773,20 +807,80 @@ def get_sector_workbench(
             limit=bounded_limit,
             stock_limit=bounded_stock_limit,
             sampled_at=sampled_at,
+            theme_source=theme_status.source if theme_status is not None else "通达信MCP涨停概念映射",
         )
         if theme_status is not None and result.scope == "industry":
             result.source_status.insert(0, theme_status)
+    snapshot_result = result.model_copy(deep=True)
     store = _sector_workbench_store()
-    store.append(result)
-    history = store.series_for(
+    intraday_history = store.series_for(
         trade_date=result.trade_date,
         mode=result.mode,
         scope=result.scope,
         selected=result.selected_themes,
         metric=result.mode,
+        sample_source="intraday",
     )
-    if history:
-        result.series = history
+    sampled_history = store.series_for(
+        trade_date=result.trade_date,
+        mode=result.mode,
+        scope=result.scope,
+        selected=result.selected_themes,
+        metric=result.mode,
+        sample_source="snapshot",
+    )
+    theme_snapshot_pending = any(
+        item.source == "题材快照" and item.status == "stale"
+        for item in result.source_status
+    )
+    if intraday_history:
+        result.series = intraday_history
+        result.source_status.append(
+            StrongStockSourceStatus(
+                source="TickFlow 当日分钟线",
+                status="success",
+                detail=f"读取本地持久化分钟线曲线 {len(intraday_history)} 条",
+            )
+        )
+    elif sampled_history:
+        result.series = sampled_history
+        result.source_status.append(
+            StrongStockSourceStatus(
+                source="板块分时本地采样",
+                status="success",
+                detail=f"读取本地采样曲线 {len(sampled_history)} 条；分钟线仍以后台补齐状态为准",
+            )
+        )
+        intraday_status = _cached_sector_intraday_status(result)
+        if intraday_status is not None:
+            result.source_status.append(intraday_status)
+        else:
+            _schedule_sector_intraday_refresh(result)
+            result.source_status.append(
+                StrongStockSourceStatus(
+                    source="TickFlow 当日分钟线",
+                    status="stale",
+                    detail="本地分钟线曲线未就绪，已触发后台补齐；本次先返回采样曲线",
+                )
+            )
+    elif theme_snapshot_pending:
+        result.source_status.append(
+            StrongStockSourceStatus(
+                source="TickFlow 当日分钟线",
+                status="disabled",
+                detail="题材快照未就绪，跳过分钟线补齐以保证首屏速度",
+            )
+        )
+    else:
+        _schedule_sector_intraday_refresh(result)
+        result.source_status.append(
+            StrongStockSourceStatus(
+                source="TickFlow 当日分钟线",
+                status="stale",
+                detail="本地分时曲线未就绪，已触发后台补齐；本次先返回当前快照",
+            )
+        )
+    store.append(snapshot_result, sample_source="snapshot")
     return result.model_dump(mode="json")
 
 
@@ -1256,6 +1350,18 @@ def _auction_now() -> datetime:
     return getattr(app.state, "auction_now", None) or datetime.now().astimezone()
 
 
+def _sample_sector_workbench() -> None:
+    _refresh_sector_theme_rows()
+    for mode in ("strength", "main_flow"):
+        get_sector_workbench(
+            mode=mode,
+            scope="auto",
+            selected="",
+            limit=30,
+            stock_limit=80,
+        )
+
+
 def _cached_sector_radar(limit: int) -> SectorRadarResponse:
     provider = _market_overview_provider()
     cache_key = f"sector-radar:{_provider_cache_key(provider)}:{limit}"
@@ -1295,6 +1401,105 @@ def _cached_sector_radar(limit: int) -> SectorRadarResponse:
         return tdx_result
 
     return SECTOR_RADAR_CACHE.get_or_set(cache_key, build).model_copy(deep=True)
+
+
+def _cached_sector_intraday_series(
+    result: SectorWorkbenchResponse,
+) -> tuple[list[SectorWorkbenchSeries], StrongStockSourceStatus]:
+    provider = _quote_provider()
+    cache_key = _sector_intraday_cache_key(result, provider)
+
+    def build() -> tuple[list[SectorWorkbenchSeries], StrongStockSourceStatus]:
+        try:
+            return build_sector_intraday_series(
+                response=result,
+                quote_provider=provider,
+                mode=result.mode,
+                count=260,
+            )
+        except Exception as exc:
+            reason = f"{exc.__class__.__name__}: {str(exc).strip()}" if str(exc).strip() else exc.__class__.__name__
+            return [], StrongStockSourceStatus(
+                source="TickFlow 当日分钟线",
+                status="failed",
+                detail=f"历史分时曲线补齐失败: {reason[:180]}",
+            )
+
+    series, status = SECTOR_INTRADAY_CACHE.get_or_refresh(cache_key, build)
+    return [item.model_copy(deep=True) for item in series], status.model_copy(deep=True)
+
+
+def _cached_sector_intraday_status(result: SectorWorkbenchResponse) -> StrongStockSourceStatus | None:
+    cached = SECTOR_INTRADAY_CACHE.get_if_fresh(_sector_intraday_cache_key(result, _quote_provider()))
+    if cached is None:
+        return None
+    _series, status = cached
+    return status.model_copy(deep=True)
+
+
+def _sector_intraday_cache_key(result: SectorWorkbenchResponse, provider: object) -> str:
+    selected = [item.strip() for item in getattr(result, "selected_themes", [])[:5] if item.strip()]
+    selected_set = set(selected)
+    symbols: list[str] = []
+    seen: set[str] = set()
+    for stock in getattr(result, "stocks", []):
+        if not selected_set.intersection(getattr(stock, "themes", [])):
+            continue
+        symbol = getattr(stock, "symbol", "").strip().upper()
+        if not symbol or symbol in seen:
+            continue
+        seen.add(symbol)
+        symbols.append(symbol)
+        if len(symbols) >= 80:
+            break
+    cache_payload = {
+        "provider": _provider_cache_key(provider),
+        "trade_date": getattr(result, "trade_date", ""),
+        "mode": getattr(result, "mode", ""),
+        "scope": getattr(result, "scope", ""),
+        "selected": selected,
+        "symbols": symbols,
+        "count": 260,
+    }
+    return f"sector-intraday:{json.dumps(cache_payload, ensure_ascii=False, sort_keys=True)}"
+
+
+def _schedule_sector_intraday_refresh(result: SectorWorkbenchResponse) -> None:
+    if getattr(app.state, "sector_intraday_async_refresh_disabled", False):
+        return
+    key = _sector_intraday_refresh_key(result)
+    refreshing = getattr(app.state, "sector_intraday_refreshing", None)
+    if refreshing is None:
+        refreshing = set()
+        app.state.sector_intraday_refreshing = refreshing
+    if key in refreshing:
+        return
+    refreshing.add(key)
+
+    def run() -> None:
+        try:
+            series, _status = _cached_sector_intraday_series(result)
+            if series:
+                refreshed = result.model_copy(update={"series": series}, deep=True)
+                _sector_workbench_store().append(refreshed, sample_source="intraday")
+        finally:
+            current = getattr(app.state, "sector_intraday_refreshing", set())
+            current.discard(key)
+
+    Thread(target=run, name="sector-intraday-refresh", daemon=True).start()
+
+
+def _sector_intraday_refresh_key(result: SectorWorkbenchResponse) -> str:
+    return json.dumps(
+        {
+            "trade_date": result.trade_date,
+            "mode": result.mode,
+            "scope": result.scope,
+            "selected": result.selected_themes[:5],
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
 
 
 def _tickflow_sector_radar(provider: object, limit: int) -> SectorRadarResponse:
@@ -1428,6 +1633,8 @@ def _clear_data_source_caches() -> None:
         MARKET_RANKINGS_CACHE,
         AUCTION_SNAPSHOT_CACHE,
         SECTOR_RADAR_CACHE,
+        SECTOR_INTRADAY_CACHE,
+        SECTOR_THEME_ROWS_CACHE,
         STOCK_KLINE_CACHE,
         STOCK_RESEARCH_CACHE,
     ):
@@ -1538,6 +1745,18 @@ def _news_risk_provider() -> object:
     return EastmoneyNewsRiskProvider.from_akshare()
 
 
+def _concept_provider() -> object:
+    injected = getattr(app.state, "concept_provider", None)
+    if injected is not None:
+        return injected
+    cached = getattr(app.state, "default_concept_provider", None)
+    if cached is None:
+        settings = _effective_settings()
+        cached = EastmoneyConceptBlockProvider(timeout_seconds=settings.provider_timeout_seconds)
+        app.state.default_concept_provider = cached
+    return cached
+
+
 def _tdx_provider() -> TdxMcpProvider:
     injected = getattr(app.state, "tdx_provider", None)
     if injected is not None:
@@ -1627,30 +1846,161 @@ def _sector_workbench_store() -> SectorWorkbenchSampleStore:
     return store
 
 
+def _sector_theme_rows_store() -> SectorThemeRowsStore:
+    injected = getattr(app.state, "sector_theme_rows_store", None)
+    if injected is not None:
+        return injected
+    data_dir = Path(
+        getattr(
+            app.state,
+            "sector_theme_rows_dir",
+            Path(getattr(app.state, "runs_dir", get_settings().data_dir)) / "sectors" / "theme-rows",
+        )
+    )
+    store = SectorThemeRowsStore(data_dir)
+    app.state.sector_theme_rows_store = store
+    return store
+
+
 def _sector_theme_rows() -> tuple[list[dict[str, object]], StrongStockSourceStatus | None]:
+    trade_date = datetime.now().astimezone().date().isoformat()
+    rows, status = _sector_theme_rows_store().load(trade_date)
+    if rows:
+        return rows, status or StrongStockSourceStatus(
+            source="题材快照",
+            status="success",
+            detail=f"读取后台题材快照 {len(rows)} 只股票",
+        )
+    _schedule_sector_theme_rows_refresh(trade_date)
+    return [], StrongStockSourceStatus(
+        source="题材快照",
+        status="stale",
+        detail="后台题材快照未就绪，已触发刷新；本次暂用行业兜底",
+    )
+
+
+def _schedule_sector_theme_rows_refresh(trade_date: str) -> None:
+    if getattr(app.state, "sector_theme_rows_async_refresh_disabled", False):
+        return
+    refreshing = getattr(app.state, "sector_theme_rows_refreshing", None)
+    if refreshing is None:
+        refreshing = set()
+        app.state.sector_theme_rows_refreshing = refreshing
+    if trade_date in refreshing:
+        return
+    refreshing.add(trade_date)
+
+    def run() -> None:
+        try:
+            _refresh_sector_theme_rows(trade_date=trade_date)
+        finally:
+            current = getattr(app.state, "sector_theme_rows_refreshing", set())
+            current.discard(trade_date)
+
+    Thread(target=run, name=f"sector-theme-rows-refresh-{trade_date}", daemon=True).start()
+
+
+def _refresh_sector_theme_rows(trade_date: str | None = None) -> tuple[list[dict[str, object]], StrongStockSourceStatus | None]:
+    current_trade_date = trade_date or datetime.now().astimezone().date().isoformat()
+    candidate_provider = _candidate_provider()
+    concept_provider = _concept_provider()
+    cache_key = (
+        "sector-theme-rows:"
+        f"{current_trade_date}:"
+        f"{_provider_cache_key(candidate_provider)}:"
+        f"{_provider_cache_key(concept_provider)}"
+    )
+    rows, status = SECTOR_THEME_ROWS_CACHE.get_or_refresh(
+        cache_key,
+        lambda: _build_sector_theme_rows(
+            trade_date=current_trade_date,
+            candidate_provider=candidate_provider,
+            concept_provider=concept_provider,
+        ),
+    )
+    if status is not None:
+        _sector_theme_rows_store().save(
+            trade_date=current_trade_date,
+            rows=rows,
+            status_source=status.source,
+            status=status.status,
+            status_detail=status.detail,
+        )
+    return rows, status
+
+
+def _build_sector_theme_rows(
+    *,
+    trade_date: str,
+    candidate_provider: object,
+    concept_provider: object,
+) -> tuple[list[dict[str, object]], StrongStockSourceStatus | None]:
+    tdx_status: StrongStockSourceStatus | None = None
     try:
         provider = getattr(app.state, "tdx_provider", None) or _tdx_provider()
         if not hasattr(provider, "query_rows"):
-            return [], StrongStockSourceStatus(
+            tdx_status = StrongStockSourceStatus(
                 source="通达信MCP涨停概念映射",
                 status="disabled",
                 detail="当前 TDX provider 不支持 query_rows，使用行业兜底",
             )
-        rows = provider.query_rows(
-            "今日涨停股列表 封单金额 首次涨停时间 涨停原因 连续涨停天数 板型 封成比 所属概念 所属通达信风格",
-            size=100,
-        )
-        return rows, StrongStockSourceStatus(
-            source="通达信MCP涨停概念映射",
-            status="success",
-            detail=f"返回 {len(rows)} 只涨停股概念映射",
-        )
+        else:
+            rows = provider.query_rows(
+                "今日涨停股列表 封单金额 首次涨停时间 涨停原因 连续涨停天数 板型 封成比 所属概念 所属通达信风格",
+                size=100,
+            )
+            if rows:
+                return rows, StrongStockSourceStatus(
+                    source="通达信MCP涨停概念映射",
+                    status="success",
+                    detail=f"返回 {len(rows)} 只涨停股概念映射",
+                )
+            tdx_status = StrongStockSourceStatus(
+                source="通达信MCP涨停概念映射",
+                status="stale",
+                detail="TDX 今日涨停题材映射返回空，尝试东财 slist 概念归属 fallback",
+            )
     except Exception as exc:
-        return [], StrongStockSourceStatus(
+        tdx_status = StrongStockSourceStatus(
             source="通达信MCP涨停概念映射",
             status="failed",
             detail=f"题材映射获取失败: {exc.__class__.__name__}",
         )
+
+    try:
+        candidates = candidate_provider.get_candidates(trade_date)
+        rows = build_limit_up_theme_rows_from_candidates(
+            candidates=candidates,
+            concept_provider=concept_provider,
+            limit=80,
+            trade_date=trade_date,
+        )
+    except Exception as exc:
+        detail = f"东财 slist 概念 fallback 失败: {exc.__class__.__name__}"
+        if tdx_status is not None:
+            detail = f"{tdx_status.detail}; {detail}"
+        return [], StrongStockSourceStatus(
+            source="东财 slist 概念归属",
+            status="failed",
+            detail=detail,
+        )
+    if rows:
+        detail = f"基于当日涨停候选/可识别候选 {len(candidates)} 只，补齐 {len(rows)} 只股票题材"
+        if tdx_status is not None:
+            detail = f"{tdx_status.detail}; {detail}"
+        return rows, StrongStockSourceStatus(
+            source="东财 slist 概念归属",
+            status="success",
+            detail=detail,
+        )
+    detail = "东财 slist 未返回可用概念标签，使用行业兜底"
+    if tdx_status is not None:
+        detail = f"{tdx_status.detail}; {detail}"
+    return [], StrongStockSourceStatus(
+        source="东财 slist 概念归属",
+        status="stale",
+        detail=detail,
+    )
 
 
 def _auction_review_summary(records: list, *, trade_date: str | None) -> AuctionReviewSummary:

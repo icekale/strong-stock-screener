@@ -1,5 +1,6 @@
 from app.models import KlineBar, StrongStockDataUnavailable
 from app.providers.baidu_kline import parse_baidu_kline_payload
+from app.providers.concept_blocks import _concept_tags_from_payload
 from app.providers.kline_fallback import FallbackKlineProvider
 from app.providers.ifind import IfindMcpProvider
 from app.providers.market_overview import EastmoneyMarketOverviewProvider
@@ -1321,6 +1322,40 @@ def test_tickflow_provider_prefers_intraday_batch_endpoint() -> None:
         "period": "1m",
         "count": 5,
     }
+
+
+def test_tickflow_provider_splits_large_intraday_batch_requests() -> None:
+    symbols = [f"{300000 + index:06d}.SZ" for index in range(45)]
+    client = FakeIntradayBatchHttpClient(FakeStatusResponse({"data": {}}))
+    provider = TickFlowQuoteProvider(
+        api_key="tk-test",
+        base_url="https://api.tickflow.org",
+        http_client=client,
+        intraday_batch_size=20,
+        intraday_batch_interval_seconds=0,
+    )
+
+    provider.get_intraday_bars(symbols, period="1m", count=5)
+
+    assert [request["params"]["symbols"] for request in client.requests] == [
+        ",".join(symbols[:20]),
+        ",".join(symbols[20:40]),
+        ",".join(symbols[40:]),
+    ]
+
+
+def test_eastmoney_concept_blocks_extracts_board_names_from_slist_payload() -> None:
+    assert _concept_tags_from_payload(
+        {
+            "data": {
+                "diff": {
+                    "0": {"f14": "机器人概念", "f12": "BK1234"},
+                    "1": {"f14": "浙江板块", "f12": "BK5678"},
+                    "2": {"f14": "机器人概念", "f12": "BK1234"},
+                }
+            }
+        }
+    ) == ["机器人概念", "浙江板块"]
 
 
 def test_tickflow_provider_falls_back_to_single_intraday_when_batch_not_allowed() -> None:

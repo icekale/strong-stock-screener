@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 from datetime import datetime
-from typing import Any
+from typing import Any, Protocol
 
 from app.models import (
     MarketRankingItem,
@@ -18,7 +18,43 @@ from app.models import (
     SectorWorkbenchStock,
     SectorWorkbenchTheme,
     StrongStockSourceStatus,
+    StrongStockCandidate,
 )
+
+
+class ConceptTagProvider(Protocol):
+    def get_concept_tags(self, symbol: str) -> list[str]:
+        ...
+
+
+NON_THEME_EXACT_TAGS = {
+    "AH股",
+    "QFII重仓",
+    "ST股",
+    "中证500",
+    "创业板综",
+    "小盘价值",
+    "小盘成长",
+    "小盘股",
+    "机构重仓",
+    "标准普尔",
+    "沪股通",
+    "深成500",
+    "深股通",
+    "破发股",
+    "股权激励",
+    "融资融券",
+    "趋势股",
+    "近期新高",
+    "近日新高",
+    "最近多板",
+    "百日新高",
+    "富时罗素",
+    "昨日涨停",
+    "昨日涨停_含一字",
+    "昨日首板",
+    "昨日高振幅",
+}
 
 
 def build_sector_workbench_from_radar(
@@ -41,7 +77,14 @@ def build_sector_workbench_from_radar(
             name=item.name,
             scope=effective_scope,
             limit_up_count=item.advance_count or 0,
-            strength_score=item.strength_score,
+            strength_score=_theme_heat_score(
+                main_flow_cny=item.net_flow_cny,
+                limit_up_count=item.advance_count or 0,
+                max_boards=0,
+                seal_amount_cny=0,
+                advance_count=item.advance_count or 0,
+                member_count=(item.advance_count or 0) + (item.decline_count or 0),
+            ),
             main_flow_cny=item.net_flow_cny,
             turnover_cny=item.turnover_cny,
             change_pct=item.change_pct,
@@ -92,6 +135,7 @@ def build_sector_workbench_response(
     limit: int,
     stock_limit: int,
     sampled_at: datetime,
+    theme_source: str = "通达信MCP涨停概念映射",
 ) -> SectorWorkbenchResponse:
     ranking_items = _unique_ranking_items(rankings)
     ranking_by_symbol = {item.symbol: item for item in ranking_items if item.symbol}
@@ -104,9 +148,9 @@ def build_sector_workbench_response(
     )
 
     if effective_scope == "theme":
-        themes = _themes_from_limit_up_rows(theme_rows, mode=mode)[:bounded_limit]
+        themes = _themes_from_limit_up_rows(theme_rows, mode=mode, source=theme_source)[:bounded_limit]
         status = StrongStockSourceStatus(
-            source="通达信MCP涨停概念映射",
+            source=theme_source,
             status="success",
             detail=f"概念/题材映射返回 {len(theme_rows)} 只涨停股，聚合 {len(themes)} 个题材",
         )
@@ -142,6 +186,39 @@ def build_sector_workbench_response(
         source_status=[status, *rankings.source_status],
         generated_at=sampled_at.isoformat(timespec="seconds"),
     )
+
+
+def build_limit_up_theme_rows_from_candidates(
+    *,
+    candidates: list[StrongStockCandidate],
+    concept_provider: ConceptTagProvider,
+    limit: int = 80,
+    trade_date: str | None = None,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    trade_date_key = _date_key(trade_date)
+    for candidate in candidates[: max(1, limit)]:
+        candidate_date_key = _date_key(_candidate_last_limit_up_date(candidate))
+        if trade_date_key and candidate_date_key and candidate_date_key != trade_date_key:
+            continue
+        try:
+            raw_tags = concept_provider.get_concept_tags(candidate.symbol)
+        except Exception:
+            raw_tags = []
+        concepts = _theme_tags_from_concept_blocks(raw_tags, industry=candidate.industry)
+        if not concepts:
+            continue
+        rows.append(
+            {
+                "代码": candidate.symbol,
+                "名称": candidate.name,
+                "所属行业": candidate.industry,
+                "所属概念": ";".join(concepts),
+                "连续涨停天数": _candidate_board_count(candidate),
+                "封单金额": _candidate_seal_amount_wan(candidate),
+            }
+        )
+    return rows
 
 
 def _unique_ranking_items(rankings: MarketRankingsResponse) -> list[MarketRankingItem]:
@@ -185,6 +262,7 @@ def _themes_from_limit_up_rows(
     rows: list[dict[str, Any]],
     *,
     mode: SectorWorkbenchMode,
+    source: str = "通达信MCP涨停概念映射",
 ) -> list[SectorWorkbenchTheme]:
     grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in rows:
@@ -206,13 +284,13 @@ def _themes_from_limit_up_rows(
         )
         max_boards = max(int(item.get("board_count") or 0) for item in members)
         seal_amount = sum(float(item.get("seal_amount_cny") or 0) for item in members)
-        strength = round(
-            len(members) * 30
-            + max_boards * 12
-            + (avg_change or 0) * 4
-            + min(turnover / 100_000_000, 30)
-            + min(seal_amount / 100_000_000, 20),
-            2,
+        strength = _theme_heat_score(
+            main_flow_cny=main_flow,
+            limit_up_count=len(members),
+            max_boards=max_boards,
+            seal_amount_cny=seal_amount,
+            advance_count=len(members),
+            member_count=len(members),
         )
         themes.append(
             SectorWorkbenchTheme(
@@ -225,7 +303,7 @@ def _themes_from_limit_up_rows(
                 change_pct=round(avg_change, 2) if avg_change is not None else None,
                 leader=leader.get("name"),
                 member_count=len(members),
-                source="通达信MCP涨停概念映射",
+                source=source,
                 flow_status="estimated",
             )
         )
@@ -252,13 +330,15 @@ def _themes_from_industries(
             if item.turnover_cny is not None and item.pct_change is not None
         )
         advance_count = sum(1 for item in members if (item.pct_change or 0) > 0)
+        strong_count = sum(1 for item in members if (item.pct_change or 0) >= 5)
         leader = max(members, key=lambda item: (item.pct_change or -999, item.turnover_cny or 0))
-        strength = round(
-            advance_count * 12
-            + (avg_change or 0) * 8
-            + min(turnover / 100_000_000, 30)
-            + len(members) * 2,
-            2,
+        strength = _theme_heat_score(
+            main_flow_cny=main_flow,
+            limit_up_count=0,
+            max_boards=0,
+            seal_amount_cny=0,
+            advance_count=advance_count + strong_count,
+            member_count=len(members),
         )
         themes.append(
             SectorWorkbenchTheme(
@@ -415,6 +495,76 @@ def _theme_sort_key(theme: SectorWorkbenchTheme, *, mode: SectorWorkbenchMode) -
     return (theme.strength_score, float(theme.limit_up_count), theme.turnover_cny or 0)
 
 
+def _theme_tags_from_concept_blocks(tags: list[str], *, industry: str | None) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    industry_text = (industry or "").strip()
+    for tag in tags:
+        name = str(tag).strip()
+        if not name or name in seen:
+            continue
+        if _is_non_theme_tag(name, industry=industry_text):
+            continue
+        if re.search(r"[ⅠⅡⅢIVX]+$", name):
+            continue
+        seen.add(name)
+        output.append(name)
+        if len(output) >= 8:
+            break
+    return output
+
+
+def _is_non_theme_tag(name: str, *, industry: str) -> bool:
+    if name == industry or name in NON_THEME_EXACT_TAGS:
+        return True
+    if name.endswith("板块"):
+        return True
+    if name.startswith(("HS300_", "MSCI", "中证", "上证", "沪深", "深证", "深成")):
+        return True
+    if re.match(r"^\d{4}年报", name):
+        return True
+    if re.search(r"(重仓|新高|高振幅|涨停|首板|多板)$", name):
+        return True
+    if name.endswith(("整机", "零部件", "专用设备", "通用设备", "自动化设备", "金属制品")):
+        return True
+    if name in {"汽车", "机械设备"}:
+        return True
+    if name.endswith("系统") and "概念" not in name:
+        return True
+    return False
+
+
+def _candidate_board_count(candidate: StrongStockCandidate) -> int:
+    note = candidate.board_note or ""
+    match = re.search(r"(?:连板数|连板|几板)[:：]?\s*(\d+)", note)
+    if match:
+        return max(1, int(match.group(1)))
+    return 1
+
+
+def _candidate_seal_amount_wan(candidate: StrongStockCandidate) -> float | None:
+    note = candidate.board_note or ""
+    match = re.search(r"(?:封单金额|封单额)[:：]?\s*(-?\d+(?:\.\d+)?)", note.replace(",", ""))
+    if not match:
+        return None
+    return float(match.group(1))
+
+
+def _candidate_last_limit_up_date(candidate: StrongStockCandidate) -> str | None:
+    for evidence in candidate.limit_up_evidence:
+        text = str(evidence).strip()
+        if text.startswith("最近涨停: "):
+            return text.removeprefix("最近涨停: ").strip()
+    return None
+
+
+def _date_key(value: str | None) -> str:
+    if not value:
+        return ""
+    digits = re.sub(r"\D", "", value)
+    return digits[:8] if len(digits) >= 8 else ""
+
+
 def _estimated_flow(rows: list[dict[str, Any]]) -> float:
     return sum(
         float(row.get("turnover_cny") or 0) * float(row.get("pct_change") or 0) / 100
@@ -428,6 +578,22 @@ def _average(values: Any) -> float | None:
     if not numeric:
         return None
     return sum(numeric) / len(numeric)
+
+
+def _theme_heat_score(
+    *,
+    main_flow_cny: float | None,
+    limit_up_count: int,
+    max_boards: int,
+    seal_amount_cny: float | None,
+    advance_count: int,
+    member_count: int,
+) -> float:
+    flow_score = float(main_flow_cny or 0) / 100_000
+    board_score = limit_up_count * 600 + max_boards * 240
+    seal_score = float(seal_amount_cny or 0) / 80_000
+    breadth_score = (advance_count - max(member_count - advance_count, 0)) * 80
+    return round(flow_score + board_score + seal_score + breadth_score, 2)
 
 
 def _concepts_from_row(row: dict[str, Any]) -> list[str]:

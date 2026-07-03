@@ -14,6 +14,7 @@ import type {
   SectorWorkbenchSeries,
   SectorWorkbenchStock,
   SectorWorkbenchTheme,
+  StrongStockSourceStatus,
 } from "../../lib/types";
 
 const MODE_OPTIONS: Array<{ label: string; value: SectorWorkbenchMode }> = [
@@ -73,6 +74,10 @@ export function SectorThemeWorkbench() {
     const first = data?.source_status.find((item) => item.status === "success") ?? data?.source_status[0];
     return first ? `${first.source} · ${first.detail}` : "等待数据源";
   }, [data]);
+  const intradayStatus = useMemo(
+    () => data?.source_status.find((item) => item.source.includes("分钟线")) ?? null,
+    [data],
+  );
 
   const selectedSet = useMemo(() => new Set(selectedThemes), [selectedThemes]);
 
@@ -112,29 +117,30 @@ export function SectorThemeWorkbench() {
   }
 
   return (
-    <section className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
+    <section className="grid gap-3 xl:grid-cols-[340px_minmax(0,1fr)]">
       {contextHolder}
       <aside className="workbench-panel overflow-hidden rounded-xl border">
-        <div className="grid grid-cols-2 border-b border-[#ddd8d0] bg-[#f8f7f4] p-2">
+        <div className="border-b border-[#ddd8d0] bg-[#f8f7f4] px-3 py-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <div className="text-xs font-black text-[#7b756d]">工作模式</div>
+            <Button icon={<ReloadOutlined />} loading={loading} onClick={() => setRefreshKey((value) => value + 1)} size="small">
+              刷新
+            </Button>
+          </div>
           <Segmented
             block
-            className="col-span-2"
             onChange={(value) => setMode(value as SectorWorkbenchMode)}
             options={MODE_OPTIONS}
             value={mode}
           />
         </div>
-        <div className="border-b border-[#ddd8d0] px-4 py-3">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <div className="text-sm font-black text-[#11100e]">题材多选</div>
-              <div className="text-xs text-[#7b756d]">
-                {mode === "strength" ? "按强度、涨停和扩散度排序" : "按资金确认强弱排序"}
-              </div>
-            </div>
-            <Button icon={<ReloadOutlined />} loading={loading} onClick={() => setRefreshKey((value) => value + 1)} size="small">
-              刷新
-            </Button>
+        <div className="border-b border-[#ddd8d0] px-3 py-2.5">
+          <div className="flex items-end justify-between gap-2">
+            <div className="text-sm font-black text-[#11100e]">题材多选</div>
+            <div className="text-[11px] font-bold text-[#7b756d]">{selectedThemes.length}/5</div>
+          </div>
+          <div className="mt-0.5 text-xs text-[#7b756d]">
+            {mode === "strength" ? "按强度、涨停和扩散度排序" : "按资金确认强弱排序"}
           </div>
         </div>
 
@@ -143,7 +149,7 @@ export function SectorThemeWorkbench() {
             <Skeleton active paragraph={{ rows: 10 }} title={false} />
           </div>
         ) : (
-          <div className="max-h-[calc(100vh-250px)] overflow-y-auto p-2">
+          <div className="max-h-[calc(100vh-238px)] overflow-y-auto">
             {(data?.themes ?? []).map((theme) => (
               <ThemeSelectorItem
                 checked={selectedSet.has(theme.name)}
@@ -157,18 +163,18 @@ export function SectorThemeWorkbench() {
           </div>
         )}
 
-        <div className="border-t border-[#ddd8d0] bg-[#fff7ed] px-4 py-3 text-xs leading-5 text-[#8a4b12]">
+        <div className="border-t border-[#ddd8d0] bg-[#fff7ed] px-3 py-3 text-xs leading-5 text-[#8a4b12]">
           {data?.scope === "industry" ? "行业兜底：概念映射不可用，当前按行业聚合。" : "概念/题材优先：行情来自 TickFlow，题材映射来自补充数据源。"}
         </div>
       </aside>
 
-      <section className="min-w-0 space-y-4">
+      <section className="min-w-0 space-y-3">
         {error && <Alert showIcon title={error} type="error" />}
 
-        <div className="workbench-panel rounded-xl border">
+        <div className="workbench-panel overflow-hidden rounded-xl border">
           <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[#ddd8d0] px-4 py-3">
             <div>
-              <div className="text-xs font-black text-[#7b756d]">双模式分时</div>
+              <div className="text-xs font-black text-[#7b756d]">双模式分时 · {mode === "strength" ? "热度曲线" : "资金流向"}</div>
               <Typography.Title className="m-0 text-[#11100e]" level={4}>
                 {mode === "strength" ? "板块强度分时" : "主力流入分时"}
               </Typography.Title>
@@ -182,20 +188,19 @@ export function SectorThemeWorkbench() {
               {data?.themes.some((item) => item.flow_status === "estimated") && <Tag color="orange">估算口径</Tag>}
             </Space>
           </div>
-          <div className="p-4">
-            <SectorIntradayChart mode={mode} series={data?.series ?? []} />
+          <div className="bg-white px-3 py-3">
+            <SectorIntradayChart mode={mode} series={data?.series ?? []} sourceStatus={intradayStatus} />
           </div>
-        </div>
-
-        <div className="workbench-panel rounded-xl border px-4 py-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-black text-[#7b756d]">关联子题材</span>
-            {(data?.related_tags ?? []).slice(0, 12).map((tag) => (
-              <Tag className="m-0" key={tag}>
-                {tag}
-              </Tag>
-            ))}
-            {data && data.related_tags.length === 0 && <span className="text-xs text-[#7b756d]">暂无关联题材</span>}
+          <div className="border-t border-[#ece7df] bg-[#faf8f5] px-4 py-2.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-black text-[#7b756d]">关联子题材</span>
+              {(data?.related_tags ?? []).slice(0, 12).map((tag) => (
+                <Tag className="m-0" key={tag}>
+                  {tag}
+                </Tag>
+              ))}
+              {data && data.related_tags.length === 0 && <span className="text-xs text-[#7b756d]">暂无关联题材</span>}
+            </div>
           </div>
         </div>
 
@@ -235,79 +240,181 @@ function ThemeSelectorItem({
   onChange: (checked: boolean) => void;
   theme: SectorWorkbenchTheme;
 }) {
-  const value = mode === "strength" ? `${theme.limit_up_count}涨停` : formatCny(theme.main_flow_cny);
+  const value =
+    mode === "strength"
+      ? theme.scope === "theme"
+        ? `${theme.limit_up_count}涨停`
+        : `${theme.member_count}成分`
+      : formatCny(theme.main_flow_cny);
   return (
     <label
-      className={`mb-2 flex cursor-pointer gap-2 rounded-lg border p-3 transition ${
-        checked ? "border-[#fca5a5] bg-[#fff1f2]" : "border-[#e5e0d8] bg-white hover:bg-[#faf8f5]"
+      className={`flex cursor-pointer items-center gap-2 border-b px-3 py-2.5 transition ${
+        checked ? "border-[#f2b8b5] bg-[#fff1f2]" : "border-[#ece7df] bg-[#f8f7f4] hover:bg-white"
       }`}
     >
       <Checkbox checked={checked} onChange={(event) => onChange(event.target.checked)} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center justify-between gap-2">
-          <span className="truncate text-sm font-black text-[#11100e]">{theme.name}</span>
+          <span className={`truncate text-sm font-black ${checked ? "text-[#d92d20]" : "text-[#11100e]"}`}>
+            {theme.name}
+            <span className="ml-1 text-xs font-bold text-[#7b756d]">({formatScore(theme.strength_score)})</span>
+          </span>
           <span className={mode === "strength" ? "shrink-0 text-xs font-black text-[#d92d20]" : "shrink-0 text-xs font-black text-[#7c3aed]"}>
             {value}
           </span>
         </div>
-        <div className="mt-1 truncate text-xs text-[#7b756d]">
-          强度 {theme.strength_score.toFixed(1)} · 成交 {formatCny(theme.turnover_cny)} · 领涨 {theme.leader ?? "--"}
+        <div className="mt-0.5 flex items-center justify-between gap-2 text-xs text-[#7b756d]">
+          <span className="truncate">领涨 {theme.leader ?? "--"}</span>
+          <span className="shrink-0">成交 {formatCny(theme.turnover_cny)}</span>
         </div>
       </div>
     </label>
   );
 }
 
-function SectorIntradayChart({ mode, series }: { mode: SectorWorkbenchMode; series: SectorWorkbenchSeries[] }) {
+function SectorIntradayChart({
+  mode,
+  series,
+  sourceStatus,
+}: {
+  mode: SectorWorkbenchMode;
+  series: SectorWorkbenchSeries[];
+  sourceStatus: StrongStockSourceStatus | null;
+}) {
   const chartRef = useRef<HTMLDivElement>(null);
   const hasData = series.some((item) => item.points.length > 0);
+  const sampleCount = Math.max(0, ...series.map((item) => item.points.length));
+  const isIntradayUnavailable = Boolean(sourceStatus && sourceStatus.status !== "success");
 
   useEffect(() => {
     if (!chartRef.current || !hasData) {
       return;
     }
     const chart = echarts.init(chartRef.current);
-    const times = Array.from(new Set(series.flatMap((item) => item.points.map((point) => point.time))));
+    const times = Array.from(new Set(series.flatMap((item) => item.points.map((point) => point.time)))).sort();
     chart.setOption({
-      color: ["#d92d20", "#f59e0b", "#7c3aed", "#2563eb", "var(--market-green-fill)"],
-      grid: { bottom: 36, left: 56, right: 28, top: 24 },
-      legend: { top: 0, type: "scroll" },
+      backgroundColor: "#fffdf8",
+      animationDuration: 180,
+      color: ["#ef4444", "#ff7a00", "#d946ef", "#78b65b", "#4169d8", "#14b8a6", "#a855f7", "#64748b"],
+      grid: { bottom: 58, containLabel: true, left: 18, right: 30, top: 22 },
+      legend: {
+        icon: "circle",
+        itemGap: 18,
+        itemHeight: 9,
+        itemWidth: 9,
+        left: "center",
+        bottom: 10,
+        type: "scroll",
+      },
       tooltip: {
+        backgroundColor: "rgba(17, 16, 14, 0.92)",
+        borderWidth: 0,
+        textStyle: { color: "#fff" },
+        axisPointer: {
+          label: {
+            backgroundColor: "#2b2925",
+            color: "#fff",
+          },
+          lineStyle: {
+            color: "#8f8a82",
+            type: "dashed",
+            width: 1,
+          },
+          type: "cross",
+        },
+        confine: true,
         trigger: "axis",
         valueFormatter: (value: unknown) =>
-          mode === "main_flow" && typeof value === "number" ? formatCny(value) : String(value ?? "--"),
+          mode === "main_flow" && typeof value === "number" ? formatCny(value) : formatHeatValue(value),
       },
-      xAxis: { axisTick: { show: false }, data: times, type: "category" },
+      xAxis: {
+        axisLabel: {
+          color: "#7b756d",
+          hideOverlap: true,
+          interval: (_index: number, value: string) => isKeyTradingTime(value),
+        },
+        axisLine: { lineStyle: { color: "#cfc7ba" } },
+        axisTick: { show: false },
+        boundaryGap: false,
+        data: times,
+        type: "category",
+      },
       yAxis: {
         axisLabel: {
-          formatter: (value: number) => (mode === "main_flow" ? formatCompactNumber(value) : String(value)),
+          color: "#6f6a62",
+          formatter: (value: number) => (mode === "main_flow" ? formatCompactNumber(value) : formatHeatAxis(value)),
         },
-        splitLine: { lineStyle: { color: "#eee9df" } },
+        axisLine: { show: false },
+        axisTick: { show: false },
+        splitLine: { lineStyle: { color: "#ebe6dd", type: "solid" } },
+        splitNumber: 6,
         type: "value",
       },
-      series: series.map((item) => {
+      series: series.map((item, index) => {
         const pointByTime = new Map(item.points.map((point) => [point.time, point.value]));
         return {
           data: times.map((time) => pointByTime.get(time) ?? null),
+          emphasis: { focus: "series" },
+          connectNulls: true,
+          lineStyle: { width: index === 0 ? 1.9 : 1.45 },
+          markLine:
+            index === 0
+              ? {
+                  data: [{ name: "零轴", yAxis: 0 }],
+                  label: {
+                    color: "#8a4b12",
+                    formatter: "{b}",
+                    position: "end",
+                    show: true,
+                  },
+                  lineStyle: { color: "#8f8a82", type: "solid", width: 1 },
+                  silent: true,
+                  symbol: "none",
+                }
+              : undefined,
           name: item.name,
-          showSymbol: times.length < 12,
-          smooth: true,
+          showSymbol: false,
+          smooth: 0.12,
+          symbol: "circle",
+          symbolSize: 5,
           type: "line",
         };
       }),
     });
-    const resize = () => chart.resize();
-    window.addEventListener("resize", resize);
+    const resizeObserver = new ResizeObserver(() => chart.resize());
+    resizeObserver.observe(chartRef.current);
     return () => {
-      window.removeEventListener("resize", resize);
+      resizeObserver.disconnect();
       chart.dispose();
     };
   }, [hasData, mode, series]);
 
   if (!hasData) {
-    return <Empty className="py-12" description="暂无分时采样数据，刷新后开始积累曲线" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
+    return <Empty className="py-16" description="暂无分时采样数据，刷新后开始积累曲线" image={Empty.PRESENTED_IMAGE_SIMPLE} />;
   }
-  return <div className="h-[320px] w-full" ref={chartRef} />;
+  return (
+    <div>
+      {isIntradayUnavailable && (
+        <div className="mb-3 rounded-lg border border-[#fed7aa] bg-[#fff7ed] px-3 py-2 text-xs leading-5 text-[#8a4b12]">
+          <div className="font-black">TickFlow 分钟线暂不可用</div>
+          <div>
+            当前曲线使用快照采样兜底，可能暂时呈横线；分钟线恢复后会切回完整盘中曲线。{sourceStatus?.detail ? ` ${sourceStatus.detail}` : ""}
+          </div>
+        </div>
+      )}
+      {sampleCount < 4 && (
+        <div className="mb-3 rounded-lg border border-[#bfdbfe] bg-[#eff6ff] px-3 py-2 text-xs leading-5 text-[#1d4ed8]">
+          <div className="font-black">等待盘中采样积累</div>
+          <div>当前采样点偏少，曲线会随刷新和后台采样逐步变得更连续。</div>
+        </div>
+      )}
+      <div className="h-[520px] w-full" ref={chartRef} />
+    </div>
+  );
+}
+
+function isKeyTradingTime(value: string): boolean {
+  return ["09:30", "10:00", "10:30", "11:00", "11:30", "13:00", "13:30", "14:00", "14:30", "15:00"].includes(value);
 }
 
 function stockColumns({
@@ -402,6 +509,17 @@ function formatPct(value: number | null): string {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
 }
 
+function formatScore(value: number): string {
+  return value >= 100 ? value.toFixed(0) : value.toFixed(1);
+}
+
+function formatHeatValue(value: unknown): string {
+  if (typeof value !== "number") {
+    return String(value ?? "--");
+  }
+  return formatHeatAxis(value);
+}
+
 function formatCny(value: number | null): string {
   if (value === null) {
     return "--";
@@ -426,4 +544,13 @@ function formatCompactNumber(value: number): string {
     return `${(value / 10_000).toFixed(0)}万`;
   }
   return value.toFixed(0);
+}
+
+function formatHeatAxis(value: number): string {
+  const abs = Math.abs(value);
+  const sign = value < 0 ? "-" : "";
+  if (abs >= 10_000) {
+    return `${sign}${Math.round(abs).toLocaleString("zh-CN")}`;
+  }
+  return `${sign}${abs.toFixed(abs >= 100 ? 0 : 1)}`;
 }

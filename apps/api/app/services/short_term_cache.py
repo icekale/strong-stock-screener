@@ -45,6 +45,17 @@ class TtlCache(Generic[T]):
             self._items[key] = (monotonic() + self.ttl_seconds, value)
         return value
 
+    def get_if_fresh(self, key: str) -> T | None:
+        with self._lock:
+            now = monotonic()
+            cached = self._items.get(key)
+            if cached is None:
+                return None
+            expires_at, value = cached
+            if expires_at <= now:
+                return None
+            return value
+
     def clear(self) -> None:
         with self._lock:
             self._items.clear()

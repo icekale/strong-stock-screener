@@ -7,6 +7,7 @@ from datetime import datetime
 from threading import Thread
 from time import perf_counter
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -78,7 +79,7 @@ from app.services.auction_review import (
 )
 from app.services.auction_review_store import AuctionReviewStore
 from app.services.auction_sampler import AuctionSnapshotSampler
-from app.services.sector_workbench_sampler import SectorWorkbenchSampler
+from app.services.sector_workbench_sampler import SectorWorkbenchSampler, is_sector_workbench_sample_window
 from app.services.auction_snapshot_store import AuctionSnapshotStore
 from app.services.market_emotion_history import MarketEmotionHistoryStore
 from app.services.runs import RunStore
@@ -783,7 +784,7 @@ def get_sector_workbench(
     bounded_limit = max(1, min(limit, 50))
     bounded_stock_limit = max(1, min(stock_limit, 200))
     selected_names = [part.strip() for part in selected.split(",") if part.strip()]
-    sampled_at = datetime.now().astimezone()
+    sampled_at = _sector_now()
     try:
         rankings = _cached_market_rankings(100)
     except Exception:
@@ -880,7 +881,8 @@ def get_sector_workbench(
                 detail="本地分时曲线未就绪，已触发后台补齐；本次先返回当前快照",
             )
         )
-    store.append(snapshot_result, sample_source="snapshot")
+    if is_sector_workbench_sample_window(sampled_at):
+        store.append(snapshot_result, sample_source="snapshot")
     return result.model_dump(mode="json")
 
 
@@ -1348,6 +1350,10 @@ def _run_auction_snapshot_refresh_job(
 
 def _auction_now() -> datetime:
     return getattr(app.state, "auction_now", None) or datetime.now().astimezone()
+
+
+def _sector_now() -> datetime:
+    return getattr(app.state, "sector_now", None) or datetime.now(ZoneInfo("Asia/Shanghai"))
 
 
 def _sample_sector_workbench() -> None:

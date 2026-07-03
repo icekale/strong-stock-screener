@@ -536,6 +536,9 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(sectorsFeatureSource, /axisPointer/);
   assert.match(sectorsFeatureSource, /热度曲线/);
   assert.match(sectorsFeatureSource, /formatHeatValue/);
+  assert.match(sectorsFeatureSource, /buildTradingTimeAxis/);
+  assert.match(sectorsFeatureSource, /09:30/);
+  assert.match(sectorsFeatureSource, /15:00/);
   assert.match(sectorsFeatureSource, /connectNulls/);
   assert.match(sectorsFeatureSource, /ResizeObserver/);
   assert.match(sectorsFeatureSource, /零轴/);

@@ -291,7 +291,7 @@ function SectorIntradayChart({
       return;
     }
     const chart = echarts.init(chartRef.current);
-    const times = Array.from(new Set(series.flatMap((item) => item.points.map((point) => point.time)))).sort();
+    const times = buildTradingTimeAxis();
     chart.setOption({
       backgroundColor: "#fffdf8",
       animationDuration: 180,
@@ -415,6 +415,27 @@ function SectorIntradayChart({
 
 function isKeyTradingTime(value: string): boolean {
   return ["09:30", "10:00", "10:30", "11:00", "11:30", "13:00", "13:30", "14:00", "14:30", "15:00"].includes(value);
+}
+
+function buildTradingTimeAxis(): string[] {
+  return [...buildMinuteRange("09:30", "11:30"), ...buildMinuteRange("13:00", "15:00")];
+}
+
+function buildMinuteRange(start: string, end: string): string[] {
+  const output: string[] = [];
+  const startMinute = tradingMinuteValue(start);
+  const endMinute = tradingMinuteValue(end);
+  for (let minute = startMinute; minute <= endMinute; minute += 1) {
+    const hour = Math.floor(minute / 60);
+    const rest = minute % 60;
+    output.push(`${String(hour).padStart(2, "0")}:${String(rest).padStart(2, "0")}`);
+  }
+  return output;
+}
+
+function tradingMinuteValue(value: string): number {
+  const [hour, minute] = value.split(":").map((part) => Number.parseInt(part, 10));
+  return hour * 60 + minute;
 }
 
 function stockColumns({

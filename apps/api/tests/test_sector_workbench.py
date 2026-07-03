@@ -279,6 +279,55 @@ def test_sector_workbench_store_ignores_stale_heat_unit_samples(tmp_path: Path) 
     assert series == []
 
 
+def test_sector_workbench_store_ignores_after_hours_samples(tmp_path: Path) -> None:
+    store = SectorWorkbenchSampleStore(tmp_path)
+    (tmp_path / "2026-07-03.json").write_text(
+        """
+        {
+          "samples": [
+            {
+              "trade_date": "2026-07-03",
+              "schema_version": 4,
+              "mode": "strength",
+              "scope": "industry",
+              "name": "汽车零部件",
+              "metric": "strength",
+              "sample_source": "snapshot",
+              "time": "14:21",
+              "value": 369.75,
+              "sampled_at": "2026-07-03T14:21:15+08:00"
+            },
+            {
+              "trade_date": "2026-07-03",
+              "schema_version": 4,
+              "mode": "strength",
+              "scope": "industry",
+              "name": "汽车零部件",
+              "metric": "strength",
+              "sample_source": "snapshot",
+              "time": "19:31",
+              "value": 382.82,
+              "sampled_at": "2026-07-03T19:31:54+08:00"
+            }
+          ]
+        }
+        """,
+        encoding="utf-8",
+    )
+
+    series = store.series_for(
+        trade_date="2026-07-03",
+        mode="strength",
+        scope="industry",
+        selected=["汽车零部件"],
+        metric="strength",
+        sample_source="snapshot",
+    )
+
+    assert len(series) == 1
+    assert [(point.time, point.value) for point in series[0].points] == [("14:21", 369.75)]
+
+
 def test_sector_workbench_can_fall_back_to_sector_radar_without_rankings() -> None:
     response = build_sector_workbench_from_radar(
         radar=SectorRadarResponse(

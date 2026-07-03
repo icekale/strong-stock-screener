@@ -2,6 +2,7 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from threading import Event
 from time import sleep
+from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 
@@ -971,6 +972,8 @@ def _client(
         delattr(app.state, "sector_intraday_refreshing")
     if hasattr(app.state, "sector_intraday_async_refresh_disabled"):
         delattr(app.state, "sector_intraday_async_refresh_disabled")
+    if hasattr(app.state, "sector_now"):
+        delattr(app.state, "sector_now")
     app.state.watchlist_snapshot = WatchlistSnapshot(
         items=[WatchlistItem(symbol="002000.SZ", name="示例股份")]
     )
@@ -1916,10 +1919,23 @@ def test_sector_workbench_endpoint_does_not_block_on_intraday_refresh_when_histo
     )
 
 
+def test_sector_workbench_endpoint_does_not_persist_after_hours_snapshot_samples(tmp_path: Path) -> None:
+    client = _client(tmp_path, quote_provider=CountingIntradayQuoteProvider())
+    _seed_sector_theme_rows(tmp_path)
+    app.state.sector_intraday_async_refresh_disabled = True
+    app.state.sector_now = datetime(2026, 7, 3, 19, 31, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    response = client.get("/api/sectors/workbench?mode=strength&scope=auto&limit=5&stock_limit=10")
+
+    assert response.status_code == 200
+    assert not (tmp_path / "sectors" / "2026-07-03.json").exists()
+
+
 def test_sector_workbench_endpoint_caches_tickflow_intraday_history(tmp_path: Path) -> None:
     quote_provider = CountingIntradayQuoteProvider()
     client = _client(tmp_path, quote_provider=quote_provider)
     _seed_sector_theme_rows(tmp_path)
+    app.state.sector_now = datetime(2026, 7, 3, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
 
     first = client.get("/api/sectors/workbench?mode=strength&scope=auto&limit=5&stock_limit=10")
     second = client.get("/api/sectors/workbench?mode=strength&scope=auto&limit=5&stock_limit=10")
@@ -1933,6 +1949,7 @@ def test_sector_workbench_endpoint_caches_tickflow_intraday_failure(tmp_path: Pa
     quote_provider = FailingIntradayQuoteProvider()
     client = _client(tmp_path, quote_provider=quote_provider)
     _seed_sector_theme_rows(tmp_path)
+    app.state.sector_now = datetime(2026, 7, 3, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
 
     first = client.get("/api/sectors/workbench?mode=strength&scope=auto&limit=5&stock_limit=10")
     second = client.get("/api/sectors/workbench?mode=strength&scope=auto&limit=5&stock_limit=10")

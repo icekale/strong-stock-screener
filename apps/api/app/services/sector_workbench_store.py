@@ -143,12 +143,15 @@ class SectorWorkbenchSampleStore:
                     or sample.get("name") != name
                 ):
                     continue
+                time_text = str(sample.get("time") or "")
+                if not self._is_trading_time(time_text):
+                    continue
                 if sample_source is not None and not self._sample_source_matches(sample, sample_source):
                     continue
                 raw_points.append(
                     (
                         SectorWorkbenchPoint(
-                            time=str(sample.get("time") or ""),
+                            time=time_text,
                             value=float(sample.get("value") or 0),
                             sampled_at=str(sample.get("sampled_at") or ""),
                         ),
@@ -222,6 +225,21 @@ class SectorWorkbenchSampleStore:
         if expected == "snapshot":
             return actual in {"", "snapshot"}
         return actual == expected
+
+    @staticmethod
+    def _is_trading_time(value: str) -> bool:
+        parts = value.split(":")
+        if len(parts) < 2:
+            return False
+        try:
+            hour = int(parts[0])
+            minute = int(parts[1])
+        except ValueError:
+            return False
+        seconds = hour * 3600 + minute * 60
+        morning = (9 * 3600 + 30 * 60) <= seconds <= (11 * 3600 + 30 * 60)
+        afternoon = (13 * 3600) <= seconds <= (15 * 3600)
+        return morning or afternoon
 
     def _write(self, path: Path, payload: dict[str, Any]) -> None:
         self.base_dir.mkdir(parents=True, exist_ok=True)

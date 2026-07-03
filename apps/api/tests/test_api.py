@@ -1799,6 +1799,7 @@ def test_sector_radar_falls_back_to_tickflow_industry_aggregation_when_primary_s
 def test_sector_workbench_endpoint_returns_theme_mode_and_source_status(tmp_path: Path) -> None:
     client = _client(tmp_path)
     _seed_sector_theme_rows(tmp_path)
+    app.state.sector_now = datetime(2026, 7, 3, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
 
     response = client.get("/api/sectors/workbench?mode=strength&scope=auto&limit=5&stock_limit=10")
 
@@ -1928,6 +1929,12 @@ def test_sector_workbench_endpoint_does_not_persist_after_hours_snapshot_samples
     response = client.get("/api/sectors/workbench?mode=strength&scope=auto&limit=5&stock_limit=10")
 
     assert response.status_code == 200
+    assert [
+        point["time"]
+        for series in response.json()["series"]
+        for point in series["points"]
+        if point["time"] == "19:31"
+    ] == []
     assert not (tmp_path / "sectors" / "2026-07-03.json").exists()
 
 

@@ -830,6 +830,7 @@ def get_sector_workbench(
         metric=result.mode,
         sample_source="snapshot",
     )
+    is_trading_sample_time = is_sector_workbench_sample_window(sampled_at)
     theme_snapshot_pending = any(
         item.source == "题材快照" and item.status == "stale"
         for item in result.source_status
@@ -865,6 +866,8 @@ def get_sector_workbench(
                 )
             )
     elif theme_snapshot_pending:
+        if not is_trading_sample_time:
+            result.series = []
         result.source_status.append(
             StrongStockSourceStatus(
                 source="TickFlow 当日分钟线",
@@ -874,14 +877,20 @@ def get_sector_workbench(
         )
     else:
         _schedule_sector_intraday_refresh(result)
+        if not is_trading_sample_time:
+            result.series = []
         result.source_status.append(
             StrongStockSourceStatus(
                 source="TickFlow 当日分钟线",
                 status="stale",
-                detail="本地分时曲线未就绪，已触发后台补齐；本次先返回当前快照",
+                detail=(
+                    "本地分时曲线未就绪，已触发后台补齐；本次先返回当前快照"
+                    if is_trading_sample_time
+                    else "本地分时曲线未就绪，已触发后台补齐；当前不在交易时段，暂不返回盘后快照点"
+                ),
             )
         )
-    if is_sector_workbench_sample_window(sampled_at):
+    if is_trading_sample_time:
         store.append(snapshot_result, sample_source="snapshot")
     return result.model_dump(mode="json")
 

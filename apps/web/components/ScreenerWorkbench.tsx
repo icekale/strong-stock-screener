@@ -4,7 +4,7 @@ import { Alert, App } from "antd";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import type { ReactNode, SyntheticEvent } from "react";
 import type {
   BackgroundJobState,
   DataSourceStatusResponse,
@@ -58,6 +58,7 @@ type ScreenerWorkbenchProps = {
   calibrationSummary: GsgfRealCalibrationSummary | null;
   calibrationJob: BackgroundJobState | null;
   gsgfHealth: GsgfModelHealth | null;
+  diagnosticsLoading: boolean;
   running: boolean;
   screenJob: ScreenRunJobState | null;
   reviewRunning: boolean;
@@ -84,6 +85,7 @@ type ScreenerWorkbenchProps = {
     count: number;
   }) => void;
   onCancelGsgfCalibration: () => void;
+  onLoadDiagnostics: () => void;
   onRecheckGsgfReview: () => void;
   onRefreshSources: () => void;
   onSaveGsgfReviewSnapshot: () => void;
@@ -100,6 +102,7 @@ export function ScreenerWorkbench({
   calibrationSummary,
   calibrationJob,
   gsgfHealth,
+  diagnosticsLoading,
   running,
   screenJob,
   reviewRunning,
@@ -121,6 +124,7 @@ export function ScreenerWorkbench({
   onRun,
   onRunGsgfCalibration,
   onCancelGsgfCalibration,
+  onLoadDiagnostics,
   onRecheckGsgfReview,
   onRefreshSources,
   onSaveGsgfReviewSnapshot,
@@ -205,7 +209,7 @@ export function ScreenerWorkbench({
 
         <HomepageMarketSupportPanel sectorRadar={sectorRadar} />
 
-        <HomepageDiagnosticsPanel>
+        <HomepageDiagnosticsPanel diagnosticsLoading={diagnosticsLoading} onLoadDiagnostics={onLoadDiagnostics}>
           <GsgfReviewPanel
             gsgfHealth={gsgfHealth}
             onRecheck={onRecheckGsgfReview}
@@ -300,10 +304,28 @@ function HomepageMarketSupportPanel({ sectorRadar }: { sectorRadar: SectorRadarR
   );
 }
 
-function HomepageDiagnosticsPanel({ children }: { children: ReactNode }) {
+function HomepageDiagnosticsPanel({
+  children,
+  diagnosticsLoading,
+  onLoadDiagnostics,
+}: {
+  children: ReactNode;
+  diagnosticsLoading: boolean;
+  onLoadDiagnostics: () => void;
+}) {
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
+
+  function handleToggle(event: SyntheticEvent<HTMLDetailsElement>) {
+    const isOpen = event.currentTarget.open;
+    setDiagnosticsOpen(isOpen);
+    if (isOpen) {
+      onLoadDiagnostics();
+    }
+  }
+
   return (
     <section className="mt-4">
-      <details className="rounded-xl border border-[#ddd8d0] bg-[#f8f7f4]">
+      <details className="rounded-xl border border-[#ddd8d0] bg-[#f8f7f4]" onToggle={handleToggle}>
         <summary className="cursor-pointer list-none px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -313,11 +335,17 @@ function HomepageDiagnosticsPanel({ children }: { children: ReactNode }) {
               </p>
             </div>
             <span className="rounded-full border border-[#ddd8d0] bg-white px-3 py-1 text-xs font-bold text-[#7b756d]">
-              展开诊断
+              {diagnosticsLoading ? "正在加载" : diagnosticsOpen ? "收起诊断" : "展开诊断"}
             </span>
           </div>
         </summary>
-        <div className="border-t border-[#ddd8d0] px-4 pb-4">{children}</div>
+        <div className="border-t border-[#ddd8d0] px-4 pb-4">
+          {diagnosticsOpen ? (
+            children
+          ) : (
+            <p className="mt-4 text-sm font-medium text-[#7b756d]">展开后加载模型诊断数据。</p>
+          )}
+        </div>
       </details>
     </section>
   );

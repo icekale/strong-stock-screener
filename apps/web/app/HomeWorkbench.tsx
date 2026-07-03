@@ -60,6 +60,8 @@ export function HomeWorkbench() {
   const [calibrationRunning, setCalibrationRunning] = useState(false);
   const [calibrationJob, setCalibrationJob] = useState<BackgroundJobState | null>(null);
   const [gsgfHealth, setGsgfHealth] = useState<GsgfModelHealth | null>(null);
+  const [diagnosticsLoaded, setDiagnosticsLoaded] = useState(false);
+  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [screenJob, setScreenJob] = useState<ScreenRunJobState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -74,7 +76,6 @@ export function HomeWorkbench() {
     void refreshSectorRadar();
     void refreshSentimentSummary();
     void refreshLatest();
-    void refreshGsgfLatest();
     void refreshWatchlistPool();
 
     return () => {
@@ -138,6 +139,19 @@ export function HomeWorkbench() {
     setReviewSummary(latestReview);
     setCalibrationSummary(latestCalibration);
     setGsgfHealth(latestHealth);
+  }
+
+  async function handleLoadDiagnostics() {
+    if (diagnosticsLoaded || diagnosticsLoading) {
+      return;
+    }
+    setDiagnosticsLoading(true);
+    try {
+      await refreshGsgfLatest();
+      setDiagnosticsLoaded(true);
+    } finally {
+      setDiagnosticsLoading(false);
+    }
   }
 
   async function refreshWatchlistPool() {
@@ -359,6 +373,7 @@ export function HomeWorkbench() {
       calibrationJob={calibrationJob}
       calibrationRunning={calibrationRunning}
       calibrationSummary={calibrationSummary}
+      diagnosticsLoading={diagnosticsLoading}
       error={error}
       gsgfHealth={gsgfHealth}
       intraday={intraday}
@@ -369,6 +384,7 @@ export function HomeWorkbench() {
       onRun={() => void handleRun()}
       onRunGsgfCalibration={(options) => void handleRunGsgfCalibration(options)}
       onCancelGsgfCalibration={() => void handleCancelGsgfCalibration()}
+      onLoadDiagnostics={() => void handleLoadDiagnostics()}
       onRecheckGsgfReview={() => void handleRecheckGsgfReview()}
       onAddToWatchlist={(item, group, tags) => void handleAddToWatchlist(item, group, tags)}
       onAddManyToWatchlist={(items, group, tags) => void handleAddManyToWatchlist(items, group, tags)}

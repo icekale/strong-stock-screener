@@ -429,6 +429,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(homeFeatureSource, /createGsgfCalibrationJob/);
   assert.match(homeFeatureSource, /handleRunGsgfCalibration/);
   assert.match(homeFeatureSource, /refreshGsgfLatest/);
+  assert.match(homeWorkspaceSource, /handleLoadDiagnostics/);
+  assert.doesNotMatch(homeWorkspaceSource, /void refreshGsgfLatest\(\);/);
   assert.match(homeFeatureSource, /calibrationJob/);
   assert.match(gsgfPanelsSource, /校准任务/);
   assert.match(gsgfPanelsSource, /模型健康/);
@@ -508,6 +510,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(screenerFeatureSource, /grid items-stretch gap-4 xl:grid-cols-\[minmax\(0,2fr\)_minmax\(360px,1fr\)\]/);
   assert.match(componentSource, /HomepageDiagnosticsPanel/);
   assert.match(componentSource, /模型诊断/);
+  assert.match(componentSource, /onLoadDiagnostics/);
+  assert.match(componentSource, /diagnosticsOpen/);
   assert.match(componentSource, /overflow-x-auto max-w-full/);
   assert.match(screenerFeatureSource, /grid gap-4 md:grid-cols-2 xl:grid-cols-4/);
   assert.doesNotMatch(screenerFeatureSource, /xl:grid-cols-\[280px_minmax\(0,1fr\)_320px\]/);

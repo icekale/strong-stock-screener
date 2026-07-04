@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from app.config import get_settings
 from app.models import (
     AuctionBackfillResponse,
+    AuctionModelTop3Response,
     AuctionReviewSummary,
     AuctionSnapshotResponse,
     AuctionTimelineResponse,
@@ -75,6 +76,12 @@ from app.services.gsgf_real_calibration import summarize_gsgf_real_calibration
 from app.services.gsgf_review import GsgfReviewStore
 from app.services.gsgf_trade_plan import build_gsgf_trade_plan
 from app.services.auction import build_auction_snapshot
+from app.services.auction_model import (
+    AuctionModelDataError,
+    AuctionModelResultStore,
+    AuctionModelService,
+    FreeStockDbAuctionModelSource,
+)
 from app.services.auction_review import (
     build_auction_review_records,
     build_auction_rule_buckets,
@@ -718,6 +725,30 @@ def get_latest_auction_snapshot(limit: int = 100) -> dict[str, object]:
 def get_auction_timeline(limit: int = 8) -> dict[str, object]:
     bounded_limit = max(1, min(limit, 20))
     result: AuctionTimelineResponse = _auction_snapshot_store().timeline(limit=bounded_limit)
+    return result.model_dump(mode="json")
+
+
+@app.get("/api/auction/model/top3")
+def get_auction_model_top3(
+    trade_date: str,
+    refresh: bool = False,
+    cache_only: bool = False,
+) -> dict[str, object]:
+    try:
+        datetime.strptime(trade_date, "%Y-%m-%d")
+        store = _auction_model_result_store()
+        if not refresh:
+            cached = store.load_top3(trade_date)
+            if cached is not None:
+                return cached.model_dump(mode="json")
+            if cache_only:
+                raise HTTPException(status_code=404, detail="暂无缓存的竞价模型Top3结果")
+        result: AuctionModelTop3Response = _auction_model_service().predict_top3(trade_date)
+        store.save_top3(result)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="trade_date must use YYYY-MM-DD") from exc
+    except (FileNotFoundError, AuctionModelDataError) as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     return result.model_dump(mode="json")
 
 
@@ -1467,6 +1498,33 @@ def _refresh_market_rankings(limit: int) -> MarketRankingsResponse:
     if not hasattr(provider, "get_market_rankings"):
         raise StrongStockDataUnavailable("当前市场概览源不支持全A实时排行榜")
     return provider.get_market_rankings(limit=limit).model_copy(deep=True)
+
+
+def _auction_model_service() -> AuctionModelService:
+    injected = getattr(app.state, "auction_model_service", None)
+    if injected is not None:
+        return injected
+    settings = get_settings()
+    return AuctionModelService(
+        source=FreeStockDbAuctionModelSource(
+            base_url=settings.auction_model_free_stockdb_base_url,
+            timeout_seconds=settings.auction_model_timeout_seconds,
+        ),
+        model_path=Path(settings.auction_model_model_path),
+        metadata_path=Path(settings.auction_model_metadata_path),
+        performance_path=Path(settings.auction_model_performance_path),
+        lookback=settings.auction_model_lookback,
+        top_n=settings.auction_model_top_n,
+        max_items=settings.auction_model_max_items,
+    )
+
+
+def _auction_model_result_store() -> AuctionModelResultStore:
+    injected = getattr(app.state, "auction_model_result_store", None)
+    if injected is not None:
+        return injected
+    data_dir = Path(getattr(app.state, "runs_dir", get_settings().data_dir))
+    return AuctionModelResultStore(data_dir)
 
 
 def _cached_auction_snapshot(limit: int) -> AuctionSnapshotResponse:

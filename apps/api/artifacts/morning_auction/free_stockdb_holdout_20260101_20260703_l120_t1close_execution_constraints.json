@@ -1,0 +1,346 @@
+{
+  "period": [
+    "2026-01-01",
+    "2026-07-03"
+  ],
+  "rows_seen": 589872,
+  "top_n": 3,
+  "return_key": "t1_close_return",
+  "round_trip_cost_bps": 25.0,
+  "base_metrics": {
+    "top_n": 3,
+    "return_key": "t1_close_return",
+    "round_trip_cost_bps": 0.0,
+    "skip_open_limit_up": false,
+    "skipped_open_limit_up_count": 0,
+    "trade_days": 118,
+    "selected_count": 354,
+    "average_return": 0.015656,
+    "hit_3pct_rate": 0.409605,
+    "hit_5pct_rate": 0.327684,
+    "win_rate": 0.531073,
+    "loss_rate": 0.457627,
+    "avg_win": 0.072604,
+    "avg_loss": 0.050045,
+    "payoff_ratio": 1.450764,
+    "profit_factor": 1.683603,
+    "breakeven_win_rate": 0.408036,
+    "expectancy": 0.015656
+  },
+  "strict_metrics": {
+    "top_n": 3,
+    "return_key": "t1_close_return",
+    "round_trip_cost_bps": 25.0,
+    "skip_open_limit_up": true,
+    "skipped_open_limit_up_count": 84,
+    "trade_days": 118,
+    "selected_count": 354,
+    "average_return": 0.007281,
+    "hit_3pct_rate": 0.344633,
+    "hit_5pct_rate": 0.234463,
+    "win_rate": 0.485876,
+    "loss_rate": 0.514124,
+    "avg_win": 0.064257,
+    "avg_loss": 0.046566,
+    "payoff_ratio": 1.379937,
+    "profit_factor": 1.304116,
+    "breakeven_win_rate": 0.420179,
+    "expectancy": 0.007281
+  },
+  "base_capital_curves": {
+    "research_daily_compound": {
+      "initial": 1000000.0,
+      "final": 5414426.3,
+      "return_pct": 441.4426,
+      "trade_days_used": 118
+    },
+    "single_account_non_overlapping": {
+      "initial": 1000000.0,
+      "final": 2423088.9,
+      "return_pct": 142.3089,
+      "trade_days_used": 59
+    },
+    "two_sleeve_rolling_cash": {
+      "initial": 1000000.0,
+      "final": 2328801.5,
+      "return_pct": 132.8801,
+      "trade_days_used": 118
+    },
+    "positive_day_rate_pct": 61.8644,
+    "average_daily_return_pct": 1.5656,
+    "best_day_pct": 16.2526,
+    "worst_day_pct": -11.8275
+  },
+  "strict_capital_curves": {
+    "research_daily_compound": {
+      "initial": 1000000.0,
+      "final": 2055616.4,
+      "return_pct": 105.5616,
+      "trade_days_used": 118
+    },
+    "single_account_non_overlapping": {
+      "initial": 1000000.0,
+      "final": 1306823.33,
+      "return_pct": 30.6823,
+      "trade_days_used": 59
+    },
+    "two_sleeve_rolling_cash": {
+      "initial": 1000000.0,
+      "final": 1439905.28,
+      "return_pct": 43.9905,
+      "trade_days_used": 118
+    },
+    "positive_day_rate_pct": 55.0847,
+    "average_daily_return_pct": 0.7281,
+    "best_day_pct": 16.5814,
+    "worst_day_pct": -11.0934
+  },
+  "strict_first_trade_date": "2026-01-05",
+  "strict_last_trade_date": "2026-07-02",
+  "strict_first_day_picks": [
+    {
+      "trade_date": "2026-01-05",
+      "symbol": "688656.SH",
+      "name": "浩欧博",
+      "prob_3pct": 0.8247185029572984,
+      "t1_close_return": 0.021472,
+      "open_price": 154.62,
+      "prev_close_price": 153.8,
+      "adjusted_return": 0.018972000000000003
+    },
+    {
+      "trade_date": "2026-01-05",
+      "symbol": "002347.SZ",
+      "name": "泰尔股份",
+      "prob_3pct": 0.7888852565787323,
+      "t1_close_return": 0.017437,
+      "open_price": 13.19,
+      "prev_close_price": 12.38,
+      "adjusted_return": 0.014937
+    },
+    {
+      "trade_date": "2026-01-05",
+      "symbol": "300062.SZ",
+      "name": "中能电气",
+      "prob_3pct": 0.7565603785610037,
+      "t1_close_return": 0.060498,
+      "open_price": 8.43,
+      "prev_close_price": 8.33,
+      "adjusted_return": 0.057998
+    }
+  ],
+  "strict_last_day_picks": [
+    {
+      "trade_date": "2026-07-02",
+      "symbol": "603159.SH",
+      "name": "上海亚虹",
+      "prob_3pct": 0.9322994127614705,
+      "t1_close_return": -0.036997,
+      "open_price": 18.38,
+      "prev_close_price": 18.38,
+      "adjusted_return": -0.039497000000000004
+    },
+    {
+      "trade_date": "2026-07-02",
+      "symbol": "603042.SH",
+      "name": "华脉科技",
+      "prob_3pct": 0.9150166613118698,
+      "t1_close_return": -0.026412,
+      "open_price": 13.63,
+      "prev_close_price": 13.92,
+      "adjusted_return": -0.028912
+    },
+    {
+      "trade_date": "2026-07-02",
+      "symbol": "603040.SH",
+      "name": "新坐标",
+      "prob_3pct": 0.9129826367861095,
+      "t1_close_return": -0.004028,
+      "open_price": 72.0,
+      "prev_close_price": 69.38,
+      "adjusted_return": -0.006528000000000001
+    }
+  ],
+  "skipped_open_limit_up_examples": [
+    {
+      "trade_date": "2026-01-05",
+      "symbol": "002931.SZ",
+      "name": "锋龙股份",
+      "prob_3pct": 0.8431791951864268,
+      "t1_close_return": 0.100086,
+      "open_price": 34.87,
+      "prev_close_price": 31.7
+    },
+    {
+      "trade_date": "2026-01-05",
+      "symbol": "002718.SZ",
+      "name": "友邦吊顶",
+      "prob_3pct": 0.8101140946246111,
+      "t1_close_return": 0.099924,
+      "open_price": 39.53,
+      "prev_close_price": 35.94
+    },
+    {
+      "trade_date": "2026-01-05",
+      "symbol": "603608.SH",
+      "name": "天创时尚",
+      "prob_3pct": 0.7642282452259056,
+      "t1_close_return": -0.157988,
+      "open_price": 11.33,
+      "prev_close_price": 10.3
+    },
+    {
+      "trade_date": "2026-01-06",
+      "symbol": "002931.SZ",
+      "name": "锋龙股份",
+      "prob_3pct": 0.8550323432474435,
+      "t1_close_return": 0.100104,
+      "open_price": 38.36,
+      "prev_close_price": 34.87
+    },
+    {
+      "trade_date": "2026-01-07",
+      "symbol": "002931.SZ",
+      "name": "锋龙股份",
+      "prob_3pct": 0.8836942361610903,
+      "t1_close_return": 0.1,
+      "open_price": 42.2,
+      "prev_close_price": 38.36
+    },
+    {
+      "trade_date": "2026-01-07",
+      "symbol": "600337.SH",
+      "name": "美克家居",
+      "prob_3pct": 0.8778593432023557,
+      "t1_close_return": 0.100515,
+      "open_price": 3.88,
+      "prev_close_price": 3.53
+    },
+    {
+      "trade_date": "2026-01-07",
+      "symbol": "301363.SZ",
+      "name": "美好医疗",
+      "prob_3pct": 0.8302058050480756,
+      "t1_close_return": 0.024543,
+      "open_price": 41.56,
+      "prev_close_price": 34.63
+    },
+    {
+      "trade_date": "2026-01-07",
+      "symbol": "600775.SH",
+      "name": "南京熊猫",
+      "prob_3pct": 0.8285954056280284,
+      "t1_close_return": 0.100246,
+      "open_price": 16.26,
+      "prev_close_price": 14.78
+    },
+    {
+      "trade_date": "2026-01-07",
+      "symbol": "002173.SZ",
+      "name": "创新医疗",
+      "prob_3pct": 0.8275318551727988,
+      "t1_close_return": 0.099895,
+      "open_price": 28.63,
+      "prev_close_price": 26.03
+    },
+    {
+      "trade_date": "2026-01-07",
+      "symbol": "002195.SZ",
+      "name": "岩山科技",
+      "prob_3pct": 0.8234591960149775,
+      "t1_close_return": 0.099576,
+      "open_price": 9.44,
+      "prev_close_price": 8.58
+    },
+    {
+      "trade_date": "2026-01-08",
+      "symbol": "600783.SH",
+      "name": "鲁信创投",
+      "prob_3pct": 0.8686195129314696,
+      "t1_close_return": 0.099899,
+      "open_price": 29.63,
+      "prev_close_price": 26.94
+    },
+    {
+      "trade_date": "2026-01-08",
+      "symbol": "002931.SZ",
+      "name": "锋龙股份",
+      "prob_3pct": 0.85647813878354,
+      "t1_close_return": 0.099957,
+      "open_price": 46.42,
+      "prev_close_price": 42.2
+    },
+    {
+      "trade_date": "2026-01-08",
+      "symbol": "600337.SH",
+      "name": "美克家居",
+      "prob_3pct": 0.8465695277515625,
+      "t1_close_return": -0.100703,
+      "open_price": 4.27,
+      "prev_close_price": 3.88
+    },
+    {
+      "trade_date": "2026-01-08",
+      "symbol": "002519.SZ",
+      "name": "银河电子",
+      "prob_3pct": 0.8199019419834694,
+      "t1_close_return": 0.100211,
+      "open_price": 9.48,
+      "prev_close_price": 8.62
+    },
+    {
+      "trade_date": "2026-01-09",
+      "symbol": "600783.SH",
+      "name": "鲁信创投",
+      "prob_3pct": 0.8892118298176838,
+      "t1_close_return": 0.100031,
+      "open_price": 32.59,
+      "prev_close_price": 29.63
+    },
+    {
+      "trade_date": "2026-01-09",
+      "symbol": "603938.SH",
+      "name": "三孚股份",
+      "prob_3pct": 0.8308438744693447,
+      "t1_close_return": 0.050633,
+      "open_price": 25.28,
+      "prev_close_price": 22.98
+    },
+    {
+      "trade_date": "2026-01-09",
+      "symbol": "603015.SH",
+      "name": "弘讯科技",
+      "prob_3pct": 0.8269310214025389,
+      "t1_close_return": 0.099942,
+      "open_price": 17.11,
+      "prev_close_price": 15.55
+    },
+    {
+      "trade_date": "2026-01-09",
+      "symbol": "601106.SH",
+      "name": "中国一重",
+      "prob_3pct": 0.7838795556890518,
+      "t1_close_return": 0.099815,
+      "open_price": 5.41,
+      "prev_close_price": 4.92
+    },
+    {
+      "trade_date": "2026-01-09",
+      "symbol": "600869.SH",
+      "name": "远东股份",
+      "prob_3pct": 0.7820651110050453,
+      "t1_close_return": -0.093256,
+      "open_price": 12.01,
+      "prev_close_price": 10.92
+    },
+    {
+      "trade_date": "2026-01-09",
+      "symbol": "002931.SZ",
+      "name": "锋龙股份",
+      "prob_3pct": 0.778100216783939,
+      "t1_close_return": 0.100078,
+      "open_price": 51.06,
+      "prev_close_price": 46.42
+    }
+  ]
+}

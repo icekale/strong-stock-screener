@@ -12,6 +12,7 @@ services:
       - "3110:3110"
     volumes:
       - ./data:/app/data
+    restart: unless-stopped
     logging:
       driver: json-file
       options:

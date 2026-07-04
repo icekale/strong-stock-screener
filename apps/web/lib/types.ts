@@ -374,6 +374,55 @@ export type AuctionTimelineResponse = {
   generated_at: string;
 };
 
+export type AuctionModelBucket = "selected" | "attack" | "watch" | "avoid";
+export type AuctionModelCacheStatus = "generated" | "cached";
+
+export type AuctionModelPredictionItem = {
+  symbol: string;
+  name: string;
+  prob_3pct: number;
+  bucket: AuctionModelBucket;
+  rank: number | null;
+  prev_close_price: number | null;
+  market_cap_float: number | null;
+  avg_amount_3d: number | null;
+  feature_end_date: string | null;
+  guard_rule: string | null;
+  strategy_note: string | null;
+  trend_reasons: string[];
+  risk_flags: string[];
+  data_quality: string[];
+};
+
+export type AuctionModelBacktestSummary = {
+  period: string[];
+  sample_count: number;
+  win_rate: number | null;
+  avg_win: number | null;
+  avg_loss: number | null;
+  payoff_ratio: number | null;
+  profit_factor: number | null;
+  expectancy: number | null;
+  average_return: number | null;
+  breakeven_win_rate: number | null;
+  capital_return_pct: number | null;
+};
+
+export type AuctionModelTop3Response = {
+  run_id: string;
+  trade_date: string;
+  feature_end_date: string;
+  model_version: string;
+  feature_version: string;
+  guard_rule: string;
+  mode: string;
+  cache_status: AuctionModelCacheStatus;
+  backtest: AuctionModelBacktestSummary | null;
+  items: AuctionModelPredictionItem[];
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
 export type AuctionReviewSnapshot = {
   open_gap_pct: number | null;
   current_pct_change: number | null;

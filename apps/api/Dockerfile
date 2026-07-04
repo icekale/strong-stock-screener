@@ -11,6 +11,7 @@ WORKDIR /app
 
 COPY pyproject.toml ./
 COPY app ./app
+COPY artifacts ./artifacts
 RUN python -m pip install --no-cache-dir setuptools wheel pydantic-core==2.46.4
 RUN python -m pip install --no-cache-dir --no-build-isolation .
 

@@ -2,6 +2,7 @@ import type {
   AuctionReviewSummary,
   AuctionSnapshotResponse,
   AuctionTimelineResponse,
+  AuctionModelTop3Response,
   BackgroundJobState,
   DataSourceStatusResponse,
   GsgfAnalysis,
@@ -125,6 +126,24 @@ export async function getAuctionTimeline(limit = 8): Promise<AuctionTimelineResp
     throw new Error(`读取竞价时间轴失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<AuctionTimelineResponse>;
+}
+
+export async function getAuctionModelTop3(
+  tradeDate: string,
+  options: { cacheOnly?: boolean; refresh?: boolean } = {},
+): Promise<AuctionModelTop3Response> {
+  const params = new URLSearchParams({ trade_date: tradeDate });
+  if (options.cacheOnly) {
+    params.set("cache_only", "true");
+  }
+  if (options.refresh) {
+    params.set("refresh", "true");
+  }
+  const response = await fetch(`${API_BASE_URL}/api/auction/model/top3?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取竞价模型Top3失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<AuctionModelTop3Response>;
 }
 
 export async function getAuctionReviewLatest(): Promise<AuctionReviewSummary> {

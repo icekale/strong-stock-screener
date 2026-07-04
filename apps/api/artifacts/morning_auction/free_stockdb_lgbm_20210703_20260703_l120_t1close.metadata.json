@@ -1,0 +1,31 @@
+{
+  "model_version": "morning_auction_v1",
+  "feature_version": "morning_auction_features_v1",
+  "feature_names": [
+    "amount_ratio_3d",
+    "auction_amount_ratio",
+    "auction_data_available",
+    "auction_return",
+    "auction_volume_ratio",
+    "bid_ask_imbalance",
+    "capital_strength",
+    "close_vs_ma10",
+    "close_vs_ma20",
+    "close_vs_ma5",
+    "market_cap_float",
+    "new_high_60d",
+    "prev_return",
+    "prev_turnover",
+    "return_3d",
+    "return_5d",
+    "risk_score",
+    "sector_strength",
+    "unmatched_buy_ratio",
+    "volume_ratio_3d"
+  ],
+  "train_date_range": [
+    "2021-07-03",
+    "2026-07-03"
+  ],
+  "label_key": "t1_close_label"
+}

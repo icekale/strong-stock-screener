@@ -57,3 +57,21 @@ test("stock detail context can return to the sector workbench", () => {
     returnLabel: "返回题材工作台",
   });
 });
+
+test("stock detail context can return to the auction model panel", () => {
+  assert.equal(
+    buildStockDetailHref("300001.SZ", {
+      from: "auction-model",
+      name: "模型一号",
+    }),
+    "/stock/300001.SZ?from=auction-model&name=%E6%A8%A1%E5%9E%8B%E4%B8%80%E5%8F%B7",
+  );
+
+  assert.deepEqual(resolveStockDetailContext(new URLSearchParams("from=auction-model")), {
+    from: "auction-model",
+    industry: null,
+    name: null,
+    returnHref: "/auction",
+    returnLabel: "返回竞价模型",
+  });
+});

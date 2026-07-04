@@ -38,6 +38,8 @@ SentimentTradePermission = Literal["空仓等待", "轻仓试错", "强势进攻
 SentimentRiskLevel = Literal["低", "中", "高"]
 SentimentWatchlistAction = Literal["重点盯", "等确认", "风险回避"]
 BackgroundJobStatus = Literal["pending", "running", "success", "failed", "canceled"]
+AuctionModelBucket = Literal["selected", "attack", "watch", "avoid"]
+AuctionModelCacheStatus = Literal["generated", "cached"]
 AuctionReviewStatus = Literal["pending", "intraday_done", "day_done", "next_day_done", "data_incomplete"]
 
 
@@ -574,6 +576,54 @@ class AuctionTimelinePoint(BaseModel):
 
 class AuctionTimelineResponse(BaseModel):
     points: list[AuctionTimelinePoint] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
+class AuctionModelPredictionItem(BaseModel):
+    symbol: str
+    name: str = ""
+    prob_3pct: float
+    bucket: AuctionModelBucket = "watch"
+    rank: int | None = None
+    prev_close_price: float | None = None
+    market_cap_float: float | None = None
+    avg_amount_3d: float | None = None
+    feature_end_date: str | None = None
+    guard_rule: str | None = None
+    strategy_note: str | None = None
+    trend_reasons: list[str] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    data_quality: list[str] = Field(default_factory=list)
+
+
+class AuctionModelBacktestSummary(BaseModel):
+    period: list[str] = Field(default_factory=list)
+    sample_count: int = 0
+    win_rate: float | None = None
+    avg_win: float | None = None
+    avg_loss: float | None = None
+    payoff_ratio: float | None = None
+    profit_factor: float | None = None
+    expectancy: float | None = None
+    average_return: float | None = None
+    breakeven_win_rate: float | None = None
+    capital_return_pct: float | None = None
+
+
+class AuctionModelTop3Response(BaseModel):
+    run_id: str = Field(default_factory=lambda: datetime.now().astimezone().strftime("%Y%m%d%H%M%S%f"))
+    trade_date: str
+    feature_end_date: str
+    model_version: str
+    feature_version: str
+    guard_rule: str
+    mode: str = "research_live_signal"
+    cache_status: AuctionModelCacheStatus = "generated"
+    backtest: AuctionModelBacktestSummary | None = None
+    items: list[AuctionModelPredictionItem] = Field(default_factory=list)
     source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
     generated_at: str = Field(
         default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")

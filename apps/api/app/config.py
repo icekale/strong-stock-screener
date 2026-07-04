@@ -35,6 +35,26 @@ class Settings(BaseSettings):
     market_emotion_history_retention_days: int = Field(default=30, ge=1, le=365)
     market_emotion_samples_per_day: int = Field(default=360, ge=1, le=2000)
     auction_review_retention_days: int = Field(default=120, ge=1, le=365)
+    auction_model_free_stockdb_base_url: str = "http://192.168.5.221:7899"
+    auction_model_model_path: Path = (
+        Path("./artifacts/morning_auction/free_stockdb_lgbm_20210703_20260703_l120_t1close.pkl")
+    )
+    auction_model_metadata_path: Path = (
+        Path(
+            "./artifacts/morning_auction/"
+            "free_stockdb_lgbm_20210703_20260703_l120_t1close.metadata.json"
+        )
+    )
+    auction_model_performance_path: Path = (
+        Path(
+            "./artifacts/morning_auction/"
+            "free_stockdb_holdout_20260101_20260703_l120_t1close_execution_constraints.json"
+        )
+    )
+    auction_model_lookback: int = Field(default=120, ge=20, le=260)
+    auction_model_top_n: int = Field(default=3, ge=1, le=10)
+    auction_model_max_items: int = Field(default=50, ge=3, le=200)
+    auction_model_timeout_seconds: float = Field(default=180, ge=5, le=300)
 
     model_config = SettingsConfigDict(
         env_prefix="STRONG_STOCK_",

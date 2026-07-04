@@ -88,6 +88,7 @@ RUN apt-get update \
 COPY --from=node:22-slim /usr/local/bin/node /usr/local/bin/node
 COPY --from=api-builder /opt/strong-stock-api-venv /opt/strong-stock-api-venv
 COPY apps/api/app ./api/app
+COPY apps/api/artifacts ./api/artifacts
 COPY --from=web-builder /build/web/.next/standalone ./web
 COPY --from=web-builder /build/web/.next/static ./web/.next/static
 COPY scripts/start-single-container.sh ./start-single-container.sh

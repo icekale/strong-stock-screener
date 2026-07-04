@@ -1,7 +1,7 @@
 "use client";
 
-import { ReloadOutlined } from "@ant-design/icons";
-import { Alert, App, Button, Collapse, Empty, InputNumber, Progress, Segmented, Select, Table, Tag, Typography } from "antd";
+import { ExperimentOutlined, ReloadOutlined } from "@ant-design/icons";
+import { Alert, App, Button, Collapse, Empty, Input, InputNumber, Progress, Segmented, Select, Table, Tag, Typography } from "antd";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -9,12 +9,19 @@ import {
   createAuctionSnapshotJob,
   finalizeAuctionReview,
   getAuctionLatest,
+  getAuctionModelTop3,
   getAuctionReviewLatest,
   getAuctionRuleSummary,
   getAuctionSnapshotJob,
   getAuctionTimeline,
 } from "../../lib/api";
 import { selectAuctionFocusIndustryItems, selectAuctionHotIndustryItems } from "../../lib/auctionIndustryFilters";
+import {
+  auctionModelBucketLabel,
+  auctionModelCacheStatusLabel,
+  auctionModelRunStatusText,
+  selectAuctionModelPreviewItems,
+} from "../../lib/auctionModel";
 import { selectAuctionMainlineTopItems, selectAuctionRiskFocusItems } from "../../lib/auctionPanelLimits";
 import {
   AUCTION_SORT_OPTIONS,
@@ -28,6 +35,8 @@ import type {
   AuctionReviewRecord,
   AuctionReviewSummary,
   AuctionRuleBucket,
+  AuctionModelPredictionItem,
+  AuctionModelTop3Response,
   AuctionSnapshotItem,
   AuctionSnapshotResponse,
   AuctionTimelineResponse,
@@ -35,6 +44,7 @@ import type {
 } from "../../lib/types";
 
 type AuctionTierFilter = "all" | AuctionSnapshotItem["tier"];
+type AuctionModelLoadingMode = "cache" | "refresh";
 type IndustryAuctionStat = {
   avgOpenGapPct: number | null;
   count: number;
@@ -68,6 +78,11 @@ export function AuctionWorkspace() {
   const [auctionSortMode, setAuctionSortMode] = useState<AuctionSortMode>("score");
   const [highOpenRiskThreshold, setHighOpenRiskThreshold] = useState(7);
   const [watchlistSavingSymbol, setWatchlistSavingSymbol] = useState<string | null>(null);
+  const [modelTradeDate, setModelTradeDate] = useState(() => nextWeekdayDate());
+  const [modelRun, setModelRun] = useState<AuctionModelTop3Response | null>(null);
+  const [modelLoadingMode, setModelLoadingMode] = useState<AuctionModelLoadingMode | null>(null);
+  const [modelError, setModelError] = useState<string | null>(null);
+  const [modelSavingSymbol, setModelSavingSymbol] = useState<string | null>(null);
   const refreshPromiseRef = useRef<Promise<void> | null>(null);
 
   const loadTimeline = useCallback(async () => {
@@ -172,6 +187,26 @@ export function AuctionWorkspace() {
     void loadReview();
   }, [loadReview]);
 
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const cached = await getAuctionModelTop3(modelTradeDate, { cacheOnly: true });
+        if (active) {
+          setModelRun(cached);
+          setModelError(null);
+        }
+      } catch {
+        if (active) {
+          setModelRun(null);
+        }
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [modelTradeDate]);
+
   const observationItems = useMemo(
     () =>
       (data?.items ?? [])
@@ -216,6 +251,58 @@ export function AuctionWorkspace() {
       setError(err instanceof Error ? err.message : "加入自选股失败");
     } finally {
       setWatchlistSavingSymbol(null);
+    }
+  }
+
+  async function handleLoadCachedAuctionModel() {
+    setModelLoadingMode("cache");
+    setModelError(null);
+    try {
+      const run = await getAuctionModelTop3(modelTradeDate, { cacheOnly: true });
+      setModelRun(run);
+      void message.success(`已读取竞价模型Top3缓存：${run.trade_date}`);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "读取竞价模型Top3缓存失败";
+      setModelError(errorMessage);
+      void message.warning(errorMessage);
+    } finally {
+      setModelLoadingMode(null);
+    }
+  }
+
+  async function handleRefreshAuctionModel() {
+    setModelLoadingMode("refresh");
+    setModelError(null);
+    try {
+      const run = await getAuctionModelTop3(modelTradeDate, { refresh: true });
+      setModelRun(run);
+      void message.success(`竞价模型Top3已重新生成：${run.trade_date}`);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "重新生成竞价模型Top3失败";
+      setModelError(errorMessage);
+      void message.error(errorMessage);
+    } finally {
+      setModelLoadingMode(null);
+    }
+  }
+
+  async function handleAddModelToWatchlist(item: AuctionModelPredictionItem) {
+    setModelSavingSymbol(item.symbol);
+    setError(null);
+    try {
+      await addWatchlistPoolItem({
+        symbol: item.symbol,
+        name: item.name,
+        industry: null,
+        group: "竞价模型Top3",
+        tags: ["竞价模型", auctionModelBucketLabel(item.bucket), item.feature_end_date || "日K特征"],
+        note: buildAuctionModelWatchlistNote(item, modelRun),
+      });
+      void message.success(`已加入自选：${item.name || item.symbol}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "加入自选股失败");
+    } finally {
+      setModelSavingSymbol(null);
     }
   }
 
@@ -285,6 +372,17 @@ export function AuctionWorkspace() {
           <MetricCard compact label="候选成交额" value={data?.metrics.total_turnover_cny ?? null} formatter={formatCny} />
         </div>
         <AuctionTrustStrip data={data} />
+        <AuctionModelTrialPanel
+          error={modelError}
+          loadingMode={modelLoadingMode}
+          onAddToWatchlist={handleAddModelToWatchlist}
+          onLoadCached={handleLoadCachedAuctionModel}
+          onRefresh={handleRefreshAuctionModel}
+          onTradeDateChange={setModelTradeDate}
+          run={modelRun}
+          savingSymbol={modelSavingSymbol}
+          tradeDate={modelTradeDate}
+        />
       </section>
 
       {error && <Alert className="mb-4" showIcon title={error} type="error" />}
@@ -389,6 +487,179 @@ export function AuctionWorkspace() {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function AuctionModelTrialPanel({
+  error,
+  loadingMode,
+  onAddToWatchlist,
+  onLoadCached,
+  onRefresh,
+  onTradeDateChange,
+  run,
+  savingSymbol,
+  tradeDate,
+}: {
+  error: string | null;
+  loadingMode: AuctionModelLoadingMode | null;
+  onAddToWatchlist: (item: AuctionModelPredictionItem) => void;
+  onLoadCached: () => void;
+  onRefresh: () => void;
+  onTradeDateChange: (value: string) => void;
+  run: AuctionModelTop3Response | null;
+  savingSymbol: string | null;
+  tradeDate: string;
+}) {
+  const previewItems = useMemo(() => selectAuctionModelPreviewItems(run?.items ?? []), [run]);
+  const backtest = run?.backtest ?? null;
+  const statusText =
+    loadingMode === "refresh"
+      ? "重新生成中 · 构建全市场120日特征"
+      : loadingMode === "cache"
+        ? "读取缓存中"
+        : auctionModelRunStatusText(run);
+  const shouldShowBody = Boolean(error || loadingMode || run);
+  return (
+    <section className="mt-2 overflow-hidden rounded-lg border border-[#e3ddd3] bg-white">
+      <div className="flex flex-col gap-2 px-3 py-2.5 xl:flex-row xl:items-center xl:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-black text-[#11100e]">模型 Top3 试运行</span>
+            <Tag color="orange">研究信号 · 非自动交易</Tag>
+          </div>
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#7b756d]">
+            <span>{statusText}</span>
+            <span>{run?.model_version ?? "free-stockdb 五年模型"}</span>
+            {run ? <span>{auctionModelCacheStatusLabel(run.cache_status)} · 生成 {formatAuctionModelGeneratedAt(run.generated_at)}</span> : null}
+            <span>{run?.guard_rule ?? "09:25确认，10:00守卫"}</span>
+          </div>
+        </div>
+        <div className="grid grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-2 xl:shrink-0">
+          <Input
+            className="min-w-0 xl:w-[160px]"
+            onChange={(event) => onTradeDateChange(event.target.value)}
+            size="small"
+            type="date"
+            value={tradeDate}
+          />
+          <Button
+            className="whitespace-nowrap"
+            disabled={!tradeDate || loadingMode === "refresh"}
+            icon={<ReloadOutlined />}
+            loading={loadingMode === "cache"}
+            onClick={onLoadCached}
+            size="small"
+            type="primary"
+          >
+            读取缓存
+          </Button>
+          <Button
+            className="whitespace-nowrap"
+            disabled={!tradeDate || loadingMode === "cache"}
+            icon={<ExperimentOutlined />}
+            loading={loadingMode === "refresh"}
+            onClick={onRefresh}
+            size="small"
+          >
+            重新生成
+          </Button>
+        </div>
+      </div>
+
+      {shouldShowBody ? (
+        <div className="min-w-0 border-t border-[#eee7db] px-3 py-2">
+          {error ? <Alert className="mb-2" showIcon title={error} type="warning" /> : null}
+          {loadingMode ? (
+            <div className="rounded-md border border-dashed border-[#e3ddd3] bg-[#faf7f1] px-3 py-2 text-xs font-semibold text-[#7b756d]">
+              {loadingMode === "refresh" ? "正在构建全市场120日特征，通常需要约1-2分钟。" : "正在读取本地缓存结果。"}
+            </div>
+          ) : previewItems.length ? (
+            <>
+              {backtest ? (
+                <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="rounded-md bg-[#faf7f1] px-2 py-1 text-[#7b756d]">
+                    历史胜率 <b className="text-[#11100e]">{formatRatioPct(backtest.win_rate)}</b>
+                  </span>
+                  <span className="rounded-md bg-[#fff3f0] px-2 py-1 text-[#7b756d]">
+                    赔率 <b className="text-[#d92d20]">{formatNumber(backtest.payoff_ratio)}</b>
+                  </span>
+                  <span className="rounded-md bg-[#fff3f0] px-2 py-1 text-[#7b756d]">
+                    期望收益 <b className="text-[#d92d20]">{formatSignedRatioPct(backtest.expectancy)}</b>
+                  </span>
+                  <span className="rounded-md bg-[#faf7f1] px-2 py-1 text-[#7b756d]">
+                    单账户回测 <b className="text-[#11100e]">{formatRawPct(backtest.capital_return_pct)}</b>
+                  </span>
+                </div>
+              ) : null}
+              <div className="grid gap-2 lg:grid-cols-3">
+                {previewItems.map((item) => (
+                  <div className="rounded-lg border border-[#e3ddd3] bg-[#faf7f1] px-3 py-2" key={item.symbol}>
+                    <div className="flex items-start justify-between gap-2">
+                      <Link className="min-w-0 font-black text-[#11100e]" href={modelStockHref(item)}>
+                        <span className="block truncate">{item.name || item.symbol}</span>
+                        <span className="block text-xs font-semibold text-[#7b756d]">{item.symbol}</span>
+                      </Link>
+                      <Tag className="m-0 shrink-0" color={auctionModelBucketColor(item.bucket)}>
+                        {auctionModelBucketLabel(item.bucket)}
+                      </Tag>
+                    </div>
+                    <div className="mt-1 flex flex-wrap items-center gap-1 text-xs">
+                      <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">排名 #{item.rank ?? "--"}</span>
+                      <span className="rounded-md bg-[#fff3f0] px-2 py-1 font-black text-[#d92d20]">
+                        概率 {formatProbability(item.prob_3pct)}
+                      </span>
+                      <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">前收 {formatPrice(item.prev_close_price)}</span>
+                      <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">
+                        流通 {formatCny(item.market_cap_float)}
+                      </span>
+                      <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">
+                        3日均额 {formatCny(item.avg_amount_3d)}
+                      </span>
+                    </div>
+                    {item.risk_flags.length ? (
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {item.risk_flags.map((flag) => (
+                          <Tag className="m-0" color="orange" key={flag}>
+                            {flag}
+                          </Tag>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="mt-1 truncate text-xs leading-5 text-[#7b756d]">
+                      {(item.trend_reasons.length ? item.trend_reasons : item.data_quality).join(" · ") || "--"}
+                    </div>
+                    <div className="mt-1 flex justify-end">
+                      <Button
+                        loading={savingSymbol === item.symbol}
+                        onClick={() => onAddToWatchlist(item)}
+                        size="small"
+                        type="link"
+                      >
+                        加入自选
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <div className="rounded-md border border-dashed border-[#e3ddd3] bg-[#faf7f1] px-3 py-2 text-xs text-[#7b756d]">
+              暂无可展示候选，请确认训练数据和交易日。
+            </div>
+          )}
+          {run?.source_status.length ? (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {run.source_status.map((item) => (
+                <Tag color={item.status === "success" ? "green" : item.status === "stale" ? "orange" : "default"} key={item.source}>
+                  {item.source}
+                </Tag>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+    </section>
+  );
 }
 
 function AuctionTrustStrip({ data }: { data: AuctionSnapshotResponse | null }) {
@@ -1163,6 +1434,19 @@ function tierColor(value: AuctionSnapshotItem["tier"]): string {
   return "default";
 }
 
+function auctionModelBucketColor(value: AuctionModelPredictionItem["bucket"]): string {
+  if (value === "selected") {
+    return "red";
+  }
+  if (value === "attack") {
+    return "orange";
+  }
+  if (value === "watch") {
+    return "blue";
+  }
+  return "default";
+}
+
 function sessionLabel(value: string | null | undefined): string {
   if (value === "call_auction") {
     return "集合竞价中";
@@ -1240,6 +1524,51 @@ function formatNumber(value: number | null | undefined): string {
     return "--";
   }
   return value.toFixed(1);
+}
+
+function formatRatioPct(value: number | null): string {
+  if (value === null) {
+    return "--";
+  }
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatSignedRatioPct(value: number | null): string {
+  if (value === null) {
+    return "--";
+  }
+  const pct = value * 100;
+  return `${pct > 0 ? "+" : ""}${pct.toFixed(2)}%`;
+}
+
+function formatRawPct(value: number | null): string {
+  if (value === null) {
+    return "--";
+  }
+  return `${value > 0 ? "+" : ""}${value.toFixed(1)}%`;
+}
+
+function formatProbability(value: number): string {
+  return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatPrice(value: number | null): string {
+  if (value === null) {
+    return "--";
+  }
+  return value.toFixed(2);
+}
+
+function formatAuctionModelGeneratedAt(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${mm}-${dd} ${hh}:${min}`;
 }
 
 function formatCny(value: number | null): string {
@@ -1340,10 +1669,33 @@ function buildAuctionWatchlistNote(item: AuctionSnapshotItem): string {
   ].join("；");
 }
 
+function buildAuctionModelWatchlistNote(
+  item: AuctionModelPredictionItem,
+  run: AuctionModelTop3Response | null,
+): string {
+  return [
+    "来源：竞价模型Top3",
+    `目标日期：${run?.trade_date ?? "--"}`,
+    `特征日：${item.feature_end_date || run?.feature_end_date || "--"}`,
+    `概率：${formatProbability(item.prob_3pct)}`,
+    `分组：${auctionModelBucketLabel(item.bucket)}`,
+    `前收：${formatPrice(item.prev_close_price)}`,
+    `守卫：${item.guard_rule || run?.guard_rule || "--"}`,
+    "说明：研究信号，实盘需结合09:25竞价和10:00守卫确认",
+  ].join("；");
+}
+
 function auctionStockHref(item: { industry?: string | null; name?: string | null; symbol: string }): string {
   return buildStockDetailHref(item.symbol, {
     from: "auction",
     industry: item.industry,
+    name: item.name,
+  });
+}
+
+function modelStockHref(item: { name?: string | null; symbol: string }): string {
+  return buildStockDetailHref(item.symbol, {
+    from: "auction-model",
     name: item.name,
   });
 }
@@ -1353,5 +1705,19 @@ function todayDate(): string {
   const yyyy = now.getFullYear();
   const mm = String(now.getMonth() + 1).padStart(2, "0");
   const dd = String(now.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function nextWeekdayDate(): string {
+  const date = new Date();
+  const day = date.getDay();
+  if (day === 6) {
+    date.setDate(date.getDate() + 2);
+  } else if (day === 0) {
+    date.setDate(date.getDate() + 1);
+  }
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
   return `${yyyy}-${mm}-${dd}`;
 }

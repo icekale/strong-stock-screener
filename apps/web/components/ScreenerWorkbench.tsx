@@ -4,13 +4,9 @@ import { Alert, App } from "antd";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import type { ReactNode, SyntheticEvent } from "react";
+import type { SyntheticEvent } from "react";
 import type {
-  BackgroundJobState,
   DataSourceStatusResponse,
-  GsgfModelHealth,
-  GsgfRealCalibrationSummary,
-  GsgfReviewSummary,
   MarketOverviewResponse,
   ScreenRunFilters,
   ScreenRunJobState,
@@ -23,8 +19,6 @@ import type {
   WatchlistPoolItem,
 } from "../lib/types";
 import { FilterLogicRail } from "./screener/FilterLogicRail";
-import { GsgfFunnelPanel } from "./screener/GsgfFunnelPanel";
-import type { GsgfCalibrationPanelProps, GsgfReviewPanelProps } from "./screener/GsgfWorkflowPanels";
 import { MarketOverviewPanels, SectorFlowHeatmapPanel, SectorStrengthPanel } from "./screener/MarketOverviewPanels";
 import { buildMarketDashboardStats, sourceSummary } from "./screener/screenerUtils";
 
@@ -36,16 +30,6 @@ const CandidateResults = dynamic(
   },
 );
 
-const GsgfReviewPanel = dynamic(
-  () => import("./screener/GsgfWorkflowPanels").then((module) => module.GsgfReviewPanel),
-  { ssr: false },
-);
-
-const GsgfCalibrationPanel = dynamic(
-  () => import("./screener/GsgfWorkflowPanels").then((module) => module.GsgfCalibrationPanel),
-  { ssr: false },
-);
-
 type ScreenerWorkbenchProps = {
   tradeDate: string;
   sources: DataSourceStatusResponse | null;
@@ -55,15 +39,8 @@ type ScreenerWorkbenchProps = {
   marketSupportLoading: boolean;
   sectorRadar: SectorRadarResponse | null;
   sentimentSummary: SentimentSummaryResponse | null;
-  reviewSummary: GsgfReviewSummary | null;
-  calibrationSummary: GsgfRealCalibrationSummary | null;
-  calibrationJob: BackgroundJobState | null;
-  gsgfHealth: GsgfModelHealth | null;
-  diagnosticsLoading: boolean;
   running: boolean;
   screenJob: ScreenRunJobState | null;
-  reviewRunning: boolean;
-  calibrationRunning: boolean;
   watchlistPoolItems: WatchlistPoolItem[];
   watchlistMessage: string | null;
   strategy: ScreenStrategy;
@@ -79,18 +56,8 @@ type ScreenerWorkbenchProps = {
   onAddToWatchlist: (item: StrongStockScreeningItem, group: string, tags: string[]) => void;
   onAddManyToWatchlist: (items: StrongStockScreeningItem[], group: string, tags: string[]) => void;
   onRun: () => void;
-  onRunGsgfCalibration: (options: {
-    tradeDatesText: string;
-    windowsText: string;
-    scanLimit: number;
-    count: number;
-  }) => void;
-  onCancelGsgfCalibration: () => void;
   onLoadMarketSupport: () => void;
-  onLoadDiagnostics: () => void;
-  onRecheckGsgfReview: () => void;
   onRefreshSources: () => void;
-  onSaveGsgfReviewSnapshot: () => void;
 };
 
 export function ScreenerWorkbench({
@@ -101,15 +68,8 @@ export function ScreenerWorkbench({
   marketSupportLoading,
   sectorRadar,
   sentimentSummary,
-  reviewSummary,
-  calibrationSummary,
-  calibrationJob,
-  gsgfHealth,
-  diagnosticsLoading,
   running,
   screenJob,
-  reviewRunning,
-  calibrationRunning,
   watchlistPoolItems,
   watchlistMessage,
   strategy,
@@ -125,13 +85,8 @@ export function ScreenerWorkbench({
   onAddToWatchlist,
   onAddManyToWatchlist,
   onRun,
-  onRunGsgfCalibration,
-  onCancelGsgfCalibration,
   onLoadMarketSupport,
-  onLoadDiagnostics,
-  onRecheckGsgfReview,
   onRefreshSources,
-  onSaveGsgfReviewSnapshot,
 }: ScreenerWorkbenchProps) {
   const candidates = result?.items ?? [];
   const { message } = App.useApp();
@@ -217,31 +172,7 @@ export function ScreenerWorkbench({
           sectorRadar={sectorRadar}
         />
 
-        <HomepageDiagnosticsPanel diagnosticsLoading={diagnosticsLoading} onLoadDiagnostics={onLoadDiagnostics}>
-          <GsgfReviewPanel
-            gsgfHealth={gsgfHealth}
-            onRecheck={onRecheckGsgfReview}
-            onSaveSnapshot={onSaveGsgfReviewSnapshot}
-            reviewRunning={reviewRunning}
-            reviewSummary={reviewSummary}
-          />
-
-          <GsgfCalibrationPanel
-            calibrationJob={calibrationJob}
-            calibrationRunning={calibrationRunning}
-            calibrationSummary={calibrationSummary}
-            defaultTradeDate={tradeDate}
-            onCancelCalibration={onCancelGsgfCalibration}
-            onRunCalibration={onRunGsgfCalibration}
-          />
-
-          <GsgfFunnelPanel
-            onAddToWatchlist={onAddToWatchlist}
-            result={result}
-            running={running}
-            watchlistPoolItems={watchlistPoolItems}
-          />
-        </HomepageDiagnosticsPanel>
+        <HomepageModelMaintenancePanel />
       </div>
 
       <div className="border-t border-[#ddd8d0] bg-[#f5f3f0] px-5 py-3 text-xs text-[#7b756d]">
@@ -334,49 +265,25 @@ function HomepageMarketSupportPanel({
   );
 }
 
-function HomepageDiagnosticsPanel({
-  children,
-  diagnosticsLoading,
-  onLoadDiagnostics,
-}: {
-  children: ReactNode;
-  diagnosticsLoading: boolean;
-  onLoadDiagnostics: () => void;
-}) {
-  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
-
-  function handleToggle(event: SyntheticEvent<HTMLDetailsElement>) {
-    const isOpen = event.currentTarget.open;
-    setDiagnosticsOpen(isOpen);
-    if (isOpen) {
-      onLoadDiagnostics();
-    }
-  }
-
+function HomepageModelMaintenancePanel() {
   return (
     <section className="mt-4">
-      <details className="rounded-xl border border-[#ddd8d0] bg-[#f8f7f4]" onToggle={handleToggle}>
-        <summary className="cursor-pointer list-none px-4 py-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h2 className="text-base font-black text-[#11100e]">模型诊断</h2>
-              <p className="mt-1 text-xs font-medium text-[#7b756d]">
-                信号复盘、真实样本校准和漏斗诊断用于校验模型，不打断日常选股主流程。
-              </p>
-            </div>
-            <span className="rounded-full border border-[#ddd8d0] bg-white px-3 py-1 text-xs font-bold text-[#7b756d]">
-              {diagnosticsLoading ? "正在加载" : diagnosticsOpen ? "收起诊断" : "展开诊断"}
-            </span>
+      <div className="rounded-xl border border-[#ddd8d0] bg-[#f8f7f4] px-4 py-3">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-base font-black text-[#11100e]">AI 模型维护</h2>
+            <p className="mt-1 text-xs font-medium text-[#7b756d]">
+              复盘样本、校准结果和数据源状态集中到独立页面，由 AI 生成待确认维护建议。
+            </p>
           </div>
-        </summary>
-        <div className="border-t border-[#ddd8d0] px-4 pb-4">
-          {diagnosticsOpen ? (
-            children
-          ) : (
-            <p className="mt-4 text-sm font-medium text-[#7b756d]">展开后加载模型诊断数据。</p>
-          )}
+          <Link
+            className="inline-flex items-center justify-center rounded-md border border-[#11100e] bg-[#11100e] px-3 py-2 text-xs font-black text-white no-underline hover:bg-[#34312d]"
+            href="/model-maintenance"
+          >
+            查看模型维护
+          </Link>
         </div>
-      </details>
+      </div>
     </section>
   );
 }

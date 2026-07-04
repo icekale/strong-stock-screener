@@ -3,6 +3,7 @@
 import {
   BarChartOutlined,
   DatabaseOutlined,
+  ExperimentOutlined,
   FolderOpenOutlined,
   FundProjectionScreenOutlined,
   ThunderboltOutlined,
@@ -57,6 +58,13 @@ const NAV_ITEMS: NavItem[] = [
     icon: <ThunderboltOutlined />,
     label: "情绪",
     title: "短线情绪",
+  },
+  {
+    href: "/model-maintenance",
+    key: "/model-maintenance",
+    icon: <ExperimentOutlined />,
+    label: "模型",
+    title: "模型维护",
   },
   {
     href: "/settings",
@@ -168,6 +176,9 @@ function selectedNavKey(pathname: string): string {
   }
   if (pathname.startsWith("/sentiment")) {
     return "/sentiment";
+  }
+  if (pathname.startsWith("/model-maintenance")) {
+    return "/model-maintenance";
   }
   if (pathname.startsWith("/settings")) {
     return "/settings";

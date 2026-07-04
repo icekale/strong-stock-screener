@@ -41,6 +41,31 @@ BackgroundJobStatus = Literal["pending", "running", "success", "failed", "cancel
 AuctionModelBucket = Literal["selected", "attack", "watch", "avoid"]
 AuctionModelCacheStatus = Literal["generated", "cached"]
 AuctionReviewStatus = Literal["pending", "intraday_done", "day_done", "next_day_done", "data_incomplete"]
+ModelMaintenanceProvider = Literal["openai", "deepseek", "openai_compatible"]
+ModelMaintenanceHealthStatus = Literal[
+    "normal",
+    "watch",
+    "degraded",
+    "insufficient_sample",
+    "data_unreliable",
+]
+ModelMaintenanceRuleStatus = Literal[
+    "effective",
+    "neutral",
+    "over_strict",
+    "under_strict",
+    "degraded",
+    "insufficient_sample",
+]
+ModelMaintenanceSuggestionType = Literal[
+    "observe",
+    "adjust_weight",
+    "loosen_filter",
+    "tighten_filter",
+    "disable_rule_temporarily",
+    "data_check",
+]
+ModelMaintenanceSuggestionStatus = Literal["pending", "accepted", "ignored", "snoozed"]
 
 
 class GsgfScoreBreakdown(BaseModel):
@@ -446,6 +471,60 @@ class GsgfModelHealth(BaseModel):
     last_review_at: str | None = None
     last_calibration_at: str | None = None
     summary_text: str = "仅供复盘与模型校准，不构成投资建议。"
+
+
+class ModelMaintenanceSuggestion(BaseModel):
+    suggestion_id: str
+    type: ModelMaintenanceSuggestionType = "observe"
+    title: str
+    reason: str
+    evidence_refs: list[str] = Field(default_factory=list)
+    risk: str = "仅供模型维护参考，不构成投资建议。"
+    confidence: float = Field(default=0, ge=0, le=1)
+    suggested_action: str = "观察，不自动调整。"
+    status: ModelMaintenanceSuggestionStatus = "pending"
+
+
+class ModelMaintenanceRuleDiagnostic(BaseModel):
+    rule_name: str
+    status: ModelMaintenanceRuleStatus = "neutral"
+    evidence: list[str] = Field(default_factory=list)
+    confidence: float = Field(default=0, ge=0, le=1)
+
+
+class ModelMaintenancePacket(BaseModel):
+    packet_id: str
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+    trade_date: str | None = None
+    model_name: str = "gsgf"
+    model_version: str | None = None
+    screen_strategy: str | None = None
+    screen_params: dict[str, Any] = Field(default_factory=dict)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    latest_screen_run: dict[str, Any] = Field(default_factory=dict)
+    review_summary: dict[str, Any] = Field(default_factory=dict)
+    calibration_summary: dict[str, Any] = Field(default_factory=dict)
+    false_negative_cases: list[dict[str, Any]] = Field(default_factory=list)
+    false_positive_cases: list[dict[str, Any]] = Field(default_factory=list)
+    data_quality_notes: list[str] = Field(default_factory=list)
+
+
+class ModelMaintenanceReport(BaseModel):
+    report_id: str
+    packet_id: str
+    provider: ModelMaintenanceProvider = "openai_compatible"
+    model: str
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+    health_status: ModelMaintenanceHealthStatus = "insufficient_sample"
+    summary: str
+    key_findings: list[str] = Field(default_factory=list)
+    rule_diagnostics: list[ModelMaintenanceRuleDiagnostic] = Field(default_factory=list)
+    suggestions: list[ModelMaintenanceSuggestion] = Field(default_factory=list)
+    disclaimer: str = "仅供模型复盘与参数维护参考，不构成投资建议。"
 
 
 class MarketTurnoverSummary(BaseModel):

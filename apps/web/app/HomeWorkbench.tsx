@@ -4,29 +4,17 @@ import { useEffect, useRef, useState } from "react";
 import { ScreenerWorkbench } from "../components/ScreenerWorkbench";
 import {
   addWatchlistPoolItem,
-  cancelGsgfCalibrationJob,
-  createGsgfCalibrationJob,
   createScreenRunJob,
   getDataSourceStatus,
-  getGsgfCalibrationJob,
-  getGsgfModelHealth,
-  getLatestGsgfCalibration,
-  getLatestGsgfReview,
   getLatestScreenRun,
   getMarketOverview,
   getScreenRunJob,
   getSectorRadar,
   getSentimentSummary,
   getWatchlistPool,
-  recheckGsgfReview,
-  saveLatestGsgfReviewSnapshot,
 } from "../lib/api";
 import type {
-  BackgroundJobState,
   DataSourceStatusResponse,
-  GsgfModelHealth,
-  GsgfRealCalibrationSummary,
-  GsgfReviewSummary,
   MarketOverviewResponse,
   ScreenRunFilters,
   ScreenRunJobState,
@@ -54,22 +42,13 @@ export function HomeWorkbench() {
   const [screenFilters, setScreenFilters] = useState<ScreenRunFilters>({});
   const [screenFiltersSaved, setScreenFiltersSaved] = useState(false);
   const [watchlistPoolItems, setWatchlistPoolItems] = useState<WatchlistPoolItem[]>([]);
-  const [reviewSummary, setReviewSummary] = useState<GsgfReviewSummary | null>(null);
-  const [reviewRunning, setReviewRunning] = useState(false);
-  const [calibrationSummary, setCalibrationSummary] = useState<GsgfRealCalibrationSummary | null>(null);
-  const [calibrationRunning, setCalibrationRunning] = useState(false);
-  const [calibrationJob, setCalibrationJob] = useState<BackgroundJobState | null>(null);
-  const [gsgfHealth, setGsgfHealth] = useState<GsgfModelHealth | null>(null);
   const [marketSupportLoaded, setMarketSupportLoaded] = useState(false);
   const [marketSupportLoading, setMarketSupportLoading] = useState(false);
-  const [diagnosticsLoaded, setDiagnosticsLoaded] = useState(false);
-  const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
   const [running, setRunning] = useState(false);
   const [screenJob, setScreenJob] = useState<ScreenRunJobState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [watchlistMessage, setWatchlistMessage] = useState<string | null>(null);
   const screenRunPollerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const calibrationPollerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setScreenFilters(loadSavedScreenFilters());
@@ -82,9 +61,6 @@ export function HomeWorkbench() {
     return () => {
       if (screenRunPollerRef.current) {
         clearTimeout(screenRunPollerRef.current);
-      }
-      if (calibrationPollerRef.current) {
-        clearTimeout(calibrationPollerRef.current);
       }
     };
   }, []);
@@ -141,30 +117,6 @@ export function HomeWorkbench() {
       setResult(await getLatestScreenRun());
     } catch {
       setResult(null);
-    }
-  }
-
-  async function refreshGsgfLatest() {
-    const [latestReview, latestCalibration, latestHealth] = await Promise.all([
-      getLatestGsgfReview().catch(() => null),
-      getLatestGsgfCalibration().catch(() => null),
-      getGsgfModelHealth().catch(() => null),
-    ]);
-    setReviewSummary(latestReview);
-    setCalibrationSummary(latestCalibration);
-    setGsgfHealth(latestHealth);
-  }
-
-  async function handleLoadDiagnostics() {
-    if (diagnosticsLoaded || diagnosticsLoading) {
-      return;
-    }
-    setDiagnosticsLoading(true);
-    try {
-      await refreshGsgfLatest();
-      setDiagnosticsLoaded(true);
-    } finally {
-      setDiagnosticsLoading(false);
     }
   }
 
@@ -285,111 +237,9 @@ export function HomeWorkbench() {
     }
   }
 
-  async function handleSaveGsgfReviewSnapshot() {
-    setReviewRunning(true);
-    setError(null);
-    try {
-      await saveLatestGsgfReviewSnapshot();
-      setReviewSummary(await recheckGsgfReview({ windows: [1, 3, 5, 10], count: 180 }));
-      setGsgfHealth(await getGsgfModelHealth().catch(() => null));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "保存股是股非复盘快照失败");
-    } finally {
-      setReviewRunning(false);
-    }
-  }
-
-  async function handleRecheckGsgfReview() {
-    setReviewRunning(true);
-    setError(null);
-    try {
-      setReviewSummary(await recheckGsgfReview({ windows: [1, 3, 5, 10], count: 180 }));
-      setGsgfHealth(await getGsgfModelHealth().catch(() => null));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "复查股是股非信号失败");
-    } finally {
-      setReviewRunning(false);
-    }
-  }
-
-  async function handleRunGsgfCalibration(options: {
-    tradeDatesText: string;
-    windowsText: string;
-    scanLimit: number;
-    count: number;
-  }) {
-    const tradeDates = splitInputList(options.tradeDatesText || tradeDate);
-    if (tradeDates.length === 0) {
-      setError("请输入至少一个校准样本日");
-      return;
-    }
-    setCalibrationRunning(true);
-    setError(null);
-    try {
-      const job = await createGsgfCalibrationJob({
-        tradeDates,
-        windows: splitNumberList(options.windowsText, [1, 3, 5, 10]),
-        scanLimit: options.scanLimit,
-        count: options.count,
-      });
-      setCalibrationJob(job);
-      pollGsgfCalibrationJob(job.job_id);
-    } catch (err) {
-      setCalibrationRunning(false);
-      setError(err instanceof Error ? err.message : "运行股是股非真实样本校准失败");
-    }
-  }
-
-  async function handleCancelGsgfCalibration() {
-    if (!calibrationJob) {
-      return;
-    }
-    try {
-      setCalibrationJob(await cancelGsgfCalibrationJob(calibrationJob.job_id));
-      setCalibrationRunning(false);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "取消股是股非校准任务失败");
-    }
-  }
-
-  function pollGsgfCalibrationJob(jobId: string) {
-    if (calibrationPollerRef.current) {
-      clearTimeout(calibrationPollerRef.current);
-    }
-    calibrationPollerRef.current = setTimeout(() => {
-      void (async () => {
-        try {
-          const job = await getGsgfCalibrationJob(jobId);
-          setCalibrationJob(job);
-          if (job.status === "success") {
-            setCalibrationRunning(false);
-            await refreshGsgfLatest();
-            return;
-          }
-          if (job.status === "failed" || job.status === "canceled") {
-            setCalibrationRunning(false);
-            if (job.error) {
-              setError(job.error);
-            }
-            return;
-          }
-          pollGsgfCalibrationJob(jobId);
-        } catch (err) {
-          setCalibrationRunning(false);
-          setError(err instanceof Error ? err.message : "读取股是股非校准任务失败");
-        }
-      })();
-    }, 2000);
-  }
-
   return (
     <ScreenerWorkbench
-      calibrationJob={calibrationJob}
-      calibrationRunning={calibrationRunning}
-      calibrationSummary={calibrationSummary}
-      diagnosticsLoading={diagnosticsLoading}
       error={error}
-      gsgfHealth={gsgfHealth}
       intraday={intraday}
       marketOverview={marketOverview}
       marketSupportLoading={marketSupportLoading}
@@ -397,18 +247,11 @@ export function HomeWorkbench() {
       sentimentSummary={sentimentSummary}
       onRefreshSources={() => void Promise.all([refreshSources(), refreshMarketOverview(), refreshSectorRadar(), refreshSentimentSummary()])}
       onRun={() => void handleRun()}
-      onRunGsgfCalibration={(options) => void handleRunGsgfCalibration(options)}
-      onCancelGsgfCalibration={() => void handleCancelGsgfCalibration()}
       onLoadMarketSupport={() => void handleLoadMarketSupport()}
-      onLoadDiagnostics={() => void handleLoadDiagnostics()}
-      onRecheckGsgfReview={() => void handleRecheckGsgfReview()}
       onAddToWatchlist={(item, group, tags) => void handleAddToWatchlist(item, group, tags)}
       onAddManyToWatchlist={(items, group, tags) => void handleAddManyToWatchlist(items, group, tags)}
       onSaveScreenFilters={handleSaveScreenFilters}
-      onSaveGsgfReviewSnapshot={() => void handleSaveGsgfReviewSnapshot()}
       result={result}
-      reviewRunning={reviewRunning}
-      reviewSummary={reviewSummary}
       running={running}
       scanLimit={scanLimit}
       screenJob={screenJob}
@@ -425,32 +268,6 @@ export function HomeWorkbench() {
       watchlistMessage={watchlistMessage}
     />
   );
-}
-
-function splitInputList(value: string): string[] {
-  const output: string[] = [];
-  const seen = new Set<string>();
-  for (const chunk of value.split(/[,，\s]+/)) {
-    const item = chunk.trim();
-    if (item && !seen.has(item)) {
-      seen.add(item);
-      output.push(item);
-    }
-  }
-  return output;
-}
-
-function splitNumberList(value: string, fallback: number[]): number[] {
-  const output: number[] = [];
-  const seen = new Set<number>();
-  for (const item of splitInputList(value)) {
-    const parsed = Number(item);
-    if (Number.isInteger(parsed) && parsed > 0 && !seen.has(parsed)) {
-      seen.add(parsed);
-      output.push(parsed);
-    }
-  }
-  return output.length > 0 ? output : fallback;
 }
 
 function loadSavedScreenFilters(): ScreenRunFilters {

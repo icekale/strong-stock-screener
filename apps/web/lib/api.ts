@@ -1,4 +1,5 @@
 import type {
+  AiAnalysisSettingsUpdate,
   AuctionReviewSummary,
   AuctionSnapshotResponse,
   AuctionTimelineResponse,
@@ -16,6 +17,9 @@ import type {
   MarketEmotionSnapshotResponse,
   MarketOverviewResponse,
   MarketRankingsResponse,
+  ModelMaintenancePacket,
+  ModelMaintenanceReport,
+  ModelMaintenanceSuggestion,
   NotificationChannelConfig,
   NotificationSendResult,
   PlateRotationReferenceResponse,
@@ -476,6 +480,7 @@ export async function saveRuntimeSettings(payload: {
   notification_channels?: NotificationChannelConfig[];
   sentiment_monitor?: SentimentMonitorConfig;
   gsgf_auto_review?: GsgfAutoReviewConfig;
+  ai_analysis?: AiAnalysisSettingsUpdate;
 }): Promise<RuntimeSettingsResponse> {
   const response = await fetch(`${API_BASE_URL}/api/settings`, {
     method: "PUT",
@@ -708,6 +713,44 @@ export async function getGsgfModelHealth(): Promise<GsgfModelHealth> {
     throw new Error(`读取股是股非模型健康失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<GsgfModelHealth>;
+}
+
+export async function generateModelMaintenancePacket(): Promise<ModelMaintenancePacket> {
+  const response = await fetch(`${API_BASE_URL}/api/model-maintenance/packets/generate`, { method: "POST" });
+  if (!response.ok) {
+    throw new Error(`生成模型维护复盘包失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ModelMaintenancePacket>;
+}
+
+export async function getLatestModelMaintenanceReport(): Promise<ModelMaintenanceReport | null> {
+  const response = await fetch(`${API_BASE_URL}/api/model-maintenance/reports/latest`);
+  if (!response.ok) {
+    throw new Error(`读取模型维护报告失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ModelMaintenanceReport | null>;
+}
+
+export async function analyzeModelMaintenance(): Promise<ModelMaintenanceReport> {
+  const response = await fetch(`${API_BASE_URL}/api/model-maintenance/analyze`, { method: "POST" });
+  if (!response.ok) {
+    throw new Error(`生成模型维护 AI 分析失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ModelMaintenanceReport>;
+}
+
+export async function updateModelMaintenanceSuggestion(
+  suggestionId: string,
+  action: "accept" | "ignore" | "snooze",
+): Promise<ModelMaintenanceSuggestion> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/model-maintenance/suggestions/${encodeURIComponent(suggestionId)}/${action}`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    throw new Error(`更新模型维护建议失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ModelMaintenanceSuggestion>;
 }
 
 export async function buildGsgfTradePlan(analysis: GsgfAnalysis): Promise<GsgfTradePlan> {

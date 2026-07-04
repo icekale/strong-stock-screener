@@ -32,6 +32,9 @@ from app.models import (
     MarketOverviewResponse,
     MarketRankingsResponse,
     MarketSectorStrengthItem,
+    ModelMaintenancePacket,
+    ModelMaintenanceReport,
+    ModelMaintenanceSuggestion,
     ScreenStrategy,
     SectorWorkbenchMode,
     SectorRadarItem,
@@ -75,6 +78,7 @@ from app.services.gsgf_model_health import build_gsgf_model_health
 from app.services.gsgf_real_calibration import summarize_gsgf_real_calibration
 from app.services.gsgf_review import GsgfReviewStore
 from app.services.gsgf_trade_plan import build_gsgf_trade_plan
+from app.services.ai_model_analysis import analyze_model_maintenance_packet
 from app.services.auction import build_auction_snapshot
 from app.services.auction_model import (
     AuctionModelDataError,
@@ -92,6 +96,8 @@ from app.services.auction_sampler import AuctionSnapshotSampler
 from app.services.sector_workbench_sampler import SectorWorkbenchSampler, is_sector_workbench_sample_window
 from app.services.auction_snapshot_store import AuctionSnapshotStore
 from app.services.market_emotion_history import MarketEmotionHistoryStore
+from app.services.model_maintenance_packet import build_model_maintenance_packet
+from app.services.model_maintenance_store import ModelMaintenanceStore
 from app.services.plate_rotation_reference import (
     PlateRotationReferenceProvider,
     PlateRotationReferenceResponse,
@@ -694,6 +700,74 @@ def get_latest_gsgf_review() -> dict[str, object]:
 def get_gsgf_model_health() -> dict[str, object]:
     health = _gsgf_model_health()
     return health.model_dump(mode="json")
+
+
+@app.post("/api/model-maintenance/packets/generate", response_model=ModelMaintenancePacket)
+def generate_model_maintenance_packet() -> ModelMaintenancePacket:
+    latest_screen_run = _run_store().load_latest()
+    source_status = latest_screen_run.source_status if latest_screen_run is not None else []
+    packet = build_model_maintenance_packet(
+        trade_date=latest_screen_run.trade_date if latest_screen_run is not None else None,
+        latest_screen_run=latest_screen_run,
+        review_summary=_gsgf_review_store().load_latest_summary(),
+        calibration_summary=_background_job_store().load_latest_calibration(),
+        source_status=source_status,
+    )
+    return _model_maintenance_store().save_packet(packet)
+
+
+@app.get("/api/model-maintenance/packets/latest", response_model=ModelMaintenancePacket | None)
+def get_latest_model_maintenance_packet() -> ModelMaintenancePacket | None:
+    return _model_maintenance_store().load_latest_packet()
+
+
+@app.post("/api/model-maintenance/analyze", response_model=ModelMaintenanceReport)
+def analyze_model_maintenance() -> ModelMaintenanceReport:
+    store = _model_maintenance_store()
+    packet = store.load_latest_packet()
+    if packet is None:
+        packet = generate_model_maintenance_packet()
+    return store.save_report(
+        analyze_model_maintenance_packet(
+            packet,
+            _effective_settings().ai_analysis,
+            http_client=getattr(app.state, "model_maintenance_http_client", None),
+        )
+    )
+
+
+@app.get("/api/model-maintenance/reports/latest", response_model=ModelMaintenanceReport | None)
+def get_latest_model_maintenance_report() -> ModelMaintenanceReport | None:
+    return _model_maintenance_store().load_latest_report()
+
+
+@app.get("/api/model-maintenance/reports", response_model=list[ModelMaintenanceReport])
+def list_model_maintenance_reports(limit: int = 20) -> list[ModelMaintenanceReport]:
+    return _model_maintenance_store().list_reports(limit)
+
+
+@app.post("/api/model-maintenance/suggestions/{suggestion_id}/accept", response_model=ModelMaintenanceSuggestion)
+def accept_model_maintenance_suggestion(suggestion_id: str) -> ModelMaintenanceSuggestion:
+    try:
+        return _model_maintenance_store().update_suggestion_status(suggestion_id, "accepted")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="建议不存在") from exc
+
+
+@app.post("/api/model-maintenance/suggestions/{suggestion_id}/ignore", response_model=ModelMaintenanceSuggestion)
+def ignore_model_maintenance_suggestion(suggestion_id: str) -> ModelMaintenanceSuggestion:
+    try:
+        return _model_maintenance_store().update_suggestion_status(suggestion_id, "ignored")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="建议不存在") from exc
+
+
+@app.post("/api/model-maintenance/suggestions/{suggestion_id}/snooze", response_model=ModelMaintenanceSuggestion)
+def snooze_model_maintenance_suggestion(suggestion_id: str) -> ModelMaintenanceSuggestion:
+    try:
+        return _model_maintenance_store().update_suggestion_status(suggestion_id, "snoozed")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="建议不存在") from exc
 
 
 @app.get("/api/market/overview")
@@ -2353,6 +2427,18 @@ def _background_job_store() -> BackgroundJobStore:
     return store
 
 
+def _model_maintenance_store() -> ModelMaintenanceStore:
+    data_dir = Path(getattr(app.state, "runs_dir", get_settings().data_dir))
+    existing = getattr(app.state, "model_maintenance_store", None)
+    existing_data_dir = getattr(app.state, "model_maintenance_store_data_dir", None)
+    if existing is not None and existing_data_dir == data_dir:
+        return existing
+    store = ModelMaintenanceStore(data_dir)
+    app.state.model_maintenance_store = store
+    app.state.model_maintenance_store_data_dir = data_dir
+    return store
+
+
 def _market_emotion_history_store() -> MarketEmotionHistoryStore:
     settings = get_settings()
     data_dir = getattr(app.state, "runs_dir", None)
@@ -2581,7 +2667,12 @@ def _estimated_sector_radar_item(sector: MarketSectorStrengthItem) -> SectorRada
 def _public_saved_settings() -> dict[str, object]:
     return load_runtime_settings(_runtime_config_path()).model_dump(
         mode="json",
-        exclude={"tickflow_api_key", "ifind_api_key", "tdx_api_key"},
+        exclude={
+            "tickflow_api_key": True,
+            "ifind_api_key": True,
+            "tdx_api_key": True,
+            "ai_analysis": {"api_key": True},
+        },
         exclude_none=True,
     )
 

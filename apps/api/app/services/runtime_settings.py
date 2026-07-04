@@ -23,6 +23,28 @@ IfindServiceId = Literal[
     "hexin-ifind-ds-news-mcp",
     "hexin-ifind-ds-index-mcp",
 ]
+AiAnalysisProvider = Literal["openai", "deepseek", "openai_compatible"]
+
+
+class AiAnalysisSettings(BaseModel):
+    enabled: bool = False
+    provider: AiAnalysisProvider = "openai_compatible"
+    base_url: str = "https://api.openai.com/v1"
+    model: str = "gpt-4.1-mini"
+    api_key: str | None = None
+    run_after_daily_review: bool = False
+    run_after_weekly_calibration: bool = False
+
+
+class EffectiveAiAnalysisSettings(BaseModel):
+    enabled: bool
+    provider: AiAnalysisProvider
+    base_url: str
+    model: str
+    api_key: str
+    api_key_source: Literal["runtime", "env", "none"]
+    run_after_daily_review: bool
+    run_after_weekly_calibration: bool
 
 
 class RuntimeSettings(BaseModel):
@@ -40,6 +62,7 @@ class RuntimeSettings(BaseModel):
     notification_channels: list[NotificationChannelConfig] = Field(default_factory=list)
     sentiment_monitor: SentimentMonitorConfig = Field(default_factory=SentimentMonitorConfig)
     gsgf_auto_review: GsgfAutoReviewConfig = Field(default_factory=GsgfAutoReviewConfig)
+    ai_analysis: AiAnalysisSettings = Field(default_factory=AiAnalysisSettings)
 
 
 class SettingsUpdate(BaseModel):
@@ -57,6 +80,7 @@ class SettingsUpdate(BaseModel):
     notification_channels: list[NotificationChannelConfig] = Field(default_factory=list)
     sentiment_monitor: SentimentMonitorConfig = Field(default_factory=SentimentMonitorConfig)
     gsgf_auto_review: GsgfAutoReviewConfig = Field(default_factory=GsgfAutoReviewConfig)
+    ai_analysis: AiAnalysisSettings = Field(default_factory=AiAnalysisSettings)
 
 
 class EffectiveRuntimeSettings(BaseModel):
@@ -75,6 +99,7 @@ class EffectiveRuntimeSettings(BaseModel):
     tickflow_api_key_source: Literal["runtime", "env", "none"]
     ifind_api_key_source: Literal["runtime", "env", "none"]
     tdx_api_key_source: Literal["runtime", "env", "none"]
+    ai_analysis: EffectiveAiAnalysisSettings
 
 
 def load_runtime_settings(path: Path) -> RuntimeSettings:
@@ -105,6 +130,7 @@ def save_runtime_settings(path: Path, update: SettingsUpdate) -> RuntimeSettings
             ),
             "sentiment_monitor": update.sentiment_monitor,
             "gsgf_auto_review": update.gsgf_auto_review,
+            "ai_analysis": _merge_ai_analysis_settings(current.ai_analysis, update.ai_analysis),
         }
     )
     if update.tickflow_api_key is not None:
@@ -150,6 +176,8 @@ def effective_runtime_settings(base: Settings, path: Path) -> EffectiveRuntimeSe
     else:
         tdx_key_source = "none"
 
+    ai_analysis = _effective_ai_analysis_settings(runtime.ai_analysis, base)
+
     return EffectiveRuntimeSettings(
         candidate_provider=(runtime.candidate_provider or base.candidate_provider),  # type: ignore[arg-type]
         kline_provider=(runtime.kline_provider or base.kline_provider),  # type: ignore[arg-type]
@@ -166,6 +194,7 @@ def effective_runtime_settings(base: Settings, path: Path) -> EffectiveRuntimeSe
         tickflow_api_key_source=key_source,
         ifind_api_key_source=ifind_key_source,
         tdx_api_key_source=tdx_key_source,
+        ai_analysis=ai_analysis,
     )
 
 
@@ -198,6 +227,45 @@ def public_settings_payload(config: EffectiveRuntimeSettings) -> dict[str, objec
         .sentiment_monitor.model_dump(mode="json"),
         "gsgf_auto_review": load_runtime_settings(Path(config.runtime_config_path))
         .gsgf_auto_review.model_dump(mode="json"),
+        "ai_analysis": _public_ai_analysis_settings(config.ai_analysis),
+    }
+
+
+def _effective_ai_analysis_settings(
+    runtime: AiAnalysisSettings,
+    base: Settings,
+) -> EffectiveAiAnalysisSettings:
+    runtime_key = runtime.api_key or ""
+    env_key = base.ai_analysis_api_key or ""
+    if runtime_key:
+        key_source: Literal["runtime", "env", "none"] = "runtime"
+    elif env_key:
+        key_source = "env"
+    else:
+        key_source = "none"
+    return EffectiveAiAnalysisSettings(
+        enabled=runtime.enabled,
+        provider=runtime.provider or base.ai_analysis_provider,  # type: ignore[arg-type]
+        base_url=(runtime.base_url or base.ai_analysis_base_url).rstrip("/"),
+        model=runtime.model or base.ai_analysis_model,
+        api_key=runtime_key or env_key,
+        api_key_source=key_source,
+        run_after_daily_review=runtime.run_after_daily_review,
+        run_after_weekly_calibration=runtime.run_after_weekly_calibration,
+    )
+
+
+def _public_ai_analysis_settings(config: EffectiveAiAnalysisSettings) -> dict[str, object]:
+    return {
+        "enabled": config.enabled,
+        "provider": config.provider,
+        "base_url": config.base_url,
+        "model": config.model,
+        "api_key_configured": bool(config.api_key),
+        "api_key_preview": _mask_key(config.api_key),
+        "api_key_source": config.api_key_source,
+        "run_after_daily_review": config.run_after_daily_review,
+        "run_after_weekly_calibration": config.run_after_weekly_calibration,
     }
 
 
@@ -226,6 +294,19 @@ def _merge_notification_channels(
                 data[secret_key] = getattr(existing, secret_key)
         merged.append(_strip_channel_strings(NotificationChannelConfig.model_validate(data)))
     return merged
+
+
+def _merge_ai_analysis_settings(
+    current: AiAnalysisSettings,
+    update: AiAnalysisSettings,
+) -> AiAnalysisSettings:
+    data = update.model_dump()
+    if not data.get("api_key"):
+        data["api_key"] = current.api_key
+    for key, value in list(data.items()):
+        if isinstance(value, str):
+            data[key] = value.strip()
+    return AiAnalysisSettings.model_validate(data)
 
 
 def _strip_channel_strings(channel: NotificationChannelConfig) -> NotificationChannelConfig:

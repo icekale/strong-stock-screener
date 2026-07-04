@@ -59,6 +59,13 @@ type SettingsDraft = {
   gsgf_weekly_calibration_scan_limit: number;
   gsgf_notify_on_success: boolean;
   gsgf_notify_on_degradation: boolean;
+  ai_analysis_enabled: boolean;
+  ai_analysis_provider: "openai" | "deepseek" | "openai_compatible";
+  ai_analysis_base_url: string;
+  ai_analysis_model: string;
+  ai_analysis_api_key: string;
+  ai_analysis_run_after_daily_review: boolean;
+  ai_analysis_run_after_weekly_calibration: boolean;
 };
 
 const DEFAULT_DRAFT: SettingsDraft = {
@@ -98,6 +105,13 @@ const DEFAULT_DRAFT: SettingsDraft = {
   gsgf_weekly_calibration_scan_limit: 80,
   gsgf_notify_on_success: true,
   gsgf_notify_on_degradation: true,
+  ai_analysis_enabled: false,
+  ai_analysis_provider: "openai_compatible",
+  ai_analysis_base_url: "https://api.openai.com/v1",
+  ai_analysis_model: "gpt-4.1-mini",
+  ai_analysis_api_key: "",
+  ai_analysis_run_after_daily_review: false,
+  ai_analysis_run_after_weekly_calibration: false,
 };
 
 export function SettingsWorkspace() {
@@ -141,6 +155,7 @@ export function SettingsWorkspace() {
         provider_timeout_seconds: response.config.provider_timeout_seconds,
         ...gsgfDraftFromConfig(response.config),
         ...notificationDraftFromConfig(response.config),
+        ...aiAnalysisDraftFromConfig(response.config),
       });
       setMessage("已读取当前设置");
     } catch (err) {
@@ -170,6 +185,7 @@ export function SettingsWorkspace() {
         notification_channels: buildNotificationChannels(draft),
         sentiment_monitor: config?.sentiment_monitor,
         gsgf_auto_review: buildGsgfAutoReviewConfig(draft, config?.gsgf_auto_review),
+        ai_analysis: buildAiAnalysisConfig(draft),
       });
       setConfig(response.config);
       applyDraft({
@@ -184,6 +200,7 @@ export function SettingsWorkspace() {
         provider_timeout_seconds: response.config.provider_timeout_seconds,
         ...gsgfDraftFromConfig(response.config),
         ...notificationDraftFromConfig(response.config),
+        ...aiAnalysisDraftFromConfig(response.config),
       });
       setMessage("设置已保存");
     } catch (err) {
@@ -293,6 +310,13 @@ export function SettingsWorkspace() {
                     <KeyStatus configured={Boolean(config?.tdx_api_key_configured)} />
                   </Descriptions.Item>
                   <Descriptions.Item label="通达信 MCP">{config?.tdx_api_key_source ?? "未读取"}</Descriptions.Item>
+                  <Descriptions.Item label="AI 分析服务">
+                    {config?.ai_analysis.enabled ? "已启用" : "未启用"}
+                  </Descriptions.Item>
+                  <Descriptions.Item label="AI Provider">{config?.ai_analysis.provider ?? "未读取"}</Descriptions.Item>
+                  <Descriptions.Item label="AI Key">
+                    <KeyStatus configured={Boolean(config?.ai_analysis.api_key_configured)} />
+                  </Descriptions.Item>
                   <Descriptions.Item label="超时">{config ? `${config.provider_timeout_seconds}s` : "未读取"}</Descriptions.Item>
                 </Descriptions>
               </Card>
@@ -408,6 +432,69 @@ export function SettingsWorkspace() {
                         <Descriptions.Item label="Key 来源">{config?.tdx_api_key_source ?? "未读取"}</Descriptions.Item>
                         <Descriptions.Item label="Key 摘要">{config?.tdx_api_key_preview || "未配置"}</Descriptions.Item>
                       </Descriptions>
+                    </Col>
+                  </Row>
+                </Card>
+
+                <Card className="workbench-panel" title="AI 分析服务">
+                <Alert
+                  className="mb-4"
+                  showIcon
+                  title="AI 只用于模型维护复盘和建议生成；建议需要人工确认，不会自动改筛选策略。"
+                  type="info"
+                />
+                  <Row gutter={12}>
+                    <Col md={8} xs={24}>
+                      <Form.Item label="启用 AI 分析" name="ai_analysis_enabled" valuePropName="checked">
+                        <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+                      </Form.Item>
+                    </Col>
+                    <Col md={8} xs={24}>
+                      <Form.Item label="Provider" name="ai_analysis_provider">
+                        <Select
+                          options={[
+                            { label: "OpenAI / Codex", value: "openai" },
+                            { label: "DeepSeek", value: "deepseek" },
+                            { label: "OpenAI Compatible", value: "openai_compatible" },
+                          ]}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col md={8} xs={24}>
+                      <Form.Item label="模型名称" name="ai_analysis_model">
+                        <Input placeholder="deepseek-reasoner / gpt-4.1-mini" />
+                      </Form.Item>
+                    </Col>
+                    <Col md={12} xs={24}>
+                      <Form.Item label="Base URL" name="ai_analysis_base_url">
+                        <Input placeholder="https://api.deepseek.com 或 OpenAI-compatible 节点" />
+                      </Form.Item>
+                    </Col>
+                    <Col md={12} xs={24}>
+                      <Form.Item label="API Key" name="ai_analysis_api_key">
+                        <Input.Password
+                          autoComplete="off"
+                          placeholder={config?.ai_analysis.api_key_configured ? "留空表示沿用已保存 Key" : "请输入 AI API Key"}
+                        />
+                      </Form.Item>
+                    </Col>
+                    <Col md={12} xs={24}>
+                      <Form.Item
+                        label="每日复盘后自动生成 AI 建议"
+                        name="ai_analysis_run_after_daily_review"
+                        valuePropName="checked"
+                      >
+                        <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+                      </Form.Item>
+                    </Col>
+                    <Col md={12} xs={24}>
+                      <Form.Item
+                        label="每周校准后自动生成 AI 建议"
+                        name="ai_analysis_run_after_weekly_calibration"
+                        valuePropName="checked"
+                      >
+                        <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+                      </Form.Item>
                     </Col>
                   </Row>
                 </Card>
@@ -645,6 +732,40 @@ function buildGsgfAutoReviewConfig(
     kline_count: current?.kline_count ?? 260,
     notify_on_success: draft.gsgf_notify_on_success,
     notify_on_degradation: draft.gsgf_notify_on_degradation,
+  };
+}
+
+function aiAnalysisDraftFromConfig(config: RuntimeSettingsConfig): Pick<
+  SettingsDraft,
+  | "ai_analysis_enabled"
+  | "ai_analysis_provider"
+  | "ai_analysis_base_url"
+  | "ai_analysis_model"
+  | "ai_analysis_api_key"
+  | "ai_analysis_run_after_daily_review"
+  | "ai_analysis_run_after_weekly_calibration"
+> {
+  const value = config.ai_analysis;
+  return {
+    ai_analysis_enabled: value.enabled,
+    ai_analysis_provider: value.provider,
+    ai_analysis_base_url: value.base_url,
+    ai_analysis_model: value.model,
+    ai_analysis_api_key: "",
+    ai_analysis_run_after_daily_review: value.run_after_daily_review,
+    ai_analysis_run_after_weekly_calibration: value.run_after_weekly_calibration,
+  };
+}
+
+function buildAiAnalysisConfig(draft: SettingsDraft) {
+  return {
+    enabled: draft.ai_analysis_enabled,
+    provider: draft.ai_analysis_provider,
+    base_url: draft.ai_analysis_base_url.trim(),
+    model: draft.ai_analysis_model.trim(),
+    api_key: draft.ai_analysis_api_key.trim() || undefined,
+    run_after_daily_review: draft.ai_analysis_run_after_daily_review,
+    run_after_weekly_calibration: draft.ai_analysis_run_after_weekly_calibration,
   };
 }
 

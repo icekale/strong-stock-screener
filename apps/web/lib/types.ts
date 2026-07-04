@@ -908,6 +908,101 @@ export type SentimentMonitorStatus = {
   last_alerts: SentimentMutationAlert[];
 };
 
+export type ModelMaintenanceProvider = "openai" | "deepseek" | "openai_compatible";
+export type ModelMaintenanceHealthStatus =
+  | "normal"
+  | "watch"
+  | "degraded"
+  | "insufficient_sample"
+  | "data_unreliable";
+export type ModelMaintenanceRuleStatus =
+  | "effective"
+  | "neutral"
+  | "over_strict"
+  | "under_strict"
+  | "degraded"
+  | "insufficient_sample";
+export type ModelMaintenanceSuggestionType =
+  | "observe"
+  | "adjust_weight"
+  | "loosen_filter"
+  | "tighten_filter"
+  | "disable_rule_temporarily"
+  | "data_check";
+export type ModelMaintenanceSuggestionStatus = "pending" | "accepted" | "ignored" | "snoozed";
+
+export type ModelMaintenanceSuggestion = {
+  suggestion_id: string;
+  type: ModelMaintenanceSuggestionType;
+  title: string;
+  reason: string;
+  evidence_refs: string[];
+  risk: string;
+  confidence: number;
+  suggested_action: string;
+  status: ModelMaintenanceSuggestionStatus;
+};
+
+export type ModelMaintenanceRuleDiagnostic = {
+  rule_name: string;
+  status: ModelMaintenanceRuleStatus;
+  evidence: string[];
+  confidence: number;
+};
+
+export type ModelMaintenancePacket = {
+  packet_id: string;
+  generated_at: string;
+  trade_date: string | null;
+  model_name: string;
+  model_version: string | null;
+  screen_strategy: string | null;
+  screen_params: Record<string, unknown>;
+  source_status: StrongStockSourceStatus[];
+  latest_screen_run: Record<string, unknown>;
+  review_summary: Record<string, unknown>;
+  calibration_summary: Record<string, unknown>;
+  false_negative_cases: Array<Record<string, unknown>>;
+  false_positive_cases: Array<Record<string, unknown>>;
+  data_quality_notes: string[];
+};
+
+export type ModelMaintenanceReport = {
+  report_id: string;
+  packet_id: string;
+  provider: ModelMaintenanceProvider;
+  model: string;
+  generated_at: string;
+  health_status: ModelMaintenanceHealthStatus;
+  summary: string;
+  key_findings: string[];
+  rule_diagnostics: ModelMaintenanceRuleDiagnostic[];
+  suggestions: ModelMaintenanceSuggestion[];
+  disclaimer: string;
+};
+
+export type AiAnalysisPublicConfig = {
+  enabled: boolean;
+  provider: ModelMaintenanceProvider;
+  base_url: string;
+  model: string;
+  api_key_configured: boolean;
+  api_key_preview: string;
+  api_key_source: "runtime" | "env" | "none";
+  run_after_daily_review: boolean;
+  run_after_weekly_calibration: boolean;
+};
+
+export type AiAnalysisSettingsUpdate = {
+  enabled: boolean;
+  provider: ModelMaintenanceProvider;
+  base_url: string;
+  model: string;
+  api_key?: string | null;
+  run_after_daily_review: boolean;
+  run_after_weekly_calibration: boolean;
+};
+
 export type GsgfAutoReviewConfig = {
   auto_snapshot_enabled: boolean;
   daily_review_enabled: boolean;
@@ -945,6 +1040,7 @@ export type RuntimeSettingsConfig = {
   notifications: NotificationSettingsPublic;
   sentiment_monitor: SentimentMonitorConfig;
   gsgf_auto_review: GsgfAutoReviewConfig;
+  ai_analysis: AiAnalysisPublicConfig;
 };
 
 export type NotificationChannelType = "wechat_work" | "feishu" | "telegram" | "email";
@@ -1007,11 +1103,12 @@ export type RuntimeSettingsResponse = {
     ifind_service_id?: "hexin-ifind-ds-stock-mcp" | "hexin-ifind-ds-news-mcp" | "hexin-ifind-ds-index-mcp" | null;
     tdx_base_url?: string | null;
     provider_timeout_seconds?: number | null;
-    notification_channels?: NotificationChannelConfig[];
-    sentiment_monitor?: SentimentMonitorConfig;
-    gsgf_auto_review?: GsgfAutoReviewConfig;
-  };
-};
+        notification_channels?: NotificationChannelConfig[];
+        sentiment_monitor?: SentimentMonitorConfig;
+        gsgf_auto_review?: GsgfAutoReviewConfig;
+        ai_analysis?: AiAnalysisSettingsUpdate;
+      };
+    };
 
 export type RuntimeSettingsHealthProbe = {
   name: string;

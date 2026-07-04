@@ -80,6 +80,18 @@ test("standalone strong stock workbench is wired without daily-report modules", 
     sentimentIntradaySource,
     sentimentStockPoolsSource,
   ].join("\n");
+  const modelMaintenancePageUrl = new URL("../app/model-maintenance/page.tsx", import.meta.url);
+  const modelMaintenancePageSource = existsSync(modelMaintenancePageUrl)
+    ? readFileSync(modelMaintenancePageUrl, "utf8")
+    : "";
+  const modelMaintenanceWorkspaceUrl = new URL(
+    "../app/model-maintenance/ModelMaintenanceWorkspace.tsx",
+    import.meta.url,
+  );
+  const modelMaintenanceWorkspaceSource = existsSync(modelMaintenanceWorkspaceUrl)
+    ? readFileSync(modelMaintenanceWorkspaceUrl, "utf8")
+    : "";
+  const modelMaintenanceFeatureSource = [modelMaintenancePageSource, modelMaintenanceWorkspaceSource].join("\n");
   const screenerFeatureSource = [
     componentSource,
     marketPanelsSource,
@@ -295,6 +307,9 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(typesSource, /SentimentReviewSummary/);
   assert.match(typesSource, /SentimentWatchlistAlert/);
   assert.match(typesSource, /SentimentWatchlistAlertsResponse/);
+  assert.match(typesSource, /ModelMaintenanceReport/);
+  assert.match(typesSource, /ModelMaintenancePacket/);
+  assert.match(typesSource, /ModelMaintenanceSuggestion/);
   assert.match(typesSource, /snapshot_status/);
   assert.match(typesSource, /cache_age_seconds/);
   assert.match(typesSource, /AuctionTimelineResponse/);
@@ -316,6 +331,10 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(apiSource, /getShortTermIntradaySentiment/);
   assert.match(apiSource, /getShortTermIntradaySignalDigest/);
   assert.match(apiSource, /sendNotificationMessage/);
+  assert.match(apiSource, /generateModelMaintenancePacket/);
+  assert.match(apiSource, /getLatestModelMaintenanceReport/);
+  assert.match(apiSource, /analyzeModelMaintenance/);
+  assert.match(apiSource, /updateModelMaintenanceSuggestion/);
   assert.match(apiSource, /\/api\/short-term\/sentiment/);
   assert.match(apiSource, /\/api\/short-term\/sentiment\/decision/);
   assert.match(apiSource, /\/api\/short-term\/sentiment\/review\/archive/);
@@ -346,8 +365,10 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.doesNotMatch(apiSource + screenerFeatureSource + homeFeatureSource, /x-api-key|TICKFLOW_API_KEY/);
   assert.match(screenerFeatureSource, /StockMaster/);
   assert.match(screenerFeatureSource, /dynamic[<(]/);
-  assert.match(screenerFeatureSource, /GsgfReviewPanel/);
-  assert.match(screenerFeatureSource, /GsgfCalibrationPanel/);
+  assert.match(screenerFeatureSource, /查看模型维护/);
+  assert.doesNotMatch(componentSource, /<GsgfReviewPanel/);
+  assert.doesNotMatch(componentSource, /<GsgfCalibrationPanel/);
+  assert.doesNotMatch(componentSource, /<GsgfFunnelPanel/);
   assert.match(marketPanelsSource, /MarketOverviewPanels/);
   assert.match(marketPanelsSource, /SectorFlowHeatmapPanel/);
   assert.match(filterRailSource, /FilterLogicRail/);
@@ -367,18 +388,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(screenerFeatureSource, /行业/);
   assert.match(screenerFeatureSource, /板块强度/);
   assert.match(screenerFeatureSource, /选股结果 · Screener Results/);
-  assert.ok(
-    componentSource.indexOf("<CandidateResults") < componentSource.indexOf("<GsgfReviewPanel"),
-    "homepage should show screener results before model review diagnostics",
-  );
-  assert.ok(
-    componentSource.indexOf("<CandidateResults") < componentSource.indexOf("<GsgfCalibrationPanel"),
-    "homepage should show screener results before calibration diagnostics",
-  );
-  assert.ok(
-    componentSource.indexOf("<CandidateResults") < componentSource.indexOf("<GsgfFunnelPanel"),
-    "homepage should show screener results before funnel diagnostics",
-  );
+  assert.match(componentSource, /HomepageModelMaintenancePanel/);
   assert.match(screenerFeatureSource, /数据源：/);
   assert.match(screenerFeatureSource, /CandidateTable/);
   assert.match(screenerFeatureSource, /from "antd"/);
@@ -425,15 +435,15 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(screenerFeatureSource, /gsgf_observation_items/);
   assert.match(screenerFeatureSource, /去重股票/);
   assert.match(screenerFeatureSource, /hit_rate/);
-  assert.match(homeFeatureSource, /calibrationSummary/);
-  assert.match(homeFeatureSource, /createGsgfCalibrationJob/);
-  assert.match(homeFeatureSource, /handleRunGsgfCalibration/);
+  assert.doesNotMatch(homeFeatureSource, /calibrationSummary/);
+  assert.doesNotMatch(homeFeatureSource, /createGsgfCalibrationJob/);
+  assert.doesNotMatch(homeFeatureSource, /handleRunGsgfCalibration/);
   assert.match(homeWorkspaceSource, /handleLoadMarketSupport/);
   assert.doesNotMatch(homeWorkspaceSource, /void refreshSectorRadar\(\);/);
-  assert.match(homeFeatureSource, /refreshGsgfLatest/);
-  assert.match(homeWorkspaceSource, /handleLoadDiagnostics/);
+  assert.doesNotMatch(homeFeatureSource, /refreshGsgfLatest/);
+  assert.doesNotMatch(homeWorkspaceSource, /handleLoadDiagnostics/);
   assert.doesNotMatch(homeWorkspaceSource, /void refreshGsgfLatest\(\);/);
-  assert.match(homeFeatureSource, /calibrationJob/);
+  assert.doesNotMatch(homeFeatureSource, /calibrationJob/);
   assert.match(gsgfPanelsSource, /校准任务/);
   assert.match(gsgfPanelsSource, /模型健康/);
   assert.match(screenerFeatureSource, /strongIndustryOnly/);
@@ -513,10 +523,12 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(componentSource, /HomepageMarketSupportPanel/);
   assert.match(componentSource, /onLoadMarketSupport/);
   assert.match(componentSource, /marketSupportOpen/);
-  assert.match(componentSource, /HomepageDiagnosticsPanel/);
-  assert.match(componentSource, /模型诊断/);
-  assert.match(componentSource, /onLoadDiagnostics/);
-  assert.match(componentSource, /diagnosticsOpen/);
+  assert.match(componentSource, /HomepageModelMaintenancePanel/);
+  assert.match(componentSource, /查看模型维护/);
+  assert.doesNotMatch(componentSource, /HomepageDiagnosticsPanel/);
+  assert.doesNotMatch(componentSource, /模型诊断/);
+  assert.doesNotMatch(componentSource, /onLoadDiagnostics/);
+  assert.doesNotMatch(componentSource, /diagnosticsOpen/);
   assert.match(componentSource, /overflow-x-auto max-w-full/);
   assert.match(screenerFeatureSource, /grid gap-4 md:grid-cols-2 xl:grid-cols-4/);
   assert.doesNotMatch(screenerFeatureSource, /xl:grid-cols-\[280px_minmax\(0,1fr\)_320px\]/);
@@ -709,6 +721,13 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(sentimentFeatureSource, /每日归档情绪结论/);
   assert.doesNotMatch(sentimentFeatureSource, /<Alert[^>]*message=/);
   assert.doesNotMatch(sectorsFeatureSource, /<Alert[^>]*message=/);
+  assert.match(modelMaintenancePageSource, /ModelMaintenanceWorkspace/);
+  assert.match(modelMaintenancePageSource, /dynamic[<(]/);
+  assert.match(modelMaintenanceFeatureSource, /AI 模型维护/);
+  assert.match(modelMaintenanceFeatureSource, /待确认建议/);
+  assert.match(modelMaintenanceFeatureSource, /生成复盘包并分析/);
+  assert.match(appShellSource, /模型维护/);
+  assert.match(appShellSource, /\/model-maintenance/);
   assert.match(sentimentFeatureSource, /ShortTermSentimentResponse/);
   assert.match(sentimentFeatureSource, /ShortTermIntradaySentimentResponse/);
   assert.match(sentimentFeatureSource, /ShortTermIntradaySignalDigest/);
@@ -861,6 +880,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.doesNotMatch(screenerFeatureSource + homeFeatureSource, /报告生成|历史报告|OCR|定时生成/);
   assert.match(settingsFeatureSource, /iFinD 研究增强/);
   assert.match(settingsFeatureSource, /通知渠道/);
+  assert.match(settingsFeatureSource, /AI 分析服务/);
+  assert.match(settingsFeatureSource, /DeepSeek/);
   assert.match(settingsFeatureSource, /GSGF 自动复盘/);
   assert.match(settingsFeatureSource, /weekly_calibration_scan_limit/);
   assert.match(settingsFeatureSource, /notify_on_degradation/);

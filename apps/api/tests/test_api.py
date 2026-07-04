@@ -1132,6 +1132,40 @@ def test_settings_exposes_gsgf_auto_review_config(tmp_path: Path) -> None:
     assert payload["config"]["gsgf_auto_review"]["weekly_calibration_scan_limit"] == 80
 
 
+def test_settings_can_save_ai_analysis_config_without_exposing_full_key(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.put(
+        "/api/settings",
+        json={
+            "candidate_provider": "recent_limit_up",
+            "kline_provider": "tickflow",
+            "quote_provider": "tickflow",
+            "tickflow_base_url": "https://api.example.test",
+            "provider_timeout_seconds": 3.5,
+            "ai_analysis": {
+                "enabled": True,
+                "provider": "deepseek",
+                "base_url": "https://api.deepseek.com",
+                "model": "deepseek-reasoner",
+                "api_key": "deepseek_saved_secret",
+                "run_after_daily_review": True,
+                "run_after_weekly_calibration": False,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["config"]["ai_analysis"]["enabled"] is True
+    assert payload["config"]["ai_analysis"]["provider"] == "deepseek"
+    assert payload["config"]["ai_analysis"]["model"] == "deepseek-reasoner"
+    assert payload["config"]["ai_analysis"]["api_key_configured"] is True
+    assert payload["config"]["ai_analysis"]["api_key_preview"] != "deepseek_saved_secret"
+    assert "api_key" not in payload["saved"]["ai_analysis"]
+    assert "deepseek_saved_secret" not in response.text
+
+
 def test_settings_can_be_saved_with_ifind_configuration(tmp_path: Path) -> None:
     client = _client(tmp_path)
 

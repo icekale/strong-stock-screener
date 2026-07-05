@@ -54,6 +54,9 @@ from app.models import (
     StrongStockDataUnavailable,
     StrongStockScreeningResult,
     StrongStockSourceStatus,
+    SystemCacheClearResponse,
+    SystemCacheSummary,
+    SystemStatusResponse,
 )
 from app.gsgf_rules import analyze_gsgf, build_gsgf_chart_annotations
 from app.providers.ifind import IfindMcpProvider
@@ -72,6 +75,7 @@ from app.providers.watchlist import (
 )
 from app.services.intraday import IntradayMonitor
 from app.services.background_jobs import BackgroundJobStore, CancelCheck, ProgressCallback
+from app.services.cache_registry import CacheRegistry
 from app.services.gsgf_backtest import summarize_gsgf_backtest
 from app.services.gsgf_auto_review import GsgfAutoReviewService
 from app.services.gsgf_model_health import build_gsgf_model_health
@@ -246,21 +250,54 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-SHORT_TERM_SENTIMENT_CACHE: TtlCache[ShortTermSentimentResponse] = TtlCache(ttl_seconds=90)
-MARKET_EMOTION_CACHE: TtlCache[MarketEmotionSnapshotResponse] = TtlCache(ttl_seconds=45)
-MARKET_OVERVIEW_CACHE: TtlCache[MarketOverviewResponse] = TtlCache(ttl_seconds=45)
-MARKET_RANKINGS_CACHE: TtlCache[MarketRankingsResponse] = TtlCache(ttl_seconds=45)
-AUCTION_SNAPSHOT_CACHE: TtlCache[AuctionSnapshotResponse] = TtlCache(ttl_seconds=15)
-SECTOR_RADAR_CACHE: TtlCache[SectorRadarResponse] = TtlCache(ttl_seconds=45)
-PLATE_ROTATION_REFERENCE_CACHE: TtlCache[PlateRotationReferenceResponse] = TtlCache(ttl_seconds=120)
+SHORT_TERM_SENTIMENT_CACHE: TtlCache[ShortTermSentimentResponse] = TtlCache(
+    ttl_seconds=90, name="short_term_sentiment"
+)
+MARKET_EMOTION_CACHE: TtlCache[MarketEmotionSnapshotResponse] = TtlCache(
+    ttl_seconds=45, name="market_emotion"
+)
+MARKET_OVERVIEW_CACHE: TtlCache[MarketOverviewResponse] = TtlCache(
+    ttl_seconds=45, name="market_overview"
+)
+MARKET_RANKINGS_CACHE: TtlCache[MarketRankingsResponse] = TtlCache(
+    ttl_seconds=45, name="market_rankings"
+)
+AUCTION_SNAPSHOT_CACHE: TtlCache[AuctionSnapshotResponse] = TtlCache(
+    ttl_seconds=15, name="auction_snapshot"
+)
+SECTOR_RADAR_CACHE: TtlCache[SectorRadarResponse] = TtlCache(ttl_seconds=45, name="sector_radar")
+PLATE_ROTATION_REFERENCE_CACHE: TtlCache[PlateRotationReferenceResponse] = TtlCache(
+    ttl_seconds=120, name="plate_rotation_reference"
+)
 SECTOR_INTRADAY_CACHE: TtlCache[tuple[list[SectorWorkbenchSeries], StrongStockSourceStatus]] = TtlCache(
-    ttl_seconds=90
+    ttl_seconds=90,
+    name="sector_intraday",
 )
 SECTOR_THEME_ROWS_CACHE: TtlCache[tuple[list[dict[str, object]], StrongStockSourceStatus | None]] = TtlCache(
-    ttl_seconds=300
+    ttl_seconds=300,
+    name="sector_theme_rows",
 )
-STOCK_KLINE_CACHE: TtlCache[StockKlineResponse] = TtlCache(ttl_seconds=300)
-STOCK_RESEARCH_CACHE: TtlCache[StockResearchResponse] = TtlCache(ttl_seconds=900)
+STOCK_KLINE_CACHE: TtlCache[StockKlineResponse] = TtlCache(ttl_seconds=300, name="stock_kline")
+STOCK_RESEARCH_CACHE: TtlCache[StockResearchResponse] = TtlCache(
+    ttl_seconds=900, name="stock_research"
+)
+CACHE_DEFINITIONS = (
+    ("short_term_sentiment", "sentiment", SHORT_TERM_SENTIMENT_CACHE),
+    ("market_emotion", "sentiment", MARKET_EMOTION_CACHE),
+    ("market_overview", "home", MARKET_OVERVIEW_CACHE),
+    ("market_rankings", "home", MARKET_RANKINGS_CACHE),
+    ("auction_snapshot", "auction", AUCTION_SNAPSHOT_CACHE),
+    ("sector_radar", "sectors", SECTOR_RADAR_CACHE),
+    ("plate_rotation_reference", "sectors", PLATE_ROTATION_REFERENCE_CACHE),
+    ("sector_intraday", "sectors", SECTOR_INTRADAY_CACHE),
+    ("sector_theme_rows", "sectors", SECTOR_THEME_ROWS_CACHE),
+    ("stock_kline", "stocks", STOCK_KLINE_CACHE),
+    ("stock_research", "stocks", STOCK_RESEARCH_CACHE),
+)
+CACHE_GROUPS = frozenset(cache_group for _cache_name, cache_group, _cache in CACHE_DEFINITIONS)
+CACHE_REGISTRY = CacheRegistry()
+for cache_name, cache_group, cache in CACHE_DEFINITIONS:
+    CACHE_REGISTRY.register(cache_name, cache, group=cache_group)
 
 
 def startup_sentiment_monitor() -> None:
@@ -319,6 +356,42 @@ def shutdown_gsgf_auto_review() -> None:
 @app.get("/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/system/cache", response_model=SystemCacheSummary)
+def get_system_cache() -> SystemCacheSummary:
+    return SystemCacheSummary.model_validate(CACHE_REGISTRY.summary())
+
+
+@app.post("/api/system/cache/clear", response_model=SystemCacheClearResponse)
+def clear_system_cache(group: str | None = None, all: bool = False) -> SystemCacheClearResponse:
+    if group is None and not all:
+        raise HTTPException(status_code=400, detail="必须指定 group 或 all=true")
+    if group is not None and all:
+        raise HTTPException(status_code=400, detail="group 和 all=true 不能同时使用")
+    if all:
+        return SystemCacheClearResponse(cleared=CACHE_REGISTRY.clear())
+    if group not in CACHE_GROUPS:
+        raise HTTPException(status_code=400, detail=f"未知缓存分组: {group}")
+    return SystemCacheClearResponse(cleared=CACHE_REGISTRY.clear(group=group))
+
+
+@app.get("/api/system/status", response_model=SystemStatusResponse)
+def get_system_status() -> SystemStatusResponse:
+    cache = get_system_cache()
+    jobs = _system_jobs()
+    is_degraded = any(item.last_error is not None for item in cache.items) or any(
+        _system_job_degraded(job) for job in jobs
+    )
+    status = "degraded" if is_degraded else "ok"
+    confidence = "degraded" if is_degraded else "fresh"
+    return SystemStatusResponse(
+        status=status,
+        generated_at=datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(timespec="seconds"),
+        cache=cache,
+        jobs=jobs,
+        confidence=confidence,
+    )
 
 
 @app.get("/api/data-sources/status")
@@ -1966,20 +2039,138 @@ def _cached_stock_research(symbol: str) -> StockResearchResponse:
 
 
 def _clear_data_source_caches() -> None:
-    for cache in (
-        SHORT_TERM_SENTIMENT_CACHE,
-        MARKET_EMOTION_CACHE,
-        MARKET_OVERVIEW_CACHE,
-        MARKET_RANKINGS_CACHE,
-        AUCTION_SNAPSHOT_CACHE,
-        SECTOR_RADAR_CACHE,
-        PLATE_ROTATION_REFERENCE_CACHE,
-        SECTOR_INTRADAY_CACHE,
-        SECTOR_THEME_ROWS_CACHE,
-        STOCK_KLINE_CACHE,
-        STOCK_RESEARCH_CACHE,
-    ):
-        cache.clear()
+    CACHE_REGISTRY.clear()
+
+
+def _system_jobs() -> list[dict[str, object]]:
+    auction_sampler = getattr(app.state, "auction_sampler", None)
+    sector_sampler = getattr(app.state, "sector_workbench_sampler", None)
+    sentiment_monitor = getattr(app.state, "sentiment_monitor", None)
+    gsgf_service = getattr(app.state, "gsgf_auto_review_service", None)
+    runtime = load_runtime_settings(_runtime_config_path())
+    auction_running, auction_detail = _thread_running_status(auction_sampler, "竞价时段采样器")
+    sector_running, sector_detail = _attribute_running_status(
+        sector_sampler,
+        "running",
+        "板块工作台交易时段采样器",
+    )
+    sentiment_running, sentiment_detail = _sentiment_monitor_running_status(
+        sentiment_monitor,
+        "短线情绪监控",
+    )
+    gsgf_running, gsgf_detail = _thread_running_status(gsgf_service, "GSGF 自动复盘")
+    return [
+        {
+            "name": "auction_sampler",
+            "running": auction_running,
+            "enabled": not getattr(app.state, "auction_sampler_disabled", False),
+            "detail": auction_detail,
+        },
+        {
+            "name": "sector_workbench_sampler",
+            "running": sector_running,
+            "enabled": not getattr(app.state, "sector_workbench_sampler_disabled", False),
+            "detail": sector_detail,
+        },
+        {
+            "name": "sentiment_monitor",
+            "running": sentiment_running,
+            "enabled": runtime.sentiment_monitor.enabled,
+            "detail": sentiment_detail,
+        },
+        {
+            "name": "gsgf_auto_review",
+            "running": gsgf_running,
+            "enabled": runtime.gsgf_auto_review.daily_review_enabled,
+            "detail": gsgf_detail,
+        },
+    ]
+
+
+def _attribute_running_status(
+    worker: object | None,
+    attribute: str,
+    detail: str,
+) -> tuple[bool, str]:
+    if worker is None:
+        return False, detail
+    try:
+        return bool(getattr(worker, attribute)), detail
+    except Exception:
+        return False, _status_unavailable_detail(detail)
+
+
+def _sentiment_monitor_running_status(
+    monitor: object | None,
+    detail: str,
+) -> tuple[bool, str]:
+    running, diagnostic = _safe_status_running(monitor)
+    if diagnostic is not None:
+        return False, _diagnostic_detail(detail, diagnostic)
+    return running, detail
+
+
+def _thread_running_status(worker: object | None, detail: str) -> tuple[bool, str]:
+    running, diagnostic = _safe_thread_running(worker)
+    if diagnostic is not None:
+        return False, _diagnostic_detail(detail, diagnostic)
+    return running, detail
+
+
+def _safe_status_running(service: object | None) -> tuple[bool, str | None]:
+    if service is None:
+        return False, None
+    try:
+        status = getattr(service, "status", None)
+        if not callable(status):
+            return False, "status unavailable"
+        service_status = status()
+        running = bool(getattr(service_status, "running"))
+    except Exception:
+        return False, "status unavailable"
+    if not running:
+        return False, "unexpectedly stopped"
+    return True, None
+
+
+def _safe_thread_running(
+    worker: object | None,
+    attr_name: str = "_thread",
+) -> tuple[bool, str | None]:
+    if worker is None:
+        return False, None
+    try:
+        thread = getattr(worker, attr_name, None)
+        if thread is None:
+            return False, "unexpectedly stopped"
+        is_alive = getattr(thread, "is_alive", None)
+        if not callable(is_alive):
+            return False, "thread status unavailable"
+        running = bool(is_alive())
+    except Exception:
+        return False, "thread status unavailable"
+    if not running:
+        return False, "unexpectedly stopped"
+    return True, None
+
+
+def _system_job_degraded(job: dict[str, object]) -> bool:
+    if job.get("enabled") is not True:
+        return False
+    if job.get("running") is True:
+        return False
+    detail = str(job.get("detail") or "")
+    return "状态不可用" in detail or "异常停止" in detail
+
+
+def _diagnostic_detail(detail: str, diagnostic: str) -> str:
+    if diagnostic == "unexpectedly stopped":
+        return f"{detail}（异常停止）"
+    return _status_unavailable_detail(detail)
+
+
+def _status_unavailable_detail(detail: str) -> str:
+    return f"{detail}（状态不可用）"
 
 
 def _build_and_persist_sentiment_snapshots(

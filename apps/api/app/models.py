@@ -816,6 +816,51 @@ class SectorWorkbenchStatusResponse(BaseModel):
     )
 
 
+SystemConfidence = Literal["fresh", "stale", "partial", "degraded", "unavailable"]
+
+
+class SystemCacheItem(BaseModel):
+    name: str
+    group: str
+    ttl_seconds: float
+    size: int
+    fresh_count: int
+    refreshing_count: int
+    hits: int
+    misses: int
+    stale_hits: int
+    refresh_count: int
+    refresh_error_count: int
+    last_refresh_started_at: float | None = None
+    last_refresh_finished_at: float | None = None
+    last_error: str | None = None
+    oldest_expires_in_seconds: float | None = None
+
+
+class SystemCacheSummary(BaseModel):
+    total: int
+    items: list[SystemCacheItem] = Field(default_factory=list)
+
+
+class SystemJobStatus(BaseModel):
+    name: str
+    running: bool
+    enabled: bool
+    detail: str
+
+
+class SystemStatusResponse(BaseModel):
+    status: Literal["ok", "degraded"]
+    generated_at: str
+    cache: SystemCacheSummary
+    jobs: list[SystemJobStatus] = Field(default_factory=list)
+    confidence: SystemConfidence = "fresh"
+
+
+class SystemCacheClearResponse(BaseModel):
+    cleared: list[str] = Field(default_factory=list)
+
+
 class ShortTermSentimentStockItem(BaseModel):
     symbol: str
     name: str

@@ -9,7 +9,7 @@ from time import perf_counter
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -783,15 +783,31 @@ def get_gsgf_model_health() -> dict[str, object]:
 
 
 @app.post("/api/model-maintenance/packets/generate", response_model=ModelMaintenancePacket)
-def generate_model_maintenance_packet() -> ModelMaintenancePacket:
+def generate_model_maintenance_packet(request: Request) -> ModelMaintenancePacket:
+    return _build_and_save_model_maintenance_packet(packet_base_url=_request_base_url(request))
+
+
+def _build_and_save_model_maintenance_packet(packet_base_url: str | None) -> ModelMaintenancePacket:
     latest_screen_run = _run_store().load_latest()
     source_status = latest_screen_run.source_status if latest_screen_run is not None else []
+    trade_date = latest_screen_run.trade_date if latest_screen_run is not None else None
+    settings = _effective_settings().auction_top3_training
+    auction_top3_run = _auction_model_result_store().load_top3(trade_date) if trade_date else None
+    training_summary = _auction_top3_training_store().training_summary(
+        training_window_days=settings.training_window_days,
+        include_manual_training=settings.include_manual_trade_samples_in_training,
+        enabled=settings.record_signal_samples,
+        initial_capital=settings.simulated_initial_capital,
+    )
     packet = build_model_maintenance_packet(
-        trade_date=latest_screen_run.trade_date if latest_screen_run is not None else None,
+        trade_date=trade_date,
         latest_screen_run=latest_screen_run,
         review_summary=_gsgf_review_store().load_latest_summary(),
         calibration_summary=_background_job_store().load_latest_calibration(),
         source_status=source_status,
+        auction_top3_run=auction_top3_run,
+        auction_top3_training_summary=training_summary,
+        packet_base_url=packet_base_url,
     )
     return _model_maintenance_store().save_packet(packet)
 
@@ -801,12 +817,20 @@ def get_latest_model_maintenance_packet() -> ModelMaintenancePacket | None:
     return _model_maintenance_store().load_latest_packet()
 
 
+@app.get("/api/model-maintenance/packets/{packet_id}", response_model=ModelMaintenancePacket)
+def get_model_maintenance_packet(packet_id: str) -> ModelMaintenancePacket:
+    packet = _model_maintenance_store().load_packet(packet_id)
+    if packet is None:
+        raise HTTPException(status_code=404, detail="模型维护数据包不存在")
+    return packet
+
+
 @app.post("/api/model-maintenance/analyze", response_model=ModelMaintenanceReport)
-def analyze_model_maintenance() -> ModelMaintenanceReport:
+def analyze_model_maintenance(request: Request) -> ModelMaintenanceReport:
     store = _model_maintenance_store()
     packet = store.load_latest_packet()
     if packet is None:
-        packet = generate_model_maintenance_packet()
+        packet = _build_and_save_model_maintenance_packet(packet_base_url=_request_base_url(request))
     return store.save_report(
         analyze_model_maintenance_packet(
             packet,
@@ -2707,6 +2731,10 @@ def _model_maintenance_store() -> ModelMaintenanceStore:
     app.state.model_maintenance_store = store
     app.state.model_maintenance_store_data_dir = data_dir
     return store
+
+
+def _request_base_url(request: Request) -> str:
+    return str(request.base_url).rstrip("/")
 
 
 def _auction_top3_training_store() -> AuctionTop3TrainingStore:

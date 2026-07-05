@@ -4,6 +4,9 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.models import (
+    AuctionModelPredictionItem,
+    AuctionModelTop3Response,
+    AuctionTop3TrainingSummary,
     GsgfReviewBucket,
     GsgfReviewSummary,
     ModelMaintenancePacket,
@@ -84,6 +87,74 @@ def test_model_maintenance_packet_includes_review_and_quality_notes() -> None:
     assert packet.review_summary["record_count"] == 2
     assert packet.review_summary["buckets"][0]["signal_type"] == "确认买点"
     assert packet.data_quality_notes == []
+
+
+def test_model_maintenance_packet_includes_auction_top3_and_training_sections() -> None:
+    auction_run = AuctionModelTop3Response(
+        trade_date="2026-07-06",
+        feature_end_date="2026-07-03",
+        model_version="auction-model",
+        feature_version="auction-features",
+        guard_rule="guard",
+        items=[
+            AuctionModelPredictionItem(
+                symbol="300001.SZ",
+                name="模型一号",
+                rank=1,
+                prob_3pct=0.91,
+                bucket="selected",
+                guard_rule="guard",
+            )
+        ],
+    )
+    training = AuctionTop3TrainingSummary(
+        signal_sample_count=3,
+        simulated_trade_sample_count=3,
+        simulated_profit_summary={"latest_equity": 102000, "cumulative_return_pct": 2.0},
+    )
+
+    packet = build_model_maintenance_packet(
+        trade_date="2026-07-06",
+        latest_screen_run=None,
+        review_summary=None,
+        calibration_summary=None,
+        source_status=[],
+        auction_top3_run=auction_run,
+        auction_top3_training_summary=training,
+        packet_base_url="http://testserver",
+    )
+
+    assert packet.packet_url == f"http://testserver/model-maintenance/packets/{packet.packet_id}"
+    assert packet.model_sections["auction_top3"]["available"] is True
+    assert packet.model_sections["auction_top3"]["items"][0]["symbol"] == "300001.SZ"
+    assert packet.model_sections["auction_top3_training"]["signal_sample_count"] == 3
+    assert packet.model_sections["auction_top3_training"]["simulated_profit_summary"]["latest_equity"] == 102000
+
+
+def test_model_maintenance_store_loads_packet_by_id(tmp_path: Path) -> None:
+    store = ModelMaintenanceStore(tmp_path)
+    saved = store.save_packet(ModelMaintenancePacket(packet_id="packet-abc"))
+
+    loaded = store.load_packet(saved.packet_id)
+
+    assert loaded is not None
+    assert loaded.packet_id == "packet-abc"
+
+
+def test_model_maintenance_api_serves_packet_link(tmp_path: Path) -> None:
+    app.state.runs_dir = tmp_path
+    client = TestClient(app)
+    try:
+        generated = client.post("/api/model-maintenance/packets/generate")
+        packet_id = generated.json()["packet_id"]
+        fetched = client.get(f"/api/model-maintenance/packets/{packet_id}")
+    finally:
+        delattr(app.state, "runs_dir")
+
+    assert generated.status_code == 200
+    assert generated.json()["packet_url"].endswith(f"/model-maintenance/packets/{packet_id}")
+    assert fetched.status_code == 200
+    assert fetched.json()["packet_id"] == packet_id
 
 
 def test_offline_ai_report_marks_small_samples_as_insufficient() -> None:

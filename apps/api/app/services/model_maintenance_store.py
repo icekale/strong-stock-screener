@@ -32,6 +32,12 @@ class ModelMaintenanceStore:
             return None
         return ModelMaintenancePacket.model_validate_json(self.latest_packet_path.read_text(encoding="utf-8"))
 
+    def load_packet(self, packet_id: str) -> ModelMaintenancePacket | None:
+        path = self.packets_dir / f"{packet_id}.json"
+        if not path.exists():
+            return None
+        return ModelMaintenancePacket.model_validate_json(path.read_text(encoding="utf-8"))
+
     def save_report(self, report: ModelMaintenanceReport) -> ModelMaintenanceReport:
         self.reports_dir.mkdir(parents=True, exist_ok=True)
         payload = report.model_dump_json(indent=2)

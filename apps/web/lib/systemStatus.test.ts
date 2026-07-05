@@ -48,6 +48,7 @@ test("cacheFreshnessLabel formats populated cache with unknown expiry", () => {
 test("cacheStatusTone marks only current cache errors as error", () => {
   assert.equal(cacheStatusTone(cache({ refresh_error_count: 2, last_error: null })), "fresh");
   assert.equal(cacheStatusTone(cache({ refresh_error_count: 2, last_error: "timeout" })), "error");
+  assert.equal(cacheStatusTone(cache({ refresh_error_count: 2, last_error: "" })), "error");
 });
 
 test("cacheStatusTone separates stale cache from recovered historical errors", () => {

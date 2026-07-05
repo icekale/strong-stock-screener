@@ -12,7 +12,7 @@ export function cacheFreshnessLabel(item: SystemCacheItem): string {
 }
 
 export function cacheStatusTone(item: SystemCacheItem): "error" | "fresh" | "stale" {
-  if (item.last_error) {
+  if (item.last_error !== null) {
     return "error";
   }
   if (item.fresh_count > 0) {

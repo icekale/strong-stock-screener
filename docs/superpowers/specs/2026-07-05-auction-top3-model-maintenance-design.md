@@ -41,6 +41,7 @@
 2. `模拟交易样本`
    - 可开关。
    - 按固定规则回放买入/卖出结果，例如 09:25 入选、09:30/09:35/10:00/收盘不同买点表现、止盈止损、次日溢价。
+   - 提供可追踪的模拟收益状况，包括单笔收益、日度收益、累计收益曲线、最大回撤和分策略表现。
    - 用于评估模型选股质量，不代表真实交易收益。
 
 3. `真实操作样本`
@@ -96,6 +97,18 @@
     - `signal_sample_count`
     - `simulated_trade_sample_count`
     - `manual_trade_sample_count`
+    - `simulated_profit_summary`
+      - `portfolio_id`
+      - `latest_equity`
+      - `today_return_pct`
+      - `cumulative_return_pct`
+      - `max_drawdown_pct`
+      - `win_rate`
+      - `profit_loss_ratio`
+      - `complete_sample_count`
+      - `incomplete_sample_count`
+      - `best_policy`
+      - `worst_policy`
     - `date_range`
     - `training_window_days`
     - `latest_generated_at`
@@ -135,14 +148,33 @@
 - `AuctionTop3SimulatedTradeSample`
   - `sample_id`
   - `signal_sample_id`
+  - `portfolio_id`
   - `entry_policy`: `open_0930 | after_0935_confirm | before_1000_strength | close_follow`
   - `entry_price`
+  - `entry_time`
   - `exit_policy`: `intraday_stop | intraday_take_profit | close_exit | next_open_exit | next_close_exit`
   - `exit_price`
+  - `exit_time`
+  - `position_pct`
   - `return_pct`
+  - `profit_amount`
   - `max_drawdown_pct`
   - `max_favorable_pct`
   - `label`: `win | loss | neutral | data_incomplete`
+  - `created_at`
+
+- `AuctionTop3SimulatedPerformancePoint`
+  - `portfolio_id`
+  - `trade_date`
+  - `entry_policy`
+  - `exit_policy`
+  - `trade_count`
+  - `win_count`
+  - `loss_count`
+  - `daily_return_pct`
+  - `cumulative_return_pct`
+  - `equity`
+  - `max_drawdown_pct`
   - `created_at`
 
 - `AuctionTop3ManualTradeSample`
@@ -162,6 +194,8 @@
 
 - 信号样本只能保存当时可见数据，不能在盘后用未来表现改写信号特征。
 - 模拟交易样本必须标记策略口径，避免不同买卖规则混在一起训练。
+- 模拟收益追踪必须按 `entry_policy + exit_policy + portfolio_id` 分开统计，避免不同规则混算。
+- 默认模拟账户本金使用配置值 `top3_simulated_initial_capital`，只用于收益曲线计算，不代表真实资金。
 - 真实操作样本默认不进入训练集，只有 `enabled_for_training=true` 才能被统计。
 - 训练数据用于模型维护和规则建议，不直接触发自动调参上线。
 
@@ -247,6 +281,14 @@
   - 默认 60。
   - 控制维护包里训练样本统计窗口。
 
+- `top3_simulated_initial_capital`
+  - 默认 100000。
+  - 用于计算模拟账户权益曲线。
+
+- `top3_simulated_position_pct`
+  - 默认 0.33。
+  - 用于计算每只 Top3 股票的模拟仓位。
+
 新增 API：
 
 - `GET /api/model-maintenance/auction-top3/training/summary`
@@ -254,6 +296,9 @@
 
 - `POST /api/model-maintenance/auction-top3/training/generate`
   - 手动生成或刷新指定日期的模拟交易样本。
+
+- `GET /api/model-maintenance/auction-top3/training/performance`
+  - 返回模拟交易收益追踪，包括日度收益、累计收益、最大回撤、胜率、盈亏比和分策略表现。
 
 - `POST /api/model-maintenance/auction-top3/manual-trades`
   - 保存用户真实操作样本。
@@ -279,6 +324,8 @@
 
 3. `Top3 训练数据`
    - 显示信号样本数、模拟交易样本数、真实操作样本数。
+   - 显示模拟收益概览：累计收益、今日收益、最大回撤、胜率、盈亏比。
+   - 显示模拟收益曲线，支持按买入策略和卖出策略切换。
    - 显示训练窗口天数。
    - 显示三个开关状态：记录信号样本、生成模拟交易样本、真实操作样本进入训练。
    - 提供 `生成/刷新 Top3 训练样本` 按钮。
@@ -305,6 +352,7 @@
 - 离线降级：显示“AI 未配置或调用失败，当前使用离线规则摘要”。
 - 竞价缓存缺失：显示“竞价 Top3 无缓存，本次只维护 GSGF；请先在竞价页生成 Top3 模型结果”。
 - Top3 训练样本生成成功：显示新增/更新样本数和训练窗口。
+- 模拟收益追踪更新成功：显示最新累计收益、最大回撤和样本数量。
 - 模拟交易样本关闭：显示“仅记录信号样本，暂不生成买卖回放结果”。
 
 ## 错误处理
@@ -317,6 +365,8 @@
 - 复制 Codex 分析链接失败时显示明确错误。
 - 训练样本生成失败不影响竞价 Top3 主功能。
 - 行情缺失时，模拟交易样本标记 `data_incomplete`，不伪造买卖结果。
+- 模拟收益追踪只统计完整样本，`data_incomplete` 样本单独计数。
+- 重新生成同一日期模拟样本时，必须按 `trade_date + signal_sample_id + entry_policy + exit_policy` 去重覆盖，避免收益曲线重复累计。
 - 真实操作样本保存失败时必须保留用户输入，不清空表单。
 
 ## 测试计划
@@ -329,6 +379,8 @@
 - 离线分析能识别竞价 Top3 缓存状态。
 - Top3 信号样本只保存当时特征快照，不使用未来表现。
 - 模拟交易样本能按不同 entry/exit policy 生成独立结果。
+- 模拟收益追踪能生成日度收益、累计收益、最大回撤和胜率。
+- 同一日期重复刷新模拟样本不会重复累计收益。
 - 真实操作样本默认不进入训练统计，打开后才计入。
 - 维护包包含 `auction_top3_training` 摘要。
 - 现有 GSGF 模型维护 API 测试继续通过。
@@ -342,6 +394,7 @@
 - `offline-rule-summary` 时显示离线降级提示。
 - 竞价 Top3 缓存缺失时显示可理解的说明。
 - Top3 训练数据区显示开关状态、样本数和刷新按钮。
+- Top3 训练数据区显示模拟收益概览和收益曲线。
 - 关闭模拟交易样本时，页面显示只记录信号样本。
 - 复制 Codex 分析链接按钮存在并可用。
 

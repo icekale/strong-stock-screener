@@ -62,6 +62,12 @@ class Settings(BaseSettings):
     auction_model_top_n: int = Field(default=3, ge=1, le=10)
     auction_model_max_items: int = Field(default=50, ge=3, le=200)
     auction_model_timeout_seconds: float = Field(default=180, ge=5, le=300)
+    auction_top3_record_signal_samples: bool = True
+    auction_top3_generate_simulated_trade_samples: bool = False
+    auction_top3_include_manual_trade_samples_in_training: bool = False
+    auction_top3_training_window_days: int = Field(default=60, ge=5, le=365)
+    auction_top3_simulated_initial_capital: float = Field(default=100000, gt=0)
+    auction_top3_simulated_position_pct: float = Field(default=0.33, gt=0, le=1)
 
     model_config = SettingsConfigDict(
         env_prefix="STRONG_STOCK_",

@@ -47,6 +47,15 @@ class EffectiveAiAnalysisSettings(BaseModel):
     run_after_weekly_calibration: bool
 
 
+class AuctionTop3TrainingSettings(BaseModel):
+    record_signal_samples: bool = True
+    generate_simulated_trade_samples: bool = False
+    include_manual_trade_samples_in_training: bool = False
+    training_window_days: int = Field(default=60, ge=5, le=365)
+    simulated_initial_capital: float = Field(default=100000, gt=0)
+    simulated_position_pct: float = Field(default=0.33, gt=0, le=1)
+
+
 class RuntimeSettings(BaseModel):
     candidate_provider: CandidateProviderName | None = None
     kline_provider: KlineProviderName | None = None
@@ -63,6 +72,7 @@ class RuntimeSettings(BaseModel):
     sentiment_monitor: SentimentMonitorConfig = Field(default_factory=SentimentMonitorConfig)
     gsgf_auto_review: GsgfAutoReviewConfig = Field(default_factory=GsgfAutoReviewConfig)
     ai_analysis: AiAnalysisSettings = Field(default_factory=AiAnalysisSettings)
+    auction_top3_training: AuctionTop3TrainingSettings = Field(default_factory=AuctionTop3TrainingSettings)
 
 
 class SettingsUpdate(BaseModel):
@@ -81,6 +91,7 @@ class SettingsUpdate(BaseModel):
     sentiment_monitor: SentimentMonitorConfig = Field(default_factory=SentimentMonitorConfig)
     gsgf_auto_review: GsgfAutoReviewConfig = Field(default_factory=GsgfAutoReviewConfig)
     ai_analysis: AiAnalysisSettings = Field(default_factory=AiAnalysisSettings)
+    auction_top3_training: AuctionTop3TrainingSettings = Field(default_factory=AuctionTop3TrainingSettings)
 
 
 class EffectiveRuntimeSettings(BaseModel):
@@ -100,6 +111,7 @@ class EffectiveRuntimeSettings(BaseModel):
     ifind_api_key_source: Literal["runtime", "env", "none"]
     tdx_api_key_source: Literal["runtime", "env", "none"]
     ai_analysis: EffectiveAiAnalysisSettings
+    auction_top3_training: AuctionTop3TrainingSettings
 
 
 def load_runtime_settings(path: Path) -> RuntimeSettings:
@@ -131,6 +143,7 @@ def save_runtime_settings(path: Path, update: SettingsUpdate) -> RuntimeSettings
             "sentiment_monitor": update.sentiment_monitor,
             "gsgf_auto_review": update.gsgf_auto_review,
             "ai_analysis": _merge_ai_analysis_settings(current.ai_analysis, update.ai_analysis),
+            "auction_top3_training": update.auction_top3_training,
         }
     )
     if update.tickflow_api_key is not None:
@@ -195,6 +208,7 @@ def effective_runtime_settings(base: Settings, path: Path) -> EffectiveRuntimeSe
         ifind_api_key_source=ifind_key_source,
         tdx_api_key_source=tdx_key_source,
         ai_analysis=ai_analysis,
+        auction_top3_training=runtime.auction_top3_training,
     )
 
 
@@ -228,6 +242,7 @@ def public_settings_payload(config: EffectiveRuntimeSettings) -> dict[str, objec
         "gsgf_auto_review": load_runtime_settings(Path(config.runtime_config_path))
         .gsgf_auto_review.model_dump(mode="json"),
         "ai_analysis": _public_ai_analysis_settings(config.ai_analysis),
+        "auction_top3_training": config.auction_top3_training.model_dump(mode="json"),
     }
 
 

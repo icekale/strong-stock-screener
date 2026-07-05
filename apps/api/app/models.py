@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 ScreenStatus = Literal["focus", "wait_pullback", "reduce_risk", "data_incomplete"]
@@ -40,6 +40,15 @@ SentimentWatchlistAction = Literal["重点盯", "等确认", "风险回避"]
 BackgroundJobStatus = Literal["pending", "running", "success", "failed", "canceled"]
 AuctionModelBucket = Literal["selected", "attack", "watch", "avoid"]
 AuctionModelCacheStatus = Literal["generated", "cached"]
+AuctionTop3EntryPolicy = Literal["open_0930", "after_0935_confirm", "before_1000_strength", "close_follow"]
+AuctionTop3ExitPolicy = Literal[
+    "intraday_stop",
+    "intraday_take_profit",
+    "close_exit",
+    "next_open_exit",
+    "next_close_exit",
+]
+AuctionTop3TradeLabel = Literal["win", "loss", "neutral", "data_incomplete"]
 AuctionReviewStatus = Literal["pending", "intraday_done", "day_done", "next_day_done", "data_incomplete"]
 ModelMaintenanceProvider = Literal["openai", "deepseek", "openai_compatible"]
 ModelMaintenanceHealthStatus = Literal[
@@ -509,6 +518,8 @@ class ModelMaintenancePacket(BaseModel):
     false_negative_cases: list[dict[str, Any]] = Field(default_factory=list)
     false_positive_cases: list[dict[str, Any]] = Field(default_factory=list)
     data_quality_notes: list[str] = Field(default_factory=list)
+    model_sections: dict[str, Any] = Field(default_factory=dict)
+    packet_url: str | None = None
 
 
 class ModelMaintenanceReport(BaseModel):
@@ -707,6 +718,107 @@ class AuctionModelTop3Response(BaseModel):
     generated_at: str = Field(
         default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
     )
+
+
+class AuctionTop3SignalSample(BaseModel):
+    sample_id: str
+    trade_date: str
+    symbol: str
+    name: str = ""
+    industry: str | None = None
+    rank: int | None = None
+    score: float = 0
+    model_version: str
+    feature_version: str
+    guard_rule: str | None = None
+    signals: list[str] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    feature_snapshot: dict[str, Any] = Field(default_factory=dict)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    created_at: str = Field(default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds"))
+
+
+class AuctionTop3SimulatedTradeSample(BaseModel):
+    sample_id: str
+    signal_sample_id: str
+    portfolio_id: str = "default"
+    trade_date: str
+    symbol: str
+    entry_policy: AuctionTop3EntryPolicy
+    entry_price: float | None = None
+    entry_time: str | None = None
+    exit_policy: AuctionTop3ExitPolicy
+    exit_price: float | None = None
+    exit_time: str | None = None
+    position_pct: float = 0.33
+    return_pct: float | None = None
+    profit_amount: float | None = None
+    max_drawdown_pct: float | None = None
+    max_favorable_pct: float | None = None
+    label: AuctionTop3TradeLabel = "data_incomplete"
+    created_at: str = Field(default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds"))
+
+    @model_validator(mode="after")
+    def infer_label_from_return(self) -> "AuctionTop3SimulatedTradeSample":
+        if self.return_pct is None:
+            return self
+        if self.return_pct > 0:
+            self.label = "win"
+        elif self.return_pct < 0:
+            self.label = "loss"
+        else:
+            self.label = "neutral"
+        return self
+
+
+class AuctionTop3SimulatedPerformancePoint(BaseModel):
+    portfolio_id: str = "default"
+    trade_date: str
+    entry_policy: AuctionTop3EntryPolicy
+    exit_policy: AuctionTop3ExitPolicy
+    trade_count: int = 0
+    win_count: int = 0
+    loss_count: int = 0
+    daily_return_pct: float | None = None
+    cumulative_return_pct: float | None = None
+    equity: float | None = None
+    max_drawdown_pct: float | None = None
+    created_at: str = Field(default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds"))
+
+
+class AuctionTop3ManualTradeSample(BaseModel):
+    sample_id: str
+    signal_sample_id: str
+    trade_date: str
+    symbol: str
+    enabled_for_training: bool = False
+    bought: bool = False
+    buy_price: float | None = None
+    sell_price: float | None = None
+    position_pct: float | None = None
+    buy_reason: str = ""
+    sell_reason: str = ""
+    return_pct: float | None = None
+    created_at: str = Field(default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds"))
+
+
+class AuctionTop3TrainingSummary(BaseModel):
+    enabled: bool = True
+    signal_sample_count: int = 0
+    simulated_trade_sample_count: int = 0
+    manual_trade_sample_count: int = 0
+    date_range: list[str] = Field(default_factory=list)
+    training_window_days: int = 60
+    latest_generated_at: str | None = None
+    simulated_profit_summary: dict[str, Any] = Field(default_factory=dict)
+    quality_notes: list[str] = Field(default_factory=list)
+
+
+class AuctionTop3PerformanceResponse(BaseModel):
+    summary: dict[str, Any] = Field(default_factory=dict)
+    points: list[AuctionTop3SimulatedPerformancePoint] = Field(default_factory=list)
+    trades: list[AuctionTop3SimulatedTradeSample] = Field(default_factory=list)
+    generated_at: str = Field(default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds"))
 
 
 class SectorRadarItem(BaseModel):

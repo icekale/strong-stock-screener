@@ -1,11 +1,15 @@
 from pathlib import Path
 
 from app.models import (
+    AuctionModelPredictionItem,
+    AuctionModelTop3Response,
     AuctionTop3ManualTradeSample,
     AuctionTop3SignalSample,
     AuctionTop3SimulatedPerformancePoint,
     AuctionTop3SimulatedTradeSample,
+    KlineBar,
     ModelMaintenancePacket,
+    StrongStockSourceStatus,
 )
 from app.services.runtime_settings import (
     AuctionTop3TrainingSettings,
@@ -113,3 +117,128 @@ def test_runtime_settings_persist_auction_top3_training_options(tmp_path: Path) 
     assert loaded.auction_top3_training.training_window_days == 45
     assert loaded.auction_top3_training.simulated_initial_capital == 200000
     assert loaded.auction_top3_training.simulated_position_pct == 0.25
+
+
+def test_training_store_upserts_signal_samples_by_trade_date_symbol_rank(tmp_path: Path) -> None:
+    from app.services.auction_top3_training import AuctionTop3TrainingStore, build_signal_samples_from_top3
+
+    store = AuctionTop3TrainingStore(tmp_path)
+    response = _top3_response()
+
+    first = store.upsert_signal_samples(build_signal_samples_from_top3(response))
+    second = store.upsert_signal_samples(build_signal_samples_from_top3(response))
+    loaded = store.load_signal_samples("2026-07-06")
+
+    assert len(first) == 2
+    assert len(second) == 2
+    assert len(loaded) == 2
+    assert loaded[0].sample_id == "sig-20260706-300001SZ-1"
+    assert loaded[0].feature_snapshot["prob_3pct"] == 0.91
+    assert loaded[0].source_status[0].source == "fake-source"
+
+
+def test_generate_simulated_trade_samples_and_performance_dedupes(tmp_path: Path) -> None:
+    from app.services.auction_top3_training import (
+        AuctionTop3TrainingStore,
+        build_signal_samples_from_top3,
+        generate_simulated_trade_samples,
+        summarize_simulated_performance,
+    )
+
+    store = AuctionTop3TrainingStore(tmp_path)
+    signals = store.upsert_signal_samples(build_signal_samples_from_top3(_top3_response()))
+    bars_by_symbol = {
+        "300001.SZ": [
+            KlineBar(date="2026-07-06", open=10, high=10.8, low=9.8, close=10.5, volume=100),
+            KlineBar(date="2026-07-07", open=10.7, high=11, low=10.4, close=10.8, volume=120),
+        ],
+        "300002.SZ": [
+            KlineBar(date="2026-07-06", open=20, high=20.2, low=19.2, close=19.4, volume=100),
+            KlineBar(date="2026-07-07", open=19.0, high=19.4, low=18.8, close=19.1, volume=90),
+        ],
+    }
+
+    trades = generate_simulated_trade_samples(
+        signals,
+        bars_by_symbol,
+        initial_capital=100000,
+        position_pct=0.5,
+        entry_policy="open_0930",
+        exit_policy="next_open_exit",
+    )
+    store.upsert_simulated_trades(trades)
+    store.upsert_simulated_trades(trades)
+    performance = summarize_simulated_performance(
+        store.load_simulated_trades(),
+        initial_capital=100000,
+        portfolio_id="default",
+    )
+    store.save_performance_points(performance.points)
+
+    assert len(store.load_simulated_trades()) == 2
+    assert performance.summary["complete_sample_count"] == 2
+    assert performance.summary["latest_equity"] == 101000.0
+    assert performance.summary["cumulative_return_pct"] == 1.0
+    assert performance.summary["win_rate"] == 0.5
+    assert performance.points[0].trade_date == "2026-07-06"
+
+
+def test_manual_trade_samples_count_only_when_enabled_for_training(tmp_path: Path) -> None:
+    from app.services.auction_top3_training import AuctionTop3TrainingStore
+
+    store = AuctionTop3TrainingStore(tmp_path)
+    store.upsert_manual_trade(
+        AuctionTop3ManualTradeSample(
+            sample_id="manual-1",
+            signal_sample_id="sig-1",
+            trade_date="2026-07-06",
+            symbol="300001.SZ",
+            bought=True,
+            enabled_for_training=False,
+        )
+    )
+    store.upsert_manual_trade(
+        AuctionTop3ManualTradeSample(
+            sample_id="manual-2",
+            signal_sample_id="sig-2",
+            trade_date="2026-07-06",
+            symbol="300002.SZ",
+            bought=True,
+            enabled_for_training=True,
+        )
+    )
+
+    summary = store.training_summary(training_window_days=60, include_manual_training=True)
+
+    assert summary.manual_trade_sample_count == 1
+
+
+def _top3_response() -> AuctionModelTop3Response:
+    return AuctionModelTop3Response(
+        trade_date="2026-07-06",
+        feature_end_date="2026-07-03",
+        model_version="fake-model",
+        feature_version="fake-features",
+        guard_rule="fake-guard",
+        items=[
+            AuctionModelPredictionItem(
+                symbol="300001.SZ",
+                name="模型一号",
+                rank=1,
+                prob_3pct=0.91,
+                bucket="selected",
+                guard_rule="fake-guard",
+                trend_reasons=["强趋势"],
+            ),
+            AuctionModelPredictionItem(
+                symbol="300002.SZ",
+                name="模型二号",
+                rank=2,
+                prob_3pct=0.82,
+                bucket="selected",
+                guard_rule="fake-guard",
+                risk_flags=["高开过热"],
+            ),
+        ],
+        source_status=[StrongStockSourceStatus(source="fake-source", status="success", detail="ok")],
+    )

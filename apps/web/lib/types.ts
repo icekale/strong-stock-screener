@@ -1282,3 +1282,47 @@ export type WatchlistPoolItemRequest = {
 export type WatchlistGsgfStatusResponse = {
   items: Array<WatchlistPoolItem & { gsgf: GsgfAnalysis }>;
 };
+
+export type SystemConfidence = "fresh" | "stale" | "partial" | "degraded" | "unavailable";
+
+export type SystemCacheItem = {
+  name: string;
+  group: string;
+  ttl_seconds: number;
+  size: number;
+  fresh_count: number;
+  refreshing_count: number;
+  hits: number;
+  misses: number;
+  stale_hits: number;
+  refresh_count: number;
+  refresh_error_count: number;
+  last_refresh_started_at: number | null;
+  last_refresh_finished_at: number | null;
+  last_error: string | null;
+  oldest_expires_in_seconds: number | null;
+};
+
+export type SystemCacheSummary = {
+  total: number;
+  items: SystemCacheItem[];
+};
+
+export type SystemJobStatus = {
+  name: string;
+  running: boolean;
+  enabled: boolean;
+  detail: string;
+};
+
+export type SystemStatusResponse = {
+  status: "ok" | "degraded";
+  generated_at: string;
+  cache: SystemCacheSummary;
+  jobs: SystemJobStatus[];
+  confidence: SystemConfidence;
+};
+
+export type SystemCacheClearResponse = {
+  cleared: string[];
+};

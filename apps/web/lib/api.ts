@@ -48,6 +48,9 @@ import type {
   StockResearchResponse,
   StrongStockIntradaySnapshot,
   StrongStockScreeningResponse,
+  SystemCacheClearResponse,
+  SystemCacheSummary,
+  SystemStatusResponse,
   WatchlistGsgfStatusResponse,
   WatchlistPoolItemRequest,
   WatchlistPoolResponse,
@@ -68,6 +71,37 @@ export async function getDataSourceStatus(): Promise<DataSourceStatusResponse> {
     throw new Error(`读取数据源状态失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<DataSourceStatusResponse>;
+}
+
+export async function getSystemStatus(): Promise<SystemStatusResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/system/status`);
+  if (!response.ok) {
+    throw new Error(`读取系统状态失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SystemStatusResponse>;
+}
+
+export async function getSystemCache(): Promise<SystemCacheSummary> {
+  const response = await fetch(`${API_BASE_URL}/api/system/cache`);
+  if (!response.ok) {
+    throw new Error(`读取缓存状态失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SystemCacheSummary>;
+}
+
+export async function clearSystemCache(group: string): Promise<SystemCacheClearResponse> {
+  const trimmedGroup = group.trim();
+  if (!trimmedGroup) {
+    throw new Error("缓存分组不能为空");
+  }
+  const params = new URLSearchParams({ group: trimmedGroup });
+  const response = await fetch(`${API_BASE_URL}/api/system/cache/clear?${params.toString()}`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`清理缓存失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SystemCacheClearResponse>;
 }
 
 export async function getMarketOverview(): Promise<MarketOverviewResponse> {

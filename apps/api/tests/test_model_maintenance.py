@@ -205,6 +205,68 @@ def test_online_ai_report_uses_openai_compatible_chat_completion() -> None:
     assert report.suggestions[0].status == "pending"
 
 
+def test_online_ai_prompt_mentions_auction_top3_training_context() -> None:
+    packet = ModelMaintenancePacket(
+        packet_id="packet-top3",
+        trade_date="2026-07-06",
+        review_summary={"record_count": 12, "buckets": []},
+        model_sections={
+            "auction_top3": {"available": True, "top_count": 3},
+            "auction_top3_training": {
+                "signal_sample_count": 6,
+                "simulated_trade_sample_count": 6,
+                "simulated_profit_summary": {"cumulative_return_pct": 1.8},
+            },
+        },
+    )
+    http_client = FakeAiHttpClient()
+
+    analyze_model_maintenance_packet(
+        packet,
+        EffectiveAiAnalysisSettings(
+            enabled=True,
+            provider="deepseek",
+            base_url="https://api.deepseek.com",
+            model="deepseek-reasoner",
+            api_key="deepseek-test-key",
+            api_key_source="runtime",
+            run_after_daily_review=True,
+            run_after_weekly_calibration=False,
+        ),
+        http_client=http_client,
+    )
+
+    assert http_client.request is not None
+    system_prompt = http_client.request["json"]["messages"][0]["content"]
+    assert "竞价 Top3" in system_prompt
+    assert "训练样本" in system_prompt
+    assert "模拟收益" in system_prompt
+
+
+def test_offline_ai_report_mentions_auction_top3_training_status() -> None:
+    packet = ModelMaintenancePacket(
+        packet_id="packet-top3",
+        trade_date="2026-07-06",
+        review_summary={"record_count": 12, "buckets": []},
+        model_sections={
+            "auction_top3": {"available": True, "top_count": 3, "watch_count": 2},
+            "auction_top3_training": {
+                "signal_sample_count": 6,
+                "simulated_trade_sample_count": 6,
+                "manual_trade_sample_count": 1,
+                "simulated_profit_summary": {"latest_equity": 101800, "cumulative_return_pct": 1.8},
+            },
+        },
+    )
+
+    report = build_offline_model_maintenance_report(packet)
+
+    findings = "\n".join(report.key_findings)
+    assert "竞价 Top3" in findings
+    assert "训练样本 6" in findings
+    assert "模拟收益 1.8%" in findings
+
+
 def test_model_maintenance_api_generates_packet_and_report(tmp_path: Path) -> None:
     app.state.runs_dir = tmp_path
     client = TestClient(app)

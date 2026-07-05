@@ -43,6 +43,9 @@ def analyze_model_maintenance_packet(
                         "role": "system",
                         "content": (
                             "你是A股选股模型维护助手。只分析模型表现和数据质量，不给交易指令。"
+                            "重点检查 model_sections.gsgf、model_sections.auction_top3、"
+                            "model_sections.auction_top3_training。竞价 Top3 的训练样本和模拟收益"
+                            "只用于模型维护与复盘，不代表真实收益，不自动调参。"
                             "请只返回一个 JSON 对象，字段包含 health_status, summary, key_findings,"
                             " rule_diagnostics, suggestions。"
                         ),
@@ -96,7 +99,7 @@ def build_offline_model_maintenance_report(packet: ModelMaintenancePacket) -> Mo
         model="offline-rule-summary",
         health_status=health_status,
         summary=summary,
-        key_findings=[summary],
+        key_findings=[summary, *_auction_top3_findings(packet)],
         suggestions=[
             ModelMaintenanceSuggestion(
                 suggestion_id=new_model_maintenance_id("suggestion"),
@@ -109,6 +112,39 @@ def build_offline_model_maintenance_report(packet: ModelMaintenancePacket) -> Mo
             )
         ],
     )
+
+
+def _auction_top3_findings(packet: ModelMaintenancePacket) -> list[str]:
+    sections = packet.model_sections or {}
+    auction_top3 = sections.get("auction_top3")
+    training = sections.get("auction_top3_training")
+    findings: list[str] = []
+
+    if isinstance(auction_top3, dict):
+        if auction_top3.get("available"):
+            findings.append(
+                "竞价 Top3：当前可用，入选 "
+                f"{_int_value(auction_top3.get('top_count'))} 只，观察 "
+                f"{_int_value(auction_top3.get('watch_count'))} 只。"
+            )
+        else:
+            notes = auction_top3.get("notes")
+            note = notes[0] if isinstance(notes, list) and notes else "暂无可用缓存。"
+            findings.append(f"竞价 Top3：{note}")
+
+    if isinstance(training, dict):
+        signal_count = _int_value(training.get("signal_sample_count"))
+        simulated_count = _int_value(training.get("simulated_trade_sample_count"))
+        manual_count = _int_value(training.get("manual_trade_sample_count"))
+        profit = training.get("simulated_profit_summary")
+        return_pct = profit.get("cumulative_return_pct") if isinstance(profit, dict) else None
+        suffix = f"，模拟收益 {_number_text(return_pct)}%" if isinstance(return_pct, int | float) else ""
+        findings.append(
+            "竞价 Top3训练：训练样本 "
+            f"{signal_count}，模拟交易 {simulated_count}，人工样本 {manual_count}{suffix}。"
+        )
+
+    return findings
 
 
 def _extract_chat_content(payload: dict[str, Any]) -> str:
@@ -194,6 +230,22 @@ def _suggestion_from_payload(payload: dict[str, Any]) -> ModelMaintenanceSuggest
 
 def _safe_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def _int_value(value: Any) -> int:
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int | float):
+        return int(value)
+    return 0
+
+
+def _number_text(value: Any) -> str:
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return f"{value:g}"
+    return str(value)
 
 
 def _bounded_confidence(value: Any) -> float:

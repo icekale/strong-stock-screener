@@ -2,7 +2,13 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
-from app.main import MARKET_OVERVIEW_CACHE, STOCK_KLINE_CACHE, _clear_data_source_caches, app
+from app.main import (
+    CACHE_DEFINITIONS,
+    MARKET_OVERVIEW_CACHE,
+    STOCK_KLINE_CACHE,
+    _clear_data_source_caches,
+    app,
+)
 
 
 class RaisingStatusService:
@@ -170,24 +176,42 @@ def test_system_status_tolerates_services_with_raising_thread_property() -> None
 def test_system_status_uses_current_cache_error_state_not_historical_count() -> None:
     client = TestClient(app)
     _clear_data_source_caches()
+    for cache_name, _group, cache in CACHE_DEFINITIONS:
+        cache.get_or_set(f"unit-test-reset-{cache_name}", lambda: object())
+    _clear_data_source_caches()
+    job_state_names = (
+        "auction_sampler",
+        "sector_workbench_sampler",
+        "sentiment_monitor",
+        "gsgf_auto_review_service",
+    )
+    previous_job_state = {
+        name: getattr(app.state, name) for name in job_state_names if hasattr(app.state, name)
+    }
+    for name in previous_job_state:
+        delattr(app.state, name)
 
     def failing_factory() -> object:
         raise RuntimeError("provider down")
 
     try:
-        MARKET_OVERVIEW_CACHE.get_or_set("unit-test-cache-recovery", failing_factory)
-    except RuntimeError:
-        pass
+        try:
+            MARKET_OVERVIEW_CACHE.get_or_set("unit-test-cache-recovery", failing_factory)
+        except RuntimeError:
+            pass
 
-    MARKET_OVERVIEW_CACHE.get_or_set("unit-test-cache-recovery", lambda: object())
+        MARKET_OVERVIEW_CACHE.get_or_set("unit-test-cache-recovery", lambda: object())
 
-    response = client.get("/api/system/status")
+        response = client.get("/api/system/status")
 
-    assert response.status_code == 200
-    payload = response.json()
-    market_overview = next(
-        item for item in payload["cache"]["items"] if item["name"] == "market_overview"
-    )
-    assert market_overview["refresh_error_count"] > 0
-    assert market_overview["last_error"] is None
-    assert payload["status"] == "ok"
+        assert response.status_code == 200
+        payload = response.json()
+        market_overview = next(
+            item for item in payload["cache"]["items"] if item["name"] == "market_overview"
+        )
+        assert market_overview["refresh_error_count"] > 0
+        assert market_overview["last_error"] is None
+        assert payload["status"] == "ok"
+    finally:
+        for name, value in previous_job_state.items():
+            setattr(app.state, name, value)

@@ -2,7 +2,7 @@
 
 import { Alert, Button, Card, Table, Tag, Typography } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { cacheFreshnessLabel, systemStatusTone } from "../../lib/systemStatus";
+import { cacheFreshnessLabel, cacheStatusTone, systemStatusTone } from "../../lib/systemStatus";
 import type { SystemCacheItem, SystemStatusResponse } from "../../lib/types";
 
 type Props = {
@@ -18,14 +18,17 @@ const columns: ColumnsType<SystemCacheItem> = [
   {
     title: "状态",
     key: "freshness",
-    render: (_, item) => (
-      <Tag
-        className={item.refresh_error_count > 0 ? "" : item.fresh_count > 0 ? "market-green-badge" : ""}
-        color={item.refresh_error_count > 0 ? "red" : item.fresh_count > 0 ? undefined : "orange"}
-      >
-        {cacheFreshnessLabel(item)}
-      </Tag>
-    ),
+    render: (_, item) => {
+      const tone = cacheStatusTone(item);
+      return (
+        <Tag
+          className={tone === "fresh" ? "market-green-badge" : ""}
+          color={tone === "error" ? "red" : tone === "stale" ? "orange" : undefined}
+        >
+          {cacheFreshnessLabel(item)}
+        </Tag>
+      );
+    },
   },
   { title: "命中", dataIndex: "hits", key: "hits", align: "right" },
   { title: "Miss", dataIndex: "misses", key: "misses", align: "right" },

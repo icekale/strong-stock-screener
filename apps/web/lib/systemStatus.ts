@@ -11,6 +11,16 @@ export function cacheFreshnessLabel(item: SystemCacheItem): string {
   return `已过期${Math.abs(Math.round(seconds))}秒`;
 }
 
+export function cacheStatusTone(item: SystemCacheItem): "error" | "fresh" | "stale" {
+  if (item.last_error) {
+    return "error";
+  }
+  if (item.fresh_count > 0) {
+    return "fresh";
+  }
+  return "stale";
+}
+
 export function systemStatusTone(status: SystemStatusResponse): "success" | "warning" {
   if (status.status === "ok" && status.confidence === "fresh") {
     return "success";

@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type { SystemCacheItem, SystemStatusResponse } from "./types";
 
-const { cacheFreshnessLabel, systemStatusTone } = (await import(
+const { cacheFreshnessLabel, cacheStatusTone, systemStatusTone } = (await import(
   new URL("./systemStatus.ts", import.meta.url).href
 )) as typeof import("./systemStatus");
 const { clearSystemCache } = (await import(new URL("./api.ts", import.meta.url).href)) as typeof import("./api");
@@ -43,6 +43,18 @@ test("cacheFreshnessLabel formats empty cache with unknown expiry", () => {
 
 test("cacheFreshnessLabel formats populated cache with unknown expiry", () => {
   assert.equal(cacheFreshnessLabel(cache({ size: 2, oldest_expires_in_seconds: null })), "缓存状态未知");
+});
+
+test("cacheStatusTone marks only current cache errors as error", () => {
+  assert.equal(cacheStatusTone(cache({ refresh_error_count: 2, last_error: null })), "fresh");
+  assert.equal(cacheStatusTone(cache({ refresh_error_count: 2, last_error: "timeout" })), "error");
+});
+
+test("cacheStatusTone separates stale cache from recovered historical errors", () => {
+  assert.equal(
+    cacheStatusTone(cache({ fresh_count: 0, refresh_error_count: 2, last_error: null })),
+    "stale",
+  );
 });
 
 test("systemStatusTone maps degraded systems to warning", () => {

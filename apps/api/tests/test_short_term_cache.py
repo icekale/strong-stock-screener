@@ -205,3 +205,72 @@ def test_clear_during_background_refresh_keeps_cache_empty() -> None:
     assert snapshot["last_refresh_finished_at"] != previous_finished
     assert snapshot["size"] == 0
     assert cache.get_if_fresh("key") is None
+
+
+def test_stale_fill_success_after_clear_does_not_clear_new_error() -> None:
+    cache = TtlCache[str](ttl_seconds=60, name="test-cache")
+    fill_started = Event()
+    release_fill = Event()
+    thread_errors: list[BaseException] = []
+
+    def slow_success_factory() -> str:
+        fill_started.set()
+        release_fill.wait()
+        return "old-success"
+
+    def run_slow_fill() -> None:
+        try:
+            assert cache.get_or_set("old-key", slow_success_factory) == "old-success"
+        except BaseException as exc:
+            thread_errors.append(exc)
+
+    thread = Thread(target=run_slow_fill)
+    thread.start()
+    assert fill_started.wait(timeout=1)
+
+    cache.clear()
+
+    def newer_failing_factory() -> str:
+        raise RuntimeError("new failure")
+
+    try:
+        cache.get_or_set("new-key", newer_failing_factory)
+    except RuntimeError:
+        pass
+    assert cache.snapshot()["last_error"] == "new failure"
+
+    release_fill.set()
+    thread.join(timeout=1)
+
+    assert not thread_errors
+    assert cache.snapshot()["last_error"] == "new failure"
+
+
+def test_stale_refresh_failure_after_clear_does_not_overwrite_new_success() -> None:
+    cache = TtlCache[str](ttl_seconds=0.01, name="test-cache")
+    refresh_started = Event()
+    release_refresh = Event()
+
+    assert cache.get_or_refresh("old-key", lambda: "initial") == "initial"
+    sleep(0.02)
+
+    def slow_failing_factory() -> str:
+        refresh_started.set()
+        release_refresh.wait()
+        raise RuntimeError("old failure")
+
+    assert cache.get_or_refresh("old-key", slow_failing_factory) == "initial"
+    assert refresh_started.wait(timeout=1)
+
+    cache.clear()
+    assert cache.get_or_set("new-key", lambda: "new-success") == "new-success"
+    assert cache.snapshot()["last_error"] is None
+    previous_error_count = cache.snapshot()["refresh_error_count"]
+
+    release_refresh.set()
+    for _ in range(100):
+        if cache.snapshot()["refresh_error_count"] > previous_error_count:
+            break
+        sleep(0.01)
+
+    assert cache.snapshot()["last_error"] is None

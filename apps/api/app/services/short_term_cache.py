@@ -138,15 +138,16 @@ class TtlCache(Generic[T]):
                 with self._lock:
                     self._refresh_error_count += 1
                     self._last_refresh_finished_at = monotonic()
-                    self._last_error = str(exc)
+                    if self._generation == fill_generation:
+                        self._last_error = str(exc)
                 raise
             else:
                 with self._lock:
                     if self._generation == fill_generation:
                         self._items[key] = (monotonic() + self.ttl_seconds, value)
+                        self._last_error = None
                     self._refresh_count += 1
                     self._last_refresh_finished_at = monotonic()
-                    self._last_error = None
                 return value
             finally:
                 with self._lock:
@@ -160,14 +161,15 @@ class TtlCache(Generic[T]):
             with self._lock:
                 if self._generation == generation:
                     self._items[key] = (monotonic() + self.ttl_seconds, value)
+                    self._last_error = None
                 self._refresh_count += 1
                 self._last_refresh_finished_at = monotonic()
-                self._last_error = None
         except Exception as exc:
             with self._lock:
                 self._refresh_error_count += 1
                 self._last_refresh_finished_at = monotonic()
-                self._last_error = str(exc)
+                if self._generation == generation:
+                    self._last_error = str(exc)
         finally:
             with self._lock:
                 if self._refreshing.get(key) == generation:

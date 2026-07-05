@@ -23,6 +23,23 @@ class RaisingThreadService:
         raise RuntimeError("thread unavailable")
 
 
+class AliveThread:
+    def is_alive(self) -> bool:
+        return True
+
+
+class AuctionSamplerWithTop3Status:
+    _thread = AliveThread()
+
+    def top3_status(self) -> dict[str, object]:
+        return {
+            "status": "generated",
+            "last_trade_date": "2026-07-06",
+            "last_generated_at": "2026-07-06T09:26:00+08:00",
+            "last_error": None,
+        }
+
+
 def test_system_cache_api_lists_registered_caches() -> None:
     client = TestClient(app)
 
@@ -171,6 +188,26 @@ def test_system_status_tolerates_services_with_raising_thread_property() -> None
     assert jobs["gsgf_auto_review"]["running"] is False
     assert "状态不可用" in jobs["auction_sampler"]["detail"]
     assert "状态不可用" in jobs["gsgf_auto_review"]["detail"]
+
+
+def test_system_status_includes_auction_top3_auto_status() -> None:
+    had_auction = hasattr(app.state, "auction_sampler")
+    previous_auction = getattr(app.state, "auction_sampler", None)
+    app.state.auction_sampler = AuctionSamplerWithTop3Status()
+    client = TestClient(app)
+
+    try:
+        response = client.get("/api/system/status")
+    finally:
+        if had_auction:
+            app.state.auction_sampler = previous_auction
+        else:
+            delattr(app.state, "auction_sampler")
+
+    assert response.status_code == 200
+    jobs = {job["name"]: job for job in response.json()["jobs"]}
+    assert jobs["auction_sampler"]["running"] is True
+    assert "Top3已生成 2026-07-06" in jobs["auction_sampler"]["detail"]
 
 
 def test_system_status_uses_current_cache_error_state_not_historical_count() -> None:

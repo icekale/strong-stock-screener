@@ -323,7 +323,11 @@ def startup_auction_sampler() -> None:
         return
     sampler = getattr(app.state, "auction_sampler", None)
     if sampler is None:
-        sampler = AuctionSnapshotSampler(refresh=lambda: _refresh_auction_snapshot(100))
+        sampler = AuctionSnapshotSampler(
+            refresh=lambda: _refresh_auction_snapshot(100),
+            run_top3=_generate_auction_top3_for_date,
+            clock=getattr(app.state, "auction_sampler_clock", None),
+        )
         app.state.auction_sampler = sampler
     sampler.start()
 
@@ -991,15 +995,21 @@ def get_auction_model_top3(
                 return cached.model_dump(mode="json")
             if cache_only:
                 raise HTTPException(status_code=404, detail="暂无缓存的竞价模型Top3结果")
-        result: AuctionModelTop3Response = _auction_model_service().predict_top3(trade_date)
-        store.save_top3(result)
-        if _effective_settings().auction_top3_training.record_signal_samples:
-            _auction_top3_training_store().upsert_signal_samples(build_signal_samples_from_top3(result))
+        result = _generate_auction_top3_for_date(trade_date)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="trade_date must use YYYY-MM-DD") from exc
     except (FileNotFoundError, AuctionModelDataError) as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return result.model_dump(mode="json")
+
+
+def _generate_auction_top3_for_date(trade_date: str) -> AuctionModelTop3Response:
+    datetime.strptime(trade_date, "%Y-%m-%d")
+    result: AuctionModelTop3Response = _auction_model_service().predict_top3(trade_date)
+    _auction_model_result_store().save_top3(result)
+    if _effective_settings().auction_top3_training.record_signal_samples:
+        _auction_top3_training_store().upsert_signal_samples(build_signal_samples_from_top3(result))
+    return result
 
 
 @app.get("/api/auction/snapshot")
@@ -2151,7 +2161,7 @@ def _system_jobs() -> list[dict[str, object]]:
     sentiment_monitor = getattr(app.state, "sentiment_monitor", None)
     gsgf_service = getattr(app.state, "gsgf_auto_review_service", None)
     runtime = load_runtime_settings(_runtime_config_path())
-    auction_running, auction_detail = _thread_running_status(auction_sampler, "竞价时段采样器")
+    auction_running, auction_detail = _auction_sampler_running_status(auction_sampler, "竞价时段采样器")
     sector_running, sector_detail = _attribute_running_status(
         sector_sampler,
         "running",
@@ -2211,6 +2221,32 @@ def _sentiment_monitor_running_status(
     if diagnostic is not None:
         return False, _diagnostic_detail(detail, diagnostic)
     return running, detail
+
+
+def _auction_sampler_running_status(worker: object | None, detail: str) -> tuple[bool, str]:
+    running, base_detail = _thread_running_status(worker, detail)
+    if worker is None:
+        return running, base_detail
+    try:
+        status = getattr(worker, "top3_status", None)
+        if not callable(status):
+            return running, base_detail
+        top3_status = status()
+    except Exception:
+        return running, base_detail
+    status_text = str(top3_status.get("status") or "")
+    trade_date = top3_status.get("last_trade_date")
+    last_error = top3_status.get("last_error")
+    if status_text == "generated" and trade_date:
+        return running, f"{base_detail}（Top3已生成 {trade_date}）"
+    if status_text == "running" and trade_date:
+        return running, f"{base_detail}（Top3生成中 {trade_date}）"
+    if status_text == "failed" and trade_date:
+        suffix = f"Top3失败 {trade_date}"
+        if last_error:
+            suffix = f"{suffix}: {last_error}"
+        return running, f"{base_detail}（{suffix}）"
+    return running, base_detail
 
 
 def _thread_running_status(worker: object | None, detail: str) -> tuple[bool, str]:

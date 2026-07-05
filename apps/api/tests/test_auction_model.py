@@ -1,8 +1,9 @@
 from pathlib import Path
+from datetime import datetime
 
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import app, shutdown_auction_sampler, startup_auction_sampler
 from app.models import AuctionModelBacktestSummary, AuctionModelPredictionItem, AuctionModelTop3Response
 from app.services.auction_model import (
     GUARD_RULE,
@@ -197,6 +198,56 @@ def test_auction_model_api_records_top3_signal_samples(tmp_path: Path) -> None:
     payload = summary.json()
     assert payload["signal_sample_count"] == 1
     assert payload["date_range"] == ["2026-07-06", "2026-07-06"]
+
+
+def test_startup_auction_sampler_auto_generates_top3_after_lock_time(tmp_path: Path) -> None:
+    service = CountingFakeAuctionModelService()
+    previous_disabled_exists = hasattr(app.state, "auction_sampler_disabled")
+    previous_disabled = getattr(app.state, "auction_sampler_disabled", None)
+    previous_sampler = getattr(app.state, "auction_sampler", None)
+    previous_service_exists = hasattr(app.state, "auction_model_service")
+    previous_service = getattr(app.state, "auction_model_service", None)
+    previous_result_store_exists = hasattr(app.state, "auction_model_result_store")
+    previous_result_store = getattr(app.state, "auction_model_result_store", None)
+    app.state.auction_sampler_disabled = False
+    app.state.auction_model_service = service
+    app.state.auction_model_result_store = AuctionModelResultStore(tmp_path)
+    app.state.auction_sampler_clock = lambda: datetime(2026, 7, 6, 9, 26, 0)
+    if previous_sampler is not None:
+        previous_sampler.stop()
+    if hasattr(app.state, "auction_sampler"):
+        delattr(app.state, "auction_sampler")
+
+    try:
+        startup_auction_sampler()
+        sampler = app.state.auction_sampler
+        sampler.stop()
+        sampler.sample_once()
+        result = app.state.auction_model_result_store.load_top3("2026-07-06")
+    finally:
+        shutdown_auction_sampler()
+        for attr in (
+            "auction_model_service",
+            "auction_model_result_store",
+            "auction_sampler_clock",
+            "auction_sampler",
+        ):
+            if hasattr(app.state, attr):
+                delattr(app.state, attr)
+        if previous_sampler is not None:
+            app.state.auction_sampler = previous_sampler
+        if previous_service_exists:
+            app.state.auction_model_service = previous_service
+        if previous_result_store_exists:
+            app.state.auction_model_result_store = previous_result_store
+        if previous_disabled_exists:
+            app.state.auction_sampler_disabled = previous_disabled
+        elif hasattr(app.state, "auction_sampler_disabled"):
+            delattr(app.state, "auction_sampler_disabled")
+
+    assert result is not None
+    assert result.trade_date == "2026-07-06"
+    assert service.call_count == 1
 
 
 class FakeAuctionModelService:

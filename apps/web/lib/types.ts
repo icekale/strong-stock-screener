@@ -423,6 +423,83 @@ export type AuctionModelTop3Response = {
   generated_at: string;
 };
 
+export type AuctionTop3EntryPolicy = "open_0930" | "after_0935_confirm" | "before_1000_strength" | "close_follow";
+export type AuctionTop3ExitPolicy =
+  | "intraday_stop"
+  | "intraday_take_profit"
+  | "close_exit"
+  | "next_open_exit"
+  | "next_close_exit";
+export type AuctionTop3TradeLabel = "win" | "loss" | "neutral" | "data_incomplete";
+
+export type AuctionTop3TrainingSettings = {
+  record_signal_samples: boolean;
+  generate_simulated_trade_samples: boolean;
+  include_manual_trade_samples_in_training: boolean;
+  training_window_days: number;
+  simulated_initial_capital: number;
+  simulated_position_pct: number;
+};
+
+export type AuctionTop3TrainingSummary = {
+  enabled: boolean;
+  signal_sample_count: number;
+  simulated_trade_sample_count: number;
+  manual_trade_sample_count: number;
+  date_range: string[];
+  training_window_days: number;
+  latest_generated_at: string | null;
+  simulated_profit_summary: Record<string, unknown>;
+  quality_notes: string[];
+};
+
+export type AuctionTop3SimulatedTradeSample = {
+  sample_id: string;
+  signal_sample_id: string;
+  portfolio_id: string;
+  trade_date: string;
+  symbol: string;
+  entry_policy: AuctionTop3EntryPolicy;
+  entry_price: number | null;
+  entry_time: string | null;
+  exit_policy: AuctionTop3ExitPolicy;
+  exit_price: number | null;
+  exit_time: string | null;
+  position_pct: number;
+  return_pct: number | null;
+  profit_amount: number | null;
+  max_drawdown_pct: number | null;
+  max_favorable_pct: number | null;
+  label: AuctionTop3TradeLabel;
+};
+
+export type AuctionTop3SimulatedPerformancePoint = {
+  portfolio_id: string;
+  trade_date: string;
+  entry_policy: AuctionTop3EntryPolicy;
+  exit_policy: AuctionTop3ExitPolicy;
+  trade_count: number;
+  win_count: number;
+  loss_count: number;
+  daily_return_pct: number | null;
+  cumulative_return_pct: number | null;
+  equity: number | null;
+  max_drawdown_pct: number | null;
+  created_at: string;
+};
+
+export type AuctionTop3PerformanceResponse = {
+  summary: Record<string, unknown>;
+  points: AuctionTop3SimulatedPerformancePoint[];
+  trades: AuctionTop3SimulatedTradeSample[];
+  generated_at: string;
+};
+
+export type AuctionTop3TrainingGenerateResponse = {
+  saved_count: number;
+  performance: AuctionTop3PerformanceResponse;
+};
+
 export type AuctionReviewSnapshot = {
   open_gap_pct: number | null;
   current_pct_change: number | null;
@@ -965,6 +1042,8 @@ export type ModelMaintenancePacket = {
   false_negative_cases: Array<Record<string, unknown>>;
   false_positive_cases: Array<Record<string, unknown>>;
   data_quality_notes: string[];
+  model_sections: Record<string, unknown>;
+  packet_url: string | null;
 };
 
 export type ModelMaintenanceReport = {
@@ -1041,6 +1120,7 @@ export type RuntimeSettingsConfig = {
   sentiment_monitor: SentimentMonitorConfig;
   gsgf_auto_review: GsgfAutoReviewConfig;
   ai_analysis: AiAnalysisPublicConfig;
+  auction_top3_training: AuctionTop3TrainingSettings;
 };
 
 export type NotificationChannelType = "wechat_work" | "feishu" | "telegram" | "email";
@@ -1103,12 +1183,13 @@ export type RuntimeSettingsResponse = {
     ifind_service_id?: "hexin-ifind-ds-stock-mcp" | "hexin-ifind-ds-news-mcp" | "hexin-ifind-ds-index-mcp" | null;
     tdx_base_url?: string | null;
     provider_timeout_seconds?: number | null;
-        notification_channels?: NotificationChannelConfig[];
-        sentiment_monitor?: SentimentMonitorConfig;
-        gsgf_auto_review?: GsgfAutoReviewConfig;
-        ai_analysis?: AiAnalysisSettingsUpdate;
-      };
-    };
+    notification_channels?: NotificationChannelConfig[];
+    sentiment_monitor?: SentimentMonitorConfig;
+    gsgf_auto_review?: GsgfAutoReviewConfig;
+    ai_analysis?: AiAnalysisSettingsUpdate;
+    auction_top3_training?: AuctionTop3TrainingSettings;
+  };
+};
 
 export type RuntimeSettingsHealthProbe = {
   name: string;

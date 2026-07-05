@@ -4,6 +4,10 @@ import type {
   AuctionSnapshotResponse,
   AuctionTimelineResponse,
   AuctionModelTop3Response,
+  AuctionTop3PerformanceResponse,
+  AuctionTop3TrainingSettings,
+  AuctionTop3TrainingGenerateResponse,
+  AuctionTop3TrainingSummary,
   BackgroundJobState,
   DataSourceStatusResponse,
   GsgfAnalysis,
@@ -515,6 +519,7 @@ export async function saveRuntimeSettings(payload: {
   sentiment_monitor?: SentimentMonitorConfig;
   gsgf_auto_review?: GsgfAutoReviewConfig;
   ai_analysis?: AiAnalysisSettingsUpdate;
+  auction_top3_training?: AuctionTop3TrainingSettings;
 }): Promise<RuntimeSettingsResponse> {
   const response = await fetch(`${API_BASE_URL}/api/settings`, {
     method: "PUT",
@@ -757,12 +762,57 @@ export async function generateModelMaintenancePacket(): Promise<ModelMaintenance
   return response.json() as Promise<ModelMaintenancePacket>;
 }
 
+export async function getLatestModelMaintenancePacket(): Promise<ModelMaintenancePacket | null> {
+  const response = await fetch(`${API_BASE_URL}/api/model-maintenance/packets/latest`);
+  if (!response.ok) {
+    throw new Error(`读取模型维护数据包失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ModelMaintenancePacket | null>;
+}
+
+export async function getModelMaintenancePacket(packetId: string): Promise<ModelMaintenancePacket> {
+  const response = await fetch(`${API_BASE_URL}/api/model-maintenance/packets/${encodeURIComponent(packetId)}`);
+  if (!response.ok) {
+    throw new Error(`读取模型维护数据包失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ModelMaintenancePacket>;
+}
+
 export async function getLatestModelMaintenanceReport(): Promise<ModelMaintenanceReport | null> {
   const response = await fetch(`${API_BASE_URL}/api/model-maintenance/reports/latest`);
   if (!response.ok) {
     throw new Error(`读取模型维护报告失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<ModelMaintenanceReport | null>;
+}
+
+export async function getAuctionTop3TrainingSummary(): Promise<AuctionTop3TrainingSummary> {
+  const response = await fetch(`${API_BASE_URL}/api/model-maintenance/auction-top3/training/summary`);
+  if (!response.ok) {
+    throw new Error(`读取竞价 Top3 训练摘要失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<AuctionTop3TrainingSummary>;
+}
+
+export async function getAuctionTop3TrainingPerformance(): Promise<AuctionTop3PerformanceResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/model-maintenance/auction-top3/training/performance`);
+  if (!response.ok) {
+    throw new Error(`读取竞价 Top3 模拟收益失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<AuctionTop3PerformanceResponse>;
+}
+
+export async function generateAuctionTop3TrainingSamples(
+  tradeDate?: string,
+): Promise<AuctionTop3TrainingGenerateResponse> {
+  const suffix = tradeDate ? `?trade_date=${encodeURIComponent(tradeDate)}` : "";
+  const response = await fetch(`${API_BASE_URL}/api/model-maintenance/auction-top3/training/generate${suffix}`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`生成竞价 Top3 训练样本失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<AuctionTop3TrainingGenerateResponse>;
 }
 
 export async function analyzeModelMaintenance(): Promise<ModelMaintenanceReport> {

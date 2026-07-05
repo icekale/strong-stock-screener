@@ -72,6 +72,12 @@ type SettingsDraft = {
   ai_analysis_api_key: string;
   ai_analysis_run_after_daily_review: boolean;
   ai_analysis_run_after_weekly_calibration: boolean;
+  auction_top3_record_signal_samples: boolean;
+  auction_top3_generate_simulated_trade_samples: boolean;
+  auction_top3_include_manual_trade_samples_in_training: boolean;
+  auction_top3_training_window_days: number;
+  auction_top3_simulated_initial_capital: number;
+  auction_top3_simulated_position_pct: number;
 };
 
 const DEFAULT_DRAFT: SettingsDraft = {
@@ -118,6 +124,12 @@ const DEFAULT_DRAFT: SettingsDraft = {
   ai_analysis_api_key: "",
   ai_analysis_run_after_daily_review: false,
   ai_analysis_run_after_weekly_calibration: false,
+  auction_top3_record_signal_samples: true,
+  auction_top3_generate_simulated_trade_samples: false,
+  auction_top3_include_manual_trade_samples_in_training: false,
+  auction_top3_training_window_days: 60,
+  auction_top3_simulated_initial_capital: 100000,
+  auction_top3_simulated_position_pct: 0.33,
 };
 
 export function SettingsWorkspace() {
@@ -166,6 +178,7 @@ export function SettingsWorkspace() {
         ...gsgfDraftFromConfig(response.config),
         ...notificationDraftFromConfig(response.config),
         ...aiAnalysisDraftFromConfig(response.config),
+        ...auctionTop3TrainingDraftFromConfig(response.config),
       });
       setMessage("已读取当前设置");
     } catch (err) {
@@ -208,6 +221,7 @@ export function SettingsWorkspace() {
         sentiment_monitor: config?.sentiment_monitor,
         gsgf_auto_review: buildGsgfAutoReviewConfig(draft, config?.gsgf_auto_review),
         ai_analysis: buildAiAnalysisConfig(draft),
+        auction_top3_training: buildAuctionTop3TrainingConfig(draft),
       });
       setConfig(response.config);
       applyDraft({
@@ -223,6 +237,7 @@ export function SettingsWorkspace() {
         ...gsgfDraftFromConfig(response.config),
         ...notificationDraftFromConfig(response.config),
         ...aiAnalysisDraftFromConfig(response.config),
+        ...auctionTop3TrainingDraftFromConfig(response.config),
       });
       setMessage("设置已保存");
     } catch (err) {
@@ -345,6 +360,9 @@ export function SettingsWorkspace() {
                   <Descriptions.Item label="AI Provider">{config?.ai_analysis.provider ?? "未读取"}</Descriptions.Item>
                   <Descriptions.Item label="AI Key">
                     <KeyStatus configured={Boolean(config?.ai_analysis.api_key_configured)} />
+                  </Descriptions.Item>
+                  <Descriptions.Item label="Top3 训练">
+                    {config?.auction_top3_training.record_signal_samples ? "记录信号样本" : "未记录"}
                   </Descriptions.Item>
                   <Descriptions.Item label="超时">{config ? `${config.provider_timeout_seconds}s` : "未读取"}</Descriptions.Item>
                 </Descriptions>
@@ -523,6 +541,55 @@ export function SettingsWorkspace() {
                         valuePropName="checked"
                       >
                         <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+                      </Form.Item>
+                    </Col>
+                  </Row>
+                </Card>
+
+                <Card className="workbench-panel" title="竞价 Top3 训练">
+                <Alert
+                  className="mb-4"
+                  showIcon
+                  title="记录竞价 Top3 模型输出、模拟交易和人工复盘样本，仅用于模型维护；不会真实下单，也不会自动调参。"
+                  type="info"
+                />
+                  <Row gutter={12}>
+                    <Col md={8} xs={24}>
+                      <Form.Item label="记录 Top3 信号样本" name="auction_top3_record_signal_samples" valuePropName="checked">
+                        <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+                      </Form.Item>
+                    </Col>
+                    <Col md={8} xs={24}>
+                      <Form.Item
+                        label="生成模拟交易样本"
+                        name="auction_top3_generate_simulated_trade_samples"
+                        valuePropName="checked"
+                      >
+                        <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+                      </Form.Item>
+                    </Col>
+                    <Col md={8} xs={24}>
+                      <Form.Item
+                        label="人工交易样本进入训练"
+                        name="auction_top3_include_manual_trade_samples_in_training"
+                        valuePropName="checked"
+                      >
+                        <Switch checkedChildren="启用" unCheckedChildren="关闭" />
+                      </Form.Item>
+                    </Col>
+                    <Col md={8} xs={24}>
+                      <Form.Item label="训练窗口（天）" name="auction_top3_training_window_days">
+                        <InputNumber className="w-full" max={365} min={5} />
+                      </Form.Item>
+                    </Col>
+                    <Col md={8} xs={24}>
+                      <Form.Item label="模拟初始资金" name="auction_top3_simulated_initial_capital">
+                        <InputNumber className="w-full" min={1} step={10000} />
+                      </Form.Item>
+                    </Col>
+                    <Col md={8} xs={24}>
+                      <Form.Item label="单票模拟仓位" name="auction_top3_simulated_position_pct">
+                        <InputNumber className="w-full" max={1} min={0.01} step={0.01} />
                       </Form.Item>
                     </Col>
                   </Row>
@@ -795,6 +862,37 @@ function buildAiAnalysisConfig(draft: SettingsDraft) {
     api_key: draft.ai_analysis_api_key.trim() || undefined,
     run_after_daily_review: draft.ai_analysis_run_after_daily_review,
     run_after_weekly_calibration: draft.ai_analysis_run_after_weekly_calibration,
+  };
+}
+
+function auctionTop3TrainingDraftFromConfig(config: RuntimeSettingsConfig): Pick<
+  SettingsDraft,
+  | "auction_top3_record_signal_samples"
+  | "auction_top3_generate_simulated_trade_samples"
+  | "auction_top3_include_manual_trade_samples_in_training"
+  | "auction_top3_training_window_days"
+  | "auction_top3_simulated_initial_capital"
+  | "auction_top3_simulated_position_pct"
+> {
+  const value = config.auction_top3_training;
+  return {
+    auction_top3_record_signal_samples: value.record_signal_samples,
+    auction_top3_generate_simulated_trade_samples: value.generate_simulated_trade_samples,
+    auction_top3_include_manual_trade_samples_in_training: value.include_manual_trade_samples_in_training,
+    auction_top3_training_window_days: value.training_window_days,
+    auction_top3_simulated_initial_capital: value.simulated_initial_capital,
+    auction_top3_simulated_position_pct: value.simulated_position_pct,
+  };
+}
+
+function buildAuctionTop3TrainingConfig(draft: SettingsDraft) {
+  return {
+    record_signal_samples: draft.auction_top3_record_signal_samples,
+    generate_simulated_trade_samples: draft.auction_top3_generate_simulated_trade_samples,
+    include_manual_trade_samples_in_training: draft.auction_top3_include_manual_trade_samples_in_training,
+    training_window_days: draft.auction_top3_training_window_days,
+    simulated_initial_capital: draft.auction_top3_simulated_initial_capital,
+    simulated_position_pct: draft.auction_top3_simulated_position_pct,
   };
 }
 

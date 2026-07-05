@@ -91,7 +91,18 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   const modelMaintenanceWorkspaceSource = existsSync(modelMaintenanceWorkspaceUrl)
     ? readFileSync(modelMaintenanceWorkspaceUrl, "utf8")
     : "";
-  const modelMaintenanceFeatureSource = [modelMaintenancePageSource, modelMaintenanceWorkspaceSource].join("\n");
+  const modelMaintenancePacketPageUrl = new URL(
+    "../app/model-maintenance/packets/[packetId]/page.tsx",
+    import.meta.url,
+  );
+  const modelMaintenancePacketPageSource = existsSync(modelMaintenancePacketPageUrl)
+    ? readFileSync(modelMaintenancePacketPageUrl, "utf8")
+    : "";
+  const modelMaintenanceFeatureSource = [
+    modelMaintenancePageSource,
+    modelMaintenanceWorkspaceSource,
+    modelMaintenancePacketPageSource,
+  ].join("\n");
   const screenerFeatureSource = [
     componentSource,
     marketPanelsSource,
@@ -310,6 +321,12 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(typesSource, /ModelMaintenanceReport/);
   assert.match(typesSource, /ModelMaintenancePacket/);
   assert.match(typesSource, /ModelMaintenanceSuggestion/);
+  assert.match(typesSource, /AuctionTop3TrainingSettings/);
+  assert.match(typesSource, /AuctionTop3TrainingSummary/);
+  assert.match(typesSource, /AuctionTop3PerformanceResponse/);
+  assert.match(typesSource, /packet_url: string \| null/);
+  assert.match(typesSource, /model_sections: Record<string, unknown>/);
+  assert.match(typesSource, /auction_top3_training: AuctionTop3TrainingSettings/);
   assert.match(typesSource, /snapshot_status/);
   assert.match(typesSource, /cache_age_seconds/);
   assert.match(typesSource, /AuctionTimelineResponse/);
@@ -332,9 +349,14 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(apiSource, /getShortTermIntradaySignalDigest/);
   assert.match(apiSource, /sendNotificationMessage/);
   assert.match(apiSource, /generateModelMaintenancePacket/);
+  assert.match(apiSource, /getLatestModelMaintenancePacket/);
+  assert.match(apiSource, /getModelMaintenancePacket/);
   assert.match(apiSource, /getLatestModelMaintenanceReport/);
   assert.match(apiSource, /analyzeModelMaintenance/);
   assert.match(apiSource, /updateModelMaintenanceSuggestion/);
+  assert.match(apiSource, /getAuctionTop3TrainingSummary/);
+  assert.match(apiSource, /getAuctionTop3TrainingPerformance/);
+  assert.match(apiSource, /generateAuctionTop3TrainingSamples/);
   assert.match(apiSource, /\/api\/short-term\/sentiment/);
   assert.match(apiSource, /\/api\/short-term\/sentiment\/decision/);
   assert.match(apiSource, /\/api\/short-term\/sentiment\/review\/archive/);
@@ -350,6 +372,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(apiSource, /\/api\/auction\/review\/finalize/);
   assert.match(apiSource, /\/api\/auction\/rules\/summary/);
   assert.match(apiSource, /\/api\/notifications\/send/);
+  assert.match(apiSource, /\/api\/model-maintenance\/packets\/latest/);
+  assert.match(apiSource, /\/api\/model-maintenance\/auction-top3\/training\/performance/);
   assert.match(homeFeatureSource, /marketOverview/);
   assert.match(homeFeatureSource, /refreshMarketOverview/);
   assert.match(homeFeatureSource, /sectorRadar/);
@@ -725,7 +749,15 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(modelMaintenancePageSource, /dynamic[<(]/);
   assert.match(modelMaintenanceFeatureSource, /AI 模型维护/);
   assert.match(modelMaintenanceFeatureSource, /待确认建议/);
-  assert.match(modelMaintenanceFeatureSource, /生成复盘包并分析/);
+  assert.match(modelMaintenanceFeatureSource, /生成数据包/);
+  assert.match(modelMaintenanceFeatureSource, /复制给 Codex/);
+  assert.match(modelMaintenanceFeatureSource, /竞价 Top3 训练/);
+  assert.match(modelMaintenanceFeatureSource, /模拟收益/);
+  assert.match(modelMaintenanceFeatureSource, /ModelMaintenancePacketPage/);
+  assert.match(settingsFeatureSource, /竞价 Top3 训练/);
+  assert.match(settingsFeatureSource, /记录 Top3 信号样本/);
+  assert.match(settingsFeatureSource, /生成模拟交易样本/);
+  assert.match(settingsFeatureSource, /人工交易样本进入训练/);
   assert.match(appShellSource, /模型维护/);
   assert.match(appShellSource, /\/model-maintenance/);
   assert.match(sentimentFeatureSource, /ShortTermSentimentResponse/);

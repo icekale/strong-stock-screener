@@ -19,8 +19,14 @@ import {
   Typography,
 } from "antd";
 import { useEffect, useMemo, useState } from "react";
-import { checkRuntimeSettingsHealth, getRuntimeSettings, saveRuntimeSettings } from "../../lib/api";
-import type { GsgfAutoReviewConfig, RuntimeSettingsConfig, RuntimeSettingsHealthProbe } from "../../lib/types";
+import { SystemStatusPanel } from "../../components/system/SystemStatusPanel";
+import { checkRuntimeSettingsHealth, getRuntimeSettings, getSystemStatus, saveRuntimeSettings } from "../../lib/api";
+import type {
+  GsgfAutoReviewConfig,
+  RuntimeSettingsConfig,
+  RuntimeSettingsHealthProbe,
+  SystemStatusResponse,
+} from "../../lib/types";
 
 type SettingsDraft = {
   candidate_provider: "recent_limit_up" | "thsdk";
@@ -124,9 +130,13 @@ export function SettingsWorkspace() {
   const [runningHealth, setRunningHealth] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [systemStatus, setSystemStatus] = useState<SystemStatusResponse | null>(null);
+  const [systemStatusLoading, setSystemStatusLoading] = useState(false);
+  const [systemStatusError, setSystemStatusError] = useState<string | null>(null);
 
   useEffect(() => {
     void loadSettings();
+    void loadSystemStatus();
   }, []);
 
   useEffect(() => {
@@ -162,6 +172,18 @@ export function SettingsWorkspace() {
       setError(err instanceof Error ? err.message : "读取设置失败");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadSystemStatus() {
+    setSystemStatusLoading(true);
+    setSystemStatusError(null);
+    try {
+      setSystemStatus(await getSystemStatus());
+    } catch (err) {
+      setSystemStatusError(err instanceof Error ? err.message : "读取系统状态失败");
+    } finally {
+      setSystemStatusLoading(false);
     }
   }
 
@@ -289,6 +311,13 @@ export function SettingsWorkspace() {
 
         {error && <Alert showIcon title={error} type="error" />}
         {message && <Alert showIcon title={message} type="success" />}
+
+        <SystemStatusPanel
+          error={systemStatusError}
+          loading={systemStatusLoading}
+          onRefresh={() => void loadSystemStatus()}
+          status={systemStatus}
+        />
 
         <Row gutter={[16, 16]}>
           <Col lg={16} xs={24}>

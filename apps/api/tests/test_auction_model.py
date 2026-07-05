@@ -179,6 +179,26 @@ def test_auction_model_api_cache_only_does_not_generate_when_missing(tmp_path: P
     assert service.call_count == 0
 
 
+def test_auction_model_api_records_top3_signal_samples(tmp_path: Path) -> None:
+    app.state.auction_model_service = FakeAuctionModelService()
+    app.state.auction_model_result_store = AuctionModelResultStore(tmp_path)
+    app.state.runs_dir = tmp_path
+    client = TestClient(app)
+    try:
+        response = client.get("/api/auction/model/top3?trade_date=2026-07-06&refresh=true")
+        summary = client.get("/api/model-maintenance/auction-top3/training/summary")
+    finally:
+        delattr(app.state, "auction_model_service")
+        delattr(app.state, "auction_model_result_store")
+        delattr(app.state, "runs_dir")
+
+    assert response.status_code == 200
+    assert summary.status_code == 200
+    payload = summary.json()
+    assert payload["signal_sample_count"] == 1
+    assert payload["date_range"] == ["2026-07-06", "2026-07-06"]
+
+
 class FakeAuctionModelService:
     def predict_top3(self, trade_date: str) -> AuctionModelTop3Response:
         return AuctionModelTop3Response(

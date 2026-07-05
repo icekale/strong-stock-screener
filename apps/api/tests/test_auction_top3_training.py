@@ -1,5 +1,8 @@
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
+from app.main import app
 from app.models import (
     AuctionModelPredictionItem,
     AuctionModelTop3Response,
@@ -242,3 +245,35 @@ def _top3_response() -> AuctionModelTop3Response:
         ],
         source_status=[StrongStockSourceStatus(source="fake-source", status="success", detail="ok")],
     )
+
+
+def test_training_performance_api_returns_summary(tmp_path: Path) -> None:
+    from app.services.auction_top3_training import (
+        AuctionTop3TrainingStore,
+        build_signal_samples_from_top3,
+        generate_simulated_trade_samples,
+    )
+
+    app.state.runs_dir = tmp_path
+    store = AuctionTop3TrainingStore(tmp_path)
+    signals = store.upsert_signal_samples(build_signal_samples_from_top3(_top3_response()))
+    trades = generate_simulated_trade_samples(
+        signals[:1],
+        {
+            "300001.SZ": [
+                KlineBar(date="2026-07-06", open=10, high=11, low=9.8, close=10.4, volume=1),
+                KlineBar(date="2026-07-07", open=10.5, high=10.8, low=10.2, close=10.6, volume=1),
+            ]
+        },
+        initial_capital=100000,
+        position_pct=0.33,
+    )
+    store.upsert_simulated_trades(trades)
+    client = TestClient(app)
+    try:
+        response = client.get("/api/model-maintenance/auction-top3/training/performance")
+    finally:
+        delattr(app.state, "runs_dir")
+
+    assert response.status_code == 200
+    assert response.json()["summary"]["complete_sample_count"] == 1

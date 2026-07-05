@@ -20,6 +20,7 @@ from app.models import (
     AuctionReviewSummary,
     AuctionSnapshotResponse,
     AuctionTimelineResponse,
+    AuctionTop3ManualTradeSample,
     GsgfAnalysis,
     GsgfBacktestSummary,
     GsgfModelHealth,
@@ -89,6 +90,12 @@ from app.services.auction_model import (
     AuctionModelResultStore,
     AuctionModelService,
     FreeStockDbAuctionModelSource,
+)
+from app.services.auction_top3_training import (
+    AuctionTop3TrainingStore,
+    build_signal_samples_from_top3,
+    generate_simulated_trade_samples,
+    summarize_simulated_performance,
 )
 from app.services.auction_review import (
     build_auction_review_records,
@@ -843,6 +850,76 @@ def snooze_model_maintenance_suggestion(suggestion_id: str) -> ModelMaintenanceS
         raise HTTPException(status_code=404, detail="建议不存在") from exc
 
 
+@app.get("/api/model-maintenance/auction-top3/training/summary")
+def get_auction_top3_training_summary() -> dict[str, object]:
+    settings = _effective_settings().auction_top3_training
+    summary = _auction_top3_training_store().training_summary(
+        training_window_days=settings.training_window_days,
+        include_manual_training=settings.include_manual_trade_samples_in_training,
+        enabled=settings.record_signal_samples,
+        initial_capital=settings.simulated_initial_capital,
+    )
+    return summary.model_dump(mode="json")
+
+
+@app.get("/api/model-maintenance/auction-top3/training/performance")
+def get_auction_top3_training_performance() -> dict[str, object]:
+    settings = _effective_settings().auction_top3_training
+    trades = _auction_top3_training_store().load_simulated_trades()
+    response = summarize_simulated_performance(
+        trades,
+        initial_capital=settings.simulated_initial_capital,
+        portfolio_id="default",
+    )
+    return response.model_dump(mode="json")
+
+
+@app.post("/api/model-maintenance/auction-top3/training/generate")
+def generate_auction_top3_training_samples(trade_date: str | None = None) -> dict[str, object]:
+    settings = _effective_settings().auction_top3_training
+    store = _auction_top3_training_store()
+    signals = store.load_signal_samples(trade_date)
+    bars_by_symbol: dict[str, list[KlineBar]] = {}
+    provider = _kline_provider()
+    for symbol in _dedupe_symbols([sample.symbol for sample in signals]):
+        try:
+            bars_by_symbol[symbol] = provider.get_klines(symbol, count=8)
+        except Exception:
+            bars_by_symbol[symbol] = []
+    trades = generate_simulated_trade_samples(
+        signals,
+        bars_by_symbol,
+        initial_capital=settings.simulated_initial_capital,
+        position_pct=settings.simulated_position_pct,
+    )
+    saved = store.upsert_simulated_trades(trades)
+    performance = summarize_simulated_performance(
+        store.load_simulated_trades(),
+        initial_capital=settings.simulated_initial_capital,
+        portfolio_id="default",
+    )
+    store.save_performance_points(performance.points)
+    return {"saved_count": len(saved), "performance": performance.model_dump(mode="json")}
+
+
+@app.post("/api/model-maintenance/auction-top3/manual-trades", response_model=AuctionTop3ManualTradeSample)
+def save_auction_top3_manual_trade(sample: AuctionTop3ManualTradeSample) -> AuctionTop3ManualTradeSample:
+    return _auction_top3_training_store().upsert_manual_trade(sample)
+
+
+@app.patch(
+    "/api/model-maintenance/auction-top3/manual-trades/{sample_id}",
+    response_model=AuctionTop3ManualTradeSample,
+)
+def update_auction_top3_manual_trade(
+    sample_id: str,
+    sample: AuctionTop3ManualTradeSample,
+) -> AuctionTop3ManualTradeSample:
+    if sample.sample_id != sample_id:
+        raise HTTPException(status_code=422, detail="sample_id mismatch")
+    return _auction_top3_training_store().upsert_manual_trade(sample)
+
+
 @app.get("/api/market/overview")
 def get_market_overview() -> dict[str, object]:
     result = _cached_market_overview()
@@ -892,6 +969,8 @@ def get_auction_model_top3(
                 raise HTTPException(status_code=404, detail="暂无缓存的竞价模型Top3结果")
         result: AuctionModelTop3Response = _auction_model_service().predict_top3(trade_date)
         store.save_top3(result)
+        if _effective_settings().auction_top3_training.record_signal_samples:
+            _auction_top3_training_store().upsert_signal_samples(build_signal_samples_from_top3(result))
     except ValueError as exc:
         raise HTTPException(status_code=422, detail="trade_date must use YYYY-MM-DD") from exc
     except (FileNotFoundError, AuctionModelDataError) as exc:
@@ -2627,6 +2706,18 @@ def _model_maintenance_store() -> ModelMaintenanceStore:
     store = ModelMaintenanceStore(data_dir)
     app.state.model_maintenance_store = store
     app.state.model_maintenance_store_data_dir = data_dir
+    return store
+
+
+def _auction_top3_training_store() -> AuctionTop3TrainingStore:
+    data_dir = Path(getattr(app.state, "runs_dir", get_settings().data_dir))
+    existing = getattr(app.state, "auction_top3_training_store", None)
+    existing_data_dir = getattr(app.state, "auction_top3_training_store_data_dir", None)
+    if existing is not None and existing_data_dir == data_dir:
+        return existing
+    store = AuctionTop3TrainingStore(data_dir)
+    app.state.auction_top3_training_store = store
+    app.state.auction_top3_training_store_data_dir = data_dir
     return store
 
 

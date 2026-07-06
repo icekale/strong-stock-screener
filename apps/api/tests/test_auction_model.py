@@ -4,12 +4,20 @@ from datetime import datetime
 from fastapi.testclient import TestClient
 
 from app.main import app, shutdown_auction_sampler, startup_auction_sampler
-from app.models import AuctionModelBacktestSummary, AuctionModelPredictionItem, AuctionModelTop3Response
+from app.models import (
+    AuctionModelBacktestSummary,
+    AuctionModelPredictionItem,
+    AuctionModelTop3Response,
+    AuctionSnapshotItem,
+    AuctionSnapshotResponse,
+)
 from app.services.auction_model import (
     GUARD_RULE,
     AuctionModelResultStore,
     prediction_items_from_scored_rows,
 )
+from app.services.auction_snapshot_store import AuctionSnapshotStore
+from app.services.auction_top3_live_confirmation import AuctionTop3LiveConfirmationStore
 
 
 def test_prediction_items_marks_top3_selected_with_guard_rule() -> None:
@@ -177,6 +185,72 @@ def test_auction_model_api_cache_only_does_not_generate_when_missing(tmp_path: P
         delattr(app.state, "auction_model_result_store")
 
     assert response.status_code == 404
+    assert response.json()["detail"] == "暂无缓存的竞价模型Top3结果"
+    assert service.call_count == 0
+
+
+def test_auction_model_live_confirmation_uses_cached_top3_without_generating(tmp_path: Path) -> None:
+    service = CountingFakeAuctionModelService()
+    result_store = AuctionModelResultStore(tmp_path)
+    result_store.save_top3(
+        FakeAuctionModelService().predict_top3("2026-07-06").model_copy(update={"run_id": "fake-run"})
+    )
+    snapshot_store = AuctionSnapshotStore(data_dir=tmp_path)
+    snapshot_store.save(
+        AuctionSnapshotResponse(
+            trade_date="2026-07-06",
+            items=[
+                AuctionSnapshotItem(
+                    symbol="300001.SZ",
+                    name="模型一号",
+                    open_gap_pct=4.2,
+                    current_pct_change=5.1,
+                    turnover_cny=180_000_000,
+                    turnover_rate=4.5,
+                    quote_time="2026-07-06T09:25:00+08:00",
+                )
+            ],
+        )
+    )
+    app.state.auction_model_service = service
+    app.state.auction_model_result_store = result_store
+    app.state.auction_snapshot_store = snapshot_store
+    app.state.auction_top3_live_confirmation_store = AuctionTop3LiveConfirmationStore(tmp_path)
+    client = TestClient(app)
+    try:
+        response = client.get("/api/auction/model/top3/live-confirmation?trade_date=2026-07-06")
+    finally:
+        delattr(app.state, "auction_model_service")
+        delattr(app.state, "auction_model_result_store")
+        delattr(app.state, "auction_snapshot_store")
+        delattr(app.state, "auction_top3_live_confirmation_store")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["trade_date"] == "2026-07-06"
+    assert payload["model_run_id"] == "fake-run"
+    assert payload["cache_status"] == "cached"
+    assert payload["items"][0]["symbol"] == "300001.SZ"
+    assert payload["items"][0]["confirmation"] == "buyable"
+    assert payload["items"][0]["realtime"]["current_pct_change"] == 5.1
+    assert service.call_count == 0
+
+
+def test_auction_model_live_confirmation_returns_404_without_top3_cache(tmp_path: Path) -> None:
+    service = CountingFakeAuctionModelService()
+    app.state.auction_model_service = service
+    app.state.auction_model_result_store = AuctionModelResultStore(tmp_path)
+    app.state.auction_top3_live_confirmation_store = AuctionTop3LiveConfirmationStore(tmp_path)
+    client = TestClient(app)
+    try:
+        response = client.get("/api/auction/model/top3/live-confirmation?trade_date=2026-07-06")
+    finally:
+        delattr(app.state, "auction_model_service")
+        delattr(app.state, "auction_model_result_store")
+        delattr(app.state, "auction_top3_live_confirmation_store")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "暂无缓存的竞价模型Top3结果"
     assert service.call_count == 0
 
 

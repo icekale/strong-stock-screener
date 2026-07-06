@@ -7,6 +7,8 @@ const {
   AUCTION_MODEL_PREVIEW_LIMIT,
   auctionModelBucketLabel,
   auctionModelCacheStatusLabel,
+  auctionModelLiveConfirmationColor,
+  auctionModelLiveConfirmationLabel,
   auctionModelRunStatusText,
   selectAuctionModelPreviewItems,
 } = (await import(new URL("./auctionModel.ts", import.meta.url).href)) as typeof import("./auctionModel");
@@ -53,6 +55,15 @@ test("auction model bucket labels are trading-workbench copy", () => {
 test("auction model cache status labels separate cached and regenerated runs", () => {
   assert.equal(auctionModelCacheStatusLabel("cached"), "缓存结果");
   assert.equal(auctionModelCacheStatusLabel("generated"), "刚生成");
+});
+
+test("auction model live confirmation labels and colors are compact", () => {
+  assert.equal(auctionModelLiveConfirmationLabel("buyable"), "可买");
+  assert.equal(auctionModelLiveConfirmationLabel("watch"), "观察");
+  assert.equal(auctionModelLiveConfirmationLabel("reject"), "放弃");
+  assert.equal(auctionModelLiveConfirmationColor("buyable"), "red");
+  assert.equal(auctionModelLiveConfirmationColor("watch"), "orange");
+  assert.equal(auctionModelLiveConfirmationColor("reject"), "default");
 });
 
 test("auction model status text stays compact before and after a run", () => {

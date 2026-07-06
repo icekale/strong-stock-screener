@@ -720,6 +720,42 @@ class AuctionModelTop3Response(BaseModel):
     )
 
 
+AuctionTop3LiveConfirmation = Literal["buyable", "watch", "reject"]
+
+
+class AuctionTop3RealtimeSnapshot(BaseModel):
+    last_price: float | None = None
+    current_pct_change: float | None = None
+    open_gap_pct: float | None = None
+    turnover_cny: float | None = None
+    turnover_rate: float | None = None
+    quote_time: str | None = None
+
+
+class AuctionTop3LiveConfirmationItem(BaseModel):
+    symbol: str
+    name: str = ""
+    model_rank: int | None = None
+    model_bucket: AuctionModelBucket = "watch"
+    prob_3pct: float
+    confirmation: AuctionTop3LiveConfirmation
+    realtime: AuctionTop3RealtimeSnapshot | None = None
+    reasons: list[str] = Field(default_factory=list)
+    risk_flags: list[str] = Field(default_factory=list)
+    data_quality: list[str] = Field(default_factory=list)
+
+
+class AuctionTop3LiveConfirmationResponse(BaseModel):
+    trade_date: str
+    model_run_id: str | None = None
+    cache_status: AuctionModelCacheStatus = "cached"
+    items: list[AuctionTop3LiveConfirmationItem] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
 class AuctionTop3SignalSample(BaseModel):
     sample_id: str
     trade_date: str

@@ -4,6 +4,7 @@ import type {
   AuctionSnapshotResponse,
   AuctionTimelineResponse,
   AuctionModelTop3Response,
+  AuctionTop3LiveConfirmationResponse,
   AuctionTop3PerformanceResponse,
   AuctionTop3TrainingSettings,
   AuctionTop3TrainingGenerateResponse,
@@ -186,6 +187,15 @@ export async function getAuctionModelTop3(
     throw new Error(`读取竞价模型Top3失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<AuctionModelTop3Response>;
+}
+
+export async function getAuctionModelLiveConfirmation(tradeDate: string): Promise<AuctionTop3LiveConfirmationResponse> {
+  const params = new URLSearchParams({ trade_date: tradeDate });
+  const response = await fetch(`${API_BASE_URL}/api/auction/model/top3/live-confirmation?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取竞价模型Top3实盘确认失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<AuctionTop3LiveConfirmationResponse>;
 }
 
 export async function getAuctionReviewLatest(): Promise<AuctionReviewSummary> {

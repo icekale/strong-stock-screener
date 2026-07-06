@@ -3,6 +3,7 @@ import type {
   AuctionModelCacheStatus,
   AuctionModelPredictionItem,
   AuctionModelTop3Response,
+  AuctionTop3LiveConfirmation,
 } from "./types";
 
 export const AUCTION_MODEL_PREVIEW_LIMIT = 3;
@@ -49,6 +50,26 @@ export function auctionModelBucketLabel(bucket: AuctionModelBucket): string {
 
 export function auctionModelCacheStatusLabel(status: AuctionModelCacheStatus): string {
   return status === "cached" ? "缓存结果" : "刚生成";
+}
+
+export function auctionModelLiveConfirmationLabel(status: AuctionTop3LiveConfirmation): string {
+  if (status === "buyable") {
+    return "可买";
+  }
+  if (status === "watch") {
+    return "观察";
+  }
+  return "放弃";
+}
+
+export function auctionModelLiveConfirmationColor(status: AuctionTop3LiveConfirmation): string {
+  if (status === "buyable") {
+    return "red";
+  }
+  if (status === "watch") {
+    return "orange";
+  }
+  return "default";
 }
 
 export function auctionModelRunStatusText(

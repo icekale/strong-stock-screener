@@ -9,6 +9,7 @@ import {
   createAuctionSnapshotJob,
   finalizeAuctionReview,
   getAuctionLatest,
+  getAuctionModelLiveConfirmation,
   getAuctionModelTop3,
   getAuctionReviewLatest,
   getAuctionRuleSummary,
@@ -19,6 +20,8 @@ import { selectAuctionFocusIndustryItems, selectAuctionHotIndustryItems } from "
 import {
   auctionModelBucketLabel,
   auctionModelCacheStatusLabel,
+  auctionModelLiveConfirmationColor,
+  auctionModelLiveConfirmationLabel,
   auctionModelRunStatusText,
   selectAuctionModelPreviewItems,
 } from "../../lib/auctionModel";
@@ -37,6 +40,8 @@ import type {
   AuctionRuleBucket,
   AuctionModelPredictionItem,
   AuctionModelTop3Response,
+  AuctionTop3LiveConfirmationItem,
+  AuctionTop3LiveConfirmationResponse,
   AuctionSnapshotItem,
   AuctionSnapshotResponse,
   AuctionTimelineResponse,
@@ -80,6 +85,8 @@ export function AuctionWorkspace() {
   const [watchlistSavingSymbol, setWatchlistSavingSymbol] = useState<string | null>(null);
   const [modelTradeDate, setModelTradeDate] = useState(() => nextWeekdayDate());
   const [modelRun, setModelRun] = useState<AuctionModelTop3Response | null>(null);
+  const [modelLiveConfirmation, setModelLiveConfirmation] = useState<AuctionTop3LiveConfirmationResponse | null>(null);
+  const [modelLiveError, setModelLiveError] = useState<string | null>(null);
   const [modelLoadingMode, setModelLoadingMode] = useState<AuctionModelLoadingMode | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
   const [modelSavingSymbol, setModelSavingSymbol] = useState<string | null>(null);
@@ -190,15 +197,29 @@ export function AuctionWorkspace() {
   useEffect(() => {
     let active = true;
     void (async () => {
+      setModelLiveConfirmation(null);
+      setModelLiveError(null);
       try {
         const cached = await getAuctionModelTop3(modelTradeDate, { cacheOnly: true });
         if (active) {
           setModelRun(cached);
           setModelError(null);
         }
+        try {
+          const liveConfirmation = await getAuctionModelLiveConfirmation(cached.trade_date);
+          if (active) {
+            setModelLiveConfirmation(liveConfirmation);
+            setModelLiveError(null);
+          }
+        } catch (err) {
+          if (active) {
+            setModelLiveError(err instanceof Error ? err.message : "读取竞价模型Top3实盘确认失败");
+          }
+        }
       } catch {
         if (active) {
           setModelRun(null);
+          setModelLiveConfirmation(null);
         }
       }
     })();
@@ -206,6 +227,20 @@ export function AuctionWorkspace() {
       active = false;
     };
   }, [modelTradeDate]);
+
+  const loadAuctionModelLiveConfirmation = useCallback(async (tradeDate: string) => {
+    try {
+      const liveConfirmation = await getAuctionModelLiveConfirmation(tradeDate);
+      setModelLiveConfirmation(liveConfirmation);
+      setModelLiveError(null);
+      return liveConfirmation;
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "读取竞价模型Top3实盘确认失败";
+      setModelLiveConfirmation(null);
+      setModelLiveError(errorMessage);
+      return null;
+    }
+  }, []);
 
   const observationItems = useMemo(
     () =>
@@ -257,9 +292,12 @@ export function AuctionWorkspace() {
   async function handleLoadCachedAuctionModel() {
     setModelLoadingMode("cache");
     setModelError(null);
+    setModelLiveConfirmation(null);
+    setModelLiveError(null);
     try {
       const run = await getAuctionModelTop3(modelTradeDate, { cacheOnly: true });
       setModelRun(run);
+      void loadAuctionModelLiveConfirmation(run.trade_date);
       void message.success(`已读取竞价模型Top3缓存：${run.trade_date}`);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "读取竞价模型Top3缓存失败";
@@ -273,9 +311,12 @@ export function AuctionWorkspace() {
   async function handleRefreshAuctionModel() {
     setModelLoadingMode("refresh");
     setModelError(null);
+    setModelLiveConfirmation(null);
+    setModelLiveError(null);
     try {
       const run = await getAuctionModelTop3(modelTradeDate, { refresh: true });
       setModelRun(run);
+      void loadAuctionModelLiveConfirmation(run.trade_date);
       void message.success(`竞价模型Top3已重新生成：${run.trade_date}`);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : "重新生成竞价模型Top3失败";
@@ -374,6 +415,8 @@ export function AuctionWorkspace() {
         <AuctionTrustStrip data={data} />
         <AuctionModelTrialPanel
           error={modelError}
+          liveConfirmation={modelLiveConfirmation}
+          liveConfirmationError={modelLiveError}
           loadingMode={modelLoadingMode}
           onAddToWatchlist={handleAddModelToWatchlist}
           onLoadCached={handleLoadCachedAuctionModel}
@@ -491,6 +534,8 @@ function sleep(ms: number): Promise<void> {
 
 function AuctionModelTrialPanel({
   error,
+  liveConfirmation,
+  liveConfirmationError,
   loadingMode,
   onAddToWatchlist,
   onLoadCached,
@@ -501,6 +546,8 @@ function AuctionModelTrialPanel({
   tradeDate,
 }: {
   error: string | null;
+  liveConfirmation: AuctionTop3LiveConfirmationResponse | null;
+  liveConfirmationError: string | null;
   loadingMode: AuctionModelLoadingMode | null;
   onAddToWatchlist: (item: AuctionModelPredictionItem) => void;
   onLoadCached: () => void;
@@ -511,6 +558,12 @@ function AuctionModelTrialPanel({
   tradeDate: string;
 }) {
   const previewItems = useMemo(() => selectAuctionModelPreviewItems(run?.items ?? []), [run]);
+  const liveConfirmationBySymbol = useMemo(() => {
+    if (!liveConfirmation || liveConfirmation.trade_date !== run?.trade_date) {
+      return new Map<string, AuctionTop3LiveConfirmationItem>();
+    }
+    return new Map(liveConfirmation.items.map((item) => [item.symbol, item]));
+  }, [liveConfirmation, run?.trade_date]);
   const backtest = run?.backtest ?? null;
   const statusText =
     loadingMode === "refresh"
@@ -569,6 +622,7 @@ function AuctionModelTrialPanel({
       {shouldShowBody ? (
         <div className="min-w-0 border-t border-[#eee7db] px-3 py-2">
           {error ? <Alert className="mb-2" showIcon title={error} type="warning" /> : null}
+          {liveConfirmationError ? <Alert className="mb-2" message={liveConfirmationError} showIcon type="warning" /> : null}
           {loadingMode ? (
             <div className="rounded-md border border-dashed border-[#e3ddd3] bg-[#faf7f1] px-3 py-2 text-xs font-semibold text-[#7b756d]">
               {loadingMode === "refresh" ? "正在构建全市场120日特征，通常需要约1-2分钟。" : "正在读取本地缓存结果。"}
@@ -592,54 +646,58 @@ function AuctionModelTrialPanel({
                 </div>
               ) : null}
               <div className="grid gap-2 lg:grid-cols-3">
-                {previewItems.map((item) => (
-                  <div className="rounded-lg border border-[#e3ddd3] bg-[#faf7f1] px-3 py-2" key={item.symbol}>
-                    <div className="flex items-start justify-between gap-2">
-                      <Link className="min-w-0 font-black text-[#11100e]" href={modelStockHref(item)}>
-                        <span className="block truncate">{item.name || item.symbol}</span>
-                        <span className="block text-xs font-semibold text-[#7b756d]">{item.symbol}</span>
-                      </Link>
-                      <Tag className="m-0 shrink-0" color={auctionModelBucketColor(item.bucket)}>
-                        {auctionModelBucketLabel(item.bucket)}
-                      </Tag>
-                    </div>
-                    <div className="mt-1 flex flex-wrap items-center gap-1 text-xs">
-                      <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">排名 #{item.rank ?? "--"}</span>
-                      <span className="rounded-md bg-[#fff3f0] px-2 py-1 font-black text-[#d92d20]">
-                        概率 {formatProbability(item.prob_3pct)}
-                      </span>
-                      <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">前收 {formatPrice(item.prev_close_price)}</span>
-                      <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">
-                        流通 {formatCny(item.market_cap_float)}
-                      </span>
-                      <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">
-                        3日均额 {formatCny(item.avg_amount_3d)}
-                      </span>
-                    </div>
-                    {item.risk_flags.length ? (
-                      <div className="mt-1 flex flex-wrap gap-1">
-                        {item.risk_flags.map((flag) => (
-                          <Tag className="m-0" color="orange" key={flag}>
-                            {flag}
-                          </Tag>
-                        ))}
+                {previewItems.map((item) => {
+                  const liveItem = liveConfirmationBySymbol.get(item.symbol);
+                  return (
+                    <div className="rounded-lg border border-[#e3ddd3] bg-[#faf7f1] px-3 py-2" key={item.symbol}>
+                      <div className="flex items-start justify-between gap-2">
+                        <Link className="min-w-0 font-black text-[#11100e]" href={modelStockHref(item)}>
+                          <span className="block truncate">{item.name || item.symbol}</span>
+                          <span className="block text-xs font-semibold text-[#7b756d]">{item.symbol}</span>
+                        </Link>
+                        <Tag className="m-0 shrink-0" color={auctionModelBucketColor(item.bucket)}>
+                          {auctionModelBucketLabel(item.bucket)}
+                        </Tag>
                       </div>
-                    ) : null}
-                    <div className="mt-1 truncate text-xs leading-5 text-[#7b756d]">
-                      {(item.trend_reasons.length ? item.trend_reasons : item.data_quality).join(" · ") || "--"}
+                      <div className="mt-1 flex flex-wrap items-center gap-1 text-xs">
+                        <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">排名 #{item.rank ?? "--"}</span>
+                        <span className="rounded-md bg-[#fff3f0] px-2 py-1 font-black text-[#d92d20]">
+                          概率 {formatProbability(item.prob_3pct)}
+                        </span>
+                        <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">前收 {formatPrice(item.prev_close_price)}</span>
+                        <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">
+                          流通 {formatCny(item.market_cap_float)}
+                        </span>
+                        <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">
+                          3日均额 {formatCny(item.avg_amount_3d)}
+                        </span>
+                      </div>
+                      {item.risk_flags.length ? (
+                        <div className="mt-1 flex flex-wrap gap-1">
+                          {item.risk_flags.map((flag) => (
+                            <Tag className="m-0" color="orange" key={flag}>
+                              {flag}
+                            </Tag>
+                          ))}
+                        </div>
+                      ) : null}
+                      <div className="mt-1 truncate text-xs leading-5 text-[#7b756d]">
+                        {(item.trend_reasons.length ? item.trend_reasons : item.data_quality).join(" · ") || "--"}
+                      </div>
+                      {liveItem ? <AuctionModelLiveConfirmationBlock item={liveItem} /> : null}
+                      <div className="mt-1 flex justify-end">
+                        <Button
+                          loading={savingSymbol === item.symbol}
+                          onClick={() => onAddToWatchlist(item)}
+                          size="small"
+                          type="link"
+                        >
+                          加入自选
+                        </Button>
+                      </div>
                     </div>
-                    <div className="mt-1 flex justify-end">
-                      <Button
-                        loading={savingSymbol === item.symbol}
-                        onClick={() => onAddToWatchlist(item)}
-                        size="small"
-                        type="link"
-                      >
-                        加入自选
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </>
           ) : (
@@ -659,6 +717,41 @@ function AuctionModelTrialPanel({
         </div>
       ) : null}
     </section>
+  );
+}
+
+function AuctionModelLiveConfirmationBlock({ item }: { item: AuctionTop3LiveConfirmationItem }) {
+  const realtime = item.realtime;
+  const reasons = item.reasons.slice(0, 2);
+  const risks = item.risk_flags.slice(0, 2);
+  return (
+    <div className="mt-2 border-t border-[#e3ddd3] pt-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-black text-[#11100e]">实盘确认</span>
+        <Tag className="m-0" color={auctionModelLiveConfirmationColor(item.confirmation)}>
+          {auctionModelLiveConfirmationLabel(item.confirmation)}
+        </Tag>
+      </div>
+      <div className="mt-1 flex flex-wrap gap-1 text-xs">
+        <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">高开 {formatPct(realtime?.open_gap_pct ?? null)}</span>
+        <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">现涨 {formatPct(realtime?.current_pct_change ?? null)}</span>
+        <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">竞额 {formatCny(realtime?.turnover_cny ?? null)}</span>
+      </div>
+      {reasons.length || risks.length ? (
+        <div className="mt-1 flex flex-wrap gap-1">
+          {reasons.map((reason) => (
+            <Tag className="m-0" color="green" key={`reason-${reason}`}>
+              {reason}
+            </Tag>
+          ))}
+          {risks.map((risk) => (
+            <Tag className="m-0" color="orange" key={`risk-${risk}`}>
+              {risk}
+            </Tag>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }
 

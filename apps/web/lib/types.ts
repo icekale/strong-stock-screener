@@ -376,6 +376,7 @@ export type AuctionTimelineResponse = {
 
 export type AuctionModelBucket = "selected" | "attack" | "watch" | "avoid";
 export type AuctionModelCacheStatus = "generated" | "cached";
+export type AuctionTop3LiveConfirmation = "buyable" | "watch" | "reject";
 
 export type AuctionModelPredictionItem = {
   symbol: string;
@@ -419,6 +420,37 @@ export type AuctionModelTop3Response = {
   cache_status: AuctionModelCacheStatus;
   backtest: AuctionModelBacktestSummary | null;
   items: AuctionModelPredictionItem[];
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
+export type AuctionTop3RealtimeSnapshot = {
+  last_price: number | null;
+  current_pct_change: number | null;
+  open_gap_pct: number | null;
+  turnover_cny: number | null;
+  turnover_rate: number | null;
+  quote_time: string | null;
+};
+
+export type AuctionTop3LiveConfirmationItem = {
+  symbol: string;
+  name: string;
+  model_rank: number | null;
+  model_bucket: AuctionModelBucket;
+  prob_3pct: number;
+  confirmation: AuctionTop3LiveConfirmation;
+  realtime: AuctionTop3RealtimeSnapshot | null;
+  reasons: string[];
+  risk_flags: string[];
+  data_quality: string[];
+};
+
+export type AuctionTop3LiveConfirmationResponse = {
+  trade_date: string;
+  model_run_id: string | null;
+  cache_status: AuctionModelCacheStatus;
+  items: AuctionTop3LiveConfirmationItem[];
   source_status: StrongStockSourceStatus[];
   generated_at: string;
 };

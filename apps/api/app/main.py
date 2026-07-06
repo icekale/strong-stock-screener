@@ -91,6 +91,10 @@ from app.services.auction_model import (
     AuctionModelService,
     FreeStockDbAuctionModelSource,
 )
+from app.services.auction_top3_live_confirmation import (
+    AuctionTop3LiveConfirmationStore,
+    build_auction_top3_live_confirmation,
+)
 from app.services.auction_top3_training import (
     AuctionTop3TrainingStore,
     build_signal_samples_from_top3,
@@ -1004,6 +1008,24 @@ def get_auction_model_top3(
     return result.model_dump(mode="json")
 
 
+@app.get("/api/auction/model/top3/live-confirmation")
+def get_auction_model_top3_live_confirmation(trade_date: str) -> dict[str, object]:
+    try:
+        datetime.strptime(trade_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="trade_date must use YYYY-MM-DD") from exc
+
+    model_run = _auction_model_result_store().load_top3(trade_date)
+    if model_run is None:
+        raise HTTPException(status_code=404, detail="暂无缓存的竞价模型Top3结果")
+
+    latest_snapshot = _auction_snapshot_store().latest(max_age_seconds=24 * 3600, limit=100)
+    snapshot = None if latest_snapshot.snapshot_status == "missing" else latest_snapshot
+    result = build_auction_top3_live_confirmation(model_run, snapshot)
+    saved = _auction_top3_live_confirmation_store().save(result)
+    return saved.model_dump(mode="json")
+
+
 def _generate_auction_top3_for_date(trade_date: str) -> AuctionModelTop3Response:
     datetime.strptime(trade_date, "%Y-%m-%d")
     result: AuctionModelTop3Response = _auction_model_service().predict_top3(trade_date)
@@ -1786,6 +1808,16 @@ def _auction_model_result_store() -> AuctionModelResultStore:
         return injected
     data_dir = Path(getattr(app.state, "runs_dir", get_settings().data_dir))
     return AuctionModelResultStore(data_dir)
+
+
+def _auction_top3_live_confirmation_store() -> AuctionTop3LiveConfirmationStore:
+    injected = getattr(app.state, "auction_top3_live_confirmation_store", None)
+    if injected is not None:
+        return injected
+    data_dir = Path(getattr(app.state, "runs_dir", get_settings().data_dir))
+    store = AuctionTop3LiveConfirmationStore(data_dir)
+    app.state.auction_top3_live_confirmation_store = store
+    return store
 
 
 def _cached_auction_snapshot(limit: int) -> AuctionSnapshotResponse:

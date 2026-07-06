@@ -33,6 +33,7 @@ import {
   sortAuctionItems,
   type AuctionSortMode,
 } from "../../lib/auctionSort";
+import { buildAuctionClosePctBySymbol } from "../../lib/auctionReviewMetrics";
 import { buildStockDetailHref } from "../../lib/stockNavigation";
 import type {
   AuctionReviewRecord,
@@ -268,6 +269,10 @@ export function AuctionWorkspace() {
   );
   const industryStats = useMemo(() => buildIndustryStats(data?.items ?? []), [data]);
   const concentration = useMemo(() => buildIndustryConcentration(industryStats, data?.items.length ?? 0), [data, industryStats]);
+  const closePctBySymbol = useMemo(
+    () => buildAuctionClosePctBySymbol(reviewSummary?.records ?? [], data?.trade_date),
+    [data?.trade_date, reviewSummary?.records],
+  );
 
   async function handleAddToWatchlist(item: AuctionSnapshotItem) {
     setWatchlistSavingSymbol(item.symbol);
@@ -459,6 +464,7 @@ export function AuctionWorkspace() {
             />
             <div className="p-2 lg:p-4">
               <AuctionTable
+                closePctBySymbol={closePctBySymbol}
                 items={visibleItems}
                 loading={loading && !data}
                 onAddToWatchlist={handleAddToWatchlist}
@@ -1248,11 +1254,13 @@ function AuctionTimelinePanel({ timeline }: { timeline: AuctionTimelineResponse 
 }
 
 function AuctionTable({
+  closePctBySymbol,
   items,
   loading,
   onAddToWatchlist,
   savingSymbol,
 }: {
+  closePctBySymbol: ReadonlyMap<string, number | null>;
   items: AuctionSnapshotItem[];
   loading: boolean;
   onAddToWatchlist: (item: AuctionSnapshotItem) => void;
@@ -1314,20 +1322,20 @@ function AuctionTable({
           sorter: (a, b) => a.auction_score - b.auction_score,
         },
         {
-          title: "当前涨幅",
-          dataIndex: "current_pct_change",
-          align: "right",
-          width: 110,
-          render: (value: number | null) => <PctValue value={value} />,
-          sorter: (a, b) => (a.current_pct_change ?? -999) - (b.current_pct_change ?? -999),
-        },
-        {
-          title: "开盘幅度",
+          title: "开盘涨幅",
           dataIndex: "open_gap_pct",
           align: "right",
           width: 110,
           render: (value: number | null) => <PctValue value={value} />,
           sorter: (a, b) => (a.open_gap_pct ?? -999) - (b.open_gap_pct ?? -999),
+        },
+        {
+          title: "收盘涨幅",
+          dataIndex: "symbol",
+          align: "right",
+          width: 110,
+          render: (_, item) => <PctValue value={closePctBySymbol.get(item.symbol) ?? null} />,
+          sorter: (a, b) => (closePctBySymbol.get(a.symbol) ?? -999) - (closePctBySymbol.get(b.symbol) ?? -999),
         },
         {
           title: "成交额",

@@ -1011,6 +1011,39 @@ def get_auction_model_top3(
     return result.model_dump(mode="json")
 
 
+@app.post("/api/auction/model/top3/jobs")
+def create_auction_model_top3_job(trade_date: str) -> dict[str, object]:
+    try:
+        datetime.strptime(trade_date, "%Y-%m-%d")
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="trade_date must use YYYY-MM-DD") from exc
+    store = _background_job_store()
+    active_job = store.get_active("auction_model_top3_generate")
+    if active_job is not None:
+        return active_job.model_dump(mode="json")
+    job = store.create_transient_job(
+        "auction_model_top3_generate",
+        lambda progress, should_cancel: _run_auction_model_top3_generation_job(
+            trade_date,
+            progress,
+            should_cancel,
+        ),
+        running_message="竞价模型Top3生成中",
+        success_message="竞价模型Top3生成完成",
+        progress_total=3,
+    )
+    return job.model_dump(mode="json")
+
+
+@app.get("/api/auction/model/top3/jobs/{job_id}")
+def get_auction_model_top3_job(job_id: str) -> dict[str, object]:
+    try:
+        job = _background_job_store().get(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="auction model top3 job not found") from exc
+    return job.model_dump(mode="json")
+
+
 @app.get("/api/auction/model/top3/live-confirmation")
 def get_auction_model_top3_live_confirmation(trade_date: str) -> dict[str, object]:
     try:
@@ -1036,6 +1069,23 @@ def _generate_auction_top3_for_date(trade_date: str) -> AuctionModelTop3Response
     if _effective_settings().auction_top3_training.record_signal_samples:
         _auction_top3_training_store().upsert_signal_samples(build_signal_samples_from_top3(result))
     return result
+
+
+def _run_auction_model_top3_generation_job(
+    trade_date: str,
+    progress: ProgressCallback,
+    should_cancel: CancelCheck,
+) -> dict[str, object]:
+    if should_cancel():
+        raise RuntimeError("竞价模型Top3生成已取消")
+    progress(1, 3, "读取候选池和K线")
+    result = _generate_auction_top3_for_date(trade_date)
+    progress(3, 3, "竞价模型Top3生成完成")
+    return {
+        "trade_date": result.trade_date,
+        "run_id": result.run_id,
+        "cache_status": result.cache_status,
+    }
 
 
 @app.get("/api/auction/snapshot")

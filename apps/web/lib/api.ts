@@ -189,6 +189,25 @@ export async function getAuctionModelTop3(
   return response.json() as Promise<AuctionModelTop3Response>;
 }
 
+export async function createAuctionModelTop3Job(tradeDate: string): Promise<BackgroundJobState> {
+  const params = new URLSearchParams({ trade_date: tradeDate });
+  const response = await fetch(`${API_BASE_URL}/api/auction/model/top3/jobs?${params.toString()}`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`启动竞价模型Top3生成任务失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<BackgroundJobState>;
+}
+
+export async function getAuctionModelTop3Job(jobId: string): Promise<BackgroundJobState> {
+  const response = await fetch(`${API_BASE_URL}/api/auction/model/top3/jobs/${encodeURIComponent(jobId)}`);
+  if (!response.ok) {
+    throw new Error(`读取竞价模型Top3生成任务失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<BackgroundJobState>;
+}
+
 export async function getAuctionModelLiveConfirmation(tradeDate: string): Promise<AuctionTop3LiveConfirmationResponse> {
   const params = new URLSearchParams({ trade_date: tradeDate });
   const response = await fetch(`${API_BASE_URL}/api/auction/model/top3/live-confirmation?${params.toString()}`);

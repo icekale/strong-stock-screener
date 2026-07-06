@@ -6,9 +6,11 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addWatchlistPoolItem,
+  createAuctionModelTop3Job,
   createAuctionSnapshotJob,
   finalizeAuctionReview,
   getAuctionLatest,
+  getAuctionModelTop3Job,
   getAuctionModelLiveConfirmation,
   getAuctionModelTop3,
   getAuctionReview,
@@ -91,6 +93,7 @@ export function AuctionWorkspace() {
   const [modelLiveConfirmation, setModelLiveConfirmation] = useState<AuctionTop3LiveConfirmationResponse | null>(null);
   const [modelLiveError, setModelLiveError] = useState<string | null>(null);
   const [modelLoadingMode, setModelLoadingMode] = useState<AuctionModelLoadingMode | null>(null);
+  const [modelRefreshJob, setModelRefreshJob] = useState<BackgroundJobState | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
   const [modelSavingSymbol, setModelSavingSymbol] = useState<string | null>(null);
   const refreshPromiseRef = useRef<Promise<void> | null>(null);
@@ -324,7 +327,17 @@ export function AuctionWorkspace() {
     setModelLiveConfirmation(null);
     setModelLiveError(null);
     try {
-      const run = await getAuctionModelTop3(modelTradeDate, { refresh: true });
+      let job = await createAuctionModelTop3Job(modelTradeDate);
+      setModelRefreshJob(job);
+      while (job.status === "pending" || job.status === "running") {
+        await sleep(1200);
+        job = await getAuctionModelTop3Job(job.job_id);
+        setModelRefreshJob(job);
+      }
+      if (job.status !== "success") {
+        throw new Error(job.error || job.message || "竞价模型Top3生成失败");
+      }
+      const run = await getAuctionModelTop3(modelTradeDate, { cacheOnly: true });
       setModelRun(run);
       void loadAuctionModelLiveConfirmation(run.trade_date);
       void message.success(`竞价模型Top3已重新生成：${run.trade_date}`);
@@ -333,6 +346,7 @@ export function AuctionWorkspace() {
       setModelError(errorMessage);
       void message.error(errorMessage);
     } finally {
+      setModelRefreshJob(null);
       setModelLoadingMode(null);
     }
   }
@@ -428,6 +442,7 @@ export function AuctionWorkspace() {
           liveConfirmation={modelLiveConfirmation}
           liveConfirmationError={modelLiveError}
           loadingMode={modelLoadingMode}
+          modelRefreshJob={modelRefreshJob}
           onAddToWatchlist={handleAddModelToWatchlist}
           onLoadCached={handleLoadCachedAuctionModel}
           onRefresh={handleRefreshAuctionModel}
@@ -548,6 +563,7 @@ function AuctionModelTrialPanel({
   liveConfirmation,
   liveConfirmationError,
   loadingMode,
+  modelRefreshJob,
   onAddToWatchlist,
   onLoadCached,
   onRefresh,
@@ -560,6 +576,7 @@ function AuctionModelTrialPanel({
   liveConfirmation: AuctionTop3LiveConfirmationResponse | null;
   liveConfirmationError: string | null;
   loadingMode: AuctionModelLoadingMode | null;
+  modelRefreshJob: BackgroundJobState | null;
   onAddToWatchlist: (item: AuctionModelPredictionItem) => void;
   onLoadCached: () => void;
   onRefresh: () => void;
@@ -578,7 +595,7 @@ function AuctionModelTrialPanel({
   const backtest = run?.backtest ?? null;
   const statusText =
     loadingMode === "refresh"
-      ? "重新生成中 · 构建全市场120日特征"
+      ? `重新生成中 · ${modelRefreshJob?.message || "读取候选池和K线"}`
       : loadingMode === "cache"
         ? "读取缓存中"
         : auctionModelRunStatusText(run);
@@ -636,7 +653,9 @@ function AuctionModelTrialPanel({
           {liveConfirmationError ? <Alert className="mb-2" message={liveConfirmationError} showIcon type="warning" /> : null}
           {loadingMode ? (
             <div className="rounded-md border border-dashed border-[#e3ddd3] bg-[#faf7f1] px-3 py-2 text-xs font-semibold text-[#7b756d]">
-              {loadingMode === "refresh" ? "正在构建全市场120日特征，通常需要约1-2分钟。" : "正在读取本地缓存结果。"}
+              {loadingMode === "refresh"
+                ? modelRefreshJob?.message || "正在读取候选池和K线，完成后自动读取本地缓存。"
+                : "正在读取本地缓存结果。"}
             </div>
           ) : previewItems.length ? (
             <>

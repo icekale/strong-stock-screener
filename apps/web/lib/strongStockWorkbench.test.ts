@@ -249,6 +249,9 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(apiSource, /createAuctionSnapshotJob/);
   assert.match(apiSource, /getAuctionSnapshotJob/);
   assert.match(apiSource, /\/api\/auction\/snapshot\/jobs/);
+  assert.match(apiSource, /createAuctionModelTop3Job/);
+  assert.match(apiSource, /getAuctionModelTop3Job/);
+  assert.match(apiSource, /\/api\/auction\/model\/top3\/jobs/);
   assert.match(apiSource, /getLatestGsgfReview/);
   assert.match(apiSource, /createGsgfCalibrationJob/);
   assert.match(apiSource, /getGsgfCalibrationJob/);
@@ -659,6 +662,10 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(auctionFeatureSource, /createAuctionSnapshotJob/);
   assert.match(auctionFeatureSource, /getAuctionSnapshotJob/);
   assert.match(auctionFeatureSource, /refreshJob/);
+  assert.match(auctionFeatureSource, /createAuctionModelTop3Job/);
+  assert.match(auctionFeatureSource, /getAuctionModelTop3Job/);
+  assert.match(auctionFeatureSource, /modelRefreshJob/);
+  assert.doesNotMatch(auctionFeatureSource, /getAuctionModelTop3\\(modelTradeDate, \\{ refresh: true \\}\\)/);
   assert.doesNotMatch(auctionWorkspaceSource, /getAuctionSnapshot\(/);
   assert.match(auctionFeatureSource, /竞价强度榜/);
   assert.match(auctionFeatureSource, /热门题材/);

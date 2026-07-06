@@ -1,6 +1,8 @@
 import json
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+from threading import Event
+from time import sleep
 
 from fastapi.testclient import TestClient
 
@@ -350,6 +352,60 @@ def test_auction_model_api_records_top3_signal_samples(tmp_path: Path) -> None:
     assert payload["date_range"] == ["2026-07-06", "2026-07-06"]
 
 
+def test_auction_model_top3_generation_job_runs_in_background_and_saves_cache(tmp_path: Path) -> None:
+    service = BlockingFakeAuctionModelService()
+    result_store = AuctionModelResultStore(tmp_path)
+    app.state.auction_model_service = service
+    app.state.auction_model_result_store = result_store
+    app.state.runs_dir = tmp_path
+    client = TestClient(app)
+    try:
+        job_response = client.post("/api/auction/model/top3/jobs?trade_date=2026-07-06")
+
+        assert job_response.status_code == 200
+        job_payload = job_response.json()
+        assert job_payload["type"] == "auction_model_top3_generate"
+        assert job_payload["status"] in {"pending", "running"}
+        assert service.started.wait(timeout=1) is True
+        assert result_store.load_top3("2026-07-06") is None
+
+        service.release.set()
+        completed_payload = _poll_auction_model_job(client, job_payload["job_id"])
+    finally:
+        _clear_auction_model_job_state()
+
+    assert completed_payload["status"] == "success"
+    assert completed_payload["result"]["trade_date"] == "2026-07-06"
+    assert completed_payload["result"]["run_id"] == "fake-run-1"
+    cached = result_store.load_top3("2026-07-06")
+    assert cached is not None
+    assert cached.run_id == "fake-run-1"
+
+
+def test_auction_model_top3_generation_job_failure_keeps_existing_cache(tmp_path: Path) -> None:
+    result_store = AuctionModelResultStore(tmp_path)
+    result_store.save_top3(
+        FakeAuctionModelService().predict_top3("2026-07-06").model_copy(update={"run_id": "old-run"})
+    )
+    app.state.auction_model_service = FailingFakeAuctionModelService()
+    app.state.auction_model_result_store = result_store
+    app.state.runs_dir = tmp_path
+    client = TestClient(app)
+    try:
+        job_response = client.post("/api/auction/model/top3/jobs?trade_date=2026-07-06")
+
+        assert job_response.status_code == 200
+        completed_payload = _poll_auction_model_job(client, job_response.json()["job_id"])
+    finally:
+        _clear_auction_model_job_state()
+
+    assert completed_payload["status"] == "failed"
+    assert "provider unavailable" in completed_payload["error"]
+    cached = result_store.load_top3("2026-07-06")
+    assert cached is not None
+    assert cached.run_id == "old-run"
+
+
 def test_startup_auction_sampler_auto_generates_top3_after_lock_time(tmp_path: Path) -> None:
     service = CountingFakeAuctionModelService()
     previous_disabled_exists = hasattr(app.state, "auction_sampler_disabled")
@@ -446,6 +502,23 @@ class CountingFakeAuctionModelService:
         return result.model_copy(update={"run_id": f"fake-run-{self.call_count}"})
 
 
+class BlockingFakeAuctionModelService(CountingFakeAuctionModelService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = Event()
+        self.release = Event()
+
+    def predict_top3(self, trade_date: str) -> AuctionModelTop3Response:
+        self.started.set()
+        assert self.release.wait(timeout=2) is True
+        return super().predict_top3(trade_date)
+
+
+class FailingFakeAuctionModelService:
+    def predict_top3(self, trade_date: str) -> AuctionModelTop3Response:
+        raise RuntimeError("provider unavailable")
+
+
 class FakeCandidateProvider:
     source_name = "fake-candidates"
 
@@ -494,3 +567,27 @@ class FakeAuctionModelSettings:
         self.auction_model_model_path = model_path
         self.auction_model_metadata_path = metadata_path
         self.auction_model_performance_path = performance_path
+
+
+def _poll_auction_model_job(client: TestClient, job_id: str) -> dict[str, object]:
+    payload: dict[str, object] = {}
+    for _ in range(30):
+        response = client.get(f"/api/auction/model/top3/jobs/{job_id}")
+        assert response.status_code == 200
+        payload = response.json()
+        if payload["status"] in {"success", "failed", "canceled"}:
+            return payload
+        sleep(0.05)
+    return payload
+
+
+def _clear_auction_model_job_state() -> None:
+    for attr in (
+        "auction_model_service",
+        "auction_model_result_store",
+        "background_job_store",
+        "background_job_store_data_dir",
+        "runs_dir",
+    ):
+        if hasattr(app.state, attr):
+            delattr(app.state, attr)

@@ -970,6 +970,7 @@ def get_market_rankings(limit: int = 50) -> dict[str, object]:
 def get_latest_auction_snapshot(limit: int = 100) -> dict[str, object]:
     bounded_limit = max(1, min(limit, 100))
     result = _auction_snapshot_store().latest(limit=bounded_limit)
+    result = _backfill_auction_snapshot_industries(result)
     return result.model_dump(mode="json")
 
 
@@ -1805,8 +1806,8 @@ def _cached_auction_snapshot(limit: int) -> AuctionSnapshotResponse:
         ),
     ).model_copy(deep=True)
     _append_empty_hot_theme_status(result, hot_themes, hot_theme_status)
-    _auction_snapshot_store().save(result, captured_at=_auction_now())
-    return result
+    saved = _auction_snapshot_store().save(result, captured_at=_auction_now())
+    return _backfill_auction_snapshot_industries(saved)
 
 
 def _refresh_auction_snapshot(limit: int) -> AuctionSnapshotResponse:
@@ -1819,7 +1820,52 @@ def _refresh_auction_snapshot(limit: int) -> AuctionSnapshotResponse:
         hot_themes=hot_themes,
     )
     _append_empty_hot_theme_status(result, hot_themes, hot_theme_status)
-    return _auction_snapshot_store().save(result, captured_at=now)
+    saved = _auction_snapshot_store().save(result, captured_at=now)
+    return _backfill_auction_snapshot_industries(saved)
+
+
+def _backfill_auction_snapshot_industries(snapshot: AuctionSnapshotResponse) -> AuctionSnapshotResponse:
+    missing_symbols = [
+        item.symbol
+        for item in snapshot.items
+        if item.symbol and not item.industry
+    ]
+    if not missing_symbols:
+        return snapshot
+    provider = _market_overview_provider()
+    if not hasattr(provider, "get_stock_industries"):
+        return snapshot
+    try:
+        industry_by_symbol = provider.get_stock_industries(missing_symbols)
+    except Exception:
+        return snapshot
+    if not industry_by_symbol:
+        return snapshot
+
+    _auction_snapshot_store().backfill_industries(industry_by_symbol)
+    items = [
+        item.model_copy(update={"industry": industry_by_symbol[item.symbol]})
+        if not item.industry and industry_by_symbol.get(item.symbol)
+        else item
+        for item in snapshot.items
+    ]
+    patched = sum(1 for before, after in zip(snapshot.items, items) if not before.industry and after.industry)
+    if not patched:
+        return snapshot
+    return snapshot.model_copy(
+        deep=True,
+        update={
+            "items": items,
+            "source_status": [
+                *snapshot.source_status,
+                StrongStockSourceStatus(
+                    source="竞价行业补充",
+                    status="success",
+                    detail=f"补齐 {patched}/{len(missing_symbols)} 只竞价股票行业",
+                ),
+            ],
+        },
+    )
 
 
 def _auction_hot_theme_refs() -> tuple[list[tuple[str, int, float]], StrongStockSourceStatus | None]:

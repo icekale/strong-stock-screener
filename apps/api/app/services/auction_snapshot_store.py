@@ -59,6 +59,8 @@ class AuctionSnapshotStore:
                 and _is_after_auction_lock(current)
                 and self._locked_trade_date == snapshot.trade_date
             ):
+                self._snapshot = _backfill_locked_static_metadata(self._snapshot, stored)
+                self._persist_locked_snapshot(self._snapshot)
                 return self._snapshot.model_copy(deep=True)
             self._snapshot = stored
             self._saved_at = monotonic()
@@ -120,6 +122,21 @@ class AuctionSnapshotStore:
                 ],
             },
         )
+
+    def backfill_industries(self, industry_by_symbol: dict[str, str]) -> AuctionSnapshotResponse:
+        with self._lock:
+            if self._snapshot is None:
+                return AuctionSnapshotResponse(snapshot_status="missing")
+            items = [
+                item.model_copy(update={"industry": industry_by_symbol[item.symbol]})
+                if not item.industry and industry_by_symbol.get(item.symbol)
+                else item
+                for item in self._snapshot.items
+            ]
+            self._snapshot = self._snapshot.model_copy(deep=True, update={"items": items})
+            if self._snapshot.trade_date is not None and self._snapshot.trade_date == self._locked_trade_date:
+                self._persist_locked_snapshot(self._snapshot)
+            return self._snapshot.model_copy(deep=True)
 
     def timeline(self, *, limit: int = 8) -> AuctionTimelineResponse:
         bounded_limit = max(1, min(limit, 20))
@@ -189,3 +206,31 @@ class AuctionSnapshotStore:
 def _is_after_auction_lock(current: datetime) -> bool:
     seconds = current.hour * 3600 + current.minute * 60 + current.second
     return seconds > AUCTION_LOCK_SECONDS
+
+
+def _backfill_locked_static_metadata(
+    locked: AuctionSnapshotResponse,
+    refreshed: AuctionSnapshotResponse,
+) -> AuctionSnapshotResponse:
+    refreshed_by_symbol = {item.symbol: item for item in refreshed.items}
+    items = []
+    for item in locked.items:
+        source = refreshed_by_symbol.get(item.symbol)
+        if source is None:
+            items.append(item)
+            continue
+        update: dict[str, object] = {}
+        if not item.industry and source.industry:
+            update["industry"] = source.industry
+        if not item.themes and source.themes:
+            update["themes"] = source.themes
+        if item.hot_theme_rank is None and source.hot_theme_rank is not None:
+            update["hot_theme_rank"] = source.hot_theme_rank
+        if item.hot_theme_score is None and source.hot_theme_score is not None:
+            update["hot_theme_score"] = source.hot_theme_score
+        if item.theme_auction_rank is None and source.theme_auction_rank is not None:
+            update["theme_auction_rank"] = source.theme_auction_rank
+        if not item.theme_resonance and source.theme_resonance:
+            update["theme_resonance"] = source.theme_resonance
+        items.append(item.model_copy(update=update) if update else item)
+    return locked.model_copy(deep=True, update={"items": items})

@@ -817,6 +817,17 @@ class SequenceMarketRankingsProvider(FakeMarketOverviewProvider):
         )
 
 
+class SequenceMarketRankingsProviderWithIndustryBackfill(SequenceMarketRankingsProvider):
+    def get_market_rankings(self, limit: int = 50) -> MarketRankingsResponse:
+        response = super().get_market_rankings(limit=limit)
+        if len(self.ranking_calls) == 1:
+            response.pct_change_rank[0].industry = None
+        return response
+
+    def get_stock_industries(self, symbols: list[str]) -> dict[str, str]:
+        return {symbol: "通信设备" for symbol in symbols if symbol == "300025.SZ"}
+
+
 class FailingMarketRankingsProvider(FakeMarketOverviewProvider):
     source_name = "failing fake全A排行"
 
@@ -1597,6 +1608,27 @@ def test_auction_snapshot_refresh_after_open_keeps_0925_locked_snapshot(tmp_path
     assert latest_payload["items"][0]["symbol"] == "300025.SZ"
     assert "09:25" in latest_payload["source_status"][-1]["detail"]
     assert provider.ranking_calls == [100, 100]
+
+
+def test_auction_snapshot_refresh_after_open_backfills_locked_industries(tmp_path: Path) -> None:
+    provider = SequenceMarketRankingsProviderWithIndustryBackfill()
+    client = _client(tmp_path, market_overview_provider=provider)
+    app.state.auction_now = datetime(2026, 6, 26, 9, 25, 0)
+
+    try:
+        lock_response = client.get("/api/auction/snapshot?limit=2&refresh=true")
+        app.state.auction_now = datetime(2026, 6, 26, 9, 30, 1)
+        after_open_response = client.get("/api/auction/snapshot?limit=2&refresh=true")
+        latest_response = client.get("/api/auction/latest?limit=2")
+    finally:
+        delattr(app.state, "auction_now")
+
+    assert lock_response.status_code == 200
+    assert lock_response.json()["items"][0]["industry"] == "通信设备"
+    assert after_open_response.status_code == 200
+    assert after_open_response.json()["items"][0]["symbol"] == "300025.SZ"
+    assert after_open_response.json()["items"][0]["industry"] == "通信设备"
+    assert latest_response.json()["items"][0]["industry"] == "通信设备"
 
 
 def test_auction_latest_restores_0925_locked_snapshot_after_store_restart(tmp_path: Path) -> None:

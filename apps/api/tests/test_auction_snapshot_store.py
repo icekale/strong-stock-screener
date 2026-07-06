@@ -110,6 +110,82 @@ def test_auction_snapshot_store_keeps_0925_snapshot_locked_after_open() -> None:
     assert "09:25" in latest.source_status[-1].detail
 
 
+def test_auction_snapshot_store_backfills_locked_industry_after_open() -> None:
+    store = AuctionSnapshotStore()
+    locked = AuctionSnapshotResponse(
+        trade_date="2026-07-01",
+        items=[
+            AuctionSnapshotItem(
+                symbol="300025.SZ",
+                name="竞价缺行业",
+                industry=None,
+                auction_score=92,
+                open_gap_pct=8.0,
+                current_pct_change=8.5,
+            )
+        ],
+    )
+    refreshed = AuctionSnapshotResponse(
+        trade_date="2026-07-01",
+        items=[
+            AuctionSnapshotItem(
+                symbol="300025.SZ",
+                name="竞价缺行业",
+                industry="通信设备",
+                themes=["通信"],
+                hot_theme_rank=3,
+                hot_theme_score=8800,
+                theme_auction_rank=1,
+                theme_resonance=True,
+                auction_score=99,
+                open_gap_pct=9.5,
+                current_pct_change=10.0,
+                signals=["题材共振"],
+            )
+        ],
+    )
+
+    store.save(locked, captured_at=datetime(2026, 7, 1, 9, 25, 0))
+    returned = store.save(refreshed, captured_at=datetime(2026, 7, 1, 9, 30, 1))
+    latest = store.latest(limit=5)
+
+    assert returned.items[0].symbol == "300025.SZ"
+    assert returned.items[0].auction_score == 92
+    assert returned.items[0].open_gap_pct == 8.0
+    assert returned.items[0].industry == "通信设备"
+    assert returned.items[0].themes == ["通信"]
+    assert returned.items[0].theme_resonance is True
+    assert latest.items[0].industry == "通信设备"
+
+
+def test_auction_snapshot_store_backfills_locked_industries_from_mapping() -> None:
+    store = AuctionSnapshotStore()
+    locked = AuctionSnapshotResponse(
+        trade_date="2026-07-01",
+        items=[
+            AuctionSnapshotItem(symbol="300025.SZ", name="锁定一号", auction_score=92),
+            AuctionSnapshotItem(symbol="300026.SZ", name="锁定二号", auction_score=88),
+        ],
+    )
+    refreshed = AuctionSnapshotResponse(
+        trade_date="2026-07-01",
+        items=[AuctionSnapshotItem(symbol="300930.SZ", name="盘中新票", industry="专用设备", auction_score=99)],
+    )
+
+    store.save(locked, captured_at=datetime(2026, 7, 1, 9, 25, 0))
+    store.save(refreshed, captured_at=datetime(2026, 7, 1, 9, 30, 1))
+    updated = store.backfill_industries(
+        {
+            "300025.SZ": "通信设备",
+            "300026.SZ": "房地产开发",
+        }
+    )
+
+    assert [item.symbol for item in updated.items] == ["300025.SZ", "300026.SZ"]
+    assert [item.industry for item in updated.items] == ["通信设备", "房地产开发"]
+    assert store.latest(limit=5).items[1].industry == "房地产开发"
+
+
 def test_auction_snapshot_store_restores_locked_0925_snapshot_after_restart(tmp_path) -> None:
     store = AuctionSnapshotStore(data_dir=tmp_path)
     store.save(_snapshot("300025.SZ", 92), captured_at=datetime(2026, 7, 1, 9, 25, 0))

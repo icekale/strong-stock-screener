@@ -1,9 +1,10 @@
+import json
 from pathlib import Path
 from datetime import datetime
 
 from fastapi.testclient import TestClient
 
-from app.main import app, shutdown_auction_sampler, startup_auction_sampler
+from app.main import app, shutdown_auction_sampler, startup_auction_sampler, _auction_model_service
 from app.models import (
     AuctionModelBacktestSummary,
     AuctionModelPredictionItem,
@@ -161,6 +162,47 @@ def test_provider_auction_model_source_skips_candidate_when_kline_fails() -> Non
 
     assert feature_end_date == "2026-07-03"
     assert rows == []
+
+
+def test_default_auction_model_service_uses_provider_source_not_free_stockdb(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    metadata_path = tmp_path / "metadata.json"
+    model_path = tmp_path / "model.pkl"
+    performance_path = tmp_path / "performance.json"
+    metadata_path.write_text(
+        json.dumps(
+            {
+                "model_version": "fake-provider-model",
+                "feature_version": "fake-features",
+                "feature_names": ["prev_return"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    model_path.write_bytes(b"unused")
+    performance_path.write_text("{}", encoding="utf-8")
+    app.state.candidate_provider = FakeCandidateProvider()
+    app.state.kline_provider = FakeKlineProvider()
+    monkeypatch.setattr(
+        "app.main.get_settings",
+        lambda: FakeAuctionModelSettings(model_path, metadata_path, performance_path),
+    )
+    monkeypatch.setattr(
+        "app.services.auction_model.score_rows_with_model",
+        lambda rows, model_path, metadata_path: [{**row, "prob_3pct": 0.9} for row in rows],
+    )
+
+    try:
+        result = _auction_model_service().predict_top3("2026-07-06")
+    finally:
+        delattr(app.state, "candidate_provider")
+        delattr(app.state, "kline_provider")
+
+    assert result.items[0].symbol == "300001.SZ"
+    assert result.source_status[0].source == "K线推理源"
+    assert result.source_status[0].detail == "使用 2026-07-03 及以前日K构建特征，生成 1 个候选特征行"
 
 
 def test_auction_model_api_uses_injected_service(tmp_path: Path) -> None:
@@ -439,3 +481,16 @@ class FailingKlineProvider:
 
     def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
         raise RuntimeError("kline unavailable")
+
+
+class FakeAuctionModelSettings:
+    auction_model_free_stockdb_base_url = "http://stockdb.invalid:7899"
+    auction_model_timeout_seconds = 5
+    auction_model_lookback = 5
+    auction_model_top_n = 3
+    auction_model_max_items = 50
+
+    def __init__(self, model_path: Path, metadata_path: Path, performance_path: Path) -> None:
+        self.auction_model_model_path = model_path
+        self.auction_model_metadata_path = metadata_path
+        self.auction_model_performance_path = performance_path

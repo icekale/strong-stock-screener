@@ -91,7 +91,7 @@ from app.services.auction_model import (
     AuctionModelDataError,
     AuctionModelResultStore,
     AuctionModelService,
-    FreeStockDbAuctionModelSource,
+    ProviderAuctionModelSource,
 )
 from app.services.auction_top3_live_confirmation import (
     AuctionTop3LiveConfirmationStore,
@@ -1808,9 +1808,9 @@ def _auction_model_service() -> AuctionModelService:
         return injected
     settings = get_settings()
     return AuctionModelService(
-        source=FreeStockDbAuctionModelSource(
-            base_url=settings.auction_model_free_stockdb_base_url,
-            timeout_seconds=settings.auction_model_timeout_seconds,
+        source=ProviderAuctionModelSource(
+            candidate_provider=_candidate_provider(),
+            kline_provider=_kline_provider(),
         ),
         model_path=Path(settings.auction_model_model_path),
         metadata_path=Path(settings.auction_model_metadata_path),

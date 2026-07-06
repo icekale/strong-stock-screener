@@ -10,10 +10,14 @@ from app.models import (
     AuctionModelTop3Response,
     AuctionSnapshotItem,
     AuctionSnapshotResponse,
+    KlineBar,
+    StrongStockCandidate,
 )
 from app.services.auction_model import (
     GUARD_RULE,
     AuctionModelResultStore,
+    ProviderAuctionModelSource,
+    build_live_prediction_rows,
     prediction_items_from_scored_rows,
 )
 from app.services.auction_snapshot_store import AuctionSnapshotStore
@@ -127,6 +131,36 @@ def test_prediction_items_downgrades_low_liquidity_candidates() -> None:
         "300013.SZ",
         "300014.SZ",
     ]
+
+
+def test_provider_auction_model_source_builds_rows_from_candidate_and_kline_providers() -> None:
+    source = ProviderAuctionModelSource(
+        candidate_provider=FakeCandidateProvider(),
+        kline_provider=FakeKlineProvider(),
+    )
+
+    rows, feature_end_date = build_live_prediction_rows(source, trade_date="2026-07-06", lookback=5)
+
+    assert feature_end_date == "2026-07-03"
+    assert rows[0]["symbol"] == "300001.SZ"
+    assert rows[0]["name"] == "模型一号"
+    assert rows[0]["market_cap_float"] == 5_000_000_000
+    assert rows[0]["prev_close_price"] == 12
+    assert "uses_provider_daily_bar" in rows[0]["data_quality"]
+    assert "daily_amount_estimated" in rows[0]["data_quality"]
+    assert "free-stockdb" not in source.source_name
+
+
+def test_provider_auction_model_source_skips_candidate_when_kline_fails() -> None:
+    source = ProviderAuctionModelSource(
+        candidate_provider=FakeCandidateProvider(),
+        kline_provider=FailingKlineProvider(),
+    )
+
+    rows, feature_end_date = build_live_prediction_rows(source, trade_date="2026-07-06", lookback=5)
+
+    assert feature_end_date == "2026-07-03"
+    assert rows == []
 
 
 def test_auction_model_api_uses_injected_service(tmp_path: Path) -> None:
@@ -368,3 +402,40 @@ class CountingFakeAuctionModelService:
         self.call_count += 1
         result = FakeAuctionModelService().predict_top3(trade_date)
         return result.model_copy(update={"run_id": f"fake-run-{self.call_count}"})
+
+
+class FakeCandidateProvider:
+    source_name = "fake-candidates"
+
+    def get_candidates(self, trade_date: str) -> list[StrongStockCandidate]:
+        if trade_date != "2026-07-03":
+            return []
+        return [
+            StrongStockCandidate(
+                symbol="300001.SZ",
+                name="模型一号",
+                circulating_market_cap_cny=5_000_000_000,
+                total_market_cap_cny=8_000_000_000,
+            )
+        ]
+
+
+class FakeKlineProvider:
+    source_name = "fake-kline"
+
+    def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
+        assert symbol == "300001.SZ"
+        return [
+            KlineBar(date="2026-06-29", open=10, high=10.5, low=9.8, close=10, volume=12_000_000),
+            KlineBar(date="2026-06-30", open=10.1, high=10.8, low=10, close=10.5, volume=13_000_000),
+            KlineBar(date="2026-07-01", open=10.6, high=11.2, low=10.4, close=11, volume=14_000_000),
+            KlineBar(date="2026-07-02", open=11.1, high=11.8, low=10.9, close=11.5, volume=15_000_000),
+            KlineBar(date="2026-07-03", open=11.6, high=12.4, low=11.4, close=12, volume=16_000_000),
+        ][-count:]
+
+
+class FailingKlineProvider:
+    source_name = "failing-kline"
+
+    def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
+        raise RuntimeError("kline unavailable")

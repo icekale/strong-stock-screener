@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import httpx
 
@@ -14,6 +14,8 @@ from app.models import (
     AuctionModelBacktestSummary,
     AuctionModelPredictionItem,
     AuctionModelTop3Response,
+    KlineBar,
+    StrongStockCandidate,
     StrongStockSourceStatus,
 )
 
@@ -65,6 +67,29 @@ class DailyBar:
     turnover_rate: float | None = None
 
 
+class AuctionModelSource(Protocol):
+    source_name: str
+
+    def prefetch_daily_window(self, *, feature_end_date: str, lookback: int) -> None:
+        ...
+
+    def candidate_universe(self, trade_date: str) -> list[dict[str, object]]:
+        ...
+
+    def daily_bars(self, symbol: str, *, end_date: str, lookback: int) -> list[DailyBar]:
+        ...
+
+
+class CandidateProvider(Protocol):
+    def get_candidates(self, trade_date: str) -> list[StrongStockCandidate]:
+        ...
+
+
+class KlineProvider(Protocol):
+    def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
+        ...
+
+
 class FreeStockDbClient:
     def __init__(self, *, base_url: str, timeout_seconds: float = 10.0) -> None:
         self._base_url = base_url.rstrip("/") + "/"
@@ -87,6 +112,8 @@ class FreeStockDbClient:
 
 
 class FreeStockDbAuctionModelSource:
+    source_name = "free-stockdb"
+
     def __init__(self, *, base_url: str, timeout_seconds: float = 180.0) -> None:
         self._client = FreeStockDbClient(base_url=base_url, timeout_seconds=timeout_seconds)
         self._prefetched_rows_by_date: dict[str, list[dict[str, object]]] | None = None
@@ -153,11 +180,74 @@ class FreeStockDbAuctionModelSource:
         return bars[-lookback:]
 
 
+class ProviderAuctionModelSource:
+    source_name = "K线推理源"
+
+    def __init__(
+        self,
+        *,
+        candidate_provider: CandidateProvider,
+        kline_provider: KlineProvider,
+    ) -> None:
+        self._candidate_provider = candidate_provider
+        self._kline_provider = kline_provider
+        self._amount_estimated_symbols: set[str] = set()
+
+    def prefetch_daily_window(self, *, feature_end_date: str, lookback: int) -> None:
+        _ = (feature_end_date, lookback)
+
+    def candidate_universe(self, trade_date: str) -> list[dict[str, object]]:
+        try:
+            candidates = self._candidate_provider.get_candidates(trade_date)
+        except Exception:
+            return []
+        return [_candidate_row_from_provider(candidate) for candidate in candidates]
+
+    def daily_bars(self, symbol: str, *, end_date: str, lookback: int) -> list[DailyBar]:
+        try:
+            raw_bars = self._kline_provider.get_klines(symbol, count=max(lookback, 2))
+        except Exception:
+            return []
+        end_display = _display_date(_normalize_date_key(end_date))
+        bars: list[DailyBar] = []
+        amount_estimated = False
+        for raw_bar in raw_bars:
+            bar_date = _display_date(_normalize_date_key(raw_bar.date))
+            if bar_date > end_display:
+                continue
+            amount = _kline_amount(raw_bar)
+            if amount is None:
+                amount = raw_bar.volume * raw_bar.close
+                amount_estimated = True
+            bars.append(
+                DailyBar(
+                    trade_date=bar_date,
+                    open=raw_bar.open,
+                    high=raw_bar.high,
+                    low=raw_bar.low,
+                    close=raw_bar.close,
+                    volume=raw_bar.volume,
+                    amount=amount,
+                    turnover_rate=_float_or_none(getattr(raw_bar, "turnover_rate", None)),
+                )
+            )
+        if amount_estimated:
+            self._amount_estimated_symbols.add(symbol)
+        bars.sort(key=lambda bar: bar.trade_date)
+        return bars[-lookback:]
+
+    def data_quality_flags(self, symbol: str) -> list[str]:
+        flags = ["no_auction_snapshot", "uses_provider_daily_bar"]
+        if symbol in self._amount_estimated_symbols:
+            flags.append("daily_amount_estimated")
+        return flags
+
+
 class AuctionModelService:
     def __init__(
         self,
         *,
-        source: FreeStockDbAuctionModelSource,
+        source: AuctionModelSource,
         model_path: Path,
         metadata_path: Path,
         performance_path: Path | None,
@@ -200,7 +290,7 @@ class AuctionModelService:
             items=items,
             source_status=[
                 StrongStockSourceStatus(
-                    source="free-stockdb",
+                    source=getattr(self._source, "source_name", "K线源"),
                     status="success",
                     detail=f"使用 {feature_end_date} 及以前日K构建特征，生成 {len(rows)} 个候选特征行",
                 ),
@@ -219,7 +309,7 @@ class AuctionModelService:
 
 
 def build_live_prediction_rows(
-    source: FreeStockDbAuctionModelSource,
+    source: AuctionModelSource,
     *,
     trade_date: str,
     lookback: int,
@@ -267,7 +357,7 @@ def build_live_prediction_rows(
                 "market_cap_float": _float_or_none(candidate.get("market_cap_float")),
                 "avg_amount_3d": _average_amount(bars, 3),
                 "risk_flags": risk_flags,
-                "data_quality": ["no_auction_snapshot", "uses_previous_daily_bar"],
+                "data_quality": _source_data_quality_flags(source, symbol),
             }
         )
     return rows, feature_end_date
@@ -436,7 +526,7 @@ def load_backtest_summary(path: Path | None) -> AuctionModelBacktestSummary | No
 
 
 def _previous_feature_date(
-    source: FreeStockDbAuctionModelSource,
+    source: AuctionModelSource,
     *,
     trade_date: str,
     max_calendar_backtrack: int,
@@ -447,6 +537,32 @@ def _previous_feature_date(
         if source.candidate_universe(candidate_date):
             return candidate_date
     raise AuctionModelDataError(f"{trade_date} 前 {max_calendar_backtrack} 天内没有可用日K候选池")
+
+
+def _candidate_row_from_provider(candidate: StrongStockCandidate) -> dict[str, object]:
+    name = candidate.name or ""
+    return {
+        "symbol": candidate.symbol,
+        "name": name,
+        "is_st": "ST" in name.upper(),
+        "is_suspended": False,
+        "listed_days": 9999,
+        "market_cap_float": candidate.circulating_market_cap_cny or candidate.total_market_cap_cny,
+    }
+
+
+def _kline_amount(bar: KlineBar) -> float | None:
+    amount = _float_or_none(getattr(bar, "amount", None))
+    if amount is None or amount <= 0:
+        return None
+    return amount
+
+
+def _source_data_quality_flags(source: AuctionModelSource, symbol: str) -> list[str]:
+    flags = getattr(source, "data_quality_flags", None)
+    if callable(flags):
+        return [str(flag) for flag in flags(symbol)]
+    return ["no_auction_snapshot", "uses_previous_daily_bar"]
 
 
 def _candidate_risk_flags(

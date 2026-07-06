@@ -11,6 +11,7 @@ import {
   getAuctionLatest,
   getAuctionModelLiveConfirmation,
   getAuctionModelTop3,
+  getAuctionReview,
   getAuctionReviewLatest,
   getAuctionRuleSummary,
   getAuctionSnapshotJob,
@@ -34,6 +35,7 @@ import {
   type AuctionSortMode,
 } from "../../lib/auctionSort";
 import { buildAuctionClosePctBySymbol } from "../../lib/auctionReviewMetrics";
+import { loadAuctionReviewSummaryForDate } from "../../lib/auctionReviewLoader";
 import { buildStockDetailHref } from "../../lib/stockNavigation";
 import type {
   AuctionReviewRecord,
@@ -92,6 +94,7 @@ export function AuctionWorkspace() {
   const [modelError, setModelError] = useState<string | null>(null);
   const [modelSavingSymbol, setModelSavingSymbol] = useState<string | null>(null);
   const refreshPromiseRef = useRef<Promise<void> | null>(null);
+  const reviewRequestRef = useRef(0);
 
   const loadTimeline = useCallback(async () => {
     try {
@@ -102,24 +105,23 @@ export function AuctionWorkspace() {
     }
   }, []);
 
-  const loadReview = useCallback(async () => {
+  const loadReview = useCallback(async (tradeDate?: string | null) => {
+    const requestId = reviewRequestRef.current + 1;
+    reviewRequestRef.current = requestId;
     setReviewLoading(true);
     try {
-      const [latestResult, rulesResult] = await Promise.allSettled([
-        getAuctionReviewLatest(),
-        getAuctionRuleSummary(2000),
-      ]);
-      if (latestResult.status === "fulfilled") {
-        const latest = latestResult.value;
-        const ruleBuckets = rulesResult.status === "fulfilled" ? rulesResult.value.buckets : latest.buckets;
-        setReviewSummary({ ...latest, buckets: ruleBuckets.length ? ruleBuckets : latest.buckets });
-      } else if (rulesResult.status === "fulfilled") {
-        setReviewSummary(rulesResult.value);
-      } else {
-        setReviewSummary(null);
+      const summary = await loadAuctionReviewSummaryForDate(tradeDate, {
+        getAuctionReview,
+        getAuctionReviewLatest,
+        getAuctionRuleSummary,
+      });
+      if (reviewRequestRef.current === requestId) {
+        setReviewSummary(summary);
       }
     } finally {
-      setReviewLoading(false);
+      if (reviewRequestRef.current === requestId) {
+        setReviewLoading(false);
+      }
     }
   }, []);
 
@@ -192,8 +194,11 @@ export function AuctionWorkspace() {
   }, [loadLatest, loadTimeline, refresh]);
 
   useEffect(() => {
-    void loadReview();
-  }, [loadReview]);
+    if (loading && !data?.trade_date) {
+      return;
+    }
+    void loadReview(data?.trade_date);
+  }, [data?.trade_date, loadReview, loading]);
 
   useEffect(() => {
     let active = true;

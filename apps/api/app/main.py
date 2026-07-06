@@ -17,6 +17,8 @@ from app.config import get_settings
 from app.models import (
     AuctionBackfillResponse,
     AuctionModelTop3Response,
+    AuctionReviewOutcome,
+    AuctionReviewRecord,
     AuctionReviewSummary,
     AuctionSnapshotResponse,
     AuctionTimelineResponse,
@@ -105,6 +107,7 @@ from app.services.auction_review import (
     build_auction_review_records,
     build_auction_rule_buckets,
     finalize_auction_records,
+    score_auction_record,
 )
 from app.services.auction_review_store import AuctionReviewStore
 from app.services.auction_sampler import AuctionSnapshotSampler
@@ -1118,11 +1121,27 @@ def finalize_auction_review(trade_date: str) -> dict[str, object]:
     if not records:
         raise HTTPException(status_code=404, detail="no auction review records")
     provider = _kline_provider()
-    symbol_bars = {
-        symbol: provider.get_klines(symbol, count=260)
-        for symbol in sorted({record.symbol for record in records})
-    }
+    symbol_bars: dict[str, list[KlineBar]] = {}
+    kline_errors: dict[str, str] = {}
+    for symbol in sorted({record.symbol for record in records}):
+        try:
+            symbol_bars[symbol] = provider.get_klines(symbol, count=260)
+        except StrongStockDataUnavailable as exc:
+            symbol_bars[symbol] = []
+            kline_errors[symbol] = str(exc)
     summary = finalize_auction_records(records, symbol_bars=symbol_bars)
+    reviewed_records = summary.records
+    if kline_errors:
+        reviewed_records = [
+            _mark_auction_review_kline_unavailable(record, kline_errors[record.symbol])
+            if record.symbol in kline_errors
+            else record
+            for record in reviewed_records
+        ]
+    summary = _auction_review_summary(
+        _fill_auction_review_close_from_quotes(reviewed_records, trade_date),
+        trade_date=trade_date,
+    )
     store.upsert_records(summary.records)
     store.save_summary(summary)
     return summary.model_dump(mode="json")
@@ -2771,6 +2790,124 @@ def _auction_review_summary(records: list, *, trade_date: str | None) -> Auction
         data_incomplete_count=sum(1 for record in records if record.review_status == "data_incomplete"),
         records=records,
         buckets=build_auction_rule_buckets(records),
+    )
+
+
+def _fill_auction_review_close_from_quotes(
+    records: list[AuctionReviewRecord],
+    trade_date: str,
+) -> list[AuctionReviewRecord]:
+    missing_symbols = sorted({record.symbol for record in records if record.day_result.close_pct is None})
+    if not missing_symbols:
+        return records
+    provider = _quote_provider()
+    if not hasattr(provider, "get_quotes"):
+        return records
+
+    quotes_by_symbol: dict[str, object] = {}
+    quote_batch_size = 50
+    for start in range(0, len(missing_symbols), quote_batch_size):
+        batch = missing_symbols[start : start + quote_batch_size]
+        try:
+            quotes = provider.get_quotes(batch)
+        except StrongStockDataUnavailable:
+            continue
+        quotes_by_symbol.update({quote.symbol: quote for quote in quotes})
+
+    if not quotes_by_symbol:
+        return records
+    return [
+        _fill_auction_review_record_close_from_quote(record, quotes_by_symbol.get(record.symbol), trade_date)
+        for record in records
+    ]
+
+
+def _fill_auction_review_record_close_from_quote(
+    record: AuctionReviewRecord,
+    quote: object | None,
+    trade_date: str,
+) -> AuctionReviewRecord:
+    if record.day_result.close_pct is not None or quote is None:
+        return record
+    day_result = _auction_review_quote_day_outcome(quote, trade_date)
+    if day_result is None:
+        return record
+    updated = record.model_copy(
+        deep=True,
+        update={
+            "day_result": day_result,
+            "review_status": "day_done",
+            "source_status": [
+                *record.source_status,
+                StrongStockSourceStatus(
+                    source="竞价复盘实时行情",
+                    status="success",
+                    detail="日K未含当日记录，使用实时行情涨跌幅回填收盘涨幅",
+                ),
+            ],
+        },
+    )
+    return updated.model_copy(update={"score": score_auction_record(updated)})
+
+
+def _auction_review_quote_day_outcome(quote: object, trade_date: str) -> AuctionReviewOutcome | None:
+    close_pct = getattr(quote, "pct_change", None)
+    if close_pct is None or not _quote_time_matches_trade_date(getattr(quote, "quote_time", None), trade_date):
+        return None
+    close_pct = round(float(close_pct), 2)
+    prev_close = getattr(quote, "prev_close", None)
+    drawdown_pct = _quote_pct_from_base(getattr(quote, "low_price", None), prev_close)
+    return AuctionReviewOutcome(
+        peak_pct=_quote_pct_from_base(getattr(quote, "high_price", None), prev_close),
+        close_pct=close_pct,
+        drawdown_pct=min(drawdown_pct, 0) if drawdown_pct is not None else None,
+        limit_up=close_pct >= 9.8,
+        open_pct=_quote_pct_from_base(getattr(quote, "open_price", None), prev_close),
+        status="complete",
+    )
+
+
+def _quote_pct_from_base(price: float | None, base_price: float | None) -> float | None:
+    if price is None or base_price is None or base_price <= 0:
+        return None
+    return round((float(price) - float(base_price)) / float(base_price) * 100, 2)
+
+
+def _quote_time_matches_trade_date(quote_time: str | None, trade_date: str) -> bool:
+    if not quote_time:
+        return True
+    value = str(quote_time)
+    compact_trade_date = trade_date.replace("-", "")
+    if value.startswith(trade_date) or value.startswith(compact_trade_date):
+        return True
+    if value.isdigit():
+        try:
+            timestamp = int(value)
+            seconds = timestamp / 1000 if timestamp > 10_000_000_000 else timestamp
+            return datetime.fromtimestamp(seconds, ZoneInfo("Asia/Shanghai")).date().isoformat() == trade_date
+        except (OverflowError, OSError, ValueError):
+            return False
+    return False
+
+
+def _mark_auction_review_kline_unavailable(record: AuctionReviewRecord, detail: str) -> AuctionReviewRecord:
+    unavailable = AuctionReviewOutcome(status="data_incomplete")
+    return record.model_copy(
+        deep=True,
+        update={
+            "intraday_result": unavailable,
+            "day_result": unavailable,
+            "next_day_result": unavailable,
+            "review_status": "data_incomplete",
+            "source_status": [
+                *record.source_status,
+                StrongStockSourceStatus(
+                    source="竞价复盘日K",
+                    status="failed",
+                    detail=detail,
+                ),
+            ],
+        },
     )
 
 

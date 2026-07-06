@@ -318,6 +318,21 @@ class AuctionReviewKlineProvider(FakeKlineProvider):
         ]
 
 
+class PartiallyFailingAuctionReviewKlineProvider(AuctionReviewKlineProvider):
+    def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
+        if symbol == "300002.SZ":
+            raise StrongStockDataUnavailable("TickFlow 日K请求失败: HTTP 429")
+        return super().get_klines(symbol, count=count)
+
+
+class MissingTradeDateAuctionReviewKlineProvider(AuctionReviewKlineProvider):
+    def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
+        return [
+            KlineBar(date="2026-06-27", open=9.6, close=9.8, high=10.0, low=9.5, volume=100),
+            KlineBar(date="2026-06-30", open=9.8, close=10.0, high=10.2, low=9.7, volume=100),
+        ]
+
+
 class FakeQuoteProvider:
     source_name = "TickFlow"
 
@@ -399,6 +414,37 @@ class FakeLiveQuoteProvider:
             ]
             for symbol in symbols
         }
+
+
+class AuctionReviewCloseQuoteProvider(FakeLiveQuoteProvider):
+    def get_quotes(self, symbols: list[str]) -> list[TickFlowQuote]:
+        return [
+            TickFlowQuote(
+                symbol=symbol,
+                name="涨幅一号" if symbol == "300001.SZ" else "涨幅二号",
+                last_price=10.55 if symbol == "300001.SZ" else 10.08,
+                prev_close=10.0,
+                open_price=10.2,
+                high_price=10.8 if symbol == "300001.SZ" else 10.4,
+                low_price=9.9,
+                pct_change=5.5 if symbol == "300001.SZ" else 0.8,
+                turnover_cny=120_000_000,
+                volume=100_000,
+                quote_time="2026-07-01T15:00:00+08:00",
+            )
+            for symbol in symbols
+        ]
+
+
+class SizeLimitedAuctionReviewCloseQuoteProvider(AuctionReviewCloseQuoteProvider):
+    def __init__(self) -> None:
+        self.batch_sizes: list[int] = []
+
+    def get_quotes(self, symbols: list[str]) -> list[TickFlowQuote]:
+        self.batch_sizes.append(len(symbols))
+        if len(symbols) > 50:
+            raise StrongStockDataUnavailable("quote batch too large")
+        return super().get_quotes(symbols)
 
 
 class CountingIntradayQuoteProvider(FakeLiveQuoteProvider):
@@ -778,6 +824,38 @@ class CountingMarketRankingsProvider(FakeMarketOverviewProvider):
     def get_market_rankings(self, limit: int = 50) -> MarketRankingsResponse:
         self.ranking_calls.append(limit)
         return super().get_market_rankings(limit=limit)
+
+
+class ManyAuctionMarketRankingsProvider(FakeMarketOverviewProvider):
+    source_name = "many fake全A排行"
+
+    def get_market_rankings(self, limit: int = 50) -> MarketRankingsResponse:
+        return MarketRankingsResponse(
+            trade_date="2026-06-26",
+            pct_change_rank=[
+                MarketRankingItem(
+                    symbol=f"300{index:03d}.SZ",
+                    name=f"涨幅{index:03d}",
+                    industry="机器人",
+                    last_price=10 + index / 100,
+                    open_price=10.1,
+                    prev_close=10.0,
+                    pct_change=3.0 + index / 100,
+                    current_pct_change=3.0 + index / 100,
+                    turnover_cny=100_000_000 + index,
+                    turnover_rate=2.0,
+                    quote_time="2026-06-26T10:00:00+08:00",
+                )
+                for index in range(1, 61)
+            ][:limit],
+            source_status=[
+                StrongStockSourceStatus(
+                    source="TickFlow 全A实时行情",
+                    status="success",
+                    detail="fake rankings",
+                )
+            ],
+        )
 
 
 class SequenceMarketRankingsProvider(FakeMarketOverviewProvider):
@@ -1805,6 +1883,78 @@ def test_auction_review_finalize_saves_latest_summary(tmp_path: Path) -> None:
     assert payload["data_incomplete_count"] == 2
     assert payload["records"][0]["day_result"]["close_pct"] == 8.0
     assert payload["buckets"]
+
+
+def test_auction_review_finalize_keeps_partial_results_when_one_kline_fails(tmp_path: Path) -> None:
+    client = _client(
+        tmp_path,
+        kline_provider=PartiallyFailingAuctionReviewKlineProvider(),
+        market_overview_provider=CountingMarketRankingsProvider(),
+    )
+    app.state.auction_now = datetime(2026, 7, 1, 9, 25, 0)
+
+    try:
+        client.get("/api/auction/snapshot?limit=2&refresh=true")
+        finalize_response = client.post("/api/auction/review/finalize?trade_date=2026-07-01")
+    finally:
+        delattr(app.state, "auction_now")
+
+    assert finalize_response.status_code == 200
+    payload = finalize_response.json()
+    records_by_symbol = {record["symbol"]: record for record in payload["records"]}
+    assert payload["record_count"] == 2
+    assert payload["data_incomplete_count"] == 2
+    assert records_by_symbol["300001.SZ"]["day_result"]["close_pct"] == 8.0
+    assert records_by_symbol["300002.SZ"]["review_status"] == "data_incomplete"
+    assert records_by_symbol["300002.SZ"]["day_result"]["close_pct"] is None
+    assert records_by_symbol["300002.SZ"]["source_status"][-1]["source"] == "竞价复盘日K"
+    assert records_by_symbol["300002.SZ"]["source_status"][-1]["status"] == "failed"
+
+
+def test_auction_review_finalize_uses_quote_when_daily_kline_misses_trade_date(tmp_path: Path) -> None:
+    client = _client(
+        tmp_path,
+        kline_provider=MissingTradeDateAuctionReviewKlineProvider(),
+        market_overview_provider=CountingMarketRankingsProvider(),
+        quote_provider=AuctionReviewCloseQuoteProvider(),
+    )
+    app.state.auction_now = datetime(2026, 7, 1, 9, 25, 0)
+
+    try:
+        client.get("/api/auction/snapshot?limit=2&refresh=true")
+        finalize_response = client.post("/api/auction/review/finalize?trade_date=2026-07-01")
+    finally:
+        delattr(app.state, "auction_now")
+
+    assert finalize_response.status_code == 200
+    payload = finalize_response.json()
+    records_by_symbol = {record["symbol"]: record for record in payload["records"]}
+    assert records_by_symbol["300001.SZ"]["day_result"]["close_pct"] == 5.5
+    assert records_by_symbol["300001.SZ"]["day_result"]["status"] == "complete"
+    assert records_by_symbol["300001.SZ"]["review_status"] == "day_done"
+    assert records_by_symbol["300001.SZ"]["source_status"][-1]["source"] == "竞价复盘实时行情"
+
+
+def test_auction_review_finalize_batches_quote_close_fallback(tmp_path: Path) -> None:
+    quote_provider = SizeLimitedAuctionReviewCloseQuoteProvider()
+    client = _client(
+        tmp_path,
+        kline_provider=MissingTradeDateAuctionReviewKlineProvider(),
+        market_overview_provider=ManyAuctionMarketRankingsProvider(),
+        quote_provider=quote_provider,
+    )
+    app.state.auction_now = datetime(2026, 7, 1, 9, 25, 0)
+
+    try:
+        client.get("/api/auction/snapshot?limit=60&refresh=true")
+        finalize_response = client.post("/api/auction/review/finalize?trade_date=2026-07-01")
+    finally:
+        delattr(app.state, "auction_now")
+
+    assert finalize_response.status_code == 200
+    payload = finalize_response.json()
+    assert quote_provider.batch_sizes == [50, 10]
+    assert sum(1 for record in payload["records"] if record["day_result"]["close_pct"] is not None) == 60
 
 
 def test_auction_review_finalize_seeds_records_from_latest_snapshot(tmp_path: Path) -> None:

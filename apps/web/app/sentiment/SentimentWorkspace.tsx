@@ -5,6 +5,7 @@ import { Alert, Button, Empty, Progress, Select, Skeleton, Space, Tag, Typograph
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ComponentType } from "react";
+import { WorkbenchPage } from "../../components/workbench/WorkbenchPage";
 import {
   getMarketRankings,
   getSentimentDecision,
@@ -291,16 +292,8 @@ export function SentimentWorkspace() {
   }, [data]);
 
   return (
-    <main className="workbench-page min-h-screen p-5">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <Typography.Title className="m-0 text-[#11100e]" level={3}>
-            短线情绪中心
-          </Typography.Title>
-          <Typography.Text className="workbench-muted">
-            基于近20日涨停候选池派生涨停池、炸板池、连板天梯和主线板块关联。
-          </Typography.Text>
-        </div>
+    <WorkbenchPage
+      actions={
         <Space wrap>
           <input
             className="h-8 rounded-lg border border-[#d8d2c8] bg-white px-3 text-sm font-semibold text-[#11100e]"
@@ -315,7 +308,10 @@ export function SentimentWorkspace() {
             刷新盘中
           </Button>
         </Space>
-      </div>
+      }
+      description="基于近20日涨停候选池派生涨停池、炸板池、连板天梯和主线板块关联。"
+      title="短线情绪中心"
+    >
 
       {error && <Alert className="mb-4" showIcon title={error} type="error" />}
 
@@ -425,7 +421,7 @@ export function SentimentWorkspace() {
           <Empty description="暂无短线情绪数据" />
         </div>
       )}
-    </main>
+    </WorkbenchPage>
   );
 }
 

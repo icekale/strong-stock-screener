@@ -1,8 +1,9 @@
 "use client";
 
-import { Card, Skeleton, Typography } from "antd";
+import { Card, Skeleton } from "antd";
 import dynamic from "next/dynamic";
 import { type ComponentType } from "react";
+import { WorkbenchPage } from "../../components/workbench/WorkbenchPage";
 
 const AuctionWorkspace = dynamic(
   () => import("./AuctionWorkspace").then((module) => module.AuctionWorkspace),
@@ -15,18 +16,13 @@ export default function AuctionPage() {
 
 function AuctionWorkspacePlaceholder() {
   return (
-    <main className="workbench-page min-h-screen p-5">
-      <div className="mb-4">
-        <Typography.Title className="m-0 text-[#11100e]" level={3}>
-          竞价雷达
-        </Typography.Title>
-        <Typography.Text className="workbench-muted">
-          正在加载 TickFlow 早盘竞价快照。
-        </Typography.Text>
-      </div>
+    <WorkbenchPage
+      description="正在加载 TickFlow 早盘竞价快照。"
+      title="竞价雷达"
+    >
       <Card className="workbench-panel">
         <Skeleton active paragraph={{ rows: 12 }} />
       </Card>
-    </main>
+    </WorkbenchPage>
   );
 }

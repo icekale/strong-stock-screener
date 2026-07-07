@@ -21,6 +21,7 @@ import type {
 import { FilterLogicRail } from "./screener/FilterLogicRail";
 import { MarketOverviewPanels, SectorFlowHeatmapPanel, SectorStrengthPanel } from "./screener/MarketOverviewPanels";
 import { buildMarketDashboardStats, sourceSummary } from "./screener/screenerUtils";
+import { buildWorkbenchContentClassName, buildWorkbenchPageClassName } from "./workbench/workbenchLayout";
 
 const CandidateResults = dynamic(
   () => import("./screener/CandidateResults").then((module) => module.CandidateResults),
@@ -112,8 +113,8 @@ export function ScreenerWorkbench({
   }, [message, watchlistMessage]);
 
   return (
-    <main className="min-h-screen bg-[#f5f3f0] text-[#11100e]">
-      <div className="mx-auto max-w-none px-5 py-4">
+    <main className={buildWorkbenchPageClassName("text-[#11100e]")}>
+      <div className={buildWorkbenchContentClassName("gap-0 px-5")}>
         <CoreWorkflowNav sourceOk={sourceSummary(sources).ok} />
 
         <MarketOverviewPanels

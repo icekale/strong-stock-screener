@@ -3,6 +3,7 @@
 import { Alert, App, Button, Card, Skeleton, Space, Typography } from "antd";
 import dynamic from "next/dynamic";
 import { useEffect, useState, type ComponentType } from "react";
+import { WorkbenchPage } from "../../components/workbench/WorkbenchPage";
 import { addWatchlistPoolItem, getWatchlistGsgfStatus, getWatchlistPool, saveWatchlistPool } from "../../lib/api";
 import type { GsgfAnalysis, WatchlistPoolItem } from "../../lib/types";
 import { emptyDraft, type DraftItem } from "./types";
@@ -117,35 +118,26 @@ export function WatchlistWorkspace() {
   }
 
   return (
-    <main className="workbench-page">
-      <div className="mx-auto max-w-none space-y-4 px-5 py-4">
-        <Card className="workbench-panel" styles={{ body: { padding: 18 } }}>
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <Typography.Text className="workbench-muted text-xs font-semibold uppercase">Watchlist</Typography.Text>
-              <Typography.Title className="workbench-ink mt-1 text-2xl font-black tracking-tight" level={1}>
-                自选股管理
-              </Typography.Title>
-              <Typography.Text className="workbench-muted mt-1 block text-sm font-medium">
-                管理分组、标签、行业和备注。
-              </Typography.Text>
-            </div>
-            <Space wrap>
-              <Button href="/">返回选股</Button>
-              <Button
-                disabled={saving}
-                onClick={() => {
-                  setSelectedSymbol(null);
-                  setDraft(emptyDraft());
-                }}
-                type="primary"
-              >
-                新增股票
-              </Button>
-            </Space>
-          </div>
-        </Card>
-
+    <WorkbenchPage
+      actions={
+        <Space wrap>
+          <Button href="/">返回选股</Button>
+          <Button
+            disabled={saving}
+            onClick={() => {
+              setSelectedSymbol(null);
+              setDraft(emptyDraft());
+            }}
+            type="primary"
+          >
+            新增股票
+          </Button>
+        </Space>
+      }
+      description="管理分组、标签、行业和备注。"
+      eyebrow="Watchlist"
+      title="自选股管理"
+    >
         {error && <Alert showIcon title={error} type="error" />}
 
         <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)_320px]">
@@ -167,8 +159,7 @@ export function WatchlistWorkspace() {
             selected={Boolean(selectedItem)}
           />
         </div>
-      </div>
-    </main>
+    </WorkbenchPage>
   );
 }
 

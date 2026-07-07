@@ -16,6 +16,7 @@ import {
   Typography,
 } from "antd";
 import { useEffect, useMemo, useState } from "react";
+import { WorkbenchPage } from "../../components/workbench/WorkbenchPage";
 import {
   analyzeModelMaintenance,
   generateAuctionTop3TrainingSamples,
@@ -176,19 +177,8 @@ export function ModelMaintenanceWorkspace() {
   }
 
   return (
-    <main className="workbench-page min-h-screen p-5">
-      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <Typography.Text className="workbench-muted text-xs font-semibold uppercase">
-            Model Maintenance
-          </Typography.Text>
-          <Typography.Title className="m-0 text-[#11100e]" level={3}>
-            AI 模型维护
-          </Typography.Title>
-          <Typography.Text className="workbench-muted">
-            把筛选结果、复盘样本、竞价 Top3 训练和数据源状态整理成维护包，再交给 Codex / DeepSeek 分析。
-          </Typography.Text>
-        </div>
+    <WorkbenchPage
+      actions={
         <Space wrap>
           <Button
             disabled={loading || analyzing || generatingPacket}
@@ -210,7 +200,11 @@ export function ModelMaintenanceWorkspace() {
             提交 AI 分析
           </Button>
         </Space>
-      </div>
+      }
+      description="把筛选结果、复盘样本、竞价 Top3 训练和数据源状态整理成维护包，再交给 Codex / DeepSeek 分析。"
+      eyebrow="Model Maintenance"
+      title="AI 模型维护"
+    >
 
       {error && <Alert className="mb-4" showIcon title={error} type="error" />}
 
@@ -450,7 +444,7 @@ export function ModelMaintenanceWorkspace() {
           </Space>
         </div>
       )}
-    </main>
+    </WorkbenchPage>
   );
 }
 

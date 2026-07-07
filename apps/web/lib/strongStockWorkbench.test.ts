@@ -6,6 +6,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   const typesSource = readFileSync(new URL("./types.ts", import.meta.url), "utf8");
   const apiSource = readFileSync(new URL("./api.ts", import.meta.url), "utf8");
   const componentSource = readFileSync(new URL("../components/ScreenerWorkbench.tsx", import.meta.url), "utf8");
+  const workbenchLayoutSource = readFileSync(new URL("../components/workbench/workbenchLayout.ts", import.meta.url), "utf8");
   const marketPanelsUrl = new URL("../components/screener/MarketOverviewPanels.tsx", import.meta.url);
   const marketPanelsSource = existsSync(marketPanelsUrl) ? readFileSync(marketPanelsUrl, "utf8") : "";
   const filterRailUrl = new URL("../components/screener/FilterLogicRail.tsx", import.meta.url);
@@ -545,7 +546,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(screenerFeatureSource, /CandidateCardList/);
   assert.match(screenerFeatureSource, /lg:hidden/);
   assert.match(screenerFeatureSource, /hidden overflow-x-auto lg:block/);
-  assert.match(screenerFeatureSource, /max-w-none/);
+  assert.match(componentSource, /buildWorkbenchContentClassName/);
+  assert.match(workbenchLayoutSource, /max-w-none/);
   assert.match(screenerFeatureSource, /grid items-stretch gap-4 xl:grid-cols-\[minmax\(0,2fr\)_minmax\(360px,1fr\)\]/);
   assert.match(componentSource, /HomepageMarketSupportPanel/);
   assert.match(componentSource, /onLoadMarketSupport/);
@@ -575,7 +577,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(watchlistFeatureSource, /dynamic[<(]/);
   assert.match(watchlistFeatureSource, /WatchlistEditorPanel/);
   assert.match(watchlistFeatureSource, /WatchlistManagerPanel/);
-  assert.match(watchlistFeatureSource, /workbench-page/);
+  assert.match(watchlistFeatureSource, /WorkbenchPage/);
   assert.match(watchlistFeatureSource, /workbench-panel/);
   assert.match(watchlistFeatureSource, /from "antd"/);
   assert.match(watchlistFeatureSource, /<Table/);
@@ -594,7 +596,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(watchlistFeatureSource, /结构触发/);
   assert.match(watchlistFeatureSource, /机会触发/);
   assert.match(watchlistFeatureSource, /C区\/回避/);
-  assert.match(settingsPageSource, /workbench-page/);
+  assert.match(settingsPageSource, /WorkbenchPage/);
   assert.match(settingsPageSource, /workbench-panel/);
   assert.match(settingsFeatureSource, /loading && !config/);
   assert.match(settingsPageSource, /数据源配置/);

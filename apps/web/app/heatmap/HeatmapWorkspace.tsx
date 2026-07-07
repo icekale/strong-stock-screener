@@ -20,6 +20,7 @@ import {
   message,
 } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { WorkbenchPage } from "../../components/workbench/WorkbenchPage";
 import { getHeatmapTreemap } from "../../lib/api";
 import {
   buildHeatmapQuery,
@@ -159,18 +160,9 @@ export function HeatmapWorkspace() {
   }
 
   return (
-    <main className="workbench-page min-h-screen p-5">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <Typography.Title className="m-0 text-[#11100e]" level={3}>
-            市场热力图
-          </Typography.Title>
-          <Typography.Text className="workbench-muted">
-            按行业聚合全 A 涨跌和成交活跃度，热图样本状态会在右侧明确标注。
-          </Typography.Text>
-        </div>
+    <WorkbenchPage
+      actions={
         <Space wrap>
-          <Tag color={statusTone}>{data ? heatmapSourceSummaryLabel(data.source_status) : "读取中"}</Tag>
           <Typography.Text className="workbench-muted text-xs">
             更新：{formatDateTime(data?.summary.updated_at ?? data?.generated_at)}
           </Typography.Text>
@@ -178,7 +170,11 @@ export function HeatmapWorkspace() {
             刷新
           </Button>
         </Space>
-      </div>
+      }
+      description="按行业聚合全 A 涨跌和成交活跃度，热图样本状态会在右侧明确标注。"
+      status={<Tag color={statusTone}>{data ? heatmapSourceSummaryLabel(data.source_status) : "读取中"}</Tag>}
+      title="市场热力图"
+    >
 
       {error ? (
         <Alert className="mb-4" title={error} showIcon type="warning" />
@@ -251,7 +247,7 @@ export function HeatmapWorkspace() {
           selectedStock={selectedStock}
         />
       </section>
-    </main>
+    </WorkbenchPage>
   );
 }
 

@@ -20,6 +20,7 @@ import {
 } from "antd";
 import { useEffect, useMemo, useState } from "react";
 import { SystemStatusPanel } from "../../components/system/SystemStatusPanel";
+import { WorkbenchPage } from "../../components/workbench/WorkbenchPage";
 import { checkRuntimeSettingsHealth, getRuntimeSettings, getSystemStatus, saveRuntimeSettings } from "../../lib/api";
 import type {
   GsgfAutoReviewConfig,
@@ -280,50 +281,34 @@ export function SettingsWorkspace() {
 
   if (loading && !config) {
     return (
-      <main className="workbench-page">
-        <div className="mx-auto max-w-none space-y-4 px-5 py-4">
-          <Card className="workbench-panel">
-            <Typography.Text className="workbench-muted text-xs font-semibold uppercase">Settings</Typography.Text>
-            <Typography.Title className="workbench-ink !mb-1 !mt-1 !text-2xl !font-black" level={1}>
-              数据源配置
-            </Typography.Title>
-            <Typography.Text className="workbench-muted">
-              正在读取独立选股工作台的数据源、模型和健康检查配置。
-            </Typography.Text>
-          </Card>
-          <Card className="workbench-panel">
-            <Skeleton active paragraph={{ rows: 8 }} title={false} />
-          </Card>
-        </div>
-      </main>
+      <WorkbenchPage
+        description="正在读取独立选股工作台的数据源、模型和健康检查配置。"
+        eyebrow="Settings"
+        title="数据源配置"
+      >
+        <Card className="workbench-panel">
+          <Skeleton active paragraph={{ rows: 8 }} title={false} />
+        </Card>
+      </WorkbenchPage>
     );
   }
 
   return (
-    <main className="workbench-page">
-      <div className="mx-auto max-w-none space-y-4 px-5 py-4">
-        <Card className="workbench-panel">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <Typography.Text className="workbench-muted text-xs font-semibold uppercase">Settings</Typography.Text>
-              <Typography.Title className="workbench-ink !mb-1 !mt-1 !text-2xl !font-black" level={1}>
-                数据源配置
-              </Typography.Title>
-              <Typography.Text className="workbench-muted">
-                独立选股工作台的行情源、候选源和 iFinD 研究增强配置。
-              </Typography.Text>
-            </div>
-            <Space wrap>
-              <Button disabled={loading || runningHealth} icon={<ReloadOutlined />} onClick={() => void loadSettings()}>
-                重新读取
-              </Button>
-              <Button icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()} type="primary">
-                保存设置
-              </Button>
-            </Space>
-          </div>
-        </Card>
-
+    <WorkbenchPage
+      actions={
+        <Space wrap>
+          <Button disabled={loading || runningHealth} icon={<ReloadOutlined />} onClick={() => void loadSettings()}>
+            重新读取
+          </Button>
+          <Button icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()} type="primary">
+            保存设置
+          </Button>
+        </Space>
+      }
+      description="独立选股工作台的行情源、候选源和 iFinD 研究增强配置。"
+      eyebrow="Settings"
+      title="数据源配置"
+    >
         {error && <Alert showIcon title={error} type="error" />}
         {message && <Alert showIcon title={message} type="success" />}
 
@@ -764,8 +749,7 @@ export function SettingsWorkspace() {
             </Card>
           </Col>
         </Row>
-      </div>
-    </main>
+    </WorkbenchPage>
   );
 }
 

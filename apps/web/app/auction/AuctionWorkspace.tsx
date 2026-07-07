@@ -4,6 +4,7 @@ import { ExperimentOutlined, ReloadOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Collapse, Empty, Input, InputNumber, Progress, Segmented, Select, Table, Tag, Typography } from "antd";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { WorkbenchPage } from "../../components/workbench/WorkbenchPage";
 import {
   addWatchlistPoolItem,
   createAuctionModelTop3Job,
@@ -388,7 +389,7 @@ export function AuctionWorkspace() {
   }
 
   return (
-    <main className="workbench-page min-h-screen p-3 lg:p-5">
+    <WorkbenchPage contentClassName="py-3 lg:py-5">
       <section className="auction-status-strip auction-command-strip workbench-panel mb-4 rounded-xl border px-4 py-3">
         <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(220px,auto)] xl:items-start">
           <div className="min-w-0">
@@ -550,7 +551,7 @@ export function AuctionWorkspace() {
           </section>
         </aside>
       </section>
-    </main>
+    </WorkbenchPage>
   );
 }
 

@@ -416,6 +416,29 @@ class FakeLiveQuoteProvider:
         }
 
 
+class FakeValuationQuoteProvider:
+    source_name = "腾讯财经"
+
+    def status(self) -> StrongStockSourceStatus:
+        return StrongStockSourceStatus(source="腾讯财经", status="success", detail="fake valuation")
+
+    def get_quotes(self, symbols: list[str]):
+        from app.providers.tencent_quote import TencentQuote
+
+        return [
+            TencentQuote(
+                symbol=symbol,
+                name="春秋电子",
+                total_market_cap_cny=12_345_000_000,
+                circulating_market_cap_cny=11_111_000_000,
+                pe_ttm=28.5,
+                pe_static=24.2,
+                pb=3.2,
+            )
+            for symbol in symbols
+        ]
+
+
 class AuctionReviewCloseQuoteProvider(FakeLiveQuoteProvider):
     def get_quotes(self, symbols: list[str]) -> list[TickFlowQuote]:
         return [
@@ -1075,6 +1098,8 @@ def _client(
     app.state.quote_provider = quote_provider or FakeQuoteProvider()
     app.state.news_risk_provider = news_risk_provider or FakeNewsRiskProvider()
     app.state.market_overview_provider = market_overview_provider or FakeMarketOverviewProvider()
+    if hasattr(app.state, "valuation_quote_provider"):
+        delattr(app.state, "valuation_quote_provider")
     if concept_provider is not None:
         app.state.concept_provider = concept_provider
     elif hasattr(app.state, "concept_provider"):
@@ -1521,6 +1546,22 @@ def test_stock_quote_returns_tickflow_turnover_rate(tmp_path: Path) -> None:
     assert payload["last_price"] == 16.55
     assert payload["turnover_rate"] == 12.34
     assert payload["source_status"]["source"] == "TickFlow"
+
+
+def test_stock_quote_supplements_tencent_valuation_fields(tmp_path: Path) -> None:
+    client = _client(tmp_path, quote_provider=FakeLiveQuoteProvider())
+    app.state.valuation_quote_provider = FakeValuationQuoteProvider()
+
+    response = client.get("/api/stocks/603890.SH/quote")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["total_market_cap_cny"] == 12_345_000_000
+    assert payload["circulating_market_cap_cny"] == 11_111_000_000
+    assert payload["pe_ttm"] == 28.5
+    assert payload["pe_static"] == 24.2
+    assert payload["pb"] == 3.2
+    assert payload["valuation_source_status"]["source"] == "腾讯财经"
 
 
 def test_stock_quote_supplements_industry_from_market_provider(tmp_path: Path) -> None:

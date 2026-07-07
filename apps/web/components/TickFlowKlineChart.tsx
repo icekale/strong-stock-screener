@@ -31,7 +31,7 @@ const ReactKLineChart = dynamic(
   },
 ) as ForwardRefExoticComponent<KLineChartProps & RefAttributes<KLineChartRef>>;
 
-export type KlineChartDataSourceMode = "tickflow" | "builtin";
+export type KlineChartDataSourceMode = "tickflow";
 
 const KLINE_THEME: ThemeConfig = {
   activeColor: "#0f172a",
@@ -76,31 +76,16 @@ export function TickFlowKlineChart({
 }) {
   const chartRef = useRef<KLineChartRef>(null);
   const [chartDataVersion, setChartDataVersion] = useState(0);
-  const [loadedChartData, setLoadedChartData] = useState<KlineData[]>([]);
-  const [builtinDataSourceError, setBuiltinDataSourceError] = useState<string | null>(null);
   const handleDataLoad = useCallback((data: KlineData[]) => {
-    setLoadedChartData(data);
     setChartDataVersion((version) => version + 1);
-    setBuiltinDataSourceError(null);
   }, []);
-  const handleChartError = useCallback(
-    (error: Error) => {
-      if (dataSourceMode === "builtin") {
-        setBuiltinDataSourceError(error.message || "组件内置数据源请求失败");
-      }
-    },
-    [dataSourceMode],
-  );
   const chartData = useMemo(() => convertBarsForKlineChart(bars, symbol), [bars, symbol]);
-  const overlayChartData = dataSourceMode === "tickflow" ? chartData : loadedChartData;
   const tickflowDataProvider = useMemo<KLineDataProvider>(
     () => ({
       getKline: async () => chartData,
     }),
     [chartData],
   );
-  const effectiveDataProvider = dataSourceMode === "tickflow" ? tickflowDataProvider : undefined;
-  const effectiveSymbol = dataSourceMode === "tickflow" ? symbol : builtinStockSdkSymbol(symbol);
   const requestOptions = useMemo(() => ({ abortOnChange: true, debounceMs: 0, dedupe: false }), []);
   const indicatorOptions = useMemo(() => buildKlineIndicatorOptions(movingAverages), [movingAverages]);
   const indicatorLayout = useMemo(
@@ -111,11 +96,11 @@ export function TickFlowKlineChart({
     () =>
       buildTickFlowOverlayOption({
         annotations,
-        chartData: overlayChartData,
+        chartData,
         showGsgfAnnotations: dataSourceMode === "tickflow" && showGsgfAnnotations,
         subIndicators,
       }),
-    [annotations, dataSourceMode, overlayChartData, showGsgfAnnotations, subIndicators],
+    [annotations, chartData, dataSourceMode, showGsgfAnnotations, subIndicators],
   );
 
   useEffect(() => {
@@ -125,11 +110,6 @@ export function TickFlowKlineChart({
     }
     instance.setOption(echartsOption, false);
   }, [chartDataVersion, echartsOption, indicatorLayout]);
-
-  useEffect(() => {
-    setLoadedChartData([]);
-    setBuiltinDataSourceError(null);
-  }, [dataSourceMode, effectiveSymbol, period]);
 
   if (dataSourceMode === "tickflow" && bars.length === 0) {
     return (
@@ -141,51 +121,30 @@ export function TickFlowKlineChart({
 
   return (
     <div className="tickflow-kline-chart h-full min-h-[460px] bg-white">
-      {dataSourceMode === "builtin" && builtinDataSourceError && (
-        <div className="border-b border-amber-100 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-700">
-          组件内置 K 线源加载失败：{builtinDataSourceError}。可切回 TickFlow 主源继续查看。
-        </div>
-      )}
       <ReactKLineChart
-        key={`${dataSourceMode}-${effectiveSymbol}-${period}`}
+        key={`${dataSourceMode}-${symbol}-${period}`}
         ref={chartRef}
         adjust="qfq"
-        dataProvider={effectiveDataProvider}
+        dataProvider={tickflowDataProvider}
         height={height}
         indicatorOptions={indicatorOptions}
         indicators={indicatorLayout.chartIndicators}
         market="A"
         maxSubPanes={subIndicators.length}
         onDataLoad={handleDataLoad}
-        onError={handleChartError}
         panes={indicatorLayout.panes}
         period={period}
         requestOptions={requestOptions}
         showIndicatorSelector={false}
         showPeriodSelector={false}
         showToolbar
-        symbol={effectiveSymbol}
+        symbol={symbol}
         theme={KLINE_THEME}
         visibleCount={120}
         width="100%"
       />
     </div>
   );
-}
-
-export function builtinStockSdkSymbol(symbol: string): string {
-  const normalized = symbol.trim();
-  const upper = normalized.toUpperCase();
-  if (/^\d{6}\.SH$/.test(upper)) {
-    return `sh${upper.slice(0, 6)}`;
-  }
-  if (/^\d{6}\.SZ$/.test(upper)) {
-    return `sz${upper.slice(0, 6)}`;
-  }
-  if (/^\d{6}\.BJ$/.test(upper)) {
-    return `bj${upper.slice(0, 6)}`;
-  }
-  return normalized.replace(".", "").toLowerCase();
 }
 
 export function convertBarsForKlineChart(bars: KlineBar[], symbol: string): KlineData[] {

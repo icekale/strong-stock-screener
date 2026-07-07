@@ -95,7 +95,7 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
   const [activeChartTab, setActiveChartTab] = useState<ChartTab>("day");
   const [candidateListCollapsed, setCandidateListCollapsed] = useState(false);
   const [showGsgfAnnotations, setShowGsgfAnnotations] = useState(true);
-  const [chartDataSource, setChartDataSource] = useState<KlineChartDataSourceMode>("tickflow");
+  const chartDataSource: KlineChartDataSourceMode = "tickflow";
   const [visibleMovingAverages, setVisibleMovingAverages] = useState<MovingAverageField[]>([
     "ma5",
     "ma10",
@@ -231,8 +231,7 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
   const quote = useMemo(() => buildQuote(dailyBars, realtimeQuote), [dailyBars, realtimeQuote]);
   const isChartTab = activeChartTab === "day" || activeChartTab === "week";
   const activeTabLabel = CHART_TABS.find((item) => item.key === activeChartTab)?.label ?? "日 K 线";
-  const chartDataSourceLabel =
-    chartDataSource === "tickflow" ? (data?.source_status.source ?? "TickFlow 读取中") : "kline-charts-react 内置 stock-sdk";
+  const chartDataSourceLabel = data?.source_status.source ?? "TickFlow 读取中";
   const gsgfAnnotations = data?.gsgf_annotations ?? [];
   const annotationCount = gsgfAnnotations.length;
   const canShowGsgfAnnotations = activeChartTab === "day" && chartDataSource === "tickflow" && annotationCount > 0;
@@ -299,7 +298,6 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
                   loading={loading}
                   movingAverageSummaryText={movingAverageSummary(visibleMovingAverages)}
                   onAnnotationToggle={() => setShowGsgfAnnotations((value) => !value)}
-                  onChartDataSourceChange={setChartDataSource}
                   onMovingAverageToggle={toggleMovingAverage}
                   onSubIndicatorChange={changeSubIndicator}
                   onSubPaneCountChange={changeSubPaneCount}
@@ -521,7 +519,6 @@ function ChartControlBar({
   loading,
   movingAverageSummaryText,
   onAnnotationToggle,
-  onChartDataSourceChange,
   onMovingAverageToggle,
   onSubIndicatorChange,
   onSubPaneCountChange,
@@ -541,7 +538,6 @@ function ChartControlBar({
   loading: boolean;
   movingAverageSummaryText: string;
   onAnnotationToggle: () => void;
-  onChartDataSourceChange: (source: KlineChartDataSourceMode) => void;
   onMovingAverageToggle: (field: MovingAverageField) => void;
   onSubIndicatorChange: (index: number, indicator: KlineSubIndicator) => void;
   onSubPaneCountChange: (paneCount: KlineSubPaneCount) => void;
@@ -550,11 +546,9 @@ function ChartControlBar({
   visibleMovingAverages: MovingAverageField[];
 }) {
   const summary = isChartTab
-    ? chartDataSource === "tickflow"
-      ? loading
-        ? "加载中"
-        : `${chartBarCount} 条数据 · ${movingAverageSummaryText}`
-      : `组件内置源 · ${movingAverageSummaryText}`
+    ? loading
+      ? "加载中"
+      : `${chartBarCount} 条数据 · ${movingAverageSummaryText}`
     : `${currentStock?.industry ?? "行业待补"} · ${currentStock?.symbol ?? symbol}`;
 
   return (
@@ -563,27 +557,14 @@ function ChartControlBar({
         <Typography.Text className="text-sm font-black text-slate-950">{activeTabLabel}</Typography.Text>
         <Typography.Text className="text-xs font-semibold text-slate-500">{summary}</Typography.Text>
         <Tag className="m-0 max-w-full truncate">{dataSource}</Tag>
-        {isChartTab && chartDataSource === "builtin" && (
-          <Typography.Text className="text-xs font-semibold text-amber-600">
-            组件内置源仅用于图表对照
-          </Typography.Text>
-        )}
       </div>
       {isChartTab && (
         <div className="flex flex-wrap items-center gap-2 rounded-md bg-slate-50 px-2 py-2 ring-1 ring-slate-100">
           <div className="flex items-center gap-1.5">
             <Typography.Text className="whitespace-nowrap text-xs font-black text-slate-500">
-              TickFlow / 组件内置
+              K线源
             </Typography.Text>
-            <Segmented
-              onChange={(value) => onChartDataSourceChange(value as KlineChartDataSourceMode)}
-              options={[
-                { label: "TickFlow", value: "tickflow" },
-                { label: "组件内置", value: "builtin" },
-              ]}
-              size="small"
-              value={chartDataSource}
-            />
+            <Tag className="m-0">TickFlow</Tag>
           </div>
           <MovingAverageControl
             onToggle={onMovingAverageToggle}
@@ -868,9 +849,9 @@ function StockDetailPanel({
         <InfoCard label="状态" value={statusLabel(currentStock?.status ?? null)} />
         <InfoCard label="最新价" tone="text-red-500" value={quote ? formatPrice(quote.close) : "--"} />
         <InfoCard label="成交量" value={quote ? formatVolume(quote.volume) : "--"} />
-        <InfoCard label="总市值" value={pickResearchValue(research, ["总市值", "总市值(元)", "总市值（元）", "总市值(亿元)", "总市值（亿元）", "market_cap", "market_capitalization"])} />
-        <InfoCard label="动态市盈率" value={pickResearchValue(research, ["动态市盈率", "市盈率动态", "市盈率(动态)", "市盈率（动态）", "PE动态", "动态PE", "市盈率TTM", "PE TTM", "PE_TTM", "pe_ttm"])} />
-        <InfoCard label="静态市盈率" value={pickResearchValue(research, ["静态市盈率", "市盈率静态", "市盈率(静态)", "市盈率（静态）", "PE静态", "静态PE", "市盈率", "PE", "pe"])} />
+        <InfoCard label="总市值" value={formatMarketCapCny(quote?.totalMarketCapCny ?? null) || pickResearchValue(research, ["总市值", "总市值(元)", "总市值（元）", "总市值(亿元)", "总市值（亿元）", "market_cap", "market_capitalization"])} />
+        <InfoCard label="动态市盈率" value={formatValuationRatio(quote?.peTtm ?? null) || pickResearchValue(research, ["动态市盈率", "市盈率动态", "市盈率(动态)", "市盈率（动态）", "PE动态", "动态PE", "市盈率TTM", "PE TTM", "PE_TTM", "pe_ttm"])} />
+        <InfoCard label="静态市盈率" value={formatValuationRatio(quote?.peStatic ?? null) || pickResearchValue(research, ["静态市盈率", "市盈率静态", "市盈率(静态)", "市盈率（静态）", "PE静态", "静态PE", "市盈率", "PE", "pe"])} />
       </div>
     );
   }
@@ -1064,9 +1045,14 @@ type QuoteSnapshot = {
   change: number;
   changePct: number;
   close: number;
+  circulatingMarketCapCny: number | null;
   high: number;
   low: number;
   open: number;
+  pb: number | null;
+  peStatic: number | null;
+  peTtm: number | null;
+  totalMarketCapCny: number | null;
   turnoverRate: number | null;
   volume: number;
 };
@@ -1085,6 +1071,11 @@ function buildQuote(bars: KlineBar[], realtimeQuote: StockQuoteResponse | null):
       high: realtimeQuote.high_price ?? realtimeQuote.last_price,
       low: realtimeQuote.low_price ?? realtimeQuote.last_price,
       open: realtimeQuote.open_price ?? realtimeQuote.last_price,
+      circulatingMarketCapCny: realtimeQuote.circulating_market_cap_cny,
+      pb: realtimeQuote.pb,
+      peStatic: realtimeQuote.pe_static,
+      peTtm: realtimeQuote.pe_ttm,
+      totalMarketCapCny: realtimeQuote.total_market_cap_cny,
       turnoverRate: realtimeQuote.turnover_rate,
       volume: realtimeQuote.volume ?? 0,
     };
@@ -1104,6 +1095,11 @@ function buildQuote(bars: KlineBar[], realtimeQuote: StockQuoteResponse | null):
     high,
     low,
     open,
+    circulatingMarketCapCny: realtimeQuote?.circulating_market_cap_cny ?? null,
+    pb: realtimeQuote?.pb ?? null,
+    peStatic: realtimeQuote?.pe_static ?? null,
+    peTtm: realtimeQuote?.pe_ttm ?? null,
+    totalMarketCapCny: realtimeQuote?.total_market_cap_cny ?? null,
     turnoverRate: realtimeQuote?.turnover_rate ?? null,
     volume: realtimeQuote?.volume ?? latest.volume,
   };
@@ -1324,4 +1320,24 @@ function formatTurnoverRate(value: number | null): string {
     return "--";
   }
   return `${value.toFixed(2)}%`;
+}
+
+function formatMarketCapCny(value: number | null): string {
+  if (value === null || value === undefined || !Number.isFinite(value) || value <= 0) {
+    return "";
+  }
+  if (value >= 100_000_000) {
+    return `${(value / 100_000_000).toFixed(2)}亿`;
+  }
+  if (value >= 10_000) {
+    return `${(value / 10_000).toFixed(1)}万`;
+  }
+  return `${Math.round(value)}`;
+}
+
+function formatValuationRatio(value: number | null): string {
+  if (value === null || value === undefined || !Number.isFinite(value) || value <= 0) {
+    return "";
+  }
+  return value.toFixed(2).replace(/\.?0+$/, "");
 }

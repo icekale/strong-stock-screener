@@ -170,6 +170,7 @@ export function buildTickFlowOverlayOption({
       ? [
           {
             data: [],
+            id: "custom-gsgf-annotations",
             markArea: { data: ranges, silent: true },
             markPoint: {
               data: points,
@@ -179,6 +180,8 @@ export function buildTickFlowOverlayOption({
             },
             name: "GSGF标注",
             type: "candlestick",
+            xAxisIndex: 0,
+            yAxisIndex: 0,
           },
         ]
       : [];

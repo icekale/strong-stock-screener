@@ -404,6 +404,12 @@ class StockQuoteResponse(BaseModel):
     turnover_cny: float | None = None
     volume: float | None = None
     quote_time: str | None = None
+    total_market_cap_cny: float | None = None
+    circulating_market_cap_cny: float | None = None
+    pe_ttm: float | None = None
+    pe_static: float | None = None
+    pb: float | None = None
+    valuation_source_status: StrongStockSourceStatus | None = None
     source_status: StrongStockSourceStatus
 
 

@@ -45,3 +45,32 @@ test("tickflow overlay option never emits a series without an explicit type", ()
   assert.deepEqual(series.map((item) => item.type), ["candlestick", "candlestick"]);
   assert.deepEqual(series.map((item) => item.name), ["GSGF标注", "砖形图"]);
 });
+
+test("tickflow overlay series use stable ids to avoid merging into the base K-line series", () => {
+  const option = buildTickFlowOverlayOption({
+    annotations: [
+      {
+        date: "20260102",
+        end_date: null,
+        label: "B区A点",
+        description: "结构确认",
+        price: 10.8,
+        severity: "positive",
+        start_date: null,
+        type: "trigger",
+      },
+    ],
+    chartData: [
+      { amount: null, close: 10, date: "2026-01-01", high: 11, low: 9, open: 9.5, volume: 1000 },
+      { amount: null, close: 11, date: "2026-01-02", high: 11.5, low: 10, open: 10.2, volume: 1200 },
+    ],
+    showGsgfAnnotations: true,
+    subIndicators: ["brick"],
+  });
+
+  const series = Array.isArray(option.series) ? option.series : [];
+  assert.deepEqual(
+    series.map((item) => item.id),
+    ["custom-gsgf-annotations", "custom-brick-0"],
+  );
+});

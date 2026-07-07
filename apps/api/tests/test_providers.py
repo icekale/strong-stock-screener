@@ -20,6 +20,7 @@ from app.providers.tickflow import (
     parse_tickflow_intraday_payload,
     parse_tickflow_quote_payload,
 )
+from app.providers.tencent_quote import parse_tencent_quote_payload
 from app.providers.watchlist import parse_watchlist_text
 
 
@@ -976,6 +977,50 @@ def test_ifind_stock_research_extracts_valuation_from_markdown_answer_table() ->
     assert research.valuation["静态市盈率"] == "95.0509"
 
 
+class FakeIfindCsiPeResearchHttpClient:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, object]] = []
+
+    def post(self, url: str, **kwargs: object) -> FakeResponse:
+        self.requests.append({"url": url, **kwargs})
+        payload = kwargs.get("json", {})
+        params = payload.get("params", {}) if isinstance(payload, dict) else {}
+        tool_name = params.get("name") if isinstance(params, dict) else None
+        if tool_name == "get_stock_financials":
+            return FakeResponse(
+                {
+                    "result": {
+                        "structuredContent": {
+                            "code": 1,
+                            "msg": "success",
+                            "data": {
+                                "answer": (
+                                    "|证券代码|证券简称|静态市盈率(中证发布)（单位：%）|滚动市盈率(中证发布)（单位：%）|\n"
+                                    "|---|---|---|---|\n"
+                                    "|603823.SH|百合花|180.71|183.85|\n"
+                                )
+                            },
+                        }
+                    }
+                }
+            )
+        return FakeResponse({"result": {"structuredContent": {}}})
+
+
+def test_ifind_stock_research_maps_csi_static_pe_answer_table() -> None:
+    client = FakeIfindCsiPeResearchHttpClient()
+    provider = IfindMcpProvider(
+        api_key="ifind-test",
+        base_url="https://api-mcp.51ifind.com:8643",
+        http_client=client,
+    )
+
+    research = provider.get_stock_research("603823.SH")
+
+    assert research.valuation["动态市盈率"] == "183.85"
+    assert research.valuation["静态市盈率"] == "180.71"
+
+
 class FakeIfindIndustryHttpClient:
     def __init__(self) -> None:
         self.requests: list[dict[str, object]] = []
@@ -1366,6 +1411,25 @@ def test_tickflow_provider_prefers_intraday_batch_endpoint() -> None:
         "period": "1m",
         "count": 5,
     }
+
+
+def test_parse_tencent_quote_payload_extracts_valuation_fields() -> None:
+    payload = (
+        'v_sh603823="1~百合花~603823~72.45~65.86~63.97~0~0~0~0~0~0~0~0~0~0~0~0~0~0~'
+        '0~0~0~0~0~0~0~0~0~0~0~6.59~10.01~72.45~63.97~0~0~211829.8~7.2161~183.85~'
+        '0~0~0~0~301.66~301.66~12.31~79.65~52.69~1.20~0~0~175.63~";'
+    )
+
+    quotes = parse_tencent_quote_payload(payload)
+
+    assert len(quotes) == 1
+    assert quotes[0].symbol == "603823.SH"
+    assert quotes[0].name == "百合花"
+    assert quotes[0].total_market_cap_cny == 30_166_000_000
+    assert quotes[0].circulating_market_cap_cny == 30_166_000_000
+    assert quotes[0].pe_ttm == 183.85
+    assert quotes[0].pe_static == 175.63
+    assert quotes[0].pb == 12.31
 
 
 def test_tickflow_provider_splits_large_intraday_batch_requests() -> None:

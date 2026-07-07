@@ -1394,6 +1394,12 @@ export type StockQuoteResponse = {
   turnover_cny: number | null;
   volume: number | null;
   quote_time: string | null;
+  total_market_cap_cny: number | null;
+  circulating_market_cap_cny: number | null;
+  pe_ttm: number | null;
+  pe_static: number | null;
+  pb: number | null;
+  valuation_source_status: StrongStockSourceStatus | null;
   source_status: StrongStockSourceStatus;
 };
 

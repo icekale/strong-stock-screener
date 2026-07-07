@@ -418,12 +418,29 @@ def _with_valuation_aliases(payload: dict[str, Any]) -> dict[str, Any]:
                 result["总市值"] = result[key]
                 break
     if "动态市盈率" not in result:
-        for key in ("市盈率(PE,TTM)", "市盈率（PE，TTM）", "市盈率TTM", "PE TTM", "PE_TTM"):
+        for key in (
+            "市盈率(PE,TTM)",
+            "市盈率（PE，TTM）",
+            "市盈率TTM",
+            "PE TTM",
+            "PE_TTM",
+            "滚动市盈率(中证发布)",
+            "滚动市盈率（中证发布）",
+        ):
             if key in result:
                 result["动态市盈率"] = result[key]
                 break
     if "静态市盈率" not in result:
-        for key in ("市盈率（PE，LYR）", "市盈率(PE,LYR)", "市盈率(静态)", "市盈率（静态）", "市盈率", "PE"):
+        for key in (
+            "静态市盈率(中证发布)",
+            "静态市盈率（中证发布）",
+            "市盈率（PE，LYR）",
+            "市盈率(PE,LYR)",
+            "市盈率(静态)",
+            "市盈率（静态）",
+            "市盈率",
+            "PE",
+        ):
             if key in result:
                 result["静态市盈率"] = result[key]
                 break

@@ -75,6 +75,7 @@ from app.providers.recent_limit_up_candidates import RecentLimitUpCandidateProvi
 from app.providers.thsdk_candidates import ThsdkCandidateProvider
 from app.providers.tdx_mcp import TdxMcpProvider
 from app.providers.tickflow import TickFlowDailyKlineProvider, TickFlowQuoteProvider
+from app.providers.tencent_quote import TencentQuoteProvider
 from app.providers.watchlist import (
     WatchlistItem,
     WatchlistSnapshot,
@@ -1724,6 +1725,7 @@ def get_stock_quote(symbol: str) -> dict[str, object]:
         raise HTTPException(status_code=503, detail="实时行情未返回数据")
     quote = quotes[0]
     industry = _stock_industry_for_symbol(quote.symbol)
+    valuation_quote, valuation_status = _quote_valuation_for_symbol(quote.symbol)
     source_status = (
         quote_provider.status()
         if hasattr(quote_provider, "status")
@@ -1743,6 +1745,12 @@ def get_stock_quote(symbol: str) -> dict[str, object]:
         turnover_cny=quote.turnover_cny,
         volume=quote.volume,
         quote_time=quote.quote_time,
+        total_market_cap_cny=getattr(valuation_quote, "total_market_cap_cny", None),
+        circulating_market_cap_cny=getattr(valuation_quote, "circulating_market_cap_cny", None),
+        pe_ttm=getattr(valuation_quote, "pe_ttm", None),
+        pe_static=getattr(valuation_quote, "pe_static", None),
+        pb=getattr(valuation_quote, "pb", None),
+        valuation_source_status=valuation_status,
         source_status=source_status,
     ).model_dump(mode="json")
 
@@ -2339,6 +2347,30 @@ def _cached_stock_research(symbol: str) -> StockResearchResponse:
     return STOCK_RESEARCH_CACHE.get_or_set(cache_key, build).model_copy(deep=True)
 
 
+def _quote_valuation_for_symbol(symbol: str) -> tuple[object | None, StrongStockSourceStatus | None]:
+    valuation_provider = _valuation_quote_provider()
+    source_name = getattr(valuation_provider, "source_name", "估值行情")
+    try:
+        quotes = valuation_provider.get_quotes([symbol])
+    except StrongStockDataUnavailable as exc:
+        return None, StrongStockSourceStatus(source=source_name, status="failed", detail=str(exc))
+    except Exception as exc:
+        return None, StrongStockSourceStatus(
+            source=source_name,
+            status="failed",
+            detail=f"估值行情获取失败: {exc.__class__.__name__}",
+        )
+    matched = next((quote for quote in quotes if getattr(quote, "symbol", "") == symbol), None)
+    if matched is None:
+        return None, StrongStockSourceStatus(source=source_name, status="failed", detail="估值行情未返回当前股票")
+    status = (
+        valuation_provider.status()
+        if hasattr(valuation_provider, "status")
+        else StrongStockSourceStatus(source=source_name, status="success", detail="估值行情源已配置")
+    )
+    return matched, status
+
+
 def _clear_data_source_caches() -> None:
     CACHE_REGISTRY.clear()
 
@@ -2595,6 +2627,14 @@ def _quote_provider() -> object:
         base_url=settings.tickflow_base_url,
         timeout_seconds=settings.provider_timeout_seconds,
     )
+
+
+def _valuation_quote_provider() -> object:
+    injected = getattr(app.state, "valuation_quote_provider", None)
+    if injected is not None:
+        return injected
+    settings = _effective_settings()
+    return TencentQuoteProvider(timeout_seconds=settings.provider_timeout_seconds)
 
 
 def _news_risk_provider() -> object:

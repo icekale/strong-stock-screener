@@ -19,7 +19,6 @@ import {
   Typography,
   message,
 } from "antd";
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { getHeatmapTreemap } from "../../lib/api";
 import {
@@ -363,11 +362,9 @@ function DetailRail({
               <Descriptions.Item label="总市值">{formatHeatmapMoney(displayStock.total_market_cap_cny)}</Descriptions.Item>
               <Descriptions.Item label="行情时间">{formatDateTime(displayStock.quote_time)}</Descriptions.Item>
             </Descriptions>
-            <Link href={heatmapStockHref(displayStock)}>
-              <Button block type="primary">
-                查看K线
-              </Button>
-            </Link>
+            <Button block href={heatmapStockHref(displayStock)} type="primary">
+              查看K线
+            </Button>
           </div>
         ) : (
           <Empty description="悬停或点击热图中的股票" image={Empty.PRESENTED_IMAGE_SIMPLE} />

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { HeatmapBoardNode, HeatmapStockNode } from "../../lib/types";
 
@@ -106,4 +107,11 @@ test("heatmap source summary does not hide fallback behind partial success", () 
   assert.equal(heatmapSourceSummaryTone(staleStatuses), "warning");
   assert.equal(heatmapSourceSummaryLabel(ancillaryFailureStatuses), "部分实时");
   assert.equal(heatmapSourceSummaryTone(ancillaryFailureStatuses), "warning");
+});
+
+test("heatmap K-line action uses a direct href button without nested interactive elements", () => {
+  const source = readFileSync(new URL("./HeatmapWorkspace.tsx", import.meta.url), "utf-8");
+
+  assert.ok(source.includes('<Button block href={heatmapStockHref(displayStock)} type="primary">'));
+  assert.equal(source.includes('import Link from "next/link"'), false);
 });

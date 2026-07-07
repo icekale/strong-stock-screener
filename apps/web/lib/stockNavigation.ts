@@ -1,4 +1,4 @@
-export type StockDetailFrom = "auction" | "auction-model" | "home" | "sectors";
+export type StockDetailFrom = "auction" | "auction-model" | "heatmap" | "home" | "sectors";
 
 export type StockDetailLinkContext = {
   from?: StockDetailFrom;
@@ -20,7 +20,12 @@ type ReadableSearchParams = {
 
 export function buildStockDetailHref(symbol: string, context: StockDetailLinkContext = {}): string {
   const query = new URLSearchParams();
-  if (context.from === "auction" || context.from === "auction-model" || context.from === "sectors") {
+  if (
+    context.from === "auction" ||
+    context.from === "auction-model" ||
+    context.from === "heatmap" ||
+    context.from === "sectors"
+  ) {
     query.set("from", context.from);
   }
   const name = cleanText(context.name);
@@ -38,20 +43,31 @@ export function buildStockDetailHref(symbol: string, context: StockDetailLinkCon
 export function resolveStockDetailContext(params: ReadableSearchParams): StockDetailContext {
   const source = params.get("from");
   const from: StockDetailFrom =
-    source === "auction" || source === "auction-model" || source === "sectors" ? source : "home";
+    source === "auction" || source === "auction-model" || source === "heatmap" || source === "sectors"
+      ? source
+      : "home";
   return {
     from,
     industry: cleanText(params.get("industry")),
     name: cleanText(params.get("name")),
-    returnHref: from === "auction" || from === "auction-model" ? "/auction" : from === "sectors" ? "/sectors" : "/",
+    returnHref:
+      from === "auction" || from === "auction-model"
+        ? "/auction"
+        : from === "heatmap"
+          ? "/heatmap"
+          : from === "sectors"
+            ? "/sectors"
+            : "/",
     returnLabel:
       from === "auction"
         ? "返回竞价雷达"
         : from === "auction-model"
           ? "返回竞价模型"
-          : from === "sectors"
-            ? "返回题材工作台"
-            : "返回选股工作台",
+          : from === "heatmap"
+            ? "返回市场热图"
+            : from === "sectors"
+              ? "返回题材工作台"
+              : "返回选股工作台",
   };
 }
 

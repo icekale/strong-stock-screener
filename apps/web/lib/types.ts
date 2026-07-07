@@ -75,6 +75,101 @@ export type StrongStockSourceStatus = {
   detail: string;
 };
 
+export type HeatmapPeriodKey = "day" | "week" | "month" | "year";
+export type HeatmapMarketKey = "all" | "sse" | "szse" | "hs300" | "zza500" | "cyb" | "kcb";
+export type HeatmapSizeMode = "market_cap" | "turnover";
+export type HeatmapTrendFilter = "all" | "rise" | "fall";
+
+export type HeatmapStockNode = {
+  symbol: string;
+  code: string;
+  name: string;
+  industry: string;
+  sub_industry: string | null;
+  exchange: "SH" | "SZ" | "BJ";
+  market: HeatmapMarketKey;
+  price: number | null;
+  change_pct: number;
+  week_change_pct: number | null;
+  month_change_pct: number | null;
+  year_change_pct: number | null;
+  turnover_cny: number | null;
+  circulating_market_cap_cny: number | null;
+  total_market_cap_cny: number | null;
+  value: number;
+  quote_time: string | null;
+};
+
+export type HeatmapBoardNode = {
+  key: string;
+  name: string;
+  value: number;
+  stock_count: number;
+  advance_count: number;
+  decline_count: number;
+  unchanged_count: number;
+  avg_change_pct: number | null;
+  turnover_cny: number | null;
+  children: HeatmapStockNode[];
+};
+
+export type HeatmapSummary = {
+  trade_date: string | null;
+  updated_at: string;
+  stock_count: number;
+  board_count: number;
+  advance_count: number;
+  decline_count: number;
+  unchanged_count: number;
+  turnover_cny: number | null;
+  previous_turnover_cny: number | null;
+  turnover_change_pct: number | null;
+  index_change_pct: number | null;
+};
+
+export type HeatmapTreemapResponse = {
+  market: HeatmapMarketKey;
+  period: HeatmapPeriodKey;
+  size_mode: HeatmapSizeMode;
+  trend: HeatmapTrendFilter;
+  board: string | null;
+  summary: HeatmapSummary;
+  nodes: HeatmapBoardNode[];
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
+export type HeatmapQuoteItem = {
+  symbol: string;
+  price: number | null;
+  change_pct: number;
+  turnover_cny: number | null;
+  quote_time: string | null;
+};
+
+export type HeatmapQuotesResponse = {
+  market: HeatmapMarketKey;
+  period: HeatmapPeriodKey;
+  quotes: Record<string, HeatmapQuoteItem>;
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
+export type HeatmapOverviewItem = {
+  market: HeatmapMarketKey;
+  name: string;
+  change_pct: number | null;
+  stock_count: number;
+  updated_at: string;
+};
+
+export type HeatmapOverviewResponse = {
+  period: HeatmapPeriodKey;
+  markets: HeatmapOverviewItem[];
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
 export type GsgfFunnelDiagnostics = {
   candidate_pool_count: number;
   after_static_filters_count: number;

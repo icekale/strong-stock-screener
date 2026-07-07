@@ -75,3 +75,22 @@ test("stock detail context can return to the auction model panel", () => {
     returnLabel: "返回竞价模型",
   });
 });
+
+test("stock detail context can return to the heatmap workbench", () => {
+  assert.equal(
+    buildStockDetailHref("603690.SH", {
+      from: "heatmap",
+      industry: "半导体",
+      name: "至纯科技",
+    }),
+    "/stock/603690.SH?from=heatmap&name=%E8%87%B3%E7%BA%AF%E7%A7%91%E6%8A%80&industry=%E5%8D%8A%E5%AF%BC%E4%BD%93",
+  );
+
+  assert.deepEqual(resolveStockDetailContext(new URLSearchParams("from=heatmap")), {
+    from: "heatmap",
+    industry: null,
+    name: null,
+    returnHref: "/heatmap",
+    returnLabel: "返回市场热图",
+  });
+});

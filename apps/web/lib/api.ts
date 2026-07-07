@@ -19,6 +19,11 @@ import type {
   GsgfReviewSnapshotResponse,
   GsgfReviewSummary,
   GsgfTradePlan,
+  HeatmapMarketKey,
+  HeatmapOverviewResponse,
+  HeatmapPeriodKey,
+  HeatmapQuotesResponse,
+  HeatmapTreemapResponse,
   MarketEmotionSnapshotResponse,
   MarketOverviewResponse,
   MarketRankingsResponse,
@@ -123,6 +128,35 @@ export async function getMarketRankings(limit = 30): Promise<MarketRankingsRespo
     throw new Error(`读取全A实时排行榜失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<MarketRankingsResponse>;
+}
+
+export async function getHeatmapTreemap(query: URLSearchParams): Promise<HeatmapTreemapResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/heatmap/treemap?${query.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取市场热图失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<HeatmapTreemapResponse>;
+}
+
+export async function getHeatmapQuotes(
+  market: HeatmapMarketKey,
+  period: HeatmapPeriodKey,
+): Promise<HeatmapQuotesResponse> {
+  const params = new URLSearchParams({ market, period });
+  const response = await fetch(`${API_BASE_URL}/api/heatmap/quotes?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取热图行情失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<HeatmapQuotesResponse>;
+}
+
+export async function getHeatmapOverview(period: HeatmapPeriodKey): Promise<HeatmapOverviewResponse> {
+  const params = new URLSearchParams({ period });
+  const response = await fetch(`${API_BASE_URL}/api/heatmap/overview?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取热图概览失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<HeatmapOverviewResponse>;
 }
 
 export async function getAuctionLatest(limit = 100): Promise<AuctionSnapshotResponse> {

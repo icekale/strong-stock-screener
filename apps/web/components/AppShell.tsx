@@ -6,6 +6,7 @@ import {
   ExperimentOutlined,
   FolderOpenOutlined,
   FundProjectionScreenOutlined,
+  HeatMapOutlined,
   ThunderboltOutlined,
   LineChartOutlined,
   RiseOutlined,
@@ -44,6 +45,13 @@ const NAV_ITEMS: NavItem[] = [
     icon: <FundProjectionScreenOutlined />,
     label: "板块",
     title: "板块资金流",
+  },
+  {
+    href: "/heatmap",
+    key: "/heatmap",
+    icon: <HeatMapOutlined />,
+    label: "热图",
+    title: "市场热力图",
   },
   {
     href: "/auction",
@@ -170,6 +178,9 @@ function selectedNavKey(pathname: string): string {
   }
   if (pathname.startsWith("/sectors")) {
     return "/sectors";
+  }
+  if (pathname.startsWith("/heatmap")) {
+    return "/heatmap";
   }
   if (pathname.startsWith("/auction")) {
     return "/auction";

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 const baseUrl = process.env.SMOKE_UI_BASE_URL ?? "http://127.0.0.1:3110";
-const routes = ["/", "/auction", "/sectors", "/watchlist", "/stock/002080.SZ", "/settings", "/sentiment"];
+const routes = ["/", "/auction", "/sectors", "/heatmap", "/watchlist", "/stock/002080.SZ", "/settings", "/sentiment"];
 const viewports = [
   { name: "desktop", width: 1440, height: 900 },
   { name: "mobile", width: 390, height: 844 },

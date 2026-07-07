@@ -181,7 +181,7 @@ export function HeatmapWorkspace() {
       </div>
 
       {error ? (
-        <Alert className="mb-4" message={error} showIcon type="warning" />
+        <Alert className="mb-4" title={error} showIcon type="warning" />
       ) : null}
 
       <section className="grid gap-4 xl:grid-cols-[264px_minmax(0,1fr)_300px]">

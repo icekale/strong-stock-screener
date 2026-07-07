@@ -115,3 +115,10 @@ test("heatmap K-line action uses a direct href button without nested interactive
   assert.ok(source.includes('<Button block href={heatmapStockHref(displayStock)} type="primary">'));
   assert.equal(source.includes('import Link from "next/link"'), false);
 });
+
+test("heatmap alerts use Ant Design title prop instead of deprecated message prop", () => {
+  const source = readFileSync(new URL("./HeatmapWorkspace.tsx", import.meta.url), "utf-8");
+
+  assert.equal(source.includes("<Alert className=\"mb-4\" message={error}"), false);
+  assert.ok(source.includes("<Alert className=\"mb-4\" title={error}"));
+});

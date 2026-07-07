@@ -3,12 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { HeatmapBoardNode, HeatmapStockNode } from "../../lib/types";
 import {
+  clampHeatmapViewport,
   createHeatmapDragState,
-  heatmapStockLabelLevel,
   heatmapWheelZoomFactor,
   moveHeatmapDragState,
   type HeatmapDragState,
-  type HeatmapStockLabelLevel,
   zoomHeatmapViewport,
 } from "./heatmapCanvasInteraction";
 import {
@@ -25,6 +24,7 @@ export type HeatmapCanvasProps = {
   selectedStock: HeatmapStockNode | null;
   onHoverStock: (stock: HeatmapStockNode | null) => void;
   onSelectStock: (stock: HeatmapStockNode | null) => void;
+  onOpenStock?: (stock: HeatmapStockNode) => void;
   resetKey: number;
 };
 
@@ -38,6 +38,7 @@ export function HeatmapCanvas({
   selectedStock,
   onHoverStock,
   onSelectStock,
+  onOpenStock,
   resetKey,
 }: HeatmapCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -115,7 +116,10 @@ export function HeatmapCanvas({
 
     context.setTransform(dpr, 0, 0, dpr, 0, 0);
     context.clearRect(0, 0, displayWidth, displayHeight);
-    context.fillStyle = "#171512";
+    const background = context.createLinearGradient(0, 0, displayWidth, displayHeight);
+    background.addColorStop(0, "#171b22");
+    background.addColorStop(1, "#10141b");
+    context.fillStyle = background;
     context.fillRect(0, 0, displayWidth, displayHeight);
 
     if (displayWidth <= 0 || displayHeight <= 0) {
@@ -130,17 +134,45 @@ export function HeatmapCanvas({
       if (board.width <= 0 || board.height <= 0) {
         continue;
       }
-      context.fillStyle = "#211e19";
+      context.fillStyle = "#20252d";
       context.fillRect(board.x, board.y, board.width, board.height);
-      context.strokeStyle = "#34302a";
+      context.strokeStyle = "rgba(148, 163, 184, 0.48)";
       context.lineWidth = 1 / viewport.scale;
       context.strokeRect(board.x, board.y, board.width, board.height);
 
-      if (board.width >= 96 && board.height >= 44) {
-        context.fillStyle = "#c8bda9";
-        context.font = "600 13px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+      if (board.titleHeight > 0) {
+        context.fillStyle = board.changePct ? heatmapChangeColor(board.changePct).fill : "rgb(51, 58, 70)";
+        context.fillRect(board.x, board.y, board.width, board.titleHeight);
+        context.fillStyle = "rgba(248, 250, 252, 0.96)";
+        context.font = heatmapFont(700, Math.max(10 / viewport.scale, 13 / viewport.scale));
         context.textBaseline = "top";
-        context.fillText(board.board.name, board.x + 10, board.y + 8, Math.max(0, board.width - 20));
+        context.textAlign = "left";
+        context.fillText(board.board.name, board.x + 8 / viewport.scale, board.y + 5 / viewport.scale, Math.max(0, board.width - 16 / viewport.scale));
+      }
+    }
+
+    for (const subBoard of layout.subBoards) {
+      if (subBoard.width <= 0 || subBoard.height <= 0) {
+        continue;
+      }
+
+      context.fillStyle = "rgba(18, 23, 31, 0.62)";
+      context.fillRect(subBoard.x, subBoard.y, subBoard.width, subBoard.height);
+      context.strokeStyle = "rgba(148, 163, 184, 0.3)";
+      context.lineWidth = 1 / viewport.scale;
+      context.strokeRect(subBoard.x, subBoard.y, subBoard.width, subBoard.height);
+
+      if (subBoard.titleHeight > 0) {
+        context.fillStyle = "rgba(203, 213, 225, 0.92)";
+        context.textAlign = "left";
+        context.textBaseline = "top";
+        context.font = heatmapFont(650, 10 / viewport.scale);
+        context.fillText(
+          subBoard.name,
+          subBoard.x + 5 / viewport.scale,
+          subBoard.y + 3 / viewport.scale,
+          Math.max(0, subBoard.width - 10 / viewport.scale),
+        );
       }
     }
 
@@ -152,26 +184,26 @@ export function HeatmapCanvas({
       const color = heatmapChangeColor(item.stock.change_pct);
       context.fillStyle = color.fill;
       context.fillRect(item.x, item.y, item.width, item.height);
-      context.strokeStyle = "#171512";
+      context.strokeStyle = "rgba(15, 23, 42, 0.78)";
       context.lineWidth = 1 / viewport.scale;
       context.strokeRect(item.x, item.y, item.width, item.height);
 
-      const labelLevel = heatmapStockLabelLevel(item, viewport.scale);
-      if (labelLevel !== "none") {
-        drawStockText(context, item, color.text, viewport.scale, labelLevel);
-      }
+      drawStockLabel(context, item, viewport.scale);
 
       if (selectedStock?.symbol === item.stock.symbol) {
-        context.strokeStyle = "#fffaf2";
+        context.strokeStyle = "rgba(2, 6, 23, 0.92)";
         context.lineWidth = 2 / viewport.scale;
         context.strokeRect(item.x + 1, item.y + 1, Math.max(0, item.width - 2), Math.max(0, item.height - 2));
+        context.strokeStyle = "#f8fafc";
+        context.lineWidth = 1 / viewport.scale;
+        context.strokeRect(item.x + 3, item.y + 3, Math.max(0, item.width - 6), Math.max(0, item.height - 6));
       }
     }
 
     context.restore();
   }, [canvasSize, layout, selectedStock, viewport]);
 
-  const pointerToWorld = (event: React.PointerEvent<HTMLCanvasElement>) => {
+  const pointerToWorld = (event: { clientX: number; clientY: number }) => {
     const canvas = canvasRef.current;
     if (!canvas) {
       return { x: 0, y: 0 };
@@ -186,7 +218,7 @@ export function HeatmapCanvas({
     );
   };
 
-  const hitTestPointer = (event: React.PointerEvent<HTMLCanvasElement>) => {
+  const hitTestPointer = (event: { clientX: number; clientY: number }) => {
     const hit = hitTestHeatmap(layout.stocks, pointerToWorld(event));
     return hit?.stock ?? null;
   };
@@ -217,11 +249,16 @@ export function HeatmapCanvas({
           if (drag && drag.pointerId === event.pointerId) {
             const moved = moveHeatmapDragState(drag, event.clientX, event.clientY);
             dragRef.current = moved.drag;
-            updateViewport({
-              ...viewportRef.current,
-              offsetX: viewportRef.current.offsetX + moved.deltaX,
-              offsetY: viewportRef.current.offsetY + moved.deltaY,
-            });
+            updateViewport(
+              clampHeatmapViewport(
+                {
+                  ...viewportRef.current,
+                  offsetX: viewportRef.current.offsetX + moved.deltaX,
+                  offsetY: viewportRef.current.offsetY + moved.deltaY,
+                },
+                canvasSize,
+              ),
+            );
             return;
           }
 
@@ -277,7 +314,13 @@ export function HeatmapCanvas({
           const currentViewport = viewportRef.current;
           const worldPoint = transformHeatmapPoint(screenPoint, currentViewport);
           const zoomFactor = heatmapWheelZoomFactor(event.deltaY, event.deltaMode);
-          updateViewport(zoomHeatmapViewport(currentViewport, screenPoint, worldPoint, zoomFactor));
+          updateViewport(zoomHeatmapViewport(currentViewport, screenPoint, worldPoint, zoomFactor, canvasSize));
+        }}
+        onDoubleClick={(event) => {
+          const hit = hitTestPointer(event);
+          if (hit) {
+            onOpenStock?.(hit);
+          }
         }}
         onKeyDown={(event) => {
           const handled = handleCanvasKeyDown(
@@ -316,7 +359,12 @@ function handleCanvasKeyDown(
       event.key === "ArrowLeft" ? KEYBOARD_PAN_STEP : event.key === "ArrowRight" ? -KEYBOARD_PAN_STEP : 0;
     const offsetY =
       event.key === "ArrowUp" ? KEYBOARD_PAN_STEP : event.key === "ArrowDown" ? -KEYBOARD_PAN_STEP : 0;
-    updateViewport({ ...viewport, offsetX: viewport.offsetX + offsetX, offsetY: viewport.offsetY + offsetY });
+    updateViewport(
+      clampHeatmapViewport(
+        { ...viewport, offsetX: viewport.offsetX + offsetX, offsetY: viewport.offsetY + offsetY },
+        canvasSize,
+      ),
+    );
     return true;
   }
 
@@ -324,7 +372,7 @@ function handleCanvasKeyDown(
     const screenPoint = { x: canvasSize.width / 2, y: canvasSize.height / 2 };
     const worldPoint = transformHeatmapPoint(screenPoint, viewport);
     const zoomFactor = event.key === "-" ? 1 / KEYBOARD_ZOOM_FACTOR : KEYBOARD_ZOOM_FACTOR;
-    updateViewport(zoomHeatmapViewport(viewport, screenPoint, worldPoint, zoomFactor));
+    updateViewport(zoomHeatmapViewport(viewport, screenPoint, worldPoint, zoomFactor, canvasSize));
     return true;
   }
 
@@ -347,38 +395,184 @@ function handleCanvasKeyDown(
   return false;
 }
 
-function drawStockText(
+function drawStockLabel(
   context: CanvasRenderingContext2D,
   item: HeatmapStockRect,
-  textColor: string,
   scale: number,
-  labelLevel: HeatmapStockLabelLevel,
 ) {
   const safeScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
-  const displayedWidth = item.width * safeScale;
-  const padding = (labelLevel === "name" && displayedWidth < 48 ? 4 : 6) / safeScale;
-  const nameFontSize = (labelLevel === "name" && displayedWidth < 48 ? 10 : 12) / safeScale;
-  const detailFontSize = 11 / safeScale;
-  const lineHeight = 16 / safeScale;
-  const maxWidth = Math.max(0, item.width - padding * 2);
-  const x = item.x + padding;
-  let y = item.y + padding;
+  const displayWidth = item.width * safeScale;
+  const displayHeight = item.height * safeScale;
+  const screenUnit = 1 / safeScale;
+  const clipPaddingPx = displayWidth > 110 ? 5 : displayWidth > 54 ? 3 : 2;
+  const textInsetXPx = displayWidth > 110 ? 6 : displayWidth > 54 ? 4 : 3;
+  const textInsetYPx = displayHeight > 56 ? 4.5 : displayHeight > 26 ? 3 : 2;
+  const clipPadding = clipPaddingPx * screenUnit;
+  const textInsetX = textInsetXPx * screenUnit;
+  const textInsetY = textInsetYPx * screenUnit;
+  const clipWidth = Math.max(0, item.width - clipPadding * 2);
+  const clipHeight = Math.max(0, item.height - clipPadding * 2);
 
-  context.fillStyle = textColor;
-  context.textBaseline = "top";
-  context.font = `600 ${nameFontSize}px system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
-  context.fillText(item.stock.name, x, y, maxWidth);
-
-  if (labelLevel === "code" || labelLevel === "change") {
-    y += lineHeight;
-    context.font = `${detailFontSize}px system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
-    context.fillText(item.stock.code, x, y, maxWidth);
+  if (displayWidth < 16 || displayHeight < 8 || clipWidth <= 2 || clipHeight <= 2) {
+    return;
   }
 
-  if (labelLevel === "change") {
-    y += lineHeight;
-    context.font = `600 ${nameFontSize}px system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
-    context.fillText(`${formatChangePct(item.stock.change_pct)}%`, x, y, maxWidth);
+  const hasLargeLabel = displayWidth >= 108 && displayHeight >= 58;
+  const hasStackedLabel = displayWidth >= 28 && displayHeight >= 20;
+  const hasInlineLabel = displayWidth >= 24 && displayHeight >= 10;
+
+  context.save();
+  try {
+    context.fillStyle = "rgba(247, 250, 252, 0.96)";
+    context.shadowColor = "rgba(0, 0, 0, 0.42)";
+    context.shadowBlur = (displayHeight < 14 ? 0.45 : 1.2) * screenUnit;
+    context.shadowOffsetY = 0.6 * screenUnit;
+
+    if (hasLargeLabel) {
+      const preferredTitleSize =
+        clamp(Math.floor(Math.min(displayWidth, displayHeight) * 0.26), 15, 30) * screenUnit;
+      const titleSize = fitFontSizeToWidth(
+        context,
+        item.stock.name,
+        700,
+        preferredTitleSize,
+        Math.max(12 * screenUnit, preferredTitleSize * 0.66),
+        clipWidth,
+      );
+      const detailSize = Math.min(
+        clamp(Math.floor(Math.min(displayWidth, displayHeight) * 0.19), 11, 23) * screenUnit,
+        titleSize * 1.08,
+      );
+      const centerX = item.x + item.width / 2;
+      const centerY = item.y + item.height / 2;
+
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.font = heatmapFont(700, titleSize);
+      drawClippedText(
+        context,
+        fitTextToWidth(context, item.stock.name, clipWidth),
+        centerX,
+        centerY - titleSize * 0.62,
+        item.x + clipPadding,
+        item.y + clipPadding,
+        clipWidth,
+        clipHeight,
+      );
+
+      context.font = heatmapFont(650, detailSize);
+      drawClippedText(
+        context,
+        formatChangePct(item.stock.change_pct),
+        centerX,
+        centerY + detailSize * 0.3,
+        item.x + clipPadding,
+        item.y + clipPadding,
+        clipWidth,
+        clipHeight,
+      );
+
+      if (displayWidth > 180 && displayHeight > 100) {
+        context.font = heatmapFont(550, Math.max(11 * screenUnit, detailSize - 1 * screenUnit));
+        drawClippedText(
+          context,
+          formatPrice(item.stock.price),
+          centerX,
+          centerY + detailSize * 1.35,
+          item.x + clipPadding,
+          item.y + clipPadding,
+          clipWidth,
+          clipHeight,
+        );
+      }
+      return;
+    }
+
+    if (hasStackedLabel) {
+      const preferredTitleSize =
+        clamp(Math.floor(Math.min(displayWidth * 0.19, displayHeight * 0.43)), 7.5, 16) * screenUnit;
+      const titleSize = fitFontSizeToWidth(
+        context,
+        item.stock.name,
+        700,
+        preferredTitleSize,
+        Math.max(6.5 * screenUnit, preferredTitleSize * 0.72),
+        clipWidth - (textInsetX - clipPadding),
+      );
+      const detailSize = Math.min(clamp(Math.floor(displayHeight * 0.33), 7, 13) * screenUnit, titleSize * 1.08);
+
+      context.textAlign = "left";
+      context.textBaseline = "alphabetic";
+      context.font = heatmapFont(700, titleSize);
+      drawClippedText(
+        context,
+        fitTextToWidth(context, item.stock.name, clipWidth - (textInsetX - clipPadding)),
+        item.x + textInsetX,
+        item.y + textInsetY + titleSize,
+        item.x + clipPadding,
+        item.y + clipPadding,
+        clipWidth,
+        clipHeight,
+      );
+
+      context.font = heatmapFont(650, detailSize);
+      drawClippedText(
+        context,
+        displayWidth >= 58 ? formatChangePct(item.stock.change_pct) : formatCompactChangePct(item.stock.change_pct),
+        item.x + textInsetX,
+        item.y + textInsetY + titleSize + detailSize + 1.5 * screenUnit,
+        item.x + clipPadding,
+        item.y + clipPadding,
+        clipWidth,
+        clipHeight,
+      );
+      return;
+    }
+
+    if (hasInlineLabel) {
+      const fontSize = clamp(Math.floor(Math.min(displayWidth * 0.18, displayHeight * 0.68)), 6.5, 11) * screenUnit;
+      const changeText = formatCompactChangePct(item.stock.change_pct);
+      const gap = 3 * screenUnit;
+
+      context.textAlign = "left";
+      context.textBaseline = "middle";
+      context.font = heatmapFont(650, fontSize);
+
+      const changeWidth = context.measureText(changeText).width;
+      const canShowChange = displayWidth >= 32 && changeWidth + gap < clipWidth * 0.72;
+      const nameMaxWidth = canShowChange ? Math.max(0, clipWidth - changeWidth - gap) : clipWidth;
+      const fittedName = fitTextToWidth(context, item.stock.name, nameMaxWidth);
+      const labelY = item.y + item.height / 2 + fontSize * 0.06;
+
+      if (fittedName) {
+        drawClippedText(
+          context,
+          fittedName,
+          item.x + textInsetX,
+          labelY,
+          item.x + clipPadding,
+          item.y + clipPadding,
+          clipWidth,
+          clipHeight,
+        );
+      }
+
+      if (canShowChange) {
+        context.textAlign = "right";
+        drawClippedText(
+          context,
+          changeText,
+          item.x + item.width - textInsetX,
+          labelY,
+          item.x + clipPadding,
+          item.y + clipPadding,
+          clipWidth,
+          clipHeight,
+        );
+      }
+    }
+  } finally {
+    context.restore();
   }
 }
 
@@ -387,4 +581,92 @@ function formatChangePct(value: number): string {
     return "0.00";
   }
   return value > 0 ? `+${value.toFixed(2)}` : value.toFixed(2);
+}
+
+function formatCompactChangePct(value: number): string {
+  if (!Number.isFinite(value)) {
+    return "0%";
+  }
+  const absValue = Math.abs(value);
+  const digits = absValue >= 10 ? 1 : 2;
+  const text = value.toFixed(digits).replace(/\.0+$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
+  return value > 0 ? `+${text}%` : `${text}%`;
+}
+
+function formatPrice(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) {
+    return "-";
+  }
+  return value.toFixed(value >= 100 ? 1 : 2);
+}
+
+const heatmapFontStack = `"Avenir Next Condensed", "DIN Condensed", "PingFang SC", "Microsoft YaHei", Arial, sans-serif`;
+
+function heatmapFont(weight: number, size: number): string {
+  return `${weight} ${size}px ${heatmapFontStack}`;
+}
+
+function drawClippedText(
+  context: CanvasRenderingContext2D,
+  text: string,
+  textX: number,
+  textY: number,
+  clipX: number,
+  clipY: number,
+  clipWidth: number,
+  clipHeight: number,
+) {
+  context.save();
+  context.beginPath();
+  context.rect(clipX, clipY, clipWidth, clipHeight);
+  context.clip();
+  context.fillText(text, textX, textY);
+  context.restore();
+}
+
+function fitTextToWidth(context: CanvasRenderingContext2D, text: string, maxWidth: number): string {
+  if (maxWidth <= 0 || text.length === 0) {
+    return "";
+  }
+  if (context.measureText(text).width <= maxWidth) {
+    return text;
+  }
+
+  let low = 1;
+  let high = text.length;
+  let best = "";
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const candidate = text.slice(0, mid);
+    if (context.measureText(candidate).width <= maxWidth) {
+      best = candidate;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+  return best;
+}
+
+function fitFontSizeToWidth(
+  context: CanvasRenderingContext2D,
+  text: string,
+  weight: number,
+  preferredSize: number,
+  minSize: number,
+  maxWidth: number,
+): number {
+  if (maxWidth <= 0 || text.length === 0) {
+    return preferredSize;
+  }
+  context.font = heatmapFont(weight, preferredSize);
+  const preferredWidth = context.measureText(text).width;
+  if (preferredWidth <= maxWidth) {
+    return preferredSize;
+  }
+  return clamp((preferredSize * maxWidth) / preferredWidth, minSize, preferredSize);
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }

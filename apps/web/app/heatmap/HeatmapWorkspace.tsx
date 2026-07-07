@@ -228,6 +228,9 @@ export function HeatmapWorkspace() {
                   resetKey={resetKey}
                   selectedStock={selectedStock}
                   onHoverStock={setHoverStock}
+                  onOpenStock={(stock) => {
+                    window.location.href = heatmapStockHref(stock);
+                  }}
                   onSelectStock={setSelectedStock}
                 />
               ) : (

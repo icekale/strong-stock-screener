@@ -12,8 +12,8 @@ export type HeatmapDragState = {
 export type HeatmapStockLabelLevel = "none" | "name" | "code" | "change";
 
 const DEFAULT_DRAG_THRESHOLD_PX = 2;
-const DEFAULT_MIN_SCALE = 0.7;
-const DEFAULT_MAX_SCALE = 4;
+const DEFAULT_MIN_SCALE = 1;
+const DEFAULT_MAX_SCALE = 3;
 const WHEEL_LINE_HEIGHT_PX = 16;
 const WHEEL_PAGE_HEIGHT_PX = 320;
 const MAX_WHEEL_DELTA_PX = 100;
@@ -85,6 +85,7 @@ export function zoomHeatmapViewport(
   screenPoint: { x: number; y: number },
   worldPoint: { x: number; y: number },
   zoomFactor: number,
+  size?: { width: number; height: number },
 ): HeatmapViewport {
   const currentScale = finitePositiveNumber(viewport.scale, 1);
   const nextScale = clamp(currentScale * finitePositiveNumber(zoomFactor, 1), DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
@@ -97,10 +98,34 @@ export function zoomHeatmapViewport(
     y: finiteNumber(worldPoint.y),
   };
 
-  return {
+  const nextViewport = {
     scale: nextScale,
     offsetX: safeScreenPoint.x - safeWorldPoint.x * nextScale,
     offsetY: safeScreenPoint.y - safeWorldPoint.y * nextScale,
+  };
+
+  return size ? clampHeatmapViewport(nextViewport, size) : nextViewport;
+}
+
+export function clampHeatmapViewport(
+  viewport: HeatmapViewport,
+  size: { width: number; height: number },
+): HeatmapViewport {
+  const width = Math.max(0, finiteNumber(size.width));
+  const height = Math.max(0, finiteNumber(size.height));
+  const scale = clamp(finitePositiveNumber(viewport.scale, 1), DEFAULT_MIN_SCALE, DEFAULT_MAX_SCALE);
+
+  if (scale <= 1 || width <= 0 || height <= 0) {
+    return { scale: 1, offsetX: 0, offsetY: 0 };
+  }
+
+  const minX = width - width * scale;
+  const minY = height - height * scale;
+
+  return {
+    scale,
+    offsetX: clamp(finiteNumber(viewport.offsetX), minX, 0),
+    offsetY: clamp(finiteNumber(viewport.offsetY), minY, 0),
   };
 }
 

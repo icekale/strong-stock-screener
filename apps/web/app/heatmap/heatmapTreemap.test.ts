@@ -78,6 +78,50 @@ test("layoutHeatmapTreemap produces bounded board and stock rectangles", () => {
   }
 });
 
+test("layoutHeatmapTreemap uses balanced binary subdivision instead of one-dimensional stripes", () => {
+  const layout = layoutHeatmapTreemap(
+    [
+      {
+        ...nodes[0],
+        children: [
+          { ...nodes[0].children[0], symbol: "000001.SZ", code: "000001", name: "平安银行", value: 55 },
+          { ...nodes[0].children[1], symbol: "000002.SZ", code: "000002", name: "万科A", value: 45 },
+          { ...nodes[0].children[0], symbol: "000063.SZ", code: "000063", name: "中兴通讯", value: 35 },
+          { ...nodes[0].children[1], symbol: "000333.SZ", code: "000333", name: "美的集团", value: 25 },
+        ],
+      },
+    ],
+    { width: 640, height: 360 },
+  );
+
+  assert.equal(layout.stocks.length, 4);
+  assert.ok(layout.stocks.some((stock) => stock.width < 300));
+  assert.ok(layout.stocks.some((stock) => stock.height < 160));
+});
+
+test("layoutHeatmapTreemap groups stocks by sub-industry before drawing stock cells", () => {
+  const layout = layoutHeatmapTreemap(
+    [
+      {
+        ...nodes[0],
+        children: [
+          { ...nodes[0].children[0], symbol: "603690.SH", code: "603690", name: "至纯科技", sub_industry: "半导体设备", value: 60 },
+          { ...nodes[0].children[1], symbol: "300475.SZ", code: "300475", name: "香农芯创", sub_industry: "存储芯片", value: 40 },
+          { ...nodes[0].children[0], symbol: "688981.SH", code: "688981", name: "中芯国际", sub_industry: "晶圆制造", value: 30 },
+        ],
+      },
+    ],
+    { width: 720, height: 420 },
+  );
+
+  assert.deepEqual(
+    layout.subBoards.map((item) => item.name).sort(),
+    ["半导体设备", "存储芯片", "晶圆制造"],
+  );
+  assert.equal(layout.subBoards.every((item) => item.board.name === "半导体"), true);
+  assert.equal(layout.stocks.every((item) => item.subBoard !== null), true);
+});
+
 test("layoutHeatmapTreemap keeps tiny stocks renderable without NaN", () => {
   const tinyLayout = layoutHeatmapTreemap(
     [
@@ -119,8 +163,8 @@ test("heatmapChangeColor follows A-share red-rise and green-fall convention", ()
 test("hitTestHeatmap returns topmost stock under transformed pointer", () => {
   const topmost = nodes[0].children[1];
   const overlappingStocks = [
-    { x: 30, y: 40, width: 100, height: 80, board: nodes[0], stock: nodes[0].children[0] },
-    { x: 30, y: 40, width: 100, height: 80, board: nodes[0], stock: topmost },
+    { x: 30, y: 40, width: 100, height: 80, board: nodes[0], subBoard: null, stock: nodes[0].children[0] },
+    { x: 30, y: 40, width: 100, height: 80, board: nodes[0], subBoard: null, stock: topmost },
   ];
   const point = transformHeatmapPoint(
     { x: 110, y: 120 },

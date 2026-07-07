@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 const {
+  clampHeatmapViewport,
   createHeatmapDragState,
   heatmapStockLabelLevel,
   heatmapWheelZoomFactor,
@@ -53,18 +54,37 @@ test("zoomHeatmapViewport keeps the cursor world point anchored and clamps scale
     { x: 120, y: 80 },
     { x: 120, y: 80 },
     2,
+    { width: 500, height: 300 },
   );
 
   assert.deepEqual(next, { scale: 2, offsetX: -120, offsetY: -80 });
 
   const clamped = zoomHeatmapViewport(
-    { scale: 4, offsetX: -20, offsetY: -20 },
+    { scale: 3, offsetX: -20, offsetY: -20 },
     { x: 120, y: 80 },
     { x: 35, y: 25 },
     2,
+    { width: 500, height: 300 },
   );
 
-  assert.equal(clamped.scale, 4);
-  assert.equal(clamped.offsetX, -20);
-  assert.equal(clamped.offsetY, -20);
+  assert.equal(clamped.scale, 3);
+  assert.equal(clamped.offsetX, 0);
+  assert.equal(clamped.offsetY, 0);
+});
+
+test("clampHeatmapViewport keeps zoomed canvas within visible bounds", () => {
+  assert.deepEqual(
+    clampHeatmapViewport({ scale: 0.8, offsetX: -40, offsetY: -30 }, { width: 500, height: 300 }),
+    { scale: 1, offsetX: 0, offsetY: 0 },
+  );
+
+  assert.deepEqual(
+    clampHeatmapViewport({ scale: 2, offsetX: 120, offsetY: -999 }, { width: 500, height: 300 }),
+    { scale: 2, offsetX: 0, offsetY: -300 },
+  );
+
+  assert.deepEqual(
+    clampHeatmapViewport({ scale: 2, offsetX: -999, offsetY: 20 }, { width: 500, height: 300 }),
+    { scale: 2, offsetX: -500, offsetY: 0 },
+  );
 });

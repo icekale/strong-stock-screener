@@ -69,7 +69,7 @@ def test_heatmap_models_expose_source_status_and_stock_metrics() -> None:
 
 
 def test_upstream_heatmap_license_seed_is_present() -> None:
-    data_dir = Path("app/data/heatmap")
+    data_dir = Path(__file__).resolve().parents[1] / "app/data/heatmap"
     assert (data_dir / "market-heatmap-fallback.json").exists()
     assert (data_dir / "market-heatmap-subboards.json").exists()
     license_text = (data_dir / "LICENSE.a-share-heatmap").read_text(encoding="utf-8")

@@ -4,8 +4,12 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { HeatmapBoardNode, HeatmapStockNode } from "../../lib/types";
 import {
   createHeatmapDragState,
+  heatmapStockLabelLevel,
+  heatmapWheelZoomFactor,
   moveHeatmapDragState,
   type HeatmapDragState,
+  type HeatmapStockLabelLevel,
+  zoomHeatmapViewport,
 } from "./heatmapCanvasInteraction";
 import {
   heatmapChangeColor,
@@ -26,8 +30,6 @@ export type HeatmapCanvasProps = {
 
 type CanvasSize = { width: number; height: number };
 
-const MIN_SCALE = 0.7;
-const MAX_SCALE = 4;
 const KEYBOARD_PAN_STEP = 44;
 const KEYBOARD_ZOOM_FACTOR = 1.12;
 
@@ -154,8 +156,9 @@ export function HeatmapCanvas({
       context.lineWidth = 1 / viewport.scale;
       context.strokeRect(item.x, item.y, item.width, item.height);
 
-      if (item.width >= 58 && item.height >= 34) {
-        drawStockText(context, item, color.text);
+      const labelLevel = heatmapStockLabelLevel(item, viewport.scale);
+      if (labelLevel !== "none") {
+        drawStockText(context, item, color.text, viewport.scale, labelLevel);
       }
 
       if (selectedStock?.symbol === item.stock.symbol) {
@@ -273,7 +276,7 @@ export function HeatmapCanvas({
           };
           const currentViewport = viewportRef.current;
           const worldPoint = transformHeatmapPoint(screenPoint, currentViewport);
-          const zoomFactor = event.deltaY < 0 ? KEYBOARD_ZOOM_FACTOR : 1 / KEYBOARD_ZOOM_FACTOR;
+          const zoomFactor = heatmapWheelZoomFactor(event.deltaY, event.deltaMode);
           updateViewport(zoomHeatmapViewport(currentViewport, screenPoint, worldPoint, zoomFactor));
         }}
         onKeyDown={(event) => {
@@ -344,40 +347,37 @@ function handleCanvasKeyDown(
   return false;
 }
 
-function zoomHeatmapViewport(
-  viewport: HeatmapViewport,
-  screenPoint: { x: number; y: number },
-  worldPoint: { x: number; y: number },
-  zoomFactor: number,
-): HeatmapViewport {
-  const nextScale = clamp(viewport.scale * zoomFactor, MIN_SCALE, MAX_SCALE);
-  return {
-    scale: nextScale,
-    offsetX: screenPoint.x - worldPoint.x * nextScale,
-    offsetY: screenPoint.y - worldPoint.y * nextScale,
-  };
-}
-
-function drawStockText(context: CanvasRenderingContext2D, item: HeatmapStockRect, textColor: string) {
-  const padding = 6;
+function drawStockText(
+  context: CanvasRenderingContext2D,
+  item: HeatmapStockRect,
+  textColor: string,
+  scale: number,
+  labelLevel: HeatmapStockLabelLevel,
+) {
+  const safeScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+  const displayedWidth = item.width * safeScale;
+  const padding = (labelLevel === "name" && displayedWidth < 48 ? 4 : 6) / safeScale;
+  const nameFontSize = (labelLevel === "name" && displayedWidth < 48 ? 10 : 12) / safeScale;
+  const detailFontSize = 11 / safeScale;
+  const lineHeight = 16 / safeScale;
   const maxWidth = Math.max(0, item.width - padding * 2);
   const x = item.x + padding;
   let y = item.y + padding;
 
   context.fillStyle = textColor;
   context.textBaseline = "top";
-  context.font = "600 12px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  context.font = `600 ${nameFontSize}px system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
   context.fillText(item.stock.name, x, y, maxWidth);
 
-  if (item.width >= 78 && item.height >= 52) {
-    y += 16;
-    context.font = "11px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  if (labelLevel === "code" || labelLevel === "change") {
+    y += lineHeight;
+    context.font = `${detailFontSize}px system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
     context.fillText(item.stock.code, x, y, maxWidth);
   }
 
-  if (item.width >= 68 && item.height >= 68) {
-    y += 16;
-    context.font = "600 12px system-ui, -apple-system, BlinkMacSystemFont, sans-serif";
+  if (labelLevel === "change") {
+    y += lineHeight;
+    context.font = `600 ${nameFontSize}px system-ui, -apple-system, BlinkMacSystemFont, sans-serif`;
     context.fillText(`${formatChangePct(item.stock.change_pct)}%`, x, y, maxWidth);
   }
 }
@@ -387,8 +387,4 @@ function formatChangePct(value: number): string {
     return "0.00";
   }
   return value > 0 ? `+${value.toFixed(2)}` : value.toFixed(2);
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }

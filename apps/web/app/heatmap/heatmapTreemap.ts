@@ -46,7 +46,7 @@ export function layoutHeatmapTreemap(
 }
 
 export function heatmapChangeColor(changePct: number): HeatmapChangeColor {
-  if (!Number.isFinite(changePct) || Math.abs(changePct) < 0.1) {
+  if (!Number.isFinite(changePct) || Math.abs(changePct) <= 0.1) {
     return { tone: "flat", fill: "#4b5563", text: "#ffffff" };
   }
   if (changePct > 0) {
@@ -72,9 +72,11 @@ export function hitTestHeatmap(stocks: HeatmapStockRect[], point: { x: number; y
 
 export function transformHeatmapPoint(point: { x: number; y: number }, viewport: HeatmapViewport): { x: number; y: number } {
   const scale = Number.isFinite(viewport.scale) && viewport.scale !== 0 ? viewport.scale : 1;
+  const offsetX = Number.isFinite(viewport.offsetX) ? viewport.offsetX : 0;
+  const offsetY = Number.isFinite(viewport.offsetY) ? viewport.offsetY : 0;
   return {
-    x: (point.x - viewport.offsetX) / scale,
-    y: (point.y - viewport.offsetY) / scale,
+    x: (point.x - offsetX) / scale,
+    y: (point.y - offsetY) / scale,
   };
 }
 

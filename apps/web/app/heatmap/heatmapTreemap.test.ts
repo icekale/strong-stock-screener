@@ -94,22 +94,48 @@ test("layoutHeatmapTreemap keeps tiny stocks renderable without NaN", () => {
   );
 
   assert.equal(tinyLayout.stocks.length, 2);
-  assert.ok(tinyLayout.stocks.every((item) => Number.isFinite(item.width) && Number.isFinite(item.height)));
+  for (const item of tinyLayout.stocks) {
+    assert.ok(Number.isFinite(item.x));
+    assert.ok(Number.isFinite(item.y));
+    assert.ok(Number.isFinite(item.width));
+    assert.ok(Number.isFinite(item.height));
+    assert.ok(item.x >= 0);
+    assert.ok(item.y >= 0);
+    assert.ok(item.x + item.width <= 320);
+    assert.ok(item.y + item.height <= 220);
+    assert.ok(item.width > 0);
+    assert.ok(item.height > 0);
+  }
 });
 
 test("heatmapChangeColor follows A-share red-rise and green-fall convention", () => {
   assert.equal(heatmapChangeColor(4).tone, "rise");
   assert.equal(heatmapChangeColor(-2).tone, "fall");
   assert.equal(heatmapChangeColor(0.02).tone, "flat");
+  assert.equal(heatmapChangeColor(0.1).tone, "flat");
+  assert.equal(heatmapChangeColor(-0.1).tone, "flat");
 });
 
 test("hitTestHeatmap returns topmost stock under transformed pointer", () => {
-  const layout = layoutHeatmapTreemap(nodes, { width: 1000, height: 600 });
-  const first = layout.stocks[0];
+  const topmost = nodes[0].children[1];
+  const overlappingStocks = [
+    { x: 30, y: 40, width: 100, height: 80, board: nodes[0], stock: nodes[0].children[0] },
+    { x: 30, y: 40, width: 100, height: 80, board: nodes[0], stock: topmost },
+  ];
   const point = transformHeatmapPoint(
-    { x: first.x + first.width / 2, y: first.y + first.height / 2 },
-    { scale: 1, offsetX: 0, offsetY: 0 },
+    { x: 110, y: 120 },
+    { scale: 2, offsetX: 10, offsetY: 20 },
   );
 
-  assert.equal(hitTestHeatmap(layout.stocks, point)?.stock.symbol, first.stock.symbol);
+  assert.equal(hitTestHeatmap(overlappingStocks, point)?.stock.symbol, topmost.symbol);
+});
+
+test("transformHeatmapPoint ignores non-finite offsets", () => {
+  assert.deepEqual(
+    transformHeatmapPoint(
+      { x: 50, y: 80 },
+      { scale: 2, offsetX: Number.NaN, offsetY: Number.POSITIVE_INFINITY },
+    ),
+    { x: 25, y: 40 },
+  );
 });

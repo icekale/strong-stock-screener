@@ -481,9 +481,7 @@ class EastmoneyMarketOverviewProvider:
             key=lambda item: (item.turnover_cny or 0, item.pct_change or -999, item.symbol),
             reverse=True,
         )[:bounded_limit]
-        supplemental_status = self._supplement_rank_industries(pct_change_rank, turnover_rank)
-        if supplemental_status is not None:
-            source_status.append(supplemental_status)
+        source_status.extend(self._supplement_rank_industries(pct_change_rank, turnover_rank))
         return MarketRankingsResponse(
             trade_date=max(trade_dates) if trade_dates else None,
             pct_change_rank=pct_change_rank,
@@ -496,25 +494,35 @@ class EastmoneyMarketOverviewProvider:
         self,
         pct_change_rank: list[MarketRankingItem],
         turnover_rank: list[MarketRankingItem],
-    ) -> StrongStockSourceStatus | None:
+    ) -> list[StrongStockSourceStatus]:
+        source_status: list[StrongStockSourceStatus] = []
         missing_symbols = _dedupe_symbols(
             item.symbol
             for item in [*pct_change_rank, *turnover_rank]
             if item.symbol and not item.industry
         )
         if not missing_symbols:
-            return None
+            return source_status
         try:
             industry_by_symbol = self._fetch_stock_industries_by_symbols(missing_symbols)
         except Exception:
             industry_by_symbol = {}
         patched = _patch_rank_industries(pct_change_rank, turnover_rank, industry_by_symbol)
         if patched:
-            return StrongStockSourceStatus(
-                source="东方财富行业补充",
-                status="success",
-                detail=f"补齐 {patched}/{len(missing_symbols)} 只排行股票行业",
+            source_status.append(
+                StrongStockSourceStatus(
+                    source="东方财富行业补充",
+                    status="success",
+                    detail=f"补齐 {patched}/{len(missing_symbols)} 只排行股票行业",
+                )
             )
+            missing_symbols = _dedupe_symbols(
+                item.symbol
+                for item in [*pct_change_rank, *turnover_rank]
+                if item.symbol and not item.industry
+            )
+            if not missing_symbols:
+                return source_status
 
         try:
             industry_by_symbol = self._fetch_ths_industries_by_symbols(missing_symbols)
@@ -522,37 +530,49 @@ class EastmoneyMarketOverviewProvider:
             industry_by_symbol = {}
         patched = _patch_rank_industries(pct_change_rank, turnover_rank, industry_by_symbol)
         if patched:
-            return StrongStockSourceStatus(
-                source="同花顺行业分类参考",
-                status="success",
-                detail=f"补齐 {patched}/{len(missing_symbols)} 只排行股票行业",
+            source_status.append(
+                StrongStockSourceStatus(
+                    source="同花顺行业分类参考",
+                    status="success",
+                    detail=f"补齐 {patched}/{len(missing_symbols)} 只排行股票行业",
+                )
             )
-
-        missing_symbols = _dedupe_symbols(
-            item.symbol
-            for item in [*pct_change_rank, *turnover_rank]
-            if item.symbol and not item.industry
-        )
+            missing_symbols = _dedupe_symbols(
+                item.symbol
+                for item in [*pct_change_rank, *turnover_rank]
+                if item.symbol and not item.industry
+            )
+            if not missing_symbols:
+                return source_status
         if self.ifind_stock_provider is None or not hasattr(self.ifind_stock_provider, "get_stock_industries"):
-            return StrongStockSourceStatus(
-                source="iFinD 行业补充",
-                status="disabled",
-                detail=f"{len(missing_symbols)} 只排行股票缺少行业，未配置 iFinD 行业补充源",
+            source_status.append(
+                StrongStockSourceStatus(
+                    source="iFinD 行业补充",
+                    status="disabled",
+                    detail=f"{len(missing_symbols)} 只排行股票缺少行业，未配置 iFinD 行业补充源",
+                )
             )
+            return source_status
         try:
             industry_by_symbol = self.ifind_stock_provider.get_stock_industries(missing_symbols)
         except Exception as exc:
-            return StrongStockSourceStatus(
-                source="iFinD 行业补充",
-                status="failed",
-                detail=f"{len(missing_symbols)} 只排行股票缺少行业，补充失败: {exc.__class__.__name__}",
+            source_status.append(
+                StrongStockSourceStatus(
+                    source="iFinD 行业补充",
+                    status="failed",
+                    detail=f"{len(missing_symbols)} 只排行股票缺少行业，补充失败: {exc.__class__.__name__}",
+                )
             )
+            return source_status
         unique_patched = _patch_rank_industries(pct_change_rank, turnover_rank, industry_by_symbol)
-        return StrongStockSourceStatus(
-            source="iFinD 行业补充",
-            status="success" if unique_patched else "stale",
-            detail=f"补齐 {unique_patched}/{len(missing_symbols)} 只排行股票行业",
+        source_status.append(
+            StrongStockSourceStatus(
+                source="iFinD 行业补充",
+                status="success" if unique_patched else "stale",
+                detail=f"补齐 {unique_patched}/{len(missing_symbols)} 只排行股票行业",
+            )
         )
+        return source_status
 
     def get_stock_industries(self, symbols: list[str]) -> dict[str, str]:
         missing_symbols = _dedupe_symbols(symbols)

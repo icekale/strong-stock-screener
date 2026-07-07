@@ -6,10 +6,6 @@ import type {
   StrongStockSourceStatus,
 } from "./types";
 
-const { buildStockDetailHref } = (await import(
-  new URL("./stockNavigation.ts", import.meta.url).href
-)) as typeof import("./stockNavigation");
-
 export type HeatmapQueryState = {
   market: HeatmapMarketKey;
   period: HeatmapPeriodKey;
@@ -34,6 +30,11 @@ export const HEATMAP_PERIOD_OPTIONS: Array<{ label: string; value: HeatmapPeriod
   { label: "周", value: "week" },
   { label: "月", value: "month" },
   { label: "年", value: "year" },
+];
+
+export const HEATMAP_SIZE_MODE_OPTIONS: Array<{ label: string; value: HeatmapSizeMode }> = [
+  { label: "流通市值", value: "market_cap" },
+  { label: "成交额", value: "turnover" },
 ];
 
 export const HEATMAP_TREND_OPTIONS: Array<{ label: string; value: HeatmapTrendFilter }> = [
@@ -87,9 +88,19 @@ export function heatmapSourceStatusLabel(status: StrongStockSourceStatus): strin
 }
 
 export function heatmapStockHref(stock: { symbol: string; name?: string | null; industry?: string | null }): string {
-  return buildStockDetailHref(stock.symbol, {
-    from: "heatmap",
-    name: stock.name,
-    industry: stock.industry,
-  });
+  const query = new URLSearchParams({ from: "heatmap" });
+  const name = cleanText(stock.name);
+  const industry = cleanText(stock.industry);
+  if (name) {
+    query.set("name", name);
+  }
+  if (industry) {
+    query.set("industry", industry);
+  }
+  return `/stock/${encodeURIComponent(stock.symbol)}?${query.toString()}`;
+}
+
+function cleanText(value: string | null | undefined): string | null {
+  const text = value?.trim();
+  return text ? text : null;
 }

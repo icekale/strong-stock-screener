@@ -30,6 +30,10 @@ from app.models import (
     GsgfReviewSnapshotResponse,
     GsgfReviewSummary,
     GsgfTradePlan,
+    HeatmapMarketKey,
+    HeatmapPeriodKey,
+    HeatmapSizeMode,
+    HeatmapTrendFilter,
     KlineBar,
     MarketEmotionSnapshotResponse,
     MarketOverviewResponse,
@@ -65,6 +69,7 @@ from app.gsgf_rules import analyze_gsgf, build_gsgf_chart_annotations
 from app.providers.ifind import IfindMcpProvider
 from app.providers.market_overview import EastmoneyMarketOverviewProvider
 from app.providers.concept_blocks import EastmoneyConceptBlockProvider
+from app.providers.heatmap import HeatmapProvider
 from app.providers.news_risk import EastmoneyNewsRiskProvider
 from app.providers.recent_limit_up_candidates import RecentLimitUpCandidateProvider
 from app.providers.thsdk_candidates import ThsdkCandidateProvider
@@ -970,6 +975,42 @@ def get_market_rankings(limit: int = 50) -> dict[str, object]:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"全A实时排行榜获取失败: {exc.__class__.__name__}") from exc
+    return result.model_dump(mode="json")
+
+
+@app.get("/api/heatmap/treemap")
+def get_heatmap_treemap(
+    market: HeatmapMarketKey = "all",
+    period: HeatmapPeriodKey = "day",
+    size_mode: HeatmapSizeMode = "market_cap",
+    trend: HeatmapTrendFilter = "all",
+    board: str = "",
+    limit: int = 5000,
+) -> dict[str, object]:
+    bounded_limit = max(1, min(limit, 6000))
+    result = _heatmap_provider().get_treemap(
+        market=market,
+        period=period,
+        size_mode=size_mode,
+        trend=trend,
+        board=board.strip() or None,
+        limit=bounded_limit,
+    )
+    return result.model_dump(mode="json")
+
+
+@app.get("/api/heatmap/quotes")
+def get_heatmap_quotes(
+    market: HeatmapMarketKey = "all",
+    period: HeatmapPeriodKey = "day",
+) -> dict[str, object]:
+    result = _heatmap_provider().get_quotes(market=market, period=period)
+    return result.model_dump(mode="json")
+
+
+@app.get("/api/heatmap/overview")
+def get_heatmap_overview(period: HeatmapPeriodKey = "day") -> dict[str, object]:
+    result = _heatmap_provider().get_overview(period=period)
     return result.model_dump(mode="json")
 
 
@@ -2573,6 +2614,14 @@ def _concept_provider() -> object:
         cached = EastmoneyConceptBlockProvider(timeout_seconds=settings.provider_timeout_seconds)
         app.state.default_concept_provider = cached
     return cached
+
+
+def _heatmap_provider() -> HeatmapProvider:
+    provider = getattr(app.state, "heatmap_provider", None)
+    if provider is None:
+        provider = HeatmapProvider()
+        app.state.heatmap_provider = provider
+    return provider
 
 
 def _tdx_provider() -> TdxMcpProvider:

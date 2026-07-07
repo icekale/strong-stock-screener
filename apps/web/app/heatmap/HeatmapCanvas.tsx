@@ -3,6 +3,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { HeatmapBoardNode, HeatmapStockNode } from "../../lib/types";
 import {
+  createHeatmapDragState,
+  moveHeatmapDragState,
+  type HeatmapDragState,
+} from "./heatmapCanvasInteraction";
+import {
   heatmapChangeColor,
   hitTestHeatmap,
   layoutHeatmapTreemap,
@@ -20,10 +25,11 @@ export type HeatmapCanvasProps = {
 };
 
 type CanvasSize = { width: number; height: number };
-type DragState = { pointerId: number; lastX: number; lastY: number; moved: boolean } | null;
 
 const MIN_SCALE = 0.7;
 const MAX_SCALE = 4;
+const KEYBOARD_PAN_STEP = 44;
+const KEYBOARD_ZOOM_FACTOR = 1.12;
 
 export function HeatmapCanvas({
   nodes,
@@ -34,7 +40,7 @@ export function HeatmapCanvas({
 }: HeatmapCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const dragRef = useRef<DragState>(null);
+  const dragRef = useRef<HeatmapDragState | null>(null);
   const viewportRef = useRef<HeatmapViewport>({ scale: 1, offsetX: 0, offsetY: 0 });
   const [viewport, setViewport] = useState<HeatmapViewport>({ scale: 1, offsetX: 0, offsetY: 0 });
   const [canvasSize, setCanvasSize] = useState<CanvasSize>({ width: 0, height: 0 });
@@ -193,34 +199,25 @@ export function HeatmapCanvas({
     <div ref={wrapperRef} className="relative h-full w-full touch-none">
       <canvas
         ref={canvasRef}
-        aria-label="A 股市场热力图"
+        aria-label="A 股市场热力图。方向键平移，+ 和 - 缩放，0 重置视图，Enter 选中视口中心股票。"
         className="block h-full w-full"
-        role="img"
+        role="application"
         style={{ cursor }}
+        tabIndex={0}
         onPointerDown={(event) => {
-          dragRef.current = {
-            pointerId: event.pointerId,
-            lastX: event.clientX,
-            lastY: event.clientY,
-            moved: false,
-          };
+          dragRef.current = createHeatmapDragState(event.pointerId, event.clientX, event.clientY);
           setIsDragging(true);
           event.currentTarget.setPointerCapture(event.pointerId);
         }}
         onPointerMove={(event) => {
           const drag = dragRef.current;
           if (drag && drag.pointerId === event.pointerId) {
-            const deltaX = event.clientX - drag.lastX;
-            const deltaY = event.clientY - drag.lastY;
-            if (Math.abs(deltaX) + Math.abs(deltaY) > 2) {
-              drag.moved = true;
-            }
-            drag.lastX = event.clientX;
-            drag.lastY = event.clientY;
+            const moved = moveHeatmapDragState(drag, event.clientX, event.clientY);
+            dragRef.current = moved.drag;
             updateViewport({
               ...viewportRef.current,
-              offsetX: viewportRef.current.offsetX + deltaX,
-              offsetY: viewportRef.current.offsetY + deltaY,
+              offsetX: viewportRef.current.offsetX + moved.deltaX,
+              offsetY: viewportRef.current.offsetY + moved.deltaY,
             });
             return;
           }
@@ -229,23 +226,32 @@ export function HeatmapCanvas({
         }}
         onPointerUp={(event) => {
           const drag = dragRef.current;
-          if (drag?.pointerId === event.pointerId) {
-            if (!drag.moved) {
-              onSelectStock(hitTestPointer(event));
-            }
-            dragRef.current = null;
+          if (drag?.pointerId !== event.pointerId) {
+            return;
           }
+          if (!drag.moved) {
+            onSelectStock(hitTestPointer(event));
+          }
+          dragRef.current = null;
           setIsDragging(false);
           if (event.currentTarget.hasPointerCapture(event.pointerId)) {
             event.currentTarget.releasePointerCapture(event.pointerId);
           }
         }}
         onPointerCancel={(event) => {
-          dragRef.current = null;
-          setIsDragging(false);
-          onHoverStock(null);
+          if (dragRef.current?.pointerId === event.pointerId) {
+            dragRef.current = null;
+            setIsDragging(false);
+            onHoverStock(null);
+          }
           if (event.currentTarget.hasPointerCapture(event.pointerId)) {
             event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+        }}
+        onLostPointerCapture={(event) => {
+          if (dragRef.current?.pointerId === event.pointerId) {
+            dragRef.current = null;
+            setIsDragging(false);
           }
         }}
         onPointerLeave={() => {
@@ -267,17 +273,89 @@ export function HeatmapCanvas({
           };
           const currentViewport = viewportRef.current;
           const worldPoint = transformHeatmapPoint(screenPoint, currentViewport);
-          const zoomFactor = event.deltaY < 0 ? 1.12 : 1 / 1.12;
-          const nextScale = clamp(currentViewport.scale * zoomFactor, MIN_SCALE, MAX_SCALE);
-          updateViewport({
-            scale: nextScale,
-            offsetX: screenPoint.x - worldPoint.x * nextScale,
-            offsetY: screenPoint.y - worldPoint.y * nextScale,
-          });
+          const zoomFactor = event.deltaY < 0 ? KEYBOARD_ZOOM_FACTOR : 1 / KEYBOARD_ZOOM_FACTOR;
+          updateViewport(zoomHeatmapViewport(currentViewport, screenPoint, worldPoint, zoomFactor));
+        }}
+        onKeyDown={(event) => {
+          const handled = handleCanvasKeyDown(
+            event,
+            canvasSize,
+            layout.stocks,
+            viewportRef.current,
+            updateViewport,
+            onSelectStock,
+          );
+          if (handled) {
+            event.preventDefault();
+          }
         }}
       />
     </div>
   );
+}
+
+function handleCanvasKeyDown(
+  event: React.KeyboardEvent<HTMLCanvasElement>,
+  canvasSize: CanvasSize,
+  stocks: HeatmapStockRect[],
+  viewport: HeatmapViewport,
+  updateViewport: (nextViewport: HeatmapViewport) => void,
+  onSelectStock: (stock: HeatmapStockNode | null) => void,
+): boolean {
+  const isArrowKey =
+    event.key === "ArrowLeft" ||
+    event.key === "ArrowRight" ||
+    event.key === "ArrowUp" ||
+    event.key === "ArrowDown";
+
+  if (isArrowKey) {
+    const offsetX =
+      event.key === "ArrowLeft" ? KEYBOARD_PAN_STEP : event.key === "ArrowRight" ? -KEYBOARD_PAN_STEP : 0;
+    const offsetY =
+      event.key === "ArrowUp" ? KEYBOARD_PAN_STEP : event.key === "ArrowDown" ? -KEYBOARD_PAN_STEP : 0;
+    updateViewport({ ...viewport, offsetX: viewport.offsetX + offsetX, offsetY: viewport.offsetY + offsetY });
+    return true;
+  }
+
+  if (event.key === "+" || event.key === "=" || event.key === "-") {
+    const screenPoint = { x: canvasSize.width / 2, y: canvasSize.height / 2 };
+    const worldPoint = transformHeatmapPoint(screenPoint, viewport);
+    const zoomFactor = event.key === "-" ? 1 / KEYBOARD_ZOOM_FACTOR : KEYBOARD_ZOOM_FACTOR;
+    updateViewport(zoomHeatmapViewport(viewport, screenPoint, worldPoint, zoomFactor));
+    return true;
+  }
+
+  if (event.key === "0" || event.key === "Home") {
+    updateViewport({ scale: 1, offsetX: 0, offsetY: 0 });
+    return true;
+  }
+
+  if (event.key === "Enter" || event.key === " ") {
+    const centerPoint = transformHeatmapPoint({ x: canvasSize.width / 2, y: canvasSize.height / 2 }, viewport);
+    onSelectStock(hitTestHeatmap(stocks, centerPoint)?.stock ?? null);
+    return true;
+  }
+
+  if (event.key === "Escape") {
+    onSelectStock(null);
+    return true;
+  }
+
+  return false;
+}
+
+function zoomHeatmapViewport(
+  viewport: HeatmapViewport,
+  screenPoint: { x: number; y: number },
+  worldPoint: { x: number; y: number },
+  zoomFactor: number,
+): HeatmapViewport {
+  const nextScale = clamp(viewport.scale * zoomFactor, MIN_SCALE, MAX_SCALE);
+  return {
+    scale: nextScale,
+    offsetX: screenPoint.x - worldPoint.x * nextScale,
+    offsetY: screenPoint.y - worldPoint.y * nextScale,
+  };
 }
 
 function drawStockText(context: CanvasRenderingContext2D, item: HeatmapStockRect, textColor: string) {

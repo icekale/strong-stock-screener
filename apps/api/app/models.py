@@ -75,6 +75,11 @@ ModelMaintenanceSuggestionType = Literal[
     "data_check",
 ]
 ModelMaintenanceSuggestionStatus = Literal["pending", "accepted", "ignored", "snoozed"]
+HeatmapPeriodKey = Literal["day", "week", "month", "year"]
+HeatmapMarketKey = Literal["all", "sse", "szse", "hs300", "zza500", "cyb", "kcb"]
+HeatmapSizeMode = Literal["market_cap", "turnover"]
+HeatmapTrendFilter = Literal["all", "rise", "fall"]
+HeatmapExchange = Literal["SH", "SZ", "BJ"]
 
 
 class GsgfScoreBreakdown(BaseModel):
@@ -212,6 +217,96 @@ class StrongStockSourceStatus(BaseModel):
     source: str
     status: SourceStatusValue
     detail: str
+
+
+class HeatmapStockNode(BaseModel):
+    symbol: str
+    code: str
+    name: str
+    industry: str
+    sub_industry: str | None = None
+    exchange: HeatmapExchange
+    market: HeatmapMarketKey
+    price: float | None = None
+    change_pct: float = 0
+    week_change_pct: float | None = None
+    month_change_pct: float | None = None
+    year_change_pct: float | None = None
+    turnover_cny: float | None = None
+    circulating_market_cap_cny: float | None = None
+    total_market_cap_cny: float | None = None
+    value: float = 0
+    quote_time: str | None = None
+
+
+class HeatmapBoardNode(BaseModel):
+    key: str
+    name: str
+    value: float = 0
+    stock_count: int = 0
+    advance_count: int = 0
+    decline_count: int = 0
+    unchanged_count: int = 0
+    avg_change_pct: float | None = None
+    turnover_cny: float | None = None
+    children: list[HeatmapStockNode] = Field(default_factory=list)
+
+
+class HeatmapSummary(BaseModel):
+    trade_date: str | None = None
+    updated_at: str
+    stock_count: int = 0
+    board_count: int = 0
+    advance_count: int = 0
+    decline_count: int = 0
+    unchanged_count: int = 0
+    turnover_cny: float | None = None
+    previous_turnover_cny: float | None = None
+    turnover_change_pct: float | None = None
+    index_change_pct: float | None = None
+
+
+class HeatmapTreemapResponse(BaseModel):
+    market: HeatmapMarketKey
+    period: HeatmapPeriodKey
+    size_mode: HeatmapSizeMode
+    trend: HeatmapTrendFilter = "all"
+    board: str | None = None
+    summary: HeatmapSummary
+    nodes: list[HeatmapBoardNode] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str
+
+
+class HeatmapQuoteItem(BaseModel):
+    symbol: str
+    price: float | None = None
+    change_pct: float = 0
+    turnover_cny: float | None = None
+    quote_time: str | None = None
+
+
+class HeatmapQuotesResponse(BaseModel):
+    market: HeatmapMarketKey
+    period: HeatmapPeriodKey
+    quotes: dict[str, HeatmapQuoteItem] = Field(default_factory=dict)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str
+
+
+class HeatmapOverviewItem(BaseModel):
+    market: HeatmapMarketKey
+    name: str
+    change_pct: float | None = None
+    stock_count: int = 0
+    updated_at: str
+
+
+class HeatmapOverviewResponse(BaseModel):
+    period: HeatmapPeriodKey
+    markets: list[HeatmapOverviewItem] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str
 
 
 class AuctionReviewSnapshot(BaseModel):

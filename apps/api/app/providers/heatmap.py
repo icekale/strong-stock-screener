@@ -133,8 +133,8 @@ class HeatmapProvider:
         nodes = self._build_stock_nodes(stocks, snapshot, period, size_mode)
         nodes = [node for node in nodes if self._matches_trend(node.change_pct, trend)]
         boards = self._build_board_nodes(nodes, limit)
-        turnover_cny = sum((node.turnover_cny or 0) for node in nodes) or summary_snapshot.turnover_cny
-        previous_turnover_cny = summary_snapshot.previous_turnover_cny
+        turnover_cny = self._summary_turnover(nodes, market, trend, board, summary_snapshot)
+        previous_turnover_cny = summary_snapshot.previous_turnover_cny if nodes else None
 
         return HeatmapTreemapResponse(
             market=market,
@@ -164,9 +164,7 @@ class HeatmapProvider:
         snapshot = self._safe_quote_snapshot([stock.symbol for stock in stocks])
         quotes: dict[str, HeatmapQuoteItem] = {}
         for stock in stocks:
-            quote = snapshot.values.get(stock.symbol)
-            if quote is None:
-                continue
+            quote = snapshot.values.get(stock.symbol) or self._fallback_quote_value(stock)
             quotes[stock.symbol] = HeatmapQuoteItem(
                 symbol=stock.symbol,
                 price=quote.price,
@@ -300,13 +298,32 @@ class HeatmapProvider:
                     turnover_cny=_number(row.get("f6")),
                     quote_time=quote_time,
                 )
-        statuses.append(
-            StrongStockSourceStatus(
-                source=self.source_name,
-                status="success",
-                detail=f"东方财富 push2 返回 {len(values)} 条热图行情",
+        requested_count = len(set(symbols))
+        returned_count = len(values)
+        if requested_count == 0 or returned_count == requested_count:
+            statuses.append(
+                StrongStockSourceStatus(
+                    source=self.source_name,
+                    status="success",
+                    detail=f"东方财富 push2 返回 {returned_count} 条热图行情",
+                )
             )
-        )
+        elif returned_count == 0:
+            statuses.append(
+                StrongStockSourceStatus(
+                    source=self.source_name,
+                    status="failed",
+                    detail=f"东方财富行情未返回报价行 0/{requested_count}，缺失使用样本兜底",
+                )
+            )
+        else:
+            statuses.append(
+                StrongStockSourceStatus(
+                    source=self.source_name,
+                    status="stale",
+                    detail=f"东方财富行情部分返回 {returned_count}/{requested_count}，缺失使用样本兜底",
+                )
+            )
         return HeatmapQuoteSnapshot(
             updated_at=self._now_iso(),
             values=values,
@@ -404,6 +421,23 @@ class HeatmapProvider:
         if board:
             filtered = [stock for stock in filtered if stock.industry == board or stock.sub_industry == board]
         return filtered
+
+    def _summary_turnover(
+        self,
+        nodes: list[HeatmapStockNode],
+        market: HeatmapMarketKey,
+        trend: HeatmapTrendFilter,
+        board: str | None,
+        summary_snapshot: HeatmapSummarySnapshot,
+    ) -> float | None:
+        if not nodes:
+            return 0
+        node_turnover = sum((node.turnover_cny or 0) for node in nodes)
+        if node_turnover:
+            return node_turnover
+        if market == "all" and trend == "all" and board is None:
+            return summary_snapshot.turnover_cny
+        return 0
 
     def _load_baseline_stocks(self) -> list[HeatmapBaselineStock]:
         heatmap_path = self.data_dir / "market-heatmap-fallback.json"

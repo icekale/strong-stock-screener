@@ -129,6 +129,39 @@ def _baseline() -> list[HeatmapBaselineStock]:
     ]
 
 
+def _baseline_with_fallback_quotes() -> list[HeatmapBaselineStock]:
+    return [
+        HeatmapBaselineStock(
+            symbol="603690.SH",
+            code="603690",
+            name="至纯科技",
+            exchange="SH",
+            market="sse",
+            industry="半导体",
+            sub_industry="半导体设备",
+            circulating_market_cap_cny=12_000_000_000,
+            total_market_cap_cny=15_000_000_000,
+            fallback_price=25.19,
+            fallback_change_pct=-0.67,
+            fallback_turnover_cny=50_000_000,
+        ),
+        HeatmapBaselineStock(
+            symbol="300475.SZ",
+            code="300475",
+            name="香农芯创",
+            exchange="SZ",
+            market="cyb",
+            industry="半导体",
+            sub_industry="存储芯片",
+            circulating_market_cap_cny=8_000_000_000,
+            total_market_cap_cny=10_000_000_000,
+            fallback_price=41.5,
+            fallback_change_pct=1.25,
+            fallback_turnover_cny=35_000_000,
+        ),
+    ]
+
+
 def _quote_snapshot() -> HeatmapQuoteSnapshot:
     return HeatmapQuoteSnapshot(
         updated_at="2026-07-07T10:30:00+08:00",
@@ -167,6 +200,28 @@ def _summary_snapshot() -> HeatmapSummarySnapshot:
         previous_turnover_cny=300_000_000,
         source_status=[{"source": "fake summary", "status": "success", "detail": "ok"}],
     )
+
+
+class _FakeEastmoneyResponse:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict[str, object]:
+        return {"data": {"diff": self.rows}}
+
+
+class _FakeEastmoneyClient:
+    def __init__(self, rows: list[dict[str, object]]) -> None:
+        self.rows = rows
+
+    def get(self, *args: object, **kwargs: object) -> _FakeEastmoneyResponse:
+        return _FakeEastmoneyResponse(self.rows)
+
+    def close(self) -> None:
+        return None
 
 
 def test_heatmap_provider_builds_board_nodes_from_quotes() -> None:
@@ -353,3 +408,74 @@ def test_heatmap_provider_maps_eastmoney_bj_rows_to_bj_symbols() -> None:
 
     assert provider._symbol_from_eastmoney_row({"f12": "920123", "f13": "0"}) == "920123.BJ"
     assert provider._symbol_from_eastmoney_row({"f12": "430047", "f13": "0"}) == "430047.BJ"
+
+
+def test_heatmap_provider_empty_filter_does_not_borrow_summary_turnover() -> None:
+    provider = HeatmapProvider(
+        baseline_stocks=_baseline(),
+        quote_loader=lambda symbols: _quote_snapshot(),
+        summary_loader=_summary_snapshot,
+        now=_fixed_now,
+    )
+
+    response = provider.get_treemap(
+        market="all",
+        period="day",
+        size_mode="turnover",
+        trend="all",
+        board="不存在的板块",
+        limit=20,
+    )
+
+    assert response.summary.stock_count == 0
+    assert response.summary.board_count == 0
+    assert response.nodes == []
+    assert response.summary.turnover_cny == 0
+
+
+def test_heatmap_provider_marks_empty_eastmoney_quotes_failed_and_fills_fallback() -> None:
+    provider = HeatmapProvider(
+        baseline_stocks=_baseline_with_fallback_quotes(),
+        summary_loader=_summary_snapshot,
+        now=_fixed_now,
+        http_client=_FakeEastmoneyClient([]),
+    )
+
+    response = provider.get_quotes(market="all", period="day")
+
+    assert set(response.quotes) == {"603690.SH", "300475.SZ"}
+    assert response.quotes["603690.SH"].price == 25.19
+    assert response.quotes["300475.SZ"].change_pct == 1.25
+    assert any(status.source == "东方财富热图行情" and status.status == "failed" for status in response.source_status)
+    assert not all(status.status == "success" for status in response.source_status)
+
+
+def test_heatmap_provider_marks_partial_eastmoney_quotes_stale_and_fills_missing_quotes() -> None:
+    provider = HeatmapProvider(
+        baseline_stocks=_baseline_with_fallback_quotes(),
+        summary_loader=_summary_snapshot,
+        now=_fixed_now,
+        http_client=_FakeEastmoneyClient(
+            [
+                {
+                    "f2": 28.4,
+                    "f3": 3.2,
+                    "f6": 120_000_000,
+                    "f12": "603690",
+                    "f13": "1",
+                    "f25": 30.5,
+                    "f109": 8.1,
+                    "f110": 12.4,
+                    "f124": 1_783_392_200,
+                }
+            ]
+        ),
+    )
+
+    response = provider.get_quotes(market="all", period="day")
+
+    assert set(response.quotes) == {"603690.SH", "300475.SZ"}
+    assert response.quotes["603690.SH"].price == 28.4
+    assert response.quotes["300475.SZ"].price == 41.5
+    assert response.quotes["300475.SZ"].turnover_cny == 35_000_000
+    assert any(status.source == "东方财富热图行情" and status.status == "stale" for status in response.source_status)

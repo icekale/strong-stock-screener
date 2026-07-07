@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from pathlib import Path
+import json
 from datetime import datetime
+from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from app.models import HeatmapBoardNode, HeatmapStockNode, HeatmapSummary, HeatmapTreemapResponse
@@ -240,3 +241,115 @@ def test_heatmap_provider_returns_fallback_status_when_live_quote_loader_fails()
     assert response.nodes
     assert any(status.source == "东方财富热图行情" and status.status == "failed" for status in response.source_status)
     assert any(status.source == "热图内置样本" and status.status == "stale" for status in response.source_status)
+
+
+def test_heatmap_provider_filters_cap_bucket_markets_and_uses_plan_labels() -> None:
+    provider = HeatmapProvider(
+        baseline_stocks=_baseline(),
+        quote_loader=lambda symbols: _quote_snapshot(),
+        summary_loader=_summary_snapshot,
+        now=_fixed_now,
+    )
+
+    overview = provider.get_overview(period="day")
+    counts = {item.market: item.stock_count for item in overview.markets}
+    labels = {item.market: item.name for item in overview.markets}
+    hs300 = provider.get_treemap(
+        market="hs300",
+        period="day",
+        size_mode="market_cap",
+        trend="all",
+        board=None,
+        limit=20,
+    )
+    zza500 = provider.get_treemap(
+        market="zza500",
+        period="day",
+        size_mode="market_cap",
+        trend="all",
+        board=None,
+        limit=20,
+    )
+
+    assert labels["zza500"] == "中证 A500"
+    assert counts["hs300"] == 1
+    assert counts["zza500"] == 1
+    assert hs300.summary.stock_count == 1
+    assert hs300.nodes[0].children[0].symbol == "600000.SH"
+    assert zza500.summary.stock_count == 1
+    assert zza500.nodes[0].children[0].symbol == "603690.SH"
+
+
+def test_heatmap_provider_uses_seed_quote_values_when_live_quote_loader_fails(tmp_path: Path) -> None:
+    data_dir = tmp_path / "heatmap"
+    data_dir.mkdir()
+    (data_dir / "market-heatmap-fallback.json").write_text(
+        json.dumps(
+            {
+                "stocks": [
+                    {
+                        "code": "920123.BJ",
+                        "exchange": "BJ",
+                        "name": "芭薇股份",
+                        "boardName": "美容护理",
+                        "price": 12.78,
+                        "changePct": 0.79,
+                        "turnoverAmount": 56_000_000,
+                        "totalMarketCap": 812_000_000,
+                        "floatMarketCap": 812_000_000,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (data_dir / "market-heatmap-subboards.json").write_text(
+        json.dumps(
+            {
+                "subboards": {
+                    "920123.BJ": {
+                        "sectorName": "美容护理",
+                        "subBoardName": "化妆品",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    def failing_quote_loader(symbols: list[str]) -> HeatmapQuoteSnapshot:
+        raise RuntimeError("network down")
+
+    provider = HeatmapProvider(
+        data_dir=data_dir,
+        quote_loader=failing_quote_loader,
+        summary_loader=_summary_snapshot,
+        now=_fixed_now,
+    )
+
+    response = provider.get_treemap(
+        market="all",
+        period="day",
+        size_mode="turnover",
+        trend="all",
+        board=None,
+        limit=20,
+    )
+    child = response.nodes[0].children[0]
+
+    assert child.price == 12.78
+    assert child.change_pct == 0.79
+    assert child.turnover_cny == 56_000_000
+    assert response.nodes[0].value == 56_000_000
+
+
+def test_heatmap_provider_maps_eastmoney_bj_rows_to_bj_symbols() -> None:
+    provider = HeatmapProvider(
+        baseline_stocks=_baseline(),
+        quote_loader=lambda symbols: _quote_snapshot(),
+        summary_loader=_summary_snapshot,
+        now=_fixed_now,
+    )
+
+    assert provider._symbol_from_eastmoney_row({"f12": "920123", "f13": "0"}) == "920123.BJ"
+    assert provider._symbol_from_eastmoney_row({"f12": "430047", "f13": "0"}) == "430047.BJ"

@@ -31,11 +31,11 @@ QUOTE_CACHE_SECONDS = 8
 SUMMARY_CACHE_SECONDS = 8
 FLAT_THRESHOLD = 0.1
 MARKET_LABELS: dict[HeatmapMarketKey, str] = {
-    "all": "全A",
-    "sse": "沪市",
-    "szse": "深市",
-    "hs300": "沪深300",
-    "zza500": "中证500",
+    "all": "全 A",
+    "sse": "上证 A 股",
+    "szse": "深证 A 股",
+    "hs300": "沪深 300",
+    "zza500": "中证 A500",
     "cyb": "创业板",
     "kcb": "科创板",
 }
@@ -57,6 +57,9 @@ class HeatmapBaselineStock:
     sub_industry: str | None
     circulating_market_cap_cny: float | None
     total_market_cap_cny: float | None
+    fallback_price: float | None = None
+    fallback_change_pct: float | None = None
+    fallback_turnover_cny: float | None = None
 
 
 @dataclass(frozen=True)
@@ -397,7 +400,7 @@ class HeatmapProvider:
         market: HeatmapMarketKey,
         board: str | None,
     ) -> list[HeatmapBaselineStock]:
-        filtered = [stock for stock in stocks if market == "all" or stock.market == market]
+        filtered = [stock for stock in stocks if self._matches_market(stock, market)]
         if board:
             filtered = [stock for stock in filtered if stock.industry == board or stock.sub_industry == board]
         return filtered
@@ -422,6 +425,9 @@ class HeatmapProvider:
                     sub_industry=subboard.get("subBoardName"),
                     circulating_market_cap_cny=_number(row.get("floatMarketCap")),
                     total_market_cap_cny=_number(row.get("totalMarketCap")),
+                    fallback_price=_number(row.get("price")),
+                    fallback_change_pct=_number(row.get("changePct")),
+                    fallback_turnover_cny=_number(row.get("turnoverAmount")),
                 )
             )
         return stocks
@@ -441,10 +447,11 @@ class HeatmapProvider:
         return {symbol: self._fallback_quote_value(by_symbol[symbol]) for symbol in symbols if symbol in by_symbol}
 
     def _fallback_quote_value(self, stock: HeatmapBaselineStock) -> HeatmapQuoteValue:
+        change_pct = stock.fallback_change_pct or 0
         return HeatmapQuoteValue(
-            price=None,
-            changes={"day": 0, "week": 0, "month": 0, "year": 0},
-            turnover_cny=None,
+            price=stock.fallback_price,
+            changes={"day": change_pct, "week": change_pct, "month": change_pct, "year": change_pct},
+            turnover_cny=stock.fallback_turnover_cny,
             quote_time=None,
         )
 
@@ -470,6 +477,16 @@ class HeatmapProvider:
             return change_pct < -FLAT_THRESHOLD
         return True
 
+    def _matches_market(self, stock: HeatmapBaselineStock, market: HeatmapMarketKey) -> bool:
+        if market == "all":
+            return True
+        if market == "hs300":
+            return (stock.total_market_cap_cny or 0) >= 80_000_000_000
+        if market == "zza500":
+            total_cap = stock.total_market_cap_cny or 0
+            return 15_000_000_000 <= total_cap < 80_000_000_000
+        return stock.market == market
+
     def _market_from_symbol(self, symbol: str) -> HeatmapMarketKey:
         code, _, exchange = symbol.partition(".")
         if exchange == "SH" and code.startswith("688"):
@@ -490,7 +507,12 @@ class HeatmapProvider:
     def _symbol_from_eastmoney_row(self, row: dict[str, Any]) -> str:
         code = str(row.get("f12") or "")
         market_id = str(row.get("f13") or "")
-        exchange = "SH" if market_id == "1" else "SZ"
+        if market_id == "1":
+            exchange = "SH"
+        elif code.startswith(("8", "4", "9")):
+            exchange = "BJ"
+        else:
+            exchange = "SZ"
         return f"{code}.{exchange}"
 
     def _quote_time(self, timestamp: Any) -> str | None:

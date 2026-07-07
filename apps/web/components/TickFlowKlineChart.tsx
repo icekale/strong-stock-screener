@@ -2,7 +2,6 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { EChartsOption } from "echarts";
 import type { ForwardRefExoticComponent, RefAttributes } from "react";
 import type {
   KLineChartProps,
@@ -11,13 +10,13 @@ import type {
   KLineDataProvider,
   ThemeConfig,
 } from "kline-charts-react";
-import { buildBrickIndicatorSeries, calculateBrickIndicator } from "../lib/brickIndicator";
 import {
   buildKlineIndicatorOptions,
   buildKlinePanes,
   type KlineMovingAverage,
   type KlineSubIndicator,
 } from "../lib/klineIndicatorLayout";
+import { buildTickFlowOverlayOption } from "../lib/brickIndicator";
 import type { GsgfChartAnnotation, KlineBar } from "../lib/types";
 
 const ReactKLineChart = dynamic(
@@ -207,106 +206,6 @@ export function convertBarsForKlineChart(bars: KlineBar[], symbol: string): Klin
       volume: bar.volume,
     };
   });
-}
-
-function buildTickFlowOverlayOption({
-  annotations,
-  chartData,
-  showGsgfAnnotations,
-  subIndicators,
-}: {
-  annotations: GsgfChartAnnotation[];
-  chartData: KlineData[];
-  showGsgfAnnotations: boolean;
-  subIndicators: KlineSubIndicator[];
-}): EChartsOption {
-  const brickPoints = calculateBrickIndicator(
-    chartData
-      .filter(hasBrickIndicatorPrices)
-      .map((bar) => ({
-        close: bar.close,
-        date: bar.date,
-        high: bar.high,
-        low: bar.low,
-      })),
-  );
-  const brickSeries = buildBrickIndicatorSeries(brickPoints, subIndicators);
-  const enabled = showGsgfAnnotations ? annotations : [];
-  const points = enabled
-    .filter((item) => item.date && item.price !== null && item.price !== undefined)
-    .map((item) => ({
-      coord: [normalizeKlineDate(item.date!), item.price],
-      itemStyle: { color: annotationColor(item.severity) },
-      label: {
-        backgroundColor: annotationColor(item.severity),
-        borderRadius: 3,
-        color: "#ffffff",
-        fontSize: 11,
-        fontWeight: 700,
-        padding: [3, 5],
-      },
-      name: item.label,
-      value: item.label,
-    }));
-  const ranges = enabled
-    .filter((item) => item.start_date && item.end_date)
-    .map((item) => [
-      {
-        itemStyle: { color: annotationAreaColor(item.severity) },
-        name: item.label,
-        xAxis: normalizeKlineDate(item.start_date!),
-      },
-      {
-        xAxis: normalizeKlineDate(item.end_date!),
-      },
-    ]);
-
-  const klineSeries = {
-    markArea: { data: ranges, silent: true },
-    markPoint: {
-      data: points,
-      label: { formatter: "{b}" },
-      symbol: "pin",
-      symbolSize: 52,
-    },
-    name: "K线",
-  };
-
-  return {
-    series: [klineSeries, ...brickSeries] as EChartsOption["series"],
-  };
-}
-
-function hasBrickIndicatorPrices(
-  bar: KlineData,
-): bar is KlineData & { close: number; high: number; low: number } {
-  return bar.close !== null && bar.high !== null && bar.low !== null;
-}
-
-function annotationColor(severity: GsgfChartAnnotation["severity"]): string {
-  if (severity === "positive") {
-    return "#f43f5e";
-  }
-  if (severity === "warning") {
-    return "#f59e0b";
-  }
-  if (severity === "danger") {
-    return "#0f766e";
-  }
-  return "#64748b";
-}
-
-function annotationAreaColor(severity: GsgfChartAnnotation["severity"]): string {
-  if (severity === "positive") {
-    return "rgba(244, 63, 94, 0.07)";
-  }
-  if (severity === "warning") {
-    return "rgba(245, 158, 11, 0.09)";
-  }
-  if (severity === "danger") {
-    return "rgba(15, 118, 110, 0.08)";
-  }
-  return "rgba(100, 116, 139, 0.07)";
 }
 
 function normalizeKlineDate(value: string): string {

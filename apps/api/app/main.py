@@ -1917,6 +1917,7 @@ def _auction_model_service() -> AuctionModelService:
         lookback=settings.auction_model_lookback,
         top_n=settings.auction_model_top_n,
         max_items=settings.auction_model_max_items,
+        max_kline_workers=settings.auction_model_kline_workers,
     )
 
 

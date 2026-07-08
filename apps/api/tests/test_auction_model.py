@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
 from time import sleep
 
 from fastapi.testclient import TestClient
@@ -164,6 +164,30 @@ def test_provider_auction_model_source_skips_candidate_when_kline_fails() -> Non
 
     assert feature_end_date == "2026-07-03"
     assert rows == []
+
+
+def test_build_live_prediction_rows_fetches_provider_klines_concurrently() -> None:
+    kline_provider = SlowCountingKlineProvider()
+    source = ProviderAuctionModelSource(
+        candidate_provider=ManyCandidateProvider(count=4),
+        kline_provider=kline_provider,
+    )
+
+    rows, feature_end_date = build_live_prediction_rows(
+        source,
+        trade_date="2026-07-06",
+        lookback=5,
+        max_kline_workers=4,
+    )
+
+    assert feature_end_date == "2026-07-03"
+    assert kline_provider.max_active >= 2
+    assert [row["symbol"] for row in rows] == [
+        "300001.SZ",
+        "300002.SZ",
+        "300003.SZ",
+        "300004.SZ",
+    ]
 
 
 def test_default_auction_model_service_uses_provider_source_not_free_stockdb(
@@ -535,6 +559,26 @@ class FakeCandidateProvider:
         ]
 
 
+class ManyCandidateProvider:
+    source_name = "many-candidates"
+
+    def __init__(self, count: int) -> None:
+        self.count = count
+
+    def get_candidates(self, trade_date: str) -> list[StrongStockCandidate]:
+        if trade_date != "2026-07-03":
+            return []
+        return [
+            StrongStockCandidate(
+                symbol=f"300{index:03d}.SZ",
+                name=f"模型{index}",
+                circulating_market_cap_cny=5_000_000_000 + index,
+                total_market_cap_cny=8_000_000_000 + index,
+            )
+            for index in range(1, self.count + 1)
+        ]
+
+
 class FakeKlineProvider:
     source_name = "fake-kline"
 
@@ -547,6 +591,32 @@ class FakeKlineProvider:
             KlineBar(date="2026-07-02", open=11.1, high=11.8, low=10.9, close=11.5, volume=15_000_000),
             KlineBar(date="2026-07-03", open=11.6, high=12.4, low=11.4, close=12, volume=16_000_000),
         ][-count:]
+
+
+class SlowCountingKlineProvider:
+    source_name = "slow-counting-kline"
+
+    def __init__(self) -> None:
+        self._lock = Lock()
+        self._active = 0
+        self.max_active = 0
+
+    def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
+        with self._lock:
+            self._active += 1
+            self.max_active = max(self.max_active, self._active)
+        try:
+            sleep(0.05)
+            return [
+                KlineBar(date="2026-06-29", open=10, high=10.5, low=9.8, close=10, volume=12_000_000),
+                KlineBar(date="2026-06-30", open=10.1, high=10.8, low=10, close=10.5, volume=13_000_000),
+                KlineBar(date="2026-07-01", open=10.6, high=11.2, low=10.4, close=11, volume=14_000_000),
+                KlineBar(date="2026-07-02", open=11.1, high=11.8, low=10.9, close=11.5, volume=15_000_000),
+                KlineBar(date="2026-07-03", open=11.6, high=12.4, low=11.4, close=12, volume=16_000_000),
+            ][-count:]
+        finally:
+            with self._lock:
+                self._active -= 1
 
 
 class FailingKlineProvider:
@@ -562,6 +632,7 @@ class FakeAuctionModelSettings:
     auction_model_lookback = 5
     auction_model_top_n = 3
     auction_model_max_items = 50
+    auction_model_kline_workers = 2
 
     def __init__(self, model_path: Path, metadata_path: Path, performance_path: Path) -> None:
         self.auction_model_model_path = model_path

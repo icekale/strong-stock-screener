@@ -151,6 +151,7 @@ class KlineBar(BaseModel):
     high: float
     low: float
     volume: float
+    amount: float | None = None
     ma5: float | None = None
     ma10: float | None = None
     ma20: float | None = None

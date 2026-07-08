@@ -328,6 +328,7 @@ docker compose -f docker-compose.dual.yml up -d --build
 | `STRONG_STOCK_TICKFLOW_BASE_URL` | TickFlow API 地址。 |
 | `STRONG_STOCK_IFIND_API_KEY` | iFinD MCP key。 |
 | `STRONG_STOCK_AUCTION_MODEL_FREE_STOCKDB_BASE_URL` | Windows free-stockdb 服务地址，用于竞价 Top3 模型训练、重训和离线回测数据集构建。 |
+| `STRONG_STOCK_AUCTION_MODEL_KLINE_WORKERS` | 竞价 Top3 重新生成时的日 K 并发读取数，默认 `12`。 |
 | `STRONG_STOCK_DATA_DIR` | 持久化数据目录，容器内建议 `/app/data`。 |
 | `STRONG_STOCK_CORS_ALLOW_ORIGINS` | 允许访问 API 的前端地址。 |
 | `STRONG_STOCK_SCREEN_RUN_RETENTION_COUNT` | 筛选记录保留数量。 |

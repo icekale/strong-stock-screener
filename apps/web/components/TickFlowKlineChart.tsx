@@ -153,7 +153,7 @@ export function convertBarsForKlineChart(bars: KlineBar[], symbol: string): Klin
     const change = previous ? bar.close - previous.close : null;
     const changePercent = previous && previous.close !== 0 ? (change! / previous.close) * 100 : null;
     return {
-      amount: null,
+      amount: bar.amount ?? null,
       change,
       changePercent,
       close: bar.close,

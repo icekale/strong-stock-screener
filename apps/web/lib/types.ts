@@ -1367,6 +1367,7 @@ export type KlineBar = {
   high: number;
   low: number;
   volume: number;
+  amount?: number | null;
   ma5: number | null;
   ma10: number | null;
   ma20: number | null;

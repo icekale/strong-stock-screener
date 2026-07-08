@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 import pickle
+from concurrent.futures import ThreadPoolExecutor
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from threading import Lock
 from typing import Any, Protocol
 
 import httpx
@@ -192,6 +194,7 @@ class ProviderAuctionModelSource:
         self._candidate_provider = candidate_provider
         self._kline_provider = kline_provider
         self._amount_estimated_symbols: set[str] = set()
+        self._amount_estimated_lock = Lock()
 
     def prefetch_daily_window(self, *, feature_end_date: str, lookback: int) -> None:
         _ = (feature_end_date, lookback)
@@ -232,7 +235,8 @@ class ProviderAuctionModelSource:
                 )
             )
         if amount_estimated:
-            self._amount_estimated_symbols.add(symbol)
+            with self._amount_estimated_lock:
+                self._amount_estimated_symbols.add(symbol)
         bars.sort(key=lambda bar: bar.trade_date)
         return bars[-lookback:]
 
@@ -254,6 +258,7 @@ class AuctionModelService:
         lookback: int = 120,
         top_n: int = 3,
         max_items: int = 50,
+        max_kline_workers: int = 1,
     ) -> None:
         self._source = source
         self._model_path = model_path
@@ -262,12 +267,14 @@ class AuctionModelService:
         self._lookback = lookback
         self._top_n = top_n
         self._max_items = max_items
+        self._max_kline_workers = max(1, int(max_kline_workers))
 
     def predict_top3(self, trade_date: str) -> AuctionModelTop3Response:
         rows, feature_end_date = build_live_prediction_rows(
             self._source,
             trade_date=trade_date,
             lookback=self._lookback,
+            max_kline_workers=self._max_kline_workers,
         )
         scored_rows = score_rows_with_model(
             rows,
@@ -314,6 +321,7 @@ def build_live_prediction_rows(
     trade_date: str,
     lookback: int,
     max_calendar_backtrack: int = 14,
+    max_kline_workers: int = 1,
 ) -> tuple[list[dict[str, object]], str]:
     feature_end_date = _previous_feature_date(
         source,
@@ -324,43 +332,78 @@ def build_live_prediction_rows(
     candidates = source.candidate_universe(feature_end_date)
 
     rows: list[dict[str, object]] = []
-    for candidate in candidates:
-        symbol = str(candidate["symbol"])
-        name = str(candidate.get("name", ""))
-        bars = source.daily_bars(symbol, end_date=feature_end_date, lookback=lookback)
-        if len(bars) < 2:
-            continue
-        if any(bar.close <= 0 or bar.volume <= 0 or bar.amount <= 0 for bar in bars[-2:]):
-            continue
-        risk_flags = _candidate_risk_flags(
-            symbol=symbol,
-            name=name,
-            listed_days=int(candidate.get("listed_days", 9999)),
-            is_st=bool(candidate.get("is_st", False)),
-            is_suspended=bool(candidate.get("is_suspended", False)),
-            daily_bars=bars,
+    bounded_workers = max(1, int(max_kline_workers))
+    if bounded_workers == 1 or len(candidates) <= 1:
+        built_rows = (
+            _build_live_prediction_row(
+                source,
+                candidate,
+                trade_date=trade_date,
+                feature_end_date=feature_end_date,
+                lookback=lookback,
+            )
+            for candidate in candidates
         )
-        if risk_flags:
-            continue
-        features = build_feature_row(
-            market_cap_float=_float_or_none(candidate.get("market_cap_float")),
-            daily_bars=bars,
-        )
-        rows.append(
-            {
-                "trade_date": trade_date,
-                "feature_end_date": feature_end_date,
-                "symbol": symbol,
-                "name": name,
-                "features": features,
-                "prev_close_price": bars[-1].close,
-                "market_cap_float": _float_or_none(candidate.get("market_cap_float")),
-                "avg_amount_3d": _average_amount(bars, 3),
-                "risk_flags": risk_flags,
-                "data_quality": _source_data_quality_flags(source, symbol),
-            }
-        )
+    else:
+        workers = min(bounded_workers, len(candidates))
+        with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="auction-model-kline") as executor:
+            built_rows = executor.map(
+                lambda candidate: _build_live_prediction_row(
+                    source,
+                    candidate,
+                    trade_date=trade_date,
+                    feature_end_date=feature_end_date,
+                    lookback=lookback,
+                ),
+                candidates,
+            )
+            rows.extend(row for row in built_rows if row is not None)
+        return rows, feature_end_date
+    rows.extend(row for row in built_rows if row is not None)
     return rows, feature_end_date
+
+
+def _build_live_prediction_row(
+    source: AuctionModelSource,
+    candidate: dict[str, object],
+    *,
+    trade_date: str,
+    feature_end_date: str,
+    lookback: int,
+) -> dict[str, object] | None:
+    symbol = str(candidate["symbol"])
+    name = str(candidate.get("name", ""))
+    bars = source.daily_bars(symbol, end_date=feature_end_date, lookback=lookback)
+    if len(bars) < 2:
+        return None
+    if any(bar.close <= 0 or bar.volume <= 0 or bar.amount <= 0 for bar in bars[-2:]):
+        return None
+    risk_flags = _candidate_risk_flags(
+        symbol=symbol,
+        name=name,
+        listed_days=int(candidate.get("listed_days", 9999)),
+        is_st=bool(candidate.get("is_st", False)),
+        is_suspended=bool(candidate.get("is_suspended", False)),
+        daily_bars=bars,
+    )
+    if risk_flags:
+        return None
+    features = build_feature_row(
+        market_cap_float=_float_or_none(candidate.get("market_cap_float")),
+        daily_bars=bars,
+    )
+    return {
+        "trade_date": trade_date,
+        "feature_end_date": feature_end_date,
+        "symbol": symbol,
+        "name": name,
+        "features": features,
+        "prev_close_price": bars[-1].close,
+        "market_cap_float": _float_or_none(candidate.get("market_cap_float")),
+        "avg_amount_3d": _average_amount(bars, 3),
+        "risk_flags": risk_flags,
+        "data_quality": _source_data_quality_flags(source, symbol),
+    }
 
 
 def prediction_items_from_scored_rows(

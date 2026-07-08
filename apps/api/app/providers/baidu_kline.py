@@ -72,6 +72,7 @@ def parse_baidu_kline_payload(payload: dict[str, Any]) -> list[KlineBar]:
             high=_float(item.get("high")) or 0.0,
             low=_float(item.get("low")) or 0.0,
             volume=_float(item.get("volume")) or 0.0,
+            amount=_float(item.get("amount")),
             ma5=_float(item.get("ma5avgprice")),
             ma10=_float(item.get("ma10avgprice")),
             ma20=_float(item.get("ma20avgprice")),
@@ -86,4 +87,3 @@ def _float(value: object) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
-

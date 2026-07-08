@@ -1534,9 +1534,11 @@ def test_tickflow_daily_kline_provider_maps_1d_payload() -> None:
     bars = provider.get_klines("000636.SZ", count=220)
 
     assert bars == [
-        KlineBar(date="20260610", open=10.0, high=11.5, low=9.8, close=11.0, volume=1000.0),
-        KlineBar(date="20260611", open=11.0, high=12.5, low=10.8, close=12.0, volume=1500.0),
+        KlineBar(date="20260610", open=10.0, high=11.5, low=9.8, close=11.0, volume=1000.0, amount=11000.0),
+        KlineBar(date="20260611", open=11.0, high=12.5, low=10.8, close=12.0, volume=1500.0, amount=18000.0),
     ]
+    assert bars[0].amount == 11000.0
+    assert bars[1].amount == 18000.0
     assert client.last_request is not None
     assert client.last_request["url"] == "https://api.tickflow.org/v1/klines"
     assert client.last_request["params"] == {

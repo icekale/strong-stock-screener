@@ -667,6 +667,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(auctionFeatureSource, /createAuctionModelTop3Job/);
   assert.match(auctionFeatureSource, /getAuctionModelTop3Job/);
   assert.match(auctionFeatureSource, /modelRefreshJob/);
+  assert.match(auctionFeatureSource, /shouldShowPreviewItems = previewItems\.length > 0/);
   assert.doesNotMatch(auctionFeatureSource, /getAuctionModelTop3\\(modelTradeDate, \\{ refresh: true \\}\\)/);
   assert.doesNotMatch(auctionWorkspaceSource, /getAuctionSnapshot\(/);
   assert.match(auctionFeatureSource, /竞价强度榜/);

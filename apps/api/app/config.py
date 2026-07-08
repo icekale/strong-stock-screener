@@ -61,6 +61,7 @@ class Settings(BaseSettings):
     auction_model_lookback: int = Field(default=120, ge=20, le=260)
     auction_model_top_n: int = Field(default=3, ge=1, le=10)
     auction_model_max_items: int = Field(default=50, ge=3, le=200)
+    auction_model_kline_workers: int = Field(default=12, ge=1, le=64)
     auction_model_timeout_seconds: float = Field(default=180, ge=5, le=300)
     auction_top3_record_signal_samples: bool = True
     auction_top3_generate_simulated_trade_samples: bool = False

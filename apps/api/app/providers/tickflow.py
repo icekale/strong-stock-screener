@@ -301,6 +301,12 @@ def parse_tickflow_kline_payload(payload: object) -> list[KlineBar]:
     lengths = {len(value) for value in columns.values() if isinstance(value, list)}
     if len(lengths) != 1:
         raise StrongStockDataUnavailable("TickFlow K线列长度不一致")
+    amount_column = data.get("amount")
+    if amount_column is not None:
+        if not isinstance(amount_column, list):
+            raise StrongStockDataUnavailable("TickFlow K线amount列异常")
+        if len(amount_column) not in lengths:
+            raise StrongStockDataUnavailable("TickFlow K线列长度不一致")
 
     bars: list[KlineBar] = []
     for index in range(lengths.pop() if lengths else 0):
@@ -315,6 +321,11 @@ def parse_tickflow_kline_payload(payload: object) -> list[KlineBar]:
                 low=float(columns["low"][index]),
                 close=close,
                 volume=float(columns["volume"][index]),
+                amount=(
+                    float(amount_column[index])
+                    if isinstance(amount_column, list) and amount_column[index] is not None
+                    else None
+                ),
             )
         )
     return bars

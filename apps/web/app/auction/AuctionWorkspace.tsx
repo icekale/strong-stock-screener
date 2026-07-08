@@ -600,6 +600,7 @@ function AuctionModelTrialPanel({
       : loadingMode === "cache"
         ? "读取缓存中"
         : auctionModelRunStatusText(run);
+  const shouldShowPreviewItems = previewItems.length > 0;
   const shouldShowBody = Boolean(error || loadingMode || run);
   return (
     <section className="mt-2 overflow-hidden rounded-lg border border-[#e3ddd3] bg-white">
@@ -653,12 +654,13 @@ function AuctionModelTrialPanel({
           {error ? <Alert className="mb-2" showIcon title={error} type="warning" /> : null}
           {liveConfirmationError ? <Alert className="mb-2" message={liveConfirmationError} showIcon type="warning" /> : null}
           {loadingMode ? (
-            <div className="rounded-md border border-dashed border-[#e3ddd3] bg-[#faf7f1] px-3 py-2 text-xs font-semibold text-[#7b756d]">
+            <div className="mb-2 rounded-md border border-dashed border-[#e3ddd3] bg-[#faf7f1] px-3 py-2 text-xs font-semibold text-[#7b756d]">
               {loadingMode === "refresh"
                 ? modelRefreshJob?.message || "正在读取候选池和K线，完成后自动读取本地缓存。"
                 : "正在读取本地缓存结果。"}
             </div>
-          ) : previewItems.length ? (
+          ) : null}
+          {shouldShowPreviewItems ? (
             <>
               {backtest ? (
                 <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
@@ -731,7 +733,7 @@ function AuctionModelTrialPanel({
                 })}
               </div>
             </>
-          ) : (
+          ) : loadingMode && !run ? null : (
             <div className="rounded-md border border-dashed border-[#e3ddd3] bg-[#faf7f1] px-3 py-2 text-xs text-[#7b756d]">
               暂无可展示候选，请确认训练数据和交易日。
             </div>

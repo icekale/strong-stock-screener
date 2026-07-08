@@ -1432,6 +1432,26 @@ def test_parse_tencent_quote_payload_extracts_valuation_fields() -> None:
     assert quotes[0].pb == 12.31
 
 
+def test_parse_tencent_quote_payload_extracts_realtime_fields() -> None:
+    values = [""] * 88
+    values[1] = "农业银行"
+    values[2] = "601288"
+    values[3] = "6.16"
+    values[30] = "20260708152807"
+    values[32] = "1.82"
+    values[37] = "270733"
+    payload = f'v_sh601288="{"~".join(values)}";'
+
+    quotes = parse_tencent_quote_payload(payload)
+
+    assert len(quotes) == 1
+    assert quotes[0].symbol == "601288.SH"
+    assert quotes[0].price == 6.16
+    assert quotes[0].pct_change == 1.82
+    assert quotes[0].turnover_cny == 2_707_330_000
+    assert quotes[0].quote_time == "2026-07-08T15:28:07+08:00"
+
+
 def test_tickflow_provider_splits_large_intraday_batch_requests() -> None:
     symbols = [f"{300000 + index:06d}.SZ" for index in range(45)]
     client = FakeIntradayBatchHttpClient(FakeStatusResponse({"data": {}}))

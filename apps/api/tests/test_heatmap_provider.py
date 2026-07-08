@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import httpx
+
 from app.models import HeatmapBoardNode, HeatmapStockNode, HeatmapSummary, HeatmapTreemapResponse
 from app.providers.heatmap import (
     HeatmapBaselineStock,
@@ -221,6 +223,29 @@ class _FakeEastmoneyClient:
         return _FakeEastmoneyResponse(self.rows)
 
     def close(self) -> None:
+        return None
+
+
+class _FakeHeatmapFallbackClient:
+    def __init__(self, tencent_payload: str) -> None:
+        self.tencent_payload = tencent_payload
+
+    def get(self, url: str, *args: object, **kwargs: object) -> object:
+        if "push2.eastmoney.com" in url:
+            raise httpx.RemoteProtocolError("Server disconnected without sending a response.")
+        if "qt.gtimg.cn" in url:
+            return _FakeTencentHeatmapResponse(self.tencent_payload)
+        raise AssertionError(f"unexpected url: {url}")
+
+    def close(self) -> None:
+        return None
+
+
+class _FakeTencentHeatmapResponse:
+    def __init__(self, payload: str) -> None:
+        self.content = payload.encode("gbk")
+
+    def raise_for_status(self) -> None:
         return None
 
 
@@ -479,3 +504,52 @@ def test_heatmap_provider_marks_partial_eastmoney_quotes_stale_and_fills_missing
     assert response.quotes["300475.SZ"].price == 41.5
     assert response.quotes["300475.SZ"].turnover_cny == 35_000_000
     assert any(status.source == "东方财富热图行情" and status.status == "stale" for status in response.source_status)
+
+
+def test_heatmap_provider_falls_back_to_tencent_quotes_when_eastmoney_disconnects() -> None:
+    values = [""] * 88
+    values[1] = "农业银行"
+    values[2] = "601288"
+    values[3] = "6.16"
+    values[30] = "20260708152807"
+    values[32] = "1.82"
+    values[37] = "270733"
+    payload = f'v_sh601288="{"~".join(values)}";'
+    provider = HeatmapProvider(
+        baseline_stocks=[
+            HeatmapBaselineStock(
+                symbol="601288.SH",
+                code="601288",
+                name="农业银行",
+                exchange="SH",
+                market="sse",
+                industry="银行",
+                sub_industry="国有大型银行",
+                circulating_market_cap_cny=2_100_000_000_000,
+                total_market_cap_cny=2_100_000_000_000,
+                fallback_price=7.0,
+                fallback_change_pct=0.0,
+            )
+        ],
+        summary_loader=_summary_snapshot,
+        now=_fixed_now,
+        http_client=_FakeHeatmapFallbackClient(payload),
+    )
+
+    response = provider.get_treemap(
+        market="all",
+        period="day",
+        size_mode="market_cap",
+        trend="all",
+        board=None,
+        limit=20,
+    )
+    child = response.nodes[0].children[0]
+
+    assert child.price == 6.16
+    assert child.change_pct == 1.82
+    assert child.turnover_cny == 2_707_330_000
+    assert child.quote_time == "2026-07-08T15:28:07+08:00"
+    assert any(status.source == "东方财富热图行情" and status.status == "failed" for status in response.source_status)
+    assert any(status.source == "腾讯财经" and status.status == "success" for status in response.source_status)
+    assert not any(status.source == "热图内置样本" for status in response.source_status)

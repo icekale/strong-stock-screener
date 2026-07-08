@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import httpx
 from pydantic import BaseModel
 
@@ -15,15 +18,24 @@ class TencentQuote(BaseModel):
     pe_ttm: float | None = None
     pe_static: float | None = None
     pb: float | None = None
+    pct_change: float | None = None
+    turnover_cny: float | None = None
+    quote_time: str | None = None
 
 
 class TencentQuoteProvider:
     source_name = "腾讯财经"
 
-    def __init__(self, timeout_seconds: float = 10, http_client: object | None = None) -> None:
+    def __init__(
+        self,
+        timeout_seconds: float = 10,
+        http_client: object | None = None,
+        batch_size: int = 180,
+    ) -> None:
         self.timeout_seconds = timeout_seconds
         self._owns_client = http_client is None
         self.http_client = http_client or httpx.Client()
+        self.batch_size = max(1, batch_size)
 
     def close(self) -> None:
         if self._owns_client:
@@ -41,18 +53,21 @@ class TencentQuoteProvider:
         if not prefixed:
             return []
         try:
-            response = self.http_client.get(
-                "https://qt.gtimg.cn/q=" + ",".join(prefixed),
-                headers={"User-Agent": "Mozilla/5.0"},
-                timeout=self.timeout_seconds,
-            )
-            response.raise_for_status()
-            content = getattr(response, "content", None)
-            if isinstance(content, bytes):
-                text = content.decode("gbk", errors="ignore")
-            else:
-                text = getattr(response, "text", "")
-            return parse_tencent_quote_payload(text)
+            quotes: list[TencentQuote] = []
+            for batch in _chunks(prefixed, self.batch_size):
+                response = self.http_client.get(
+                    "https://qt.gtimg.cn/q=" + ",".join(batch),
+                    headers={"User-Agent": "Mozilla/5.0"},
+                    timeout=self.timeout_seconds,
+                )
+                response.raise_for_status()
+                content = getattr(response, "content", None)
+                if isinstance(content, bytes):
+                    text = content.decode("gbk", errors="ignore")
+                else:
+                    text = getattr(response, "text", "")
+                quotes.extend(parse_tencent_quote_payload(text))
+            return quotes
         except StrongStockDataUnavailable:
             raise
         except httpx.HTTPStatusError as exc:
@@ -85,6 +100,9 @@ def parse_tencent_quote_payload(payload: str) -> list[TencentQuote]:
                 pe_ttm=_float_or_none(values[39]),
                 pe_static=_float_or_none(values[52]),
                 pb=_float_or_none(values[46]),
+                pct_change=_float_or_none(values[32]),
+                turnover_cny=_wan_to_cny(values[37]),
+                quote_time=_parse_tencent_quote_time(values[30]),
             )
         )
     return quotes
@@ -144,3 +162,21 @@ def _yi_to_cny(value: str) -> float | None:
     if number is None:
         return None
     return round(number * 100_000_000, 2)
+
+
+def _wan_to_cny(value: str) -> float | None:
+    number = _float_or_none(value)
+    if number is None:
+        return None
+    return round(number * 10_000, 2)
+
+
+def _parse_tencent_quote_time(value: str) -> str | None:
+    text = str(value or "").strip()
+    if len(text) != 14 or not text.isdigit():
+        return None
+    return datetime.strptime(text, "%Y%m%d%H%M%S").replace(tzinfo=ZoneInfo("Asia/Shanghai")).isoformat()
+
+
+def _chunks(values: list[str], size: int) -> list[list[str]]:
+    return [values[index : index + size] for index in range(0, len(values), size)]

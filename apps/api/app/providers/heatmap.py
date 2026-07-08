@@ -25,6 +25,7 @@ from app.models import (
     HeatmapTrendFilter,
     StrongStockSourceStatus,
 )
+from app.providers.tencent_quote import TencentQuoteProvider
 
 
 QUOTE_CACHE_SECONDS = 8
@@ -105,7 +106,9 @@ class HeatmapProvider:
     ) -> None:
         self.data_dir = data_dir or Path(__file__).resolve().parents[1] / "data/heatmap"
         self.baseline_stocks = baseline_stocks or self._load_baseline_stocks()
+        use_default_quote_loader = quote_loader is None
         self.quote_loader = quote_loader or self._fetch_eastmoney_quotes
+        self.quote_fallback_loader = self._fetch_tencent_quotes if use_default_quote_loader else None
         self.summary_loader = summary_loader or self._fetch_summary
         self.timeout_seconds = timeout_seconds
         self.now = now or (lambda: datetime.now(ZoneInfo("Asia/Shanghai")))
@@ -217,24 +220,63 @@ class HeatmapProvider:
         try:
             snapshot = self.quote_loader(symbols)
         except Exception as exc:
-            snapshot = HeatmapQuoteSnapshot(
-                updated_at=self._now_iso(),
-                values=self._fallback_quote_values(symbols),
-                source_status=[
-                    StrongStockSourceStatus(
-                        source="东方财富热图行情",
-                        status="failed",
-                        detail=f"实时行情获取失败: {exc.__class__.__name__}; 使用内置样本",
-                    ),
-                    StrongStockSourceStatus(
-                        source="热图内置样本",
-                        status="stale",
-                        detail="来自 wenyuanw/a-share-heatmap MIT 样本数据，仅用于降级展示",
-                    ),
-                ],
-            )
+            snapshot = self._quote_snapshot_after_primary_failure(symbols, exc)
         self._quote_cache = (now_ts, cache_key, snapshot)
         return snapshot
+
+    def _quote_snapshot_after_primary_failure(
+        self,
+        symbols: list[str],
+        primary_error: Exception,
+    ) -> HeatmapQuoteSnapshot:
+        primary_status = StrongStockSourceStatus(
+            source="东方财富热图行情",
+            status="failed",
+            detail=f"实时行情获取失败: {primary_error.__class__.__name__}; 尝试腾讯财经",
+        )
+        if self.quote_fallback_loader is not None:
+            try:
+                fallback = self.quote_fallback_loader(symbols)
+                return HeatmapQuoteSnapshot(
+                    updated_at=fallback.updated_at,
+                    values=fallback.values,
+                    source_status=[primary_status, *fallback.source_status],
+                )
+            except Exception as fallback_error:
+                return HeatmapQuoteSnapshot(
+                    updated_at=self._now_iso(),
+                    values=self._fallback_quote_values(symbols),
+                    source_status=[
+                        primary_status,
+                        StrongStockSourceStatus(
+                            source="腾讯财经",
+                            status="failed",
+                            detail=f"腾讯财经实时行情获取失败: {fallback_error.__class__.__name__}",
+                        ),
+                        StrongStockSourceStatus(
+                            source="热图内置样本",
+                            status="stale",
+                            detail="来自 wenyuanw/a-share-heatmap MIT 样本数据，仅用于降级展示",
+                        ),
+                    ],
+                )
+
+        return HeatmapQuoteSnapshot(
+            updated_at=self._now_iso(),
+            values=self._fallback_quote_values(symbols),
+            source_status=[
+                StrongStockSourceStatus(
+                    source="东方财富热图行情",
+                    status="failed",
+                    detail=f"实时行情获取失败: {primary_error.__class__.__name__}; 使用内置样本",
+                ),
+                StrongStockSourceStatus(
+                    source="热图内置样本",
+                    status="stale",
+                    detail="来自 wenyuanw/a-share-heatmap MIT 样本数据，仅用于降级展示",
+                ),
+            ],
+        )
 
     def _safe_summary_snapshot(self) -> HeatmapSummarySnapshot:
         now_ts = time.monotonic()
@@ -328,6 +370,54 @@ class HeatmapProvider:
             updated_at=self._now_iso(),
             values=values,
             source_status=statuses,
+        )
+
+    def _fetch_tencent_quotes(self, symbols: list[str]) -> HeatmapQuoteSnapshot:
+        provider = TencentQuoteProvider(
+            timeout_seconds=self.timeout_seconds,
+            http_client=self.http_client,
+            batch_size=180,
+        )
+        quotes = provider.get_quotes(symbols)
+        values: dict[str, HeatmapQuoteValue] = {}
+        for quote in quotes:
+            change_pct = quote.pct_change or 0
+            values[quote.symbol] = HeatmapQuoteValue(
+                price=quote.price,
+                changes={
+                    "day": change_pct,
+                    "week": change_pct,
+                    "month": change_pct,
+                    "year": change_pct,
+                },
+                turnover_cny=quote.turnover_cny,
+                quote_time=quote.quote_time,
+            )
+
+        requested_count = len(set(symbols))
+        returned_count = len(values)
+        if requested_count == 0 or returned_count == requested_count:
+            status = StrongStockSourceStatus(
+                source="腾讯财经",
+                status="success",
+                detail=f"qt.gtimg.cn 返回 {returned_count} 条热图行情",
+            )
+        elif returned_count == 0:
+            status = StrongStockSourceStatus(
+                source="腾讯财经",
+                status="failed",
+                detail=f"腾讯财经未返回报价行 0/{requested_count}，缺失使用样本兜底",
+            )
+        else:
+            status = StrongStockSourceStatus(
+                source="腾讯财经",
+                status="stale",
+                detail=f"腾讯财经部分返回 {returned_count}/{requested_count}，缺失使用样本兜底",
+            )
+        return HeatmapQuoteSnapshot(
+            updated_at=self._now_iso(),
+            values=values,
+            source_status=[status],
         )
 
     def _fetch_summary(self) -> HeatmapSummarySnapshot:

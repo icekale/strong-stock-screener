@@ -36,6 +36,52 @@ def test_gsgf_ranking_prioritizes_confirmed_and_low_buy_over_standalone_b_zone()
     assert [item.symbol for item in ranked] == ["603000.SH", "603001.SH", "603002.SH"]
 
 
+def test_gsgf_ranking_downgrades_confirmation_with_screening_risk_flags() -> None:
+    clean_confirmed = _item(
+        "603010.SH",
+        GsgfAnalysis(
+            total_score=75,
+            final_status="确认买点",
+            zone="a_zone",
+            confirm_type="放量突破确认",
+        ),
+    )
+    risky_confirmed = _item(
+        "603011.SH",
+        GsgfAnalysis(
+            total_score=96,
+            final_status="确认买点",
+            zone="a_zone",
+            confirm_type="放量突破确认",
+        ),
+    ).model_copy(update={"risk_flags": ["下跌日放量"]})
+
+    ranked = sorted([risky_confirmed, clean_confirmed], key=lambda item: _screening_rank_key(item, "gsgf"))
+
+    assert [item.symbol for item in ranked] == ["603010.SH", "603011.SH"]
+
+
+def test_gsgf_screening_risk_overlay_relabels_risky_confirmation() -> None:
+    item = _item(
+        "603012.SH",
+        GsgfAnalysis(
+            total_score=92,
+            final_status="确认买点",
+            action="strong_candidate",
+            zone="a_zone",
+            confirm_type="放量突破确认",
+        ),
+    ).model_copy(update={"risk_flags": ["下跌日放量", "MA5拐头向下"]})
+
+    updated = screener_module._apply_gsgf_screening_risk_overlay(item)
+
+    assert updated.gsgf.final_status == "观察"
+    assert updated.gsgf.action == "wait_trigger"
+    assert updated.gsgf.total_score == 74
+    assert "下跌日放量" in updated.gsgf.risk_flags
+    assert "确认信号降级" in "\n".join(updated.gsgf.explanation)
+
+
 def test_gsgf_screening_reports_funnel_and_keeps_b_zone_in_observation_pool(monkeypatch) -> None:
     monkeypatch.setattr(screener_module, "analyze_screening_item", fake_analyze_screening_item)
     screener = StrongStockScreener(
@@ -71,6 +117,8 @@ def test_gsgf_screening_reports_funnel_and_keeps_b_zone_in_observation_pool(monk
     assert funnel.volume_breakout_count == 1
     assert funnel.hard_risk_filtered_count == 0
     assert funnel.final_displayed_count == 2
+    assert result.source_status[-1].status == "failed"
+    assert "603003.SH 风险股份" in result.source_status[-1].detail
 
 
 def _item(symbol: str, gsgf: GsgfAnalysis) -> StrongStockScreeningItem:

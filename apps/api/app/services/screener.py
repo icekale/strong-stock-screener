@@ -18,6 +18,7 @@ from app.models import (
 from app.providers.watchlist import WatchlistSnapshot
 from app.rules import analyze_screening_item, analyze_watchlist_risk
 from app.providers.news_risk import NegativeNewsRisk
+from app.services.gsgf_trade_plan import build_gsgf_trade_plan
 
 
 class ScreeningFilters(Protocol):
@@ -99,12 +100,14 @@ class StrongStockScreener:
         items: list[StrongStockScreeningItem] = []
         observation_items: list[StrongStockScreeningItem] = []
         failures = 0
+        failed_candidates: list[str] = []
         kdj_filtered = 0
         for candidate in candidates_to_scan:
             try:
                 bars = self.kline_provider.get_klines(candidate.symbol, count=220)
             except Exception:
                 failures += 1
+                failed_candidates.append(f"{candidate.symbol} {candidate.name}")
                 continue
             funnel.kline_success_count += 1
             item = analyze_screening_item(candidate, bars, trade_date=trade_date)
@@ -114,11 +117,12 @@ class StrongStockScreener:
             if not _passes_kdj_filter(item, filters):
                 kdj_filtered += 1
                 continue
-            enriched_item = _apply_candidate_risk_checks(
+            checked_item = _apply_candidate_risk_checks(
                 _apply_industry_strength(item, industry_context),
                 candidate=candidate,
                 news_risk_provider=self.news_risk_provider,
             )
+            enriched_item = _apply_gsgf_screening_risk_overlay(checked_item)
             _count_gsgf_signal(funnel, enriched_item)
             if _is_gsgf_observation_item(enriched_item):
                 observation_items.append(enriched_item)
@@ -138,7 +142,7 @@ class StrongStockScreener:
                 StrongStockSourceStatus(
                     source=self.kline_provider.source_name,
                     status="failed",
-                    detail=f"{failures} 只股票K线获取失败",
+                    detail=_kline_failure_detail(failures, failed_candidates),
                 )
             )
         else:
@@ -310,11 +314,11 @@ def _strong_rank_key(item: StrongStockScreeningItem) -> tuple[int, int, str]:
     return (focus_rank, -item.score, item.symbol)
 
 
-def _gsgf_rank_key(item: StrongStockScreeningItem) -> tuple[int, int, int, int, int, str]:
+def _gsgf_rank_key(item: StrongStockScreeningItem) -> tuple[int, int, int, int, int, int, str]:
     gsgf = item.gsgf
     if gsgf is None:
-        return (1, 99, 99, 99, 99, item.symbol)
-    hard_risk = 1 if _has_gsgf_hard_risk(item) else 0
+        return (1, 99, 99, 99, 99, 0, item.symbol)
+    hard_risk = 1 if _has_gsgf_hard_risk(item) or _has_screening_hard_risk(item) else 0
     status_rank = _gsgf_status_rank(gsgf.final_status)
     confirm_rank = 0 if gsgf.confirm_type == "放量突破确认" else 1 if gsgf.confirm_type else 2
     zone_rank = 0 if gsgf.zone == "a_zone" else 1 if gsgf.zone == "b_zone_a_point" else 2
@@ -354,6 +358,64 @@ def _has_gsgf_hard_risk(item: StrongStockScreeningItem) -> bool:
     )
 
 
+def _has_screening_hard_risk(item: StrongStockScreeningItem) -> bool:
+    return bool(_screening_hard_risk_reasons(item))
+
+
+def _apply_gsgf_screening_risk_overlay(item: StrongStockScreeningItem) -> StrongStockScreeningItem:
+    gsgf = item.gsgf
+    if gsgf is None or not gsgf.confirm_type:
+        return item
+    reasons = _screening_hard_risk_reasons(item)
+    if not reasons:
+        return item
+
+    next_score = max(0, gsgf.total_score - 18)
+    next_status = "减仓" if item.negative_news_status == "triggered" else "观察"
+    next_action = "avoid" if next_status == "减仓" else "wait_trigger"
+    note = f"确认信号降级：{'、'.join(reasons[:3])}"
+    updated_gsgf = gsgf.model_copy(
+        update={
+            "total_score": next_score,
+            "action": next_action,
+            "final_status": next_status,
+            "risk_flags": _dedupe([*gsgf.risk_flags, *reasons]),
+            "explanation": _dedupe([*gsgf.explanation, note]),
+        }
+    )
+    updated_gsgf = updated_gsgf.model_copy(update={"trade_plan": build_gsgf_trade_plan(updated_gsgf)})
+    return item.model_copy(update={"gsgf": updated_gsgf})
+
+
+def _screening_hard_risk_reasons(item: StrongStockScreeningItem) -> list[str]:
+    hard_flags = {"下跌日放量", "阴线实体不弱", "MA5拐头向下"}
+    reasons = [flag for flag in item.risk_flags if flag in hard_flags]
+    if item.negative_news_status == "triggered":
+        reasons.extend(item.negative_news_flags[:2] or ["负面新闻触发"])
+    if item.severe_abnormal_warning == "triggered":
+        reasons.append("异常风险触发")
+    return _dedupe(reasons)
+
+
+def _kline_failure_detail(failures: int, failed_candidates: list[str]) -> str:
+    if not failed_candidates:
+        return f"{failures} 只股票K线获取失败"
+    shown = "、".join(failed_candidates[:10])
+    hidden = failures - len(failed_candidates[:10])
+    suffix = f"，另 {hidden} 只" if hidden > 0 else ""
+    return f"{failures} 只股票K线获取失败：{shown}{suffix}"
+
+
+def _dedupe(values: list[str]) -> list[str]:
+    output: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if value and value not in seen:
+            seen.add(value)
+            output.append(value)
+    return output
+
+
 def _count_gsgf_signal(funnel: GsgfFunnelDiagnostics, item: StrongStockScreeningItem) -> None:
     gsgf = item.gsgf
     if gsgf is None:
@@ -391,7 +453,7 @@ def _gsgf_observation_rank_key(item: StrongStockScreeningItem) -> tuple[int, int
 
 def _sort_version(strategy: ScreenStrategy) -> str:
     if strategy == "gsgf":
-        return "gsgf-sort-v1"
+        return "gsgf-sort-v2"
     if strategy == "combined":
         return "combined-sort-v1"
     return "strong-sort-v1"

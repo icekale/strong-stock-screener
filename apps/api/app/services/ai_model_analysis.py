@@ -139,9 +139,11 @@ def _auction_top3_findings(packet: ModelMaintenancePacket) -> list[str]:
         profit = training.get("simulated_profit_summary")
         return_pct = profit.get("cumulative_return_pct") if isinstance(profit, dict) else None
         suffix = f"，模拟收益 {_number_text(return_pct)}%" if isinstance(return_pct, int | float) else ""
+        quality_note = _first_text(training.get("quality_notes"))
+        note_suffix = f"；{quality_note}" if quality_note else ""
         findings.append(
             "竞价 Top3训练：训练样本 "
-            f"{signal_count}，模拟交易 {simulated_count}，人工样本 {manual_count}{suffix}。"
+            f"{signal_count}，模拟交易 {simulated_count}，人工样本 {manual_count}{suffix}{note_suffix}。"
         )
 
     return findings
@@ -230,6 +232,14 @@ def _suggestion_from_payload(payload: dict[str, Any]) -> ModelMaintenanceSuggest
 
 def _safe_list(value: Any) -> list[Any]:
     return value if isinstance(value, list) else []
+
+
+def _first_text(value: Any) -> str:
+    for item in _safe_list(value):
+        text = str(item).strip()
+        if text:
+            return text
+    return ""
 
 
 def _int_value(value: Any) -> int:

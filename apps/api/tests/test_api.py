@@ -2596,7 +2596,7 @@ def test_screen_run_accepts_gsgf_strategy_and_returns_metadata(tmp_path: Path) -
     payload = response.json()
     assert payload["strategy"] == "gsgf"
     assert payload["gsgf_model_version"] == "gsgf-v2"
-    assert payload["sort_version"] == "gsgf-sort-v1"
+    assert payload["sort_version"] == "gsgf-sort-v2"
     assert payload["gsgf_funnel"]["candidate_pool_count"] >= len(payload["items"])
     assert "final_displayed_count" in payload["gsgf_funnel"]
     assert "gsgf_observation_items" in payload

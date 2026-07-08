@@ -267,6 +267,32 @@ def test_offline_ai_report_mentions_auction_top3_training_status() -> None:
     assert "模拟收益 1.8%" in findings
 
 
+def test_offline_ai_report_surfaces_auction_top3_missing_cache_and_samples() -> None:
+    packet = ModelMaintenancePacket(
+        packet_id="packet-top3-missing",
+        trade_date="2026-07-06",
+        review_summary={"record_count": 12, "buckets": []},
+        model_sections={
+            "auction_top3": {
+                "available": False,
+                "notes": ["竞价 Top3 无缓存，本次未纳入模型维护。"],
+            },
+            "auction_top3_training": {
+                "signal_sample_count": 0,
+                "simulated_trade_sample_count": 0,
+                "manual_trade_sample_count": 0,
+                "quality_notes": ["暂无竞价 Top3 信号样本"],
+            },
+        },
+    )
+
+    report = build_offline_model_maintenance_report(packet)
+
+    findings = "\n".join(report.key_findings)
+    assert "竞价 Top3 无缓存" in findings
+    assert "暂无竞价 Top3 信号样本" in findings
+
+
 def test_model_maintenance_api_generates_packet_and_report(tmp_path: Path) -> None:
     app.state.runs_dir = tmp_path
     client = TestClient(app)

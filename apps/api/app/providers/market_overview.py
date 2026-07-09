@@ -609,6 +609,26 @@ class EastmoneyMarketOverviewProvider:
                     detail=f"补齐 {patched}/{len(missing_symbols)} 只排行股票行业",
                 )
             )
+            missing_symbols = _dedupe_symbols(
+                item.symbol
+                for item in [*pct_change_rank, *turnover_rank]
+                if item.symbol and not item.industry
+            )
+            if not missing_symbols:
+                return source_status
+        try:
+            industry_by_symbol = self._fetch_eastmoney_f10_industries_by_symbols(missing_symbols)
+        except Exception:
+            industry_by_symbol = {}
+        patched = _patch_rank_industries(pct_change_rank, turnover_rank, industry_by_symbol)
+        if patched:
+            source_status.append(
+                StrongStockSourceStatus(
+                    source="东方财富F10行业补充",
+                    status="success",
+                    detail=f"补齐 {patched}/{len(missing_symbols)} 只排行股票行业",
+                )
+            )
         return source_status
 
     def get_stock_industries(self, symbols: list[str]) -> dict[str, str]:
@@ -643,6 +663,12 @@ class EastmoneyMarketOverviewProvider:
         if missing_symbols:
             try:
                 output.update(self._fetch_heatmap_baseline_industries_by_symbols(missing_symbols))
+            except Exception:
+                pass
+        missing_symbols = [symbol for symbol in missing_symbols if symbol not in output]
+        if missing_symbols:
+            try:
+                output.update(self._fetch_eastmoney_f10_industries_by_symbols(missing_symbols))
             except Exception:
                 pass
         return output
@@ -717,6 +743,24 @@ class EastmoneyMarketOverviewProvider:
             for symbol in _dedupe_symbols(symbols)
             if symbol in self._heatmap_baseline_industry_map_cache
         }
+
+    def _fetch_eastmoney_f10_industries_by_symbols(self, symbols: list[str]) -> dict[str, str]:
+        output: dict[str, str] = {}
+        for symbol in _dedupe_symbols(symbols):
+            code = _eastmoney_f10_code(symbol)
+            if not code:
+                continue
+            response = self.http_client.get(
+                "https://emweb.securities.eastmoney.com/PC_HSF10/CompanySurvey/PageAjax",
+                params={"code": code},
+                headers={"User-Agent": USER_AGENT},
+                timeout=min(self.timeout_seconds, 4),
+            )
+            response.raise_for_status()
+            industry = _eastmoney_f10_industry(response.json())
+            if industry:
+                output[symbol] = industry
+        return output
 
     def _fetch_direct_limit_down_count(self, date: str) -> int:
         response = self.http_client.get(
@@ -1464,6 +1508,39 @@ def _eastmoney_stock_secid(symbol: object) -> str:
     if exchange == "SH":
         return f"1.{code}"
     return ""
+
+
+def _eastmoney_f10_code(symbol: object) -> str:
+    text = str(symbol or "").strip().upper()
+    if "." not in text:
+        text = _eastmoney_stock_symbol(text)
+    if not text or "." not in text:
+        return ""
+    code, exchange = text.split(".", 1)
+    if len(code) != 6 or not code.isdigit() or exchange not in {"SH", "SZ", "BJ"}:
+        return ""
+    return f"{exchange}{code}"
+
+
+def _eastmoney_f10_industry(payload: object) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    rows = payload.get("jbzl")
+    if not isinstance(rows, list) or not rows:
+        return None
+    row = rows[0]
+    if not isinstance(row, dict):
+        return None
+    em2016 = _text(row.get("EM2016"))
+    if em2016:
+        parts = [part.strip() for part in em2016.replace("—", "-").split("-") if part.strip()]
+        if parts:
+            return parts[-1]
+    industry_csrc = _text(row.get("INDUSTRYCSRC1"))
+    if not industry_csrc:
+        return None
+    parts = [part.strip() for part in industry_csrc.replace("—", "-").split("-") if part.strip()]
+    return parts[-1] if parts else industry_csrc
 
 
 def _patch_rank_industries(

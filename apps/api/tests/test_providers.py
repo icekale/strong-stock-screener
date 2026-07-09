@@ -294,6 +294,28 @@ class FakeTickFlowHeatmapBaselineRankingQuoteProvider:
         return [quote_map[symbol] for symbol in symbols if symbol in quote_map]
 
 
+class FakeTickFlowEastmoneyF10RankingQuoteProvider:
+    source_name = "TickFlow"
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+        self.universe_calls: list[str] = []
+
+    def get_quotes(self, symbols: list[str]) -> list[TickFlowQuote]:
+        self.calls.append(symbols)
+        return self._quotes_for_symbols(symbols)
+
+    def get_quotes_by_universe(self, universe: str) -> list[TickFlowQuote]:
+        self.universe_calls.append(universe)
+        return self._quotes_for_symbols(["688727.SH"])
+
+    def _quotes_for_symbols(self, symbols: list[str]) -> list[TickFlowQuote]:
+        quote_map = {
+            "688727.SH": TickFlowQuote(symbol="688727.SH", name="恒坤新材", last_price=141.0, pct_change=12.5, turnover_cny=2_000_000_000, turnover_rate=55.0, quote_time="2026-07-09T09:30:24+08:00"),
+        }
+        return [quote_map[symbol] for symbol in symbols if symbol in quote_map]
+
+
 class FakeIfindIndexProvider:
     def __init__(self, payload: object | None = None, error: Exception | None = None) -> None:
         self.payload = payload
@@ -376,6 +398,28 @@ class PartialThsIndustryFallbackHttpClient(FailingAshareIndustryHttpClient):
                 [
                     {"symbol": "300001.SZ", "name": "创业一", "industries": ["机械设备", "机器人", "机器人零部件"]},
                 ]
+            )
+        return super().get(url, **kwargs)
+
+
+class EastmoneyF10IndustryFallbackHttpClient(FailingAshareIndustryHttpClient):
+    def get(self, url: str, **kwargs: object) -> FakeResponse:
+        params = kwargs.get("params", {})
+        if (
+            "CompanySurvey/PageAjax" in url
+            and isinstance(params, dict)
+            and params.get("code") == "SH688727"
+        ):
+            return FakeResponse(
+                {
+                    "jbzl": [
+                        {
+                            "SECUCODE": "688727.SH",
+                            "SECURITY_NAME_ABBR": "恒坤新材",
+                            "EM2016": "电子设备-半导体-半导体材料",
+                        }
+                    ]
+                }
             )
         return super().get(url, **kwargs)
 
@@ -917,6 +961,27 @@ def test_market_overview_provider_supplements_missing_industries_from_heatmap_ba
         status.source == "热力图行业基准"
         and status.status == "success"
         and "补齐 3/3" in status.detail
+        for status in rankings.source_status
+    )
+
+
+def test_market_overview_provider_supplements_new_listing_industry_from_eastmoney_f10() -> None:
+    quote_provider = FakeTickFlowEastmoneyF10RankingQuoteProvider()
+    ifind_provider = FakeIfindIndustryProvider({})
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=EastmoneyF10IndustryFallbackHttpClient(),
+        realtime_quote_provider=quote_provider,
+        ifind_stock_provider=ifind_provider,
+    )
+
+    rankings = provider.get_market_rankings(limit=1, batch_size=1)
+
+    assert rankings.pct_change_rank[0].symbol == "688727.SH"
+    assert rankings.pct_change_rank[0].industry == "半导体材料"
+    assert any(
+        status.source == "东方财富F10行业补充"
+        and status.status == "success"
+        and "补齐 1/1" in status.detail
         for status in rankings.source_status
     )
 

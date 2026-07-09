@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -915,7 +915,9 @@ class EastmoneyMarketOverviewProvider:
         previous_dates = [
             cached_date
             for cached_date, record in records.items()
-            if cached_date < trade_date and _number(record.get("turnover_cny")) is not None
+            if cached_date < trade_date
+            and _number(record.get("turnover_cny")) is not None
+            and _is_complete_turnover_record(cached_date, record.get("updated_at"))
         ]
         if not previous_dates:
             return None
@@ -943,6 +945,8 @@ class EastmoneyMarketOverviewProvider:
             if turnover_cny is None or turnover_cny <= 0:
                 continue
             updated_at = _text(payload.get("generated_at"))
+            if not _is_complete_turnover_record(snapshot_date, updated_at):
+                continue
             candidates.append((snapshot_date, turnover_cny, updated_at))
         if not candidates:
             return None
@@ -1319,6 +1323,41 @@ def _date_from_quote_time(value: object) -> str | None:
     try:
         normalized = text.replace("Z", "+00:00")
         return datetime.fromisoformat(normalized).astimezone(ZoneInfo("Asia/Shanghai")).date().isoformat()
+    except ValueError:
+        return None
+
+
+def _is_complete_turnover_record(trade_date: str, updated_at: object) -> bool:
+    updated_time = _datetime_from_iso(updated_at)
+    if updated_time is None:
+        return False
+    trade_day = _date_from_iso(trade_date)
+    if trade_day is None:
+        return False
+    local_time = updated_time.astimezone(ZoneInfo("Asia/Shanghai"))
+    if local_time.date() > trade_day:
+        return True
+    return local_time.date() == trade_day and local_time.hour >= 15
+
+
+def _datetime_from_iso(value: object) -> datetime | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+    return parsed
+
+
+def _date_from_iso(value: object) -> date | None:
+    try:
+        return datetime.fromisoformat(str(value)).date()
     except ValueError:
         return None
 

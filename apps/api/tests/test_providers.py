@@ -270,6 +270,30 @@ class FakeTickFlowRankingQuoteProvider:
         return [quote_map[symbol] for symbol in symbols if symbol in quote_map]
 
 
+class FakeTickFlowHeatmapBaselineRankingQuoteProvider:
+    source_name = "TickFlow"
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+        self.universe_calls: list[str] = []
+
+    def get_quotes(self, symbols: list[str]) -> list[TickFlowQuote]:
+        self.calls.append(symbols)
+        return self._quotes_for_symbols(symbols)
+
+    def get_quotes_by_universe(self, universe: str) -> list[TickFlowQuote]:
+        self.universe_calls.append(universe)
+        return self._quotes_for_symbols(["002632.SZ", "002829.SZ", "301396.SZ"])
+
+    def _quotes_for_symbols(self, symbols: list[str]) -> list[TickFlowQuote]:
+        quote_map = {
+            "002632.SZ": TickFlowQuote(symbol="002632.SZ", name="道明光学", last_price=9.15, pct_change=9.98, turnover_cny=76_440_015, turnover_rate=1.45, quote_time="2026-07-09T09:30:24+08:00"),
+            "002829.SZ": TickFlowQuote(symbol="002829.SZ", name="星网宇达", last_price=17.73, pct_change=9.99, turnover_cny=35_931_606, turnover_rate=1.39, quote_time="2026-07-09T09:30:24+08:00"),
+            "301396.SZ": TickFlowQuote(symbol="301396.SZ", name="宏景科技", last_price=270.26, pct_change=5.16, turnover_cny=133_733_885, turnover_rate=0.34, quote_time="2026-07-09T09:30:24+08:00"),
+        }
+        return [quote_map[symbol] for symbol in symbols if symbol in quote_map]
+
+
 class FakeIfindIndexProvider:
     def __init__(self, payload: object | None = None, error: Exception | None = None) -> None:
         self.payload = payload
@@ -868,6 +892,29 @@ def test_market_overview_provider_continues_industry_supplement_after_partial_th
     )
     assert any(
         status.source == "iFinD 行业补充"
+        and status.status == "success"
+        and "补齐 3/3" in status.detail
+        for status in rankings.source_status
+    )
+
+
+def test_market_overview_provider_supplements_missing_industries_from_heatmap_baseline() -> None:
+    quote_provider = FakeTickFlowHeatmapBaselineRankingQuoteProvider()
+    ifind_provider = FakeIfindIndustryProvider({})
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FailingAshareIndustryHttpClient(),
+        realtime_quote_provider=quote_provider,
+        ifind_stock_provider=ifind_provider,
+    )
+
+    rankings = provider.get_market_rankings(limit=3, batch_size=2)
+
+    assert len(ifind_provider.calls) == 1
+    assert set(ifind_provider.calls[0]) == {"002632.SZ", "002829.SZ", "301396.SZ"}
+    assert [item.industry for item in rankings.pct_change_rank] == ["航天装备", "塑料", "IT服务"]
+    assert rankings.turnover_rank[0].industry == "IT服务"
+    assert any(
+        status.source == "热力图行业基准"
         and status.status == "success"
         and "补齐 3/3" in status.detail
         for status in rankings.source_status

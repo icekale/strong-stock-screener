@@ -21,6 +21,7 @@ from app.models import (
     SectorRadarResponse,
     StrongStockSourceStatus,
 )
+from app.providers.heatmap import HeatmapProvider
 
 
 INDEX_SECIDS = ("1.000001", "0.399001", "0.899050")
@@ -69,6 +70,7 @@ class EastmoneyMarketOverviewProvider:
         self.http_client = http_client or httpx.Client()
         self._a_share_realtime_rows_cache: list[dict[str, Any]] | None = None
         self._ths_industry_map_cache: dict[str, str] | None = None
+        self._heatmap_baseline_industry_map_cache: dict[str, str] | None = None
 
     def close(self) -> None:
         if self._owns_client:
@@ -567,26 +569,46 @@ class EastmoneyMarketOverviewProvider:
                     detail=f"{len(missing_symbols)} 只排行股票缺少行业，未配置 iFinD 行业补充源",
                 )
             )
-            return source_status
+        else:
+            try:
+                industry_by_symbol = self.ifind_stock_provider.get_stock_industries(missing_symbols)
+            except Exception as exc:
+                source_status.append(
+                    StrongStockSourceStatus(
+                        source="iFinD 行业补充",
+                        status="failed",
+                        detail=f"{len(missing_symbols)} 只排行股票缺少行业，补充失败: {exc.__class__.__name__}",
+                    )
+                )
+            else:
+                unique_patched = _patch_rank_industries(pct_change_rank, turnover_rank, industry_by_symbol)
+                source_status.append(
+                    StrongStockSourceStatus(
+                        source="iFinD 行业补充",
+                        status="success" if unique_patched else "stale",
+                        detail=f"补齐 {unique_patched}/{len(missing_symbols)} 只排行股票行业",
+                    )
+                )
+                missing_symbols = _dedupe_symbols(
+                    item.symbol
+                    for item in [*pct_change_rank, *turnover_rank]
+                    if item.symbol and not item.industry
+                )
+                if not missing_symbols:
+                    return source_status
         try:
-            industry_by_symbol = self.ifind_stock_provider.get_stock_industries(missing_symbols)
-        except Exception as exc:
+            industry_by_symbol = self._fetch_heatmap_baseline_industries_by_symbols(missing_symbols)
+        except Exception:
+            industry_by_symbol = {}
+        patched = _patch_rank_industries(pct_change_rank, turnover_rank, industry_by_symbol)
+        if patched:
             source_status.append(
                 StrongStockSourceStatus(
-                    source="iFinD 行业补充",
-                    status="failed",
-                    detail=f"{len(missing_symbols)} 只排行股票缺少行业，补充失败: {exc.__class__.__name__}",
+                    source="热力图行业基准",
+                    status="success",
+                    detail=f"补齐 {patched}/{len(missing_symbols)} 只排行股票行业",
                 )
             )
-            return source_status
-        unique_patched = _patch_rank_industries(pct_change_rank, turnover_rank, industry_by_symbol)
-        source_status.append(
-            StrongStockSourceStatus(
-                source="iFinD 行业补充",
-                status="success" if unique_patched else "stale",
-                detail=f"补齐 {unique_patched}/{len(missing_symbols)} 只排行股票行业",
-            )
-        )
         return source_status
 
     def get_stock_industries(self, symbols: list[str]) -> dict[str, str]:
@@ -615,6 +637,12 @@ class EastmoneyMarketOverviewProvider:
         ):
             try:
                 output.update(self.ifind_stock_provider.get_stock_industries(missing_symbols))
+            except Exception:
+                pass
+        missing_symbols = [symbol for symbol in missing_symbols if symbol not in output]
+        if missing_symbols:
+            try:
+                output.update(self._fetch_heatmap_baseline_industries_by_symbols(missing_symbols))
             except Exception:
                 pass
         return output
@@ -673,6 +701,21 @@ class EastmoneyMarketOverviewProvider:
             symbol: self._ths_industry_map_cache[symbol]
             for symbol in _dedupe_symbols(symbols)
             if symbol in self._ths_industry_map_cache
+        }
+
+    def _fetch_heatmap_baseline_industries_by_symbols(self, symbols: list[str]) -> dict[str, str]:
+        if self._heatmap_baseline_industry_map_cache is None:
+            provider = HeatmapProvider(http_client=self.http_client)
+            mapping: dict[str, str] = {}
+            for stock in provider.baseline_stocks:
+                industry = _text(stock.sub_industry) or _text(stock.industry)
+                if stock.symbol and industry and industry != "未分类":
+                    mapping[stock.symbol] = industry
+            self._heatmap_baseline_industry_map_cache = mapping
+        return {
+            symbol: self._heatmap_baseline_industry_map_cache[symbol]
+            for symbol in _dedupe_symbols(symbols)
+            if symbol in self._heatmap_baseline_industry_map_cache
         }
 
     def _fetch_direct_limit_down_count(self, date: str) -> int:

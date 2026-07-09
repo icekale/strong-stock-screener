@@ -93,6 +93,10 @@ def _fixed_now() -> datetime:
     return datetime(2026, 7, 7, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
 
 
+def _fixed_next_day() -> datetime:
+    return datetime(2026, 7, 8, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+
 def _baseline() -> list[HeatmapBaselineStock]:
     return [
         HeatmapBaselineStock(
@@ -201,6 +205,37 @@ def _summary_snapshot() -> HeatmapSummarySnapshot:
         turnover_cny=270_000_000,
         previous_turnover_cny=300_000_000,
         source_status=[{"source": "fake summary", "status": "success", "detail": "ok"}],
+    )
+
+
+def _summary_snapshot_for(date: str) -> HeatmapSummarySnapshot:
+    return HeatmapSummarySnapshot(
+        trade_date=date,
+        updated_at=f"{date}T10:30:00+08:00",
+        advance_count=None,
+        decline_count=None,
+        unchanged_count=None,
+        turnover_cny=None,
+        previous_turnover_cny=None,
+        source_status=[],
+    )
+
+
+def _quote_snapshot_with_turnover(turnovers: dict[str, float]) -> HeatmapQuoteSnapshot:
+    baseline_by_symbol = {stock.symbol: stock for stock in _baseline()}
+    return HeatmapQuoteSnapshot(
+        updated_at="2026-07-08T10:30:00+08:00",
+        values={
+            symbol: HeatmapQuoteValue(
+                price=10,
+                changes={"day": 1, "week": 1, "month": 1, "year": 1},
+                turnover_cny=turnover,
+                quote_time="2026-07-08T10:30:00+08:00",
+            )
+            for symbol, turnover in turnovers.items()
+            if symbol in baseline_by_symbol
+        },
+        source_status=[{"source": "fake quotes", "status": "success", "detail": "ok"}],
     )
 
 
@@ -553,3 +588,87 @@ def test_heatmap_provider_falls_back_to_tencent_quotes_when_eastmoney_disconnect
     assert any(status.source == "东方财富热图行情" and status.status == "failed" for status in response.source_status)
     assert any(status.source == "腾讯财经" and status.status == "success" for status in response.source_status)
     assert not any(status.source == "热图内置样本" for status in response.source_status)
+
+
+def test_heatmap_provider_caches_full_market_turnover_for_next_trade_day(tmp_path: Path) -> None:
+    cache_path = tmp_path / "heatmap-turnover.json"
+    cache_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "records": {
+                    "2026-07-07": {
+                        "turnover_cny": 300_000_000,
+                        "updated_at": "2026-07-07T15:00:00+08:00",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    provider = HeatmapProvider(
+        baseline_stocks=_baseline(),
+        quote_loader=lambda symbols: _quote_snapshot_with_turnover(
+            {
+                "603690.SH": 120_000_000,
+                "300475.SZ": 90_000_000,
+                "600000.SH": 240_000_000,
+            }
+        ),
+        summary_loader=lambda: _summary_snapshot_for("2026-07-08"),
+        now=_fixed_next_day,
+        turnover_cache_path=cache_path,
+    )
+
+    response = provider.get_treemap(
+        market="all",
+        period="day",
+        size_mode="market_cap",
+        trend="all",
+        board=None,
+        limit=20,
+    )
+
+    assert response.summary.turnover_cny == 450_000_000
+    assert response.summary.previous_turnover_cny == 300_000_000
+    assert response.summary.turnover_change_pct == 50
+    cached = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert cached["records"]["2026-07-08"]["turnover_cny"] == 450_000_000
+
+
+def test_heatmap_provider_does_not_compare_filtered_turnover_to_full_market_cache(tmp_path: Path) -> None:
+    cache_path = tmp_path / "heatmap-turnover.json"
+    cache_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "records": {
+                    "2026-07-07": {
+                        "turnover_cny": 300_000_000,
+                        "updated_at": "2026-07-07T15:00:00+08:00",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    provider = HeatmapProvider(
+        baseline_stocks=_baseline(),
+        quote_loader=lambda symbols: _quote_snapshot_with_turnover({"603690.SH": 120_000_000}),
+        summary_loader=lambda: _summary_snapshot_for("2026-07-08"),
+        now=_fixed_next_day,
+        turnover_cache_path=cache_path,
+    )
+
+    response = provider.get_treemap(
+        market="all",
+        period="day",
+        size_mode="market_cap",
+        trend="all",
+        board="半导体",
+        limit=20,
+    )
+
+    assert response.summary.turnover_cny == 120_000_000
+    assert response.summary.previous_turnover_cny is None
+    assert response.summary.turnover_change_pct is None

@@ -2660,7 +2660,10 @@ def _concept_provider() -> object:
 def _heatmap_provider() -> HeatmapProvider:
     provider = getattr(app.state, "heatmap_provider", None)
     if provider is None:
-        provider = HeatmapProvider()
+        settings = get_settings()
+        provider = HeatmapProvider(
+            turnover_cache_path=settings.data_dir / "heatmap" / "turnover-history.json"
+        )
         app.state.heatmap_provider = provider
     return provider
 
@@ -2696,11 +2699,14 @@ def _market_overview_provider() -> object:
     if injected is not None:
         return injected
     settings = _effective_settings()
+    base_settings = get_settings()
     return EastmoneyMarketOverviewProvider(
         timeout_seconds=settings.provider_timeout_seconds,
         realtime_quote_provider=_quote_provider(),
         ifind_index_provider=_ifind_provider(),
         ifind_stock_provider=_ifind_provider(),
+        turnover_cache_path=base_settings.data_dir / "market-overview" / "turnover-history.json",
+        sentiment_snapshot_dir=base_settings.data_dir / "sentiment_snapshots",
     )
 
 

@@ -1,3 +1,6 @@
+import json
+from pathlib import Path
+
 from app.models import KlineBar, StrongStockDataUnavailable
 from app.providers.baidu_kline import parse_baidu_kline_payload
 from app.providers.concept_blocks import _concept_tags_from_payload
@@ -215,6 +218,13 @@ class FakeMarketOverviewHttpClient:
                 }
             )
         raise AssertionError(f"unexpected url: {url}")
+
+
+class FailingIndexAmountHistoryHttpClient(FakeMarketOverviewHttpClient):
+    def get(self, url: str, **kwargs: object) -> FakeResponse:
+        if "stock/kline/get" in url:
+            raise RuntimeError("index history down")
+        return super().get(url, **kwargs)
 
 
 class FakeTickFlowIndexQuoteProvider:
@@ -446,6 +456,94 @@ def test_market_overview_falls_back_to_tickflow_realtime_turnover() -> None:
     assert overview.source_status[0].status == "failed"
     assert overview.source_status[1].source == "TickFlow 实时指数"
     assert overview.source_status[1].status == "success"
+
+
+def test_market_overview_uses_cached_turnover_when_index_history_fails(tmp_path: Path) -> None:
+    cache_path = tmp_path / "market-overview-turnover.json"
+    cache_path.write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "records": {
+                    "2026-06-25": {
+                        "turnover_cny": 3_000_000_000_000,
+                        "updated_at": "2026-06-25T15:00:00+08:00",
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    quote_provider = FakeTickFlowIndexQuoteProvider(
+        quotes=[
+            TickFlowQuote(symbol="000001.SH", turnover_cny=1_600_000_000_000, quote_time="1782457209000"),
+            TickFlowQuote(symbol="399001.SZ", turnover_cny=1_900_000_000_000, quote_time="1782457203000"),
+            TickFlowQuote(symbol="899050.BJ", turnover_cny=20_000_000_000, quote_time="1782457212000"),
+        ]
+    )
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FailingIndexAmountHistoryHttpClient(),
+        realtime_quote_provider=quote_provider,
+        ifind_index_provider=FakeIfindIndexProvider(error=RuntimeError("ifind down")),
+        turnover_cache_path=cache_path,
+    )
+
+    overview = provider.get_overview()
+
+    assert overview.trade_date == "2026-06-26"
+    assert overview.turnover.total_cny == 3_520_000_000_000
+    assert overview.turnover.previous_total_cny == 3_000_000_000_000
+    assert overview.turnover.change_cny == 520_000_000_000
+    assert overview.turnover.change_pct == 17.33
+    assert any(
+        status.source == "本地成交额缓存" and status.status == "success"
+        for status in overview.source_status
+    )
+    cached = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert cached["records"]["2026-06-26"]["turnover_cny"] == 3_520_000_000_000
+
+
+def test_market_overview_backfills_previous_turnover_from_sentiment_snapshot(tmp_path: Path) -> None:
+    snapshot_dir = tmp_path / "sentiment_snapshots"
+    snapshot_day_dir = snapshot_dir / "2026-06-25"
+    snapshot_day_dir.mkdir(parents=True)
+    (snapshot_day_dir / "summary.json").write_text(
+        json.dumps(
+            {
+                "trade_date": "2026-06-25",
+                "generated_at": "2026-06-25T15:05:00+08:00",
+                "metrics": {"turnover_cny": 3_000_000_000_000},
+            }
+        ),
+        encoding="utf-8",
+    )
+    quote_provider = FakeTickFlowIndexQuoteProvider(
+        quotes=[
+            TickFlowQuote(symbol="000001.SH", turnover_cny=1_600_000_000_000, quote_time="1782457209000"),
+            TickFlowQuote(symbol="399001.SZ", turnover_cny=1_900_000_000_000, quote_time="1782457203000"),
+            TickFlowQuote(symbol="899050.BJ", turnover_cny=20_000_000_000, quote_time="1782457212000"),
+        ]
+    )
+    cache_path = tmp_path / "market-overview" / "turnover-history.json"
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FailingIndexAmountHistoryHttpClient(),
+        realtime_quote_provider=quote_provider,
+        ifind_index_provider=FakeIfindIndexProvider(error=RuntimeError("ifind down")),
+        turnover_cache_path=cache_path,
+        sentiment_snapshot_dir=snapshot_dir,
+    )
+
+    overview = provider.get_overview()
+
+    assert overview.turnover.previous_total_cny == 3_000_000_000_000
+    assert overview.turnover.change_pct == 17.33
+    assert any(
+        status.source == "历史情绪快照" and status.status == "success"
+        for status in overview.source_status
+    )
+    cached = json.loads(cache_path.read_text(encoding="utf-8"))
+    assert cached["records"]["2026-06-25"]["turnover_cny"] == 3_000_000_000_000
+    assert cached["records"]["2026-06-26"]["turnover_cny"] == 3_520_000_000_000
 
 
 def test_market_overview_uses_tickflow_display_indices_before_eastmoney() -> None:

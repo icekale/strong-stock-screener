@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 from fastapi.testclient import TestClient
 
-from app.main import app
+from app.main import _heatmap_provider, app
 from app.models import (
     HeatmapBoardNode,
     HeatmapOverviewItem,
@@ -147,3 +147,13 @@ def test_heatmap_quotes_and_overview_endpoints_return_source_status() -> None:
     assert overview.status_code == 200
     assert overview.json()["markets"][0]["market"] == "all"
     assert overview.json()["source_status"][0]["status"] == "success"
+
+
+def test_default_heatmap_provider_uses_data_dir_for_turnover_cache() -> None:
+    if hasattr(app.state, "heatmap_provider"):
+        del app.state.heatmap_provider
+
+    provider = _heatmap_provider()
+
+    assert provider.turnover_cache_path is not None
+    assert provider.turnover_cache_path.name == "turnover-history.json"

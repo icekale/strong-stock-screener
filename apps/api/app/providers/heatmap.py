@@ -30,6 +30,7 @@ from app.providers.tencent_quote import TencentQuoteProvider
 
 QUOTE_CACHE_SECONDS = 8
 SUMMARY_CACHE_SECONDS = 8
+TURNOVER_CACHE_RECORD_LIMIT = 80
 FLAT_THRESHOLD = 0.1
 MARKET_LABELS: dict[HeatmapMarketKey, str] = {
     "all": "全 A",
@@ -103,6 +104,7 @@ class HeatmapProvider:
         timeout_seconds: float = 8,
         now: Callable[[], datetime] | None = None,
         http_client: httpx.Client | None = None,
+        turnover_cache_path: Path | None = None,
     ) -> None:
         self.data_dir = data_dir or Path(__file__).resolve().parents[1] / "data/heatmap"
         self.baseline_stocks = baseline_stocks or self._load_baseline_stocks()
@@ -114,6 +116,7 @@ class HeatmapProvider:
         self.now = now or (lambda: datetime.now(ZoneInfo("Asia/Shanghai")))
         self._owns_client = http_client is None
         self.http_client = http_client or httpx.Client()
+        self.turnover_cache_path = turnover_cache_path
         self._quote_cache: tuple[float, tuple[str, ...], HeatmapQuoteSnapshot] | None = None
         self._summary_cache: tuple[float, HeatmapSummarySnapshot] | None = None
 
@@ -137,7 +140,14 @@ class HeatmapProvider:
         nodes = [node for node in nodes if self._matches_trend(node.change_pct, trend)]
         boards = self._build_board_nodes(nodes, limit)
         turnover_cny = self._summary_turnover(nodes, market, trend, board, summary_snapshot)
-        previous_turnover_cny = summary_snapshot.previous_turnover_cny if nodes else None
+        previous_turnover_cny = self._previous_turnover_cny_for_request(
+            market=market,
+            trend=trend,
+            board=board,
+            summary_snapshot=summary_snapshot,
+            turnover_cny=turnover_cny,
+            has_nodes=bool(nodes),
+        )
 
         return HeatmapTreemapResponse(
             market=market,
@@ -528,6 +538,89 @@ class HeatmapProvider:
         if market == "all" and trend == "all" and board is None:
             return summary_snapshot.turnover_cny
         return 0
+
+    def _previous_turnover_cny_for_request(
+        self,
+        *,
+        market: HeatmapMarketKey,
+        trend: HeatmapTrendFilter,
+        board: str | None,
+        summary_snapshot: HeatmapSummarySnapshot,
+        turnover_cny: float | None,
+        has_nodes: bool,
+    ) -> float | None:
+        if not has_nodes or not self._is_full_market_turnover_request(market, trend, board):
+            return None
+
+        trade_date = summary_snapshot.trade_date or self.now().date().isoformat()
+        previous_turnover_cny = self._cached_previous_turnover_cny(trade_date)
+        if previous_turnover_cny is None:
+            previous_turnover_cny = summary_snapshot.previous_turnover_cny
+        self._store_turnover_cache(trade_date, turnover_cny, summary_snapshot.updated_at)
+        return previous_turnover_cny
+
+    def _is_full_market_turnover_request(
+        self,
+        market: HeatmapMarketKey,
+        trend: HeatmapTrendFilter,
+        board: str | None,
+    ) -> bool:
+        return market == "all" and trend == "all" and board is None
+
+    def _cached_previous_turnover_cny(self, trade_date: str | None) -> float | None:
+        if not trade_date:
+            return None
+        records = self._load_turnover_cache_records()
+        previous_dates = [
+            cached_date
+            for cached_date, record in records.items()
+            if cached_date < trade_date and _number(record.get("turnover_cny")) is not None
+        ]
+        if not previous_dates:
+            return None
+        previous_date = max(previous_dates)
+        return _number(records[previous_date].get("turnover_cny"))
+
+    def _store_turnover_cache(
+        self,
+        trade_date: str | None,
+        turnover_cny: float | None,
+        updated_at: str | None,
+    ) -> None:
+        if self.turnover_cache_path is None or not trade_date or turnover_cny is None or turnover_cny <= 0:
+            return
+
+        records = self._load_turnover_cache_records()
+        records[trade_date] = {
+            "turnover_cny": round(float(turnover_cny), 2),
+            "updated_at": updated_at or self._now_iso(),
+        }
+        kept_dates = sorted(records)[-TURNOVER_CACHE_RECORD_LIMIT:]
+        payload = {
+            "version": 1,
+            "records": {cached_date: records[cached_date] for cached_date in kept_dates},
+        }
+
+        self.turnover_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = self.turnover_cache_path.with_suffix(f"{self.turnover_cache_path.suffix}.tmp")
+        temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        temp_path.replace(self.turnover_cache_path)
+
+    def _load_turnover_cache_records(self) -> dict[str, dict[str, Any]]:
+        if self.turnover_cache_path is None or not self.turnover_cache_path.exists():
+            return {}
+        try:
+            payload = json.loads(self.turnover_cache_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        records = payload.get("records")
+        if not isinstance(records, dict):
+            return {}
+        return {
+            str(trade_date): record
+            for trade_date, record in records.items()
+            if isinstance(record, dict)
+        }
 
     def _load_baseline_stocks(self) -> list[HeatmapBaselineStock]:
         heatmap_path = self.data_dir / "market-heatmap-fallback.json"

@@ -11,6 +11,7 @@ from app.main import (
     MARKET_RANKINGS_CACHE,
     SECTOR_INTRADAY_CACHE,
     SECTOR_RADAR_CACHE,
+    _market_overview_provider,
     app,
     _refresh_sector_theme_rows,
     shutdown_auction_sampler,
@@ -1520,6 +1521,26 @@ def test_market_overview_returns_full_a_share_metrics(tmp_path: Path) -> None:
     assert payload["sectors"][0]["name"] == "存储芯片"
     assert payload["sectors"][0]["source"] == "东方财富行业板块"
     assert payload["source_status"][0]["source"] == "东方财富全A指数"
+
+
+def test_default_market_overview_provider_uses_data_dir_for_turnover_cache() -> None:
+    original = getattr(app.state, "market_overview_provider", None)
+    had_original = hasattr(app.state, "market_overview_provider")
+    if had_original:
+        del app.state.market_overview_provider
+
+    try:
+        provider = _market_overview_provider()
+
+        assert provider.turnover_cache_path is not None
+        assert provider.turnover_cache_path.name == "turnover-history.json"
+        assert provider.sentiment_snapshot_dir is not None
+        assert provider.sentiment_snapshot_dir.name == "sentiment_snapshots"
+    finally:
+        if had_original:
+            app.state.market_overview_provider = original
+        elif hasattr(app.state, "market_overview_provider"):
+            del app.state.market_overview_provider
 
 
 def test_short_term_sentiment_archive_persists_decision(tmp_path: Path) -> None:

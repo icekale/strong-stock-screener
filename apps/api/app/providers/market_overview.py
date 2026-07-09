@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -38,6 +39,7 @@ DISPLAY_INDEX_NAMES = {
 }
 A_SHARE_STOCK_LIST_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
 THS_INDUSTRIES_URL = "https://files.688798.xyz/ths/industries.json"
+TURNOVER_CACHE_RECORD_LIMIT = 80
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
@@ -54,11 +56,15 @@ class EastmoneyMarketOverviewProvider:
         realtime_quote_provider: object | None = None,
         ifind_index_provider: object | None = None,
         ifind_stock_provider: object | None = None,
+        turnover_cache_path: Path | None = None,
+        sentiment_snapshot_dir: Path | None = None,
     ) -> None:
         self.timeout_seconds = timeout_seconds
         self.realtime_quote_provider = realtime_quote_provider
         self.ifind_index_provider = ifind_index_provider
         self.ifind_stock_provider = ifind_stock_provider
+        self.turnover_cache_path = turnover_cache_path
+        self.sentiment_snapshot_dir = sentiment_snapshot_dir
         self._owns_client = http_client is None
         self.http_client = http_client or httpx.Client()
         self._a_share_realtime_rows_cache: list[dict[str, Any]] | None = None
@@ -221,12 +227,7 @@ class EastmoneyMarketOverviewProvider:
             previous_total = _number(history.get("previous_total_cny"))
             if previous_total is not None:
                 turnover.previous_total_cny = round(previous_total, 2)
-            if turnover.total_cny is not None and turnover.previous_total_cny:
-                turnover.change_cny = round(turnover.total_cny - turnover.previous_total_cny, 2)
-                turnover.change_pct = round(
-                    turnover.change_cny / turnover.previous_total_cny * 100,
-                    2,
-                )
+            self._apply_turnover_change(turnover)
             source_status.append(
                 StrongStockSourceStatus(
                     source="东方财富指数日K",
@@ -242,6 +243,20 @@ class EastmoneyMarketOverviewProvider:
                     detail=f"昨日成交额获取失败: {exc.__class__.__name__}",
                 )
             )
+        if turnover.previous_total_cny is None:
+            previous_turnover_record = self._previous_turnover_cny_record(trade_date)
+            if previous_turnover_record is not None:
+                previous_total, source, detail = previous_turnover_record
+                turnover.previous_total_cny = round(previous_total, 2)
+                self._apply_turnover_change(turnover)
+                source_status.append(
+                    StrongStockSourceStatus(
+                        source=source,
+                        status="success",
+                        detail=detail,
+                    )
+                )
+        self._store_turnover_cache(trade_date, turnover.total_cny)
 
         try:
             sectors = self._fetch_sector_strength(limit=20)
@@ -874,6 +889,102 @@ class EastmoneyMarketOverviewProvider:
             "trade_date": max(trade_dates) if trade_dates else None,
             "latest_total_cny": latest_total,
             "previous_total_cny": previous_total,
+        }
+
+    def _apply_turnover_change(self, turnover: MarketTurnoverSummary) -> None:
+        if turnover.total_cny is None or not turnover.previous_total_cny:
+            return
+        turnover.change_cny = round(turnover.total_cny - turnover.previous_total_cny, 2)
+        turnover.change_pct = round(turnover.change_cny / turnover.previous_total_cny * 100, 2)
+
+    def _previous_turnover_cny_record(self, trade_date: str | None) -> tuple[float, str, str] | None:
+        cached_turnover = self._cached_previous_turnover_cny(trade_date)
+        if cached_turnover is not None:
+            return cached_turnover, "本地成交额缓存", "使用上一缓存交易日成交额用于昨日对比"
+        snapshot_turnover = self._snapshot_previous_turnover_cny(trade_date)
+        if snapshot_turnover is None:
+            return None
+        snapshot_date, turnover_cny, updated_at = snapshot_turnover
+        self._store_turnover_cache(snapshot_date, turnover_cny, updated_at=updated_at)
+        return turnover_cny, "历史情绪快照", "使用上一情绪快照成交额用于昨日对比"
+
+    def _cached_previous_turnover_cny(self, trade_date: str | None) -> float | None:
+        if not trade_date:
+            return None
+        records = self._load_turnover_cache_records()
+        previous_dates = [
+            cached_date
+            for cached_date, record in records.items()
+            if cached_date < trade_date and _number(record.get("turnover_cny")) is not None
+        ]
+        if not previous_dates:
+            return None
+        previous_date = max(previous_dates)
+        return _number(records[previous_date].get("turnover_cny"))
+
+    def _snapshot_previous_turnover_cny(self, trade_date: str | None) -> tuple[str, float, str | None] | None:
+        if not trade_date or self.sentiment_snapshot_dir is None or not self.sentiment_snapshot_dir.exists():
+            return None
+        candidates: list[tuple[str, float, str | None]] = []
+        for summary_path in self.sentiment_snapshot_dir.glob("*/summary.json"):
+            snapshot_date = summary_path.parent.name
+            if snapshot_date >= trade_date:
+                continue
+            try:
+                payload = json.loads(summary_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            metrics = payload.get("metrics")
+            if not isinstance(metrics, dict):
+                continue
+            turnover_cny = _number(metrics.get("turnover_cny"))
+            if turnover_cny is None or turnover_cny <= 0:
+                continue
+            updated_at = _text(payload.get("generated_at"))
+            candidates.append((snapshot_date, turnover_cny, updated_at))
+        if not candidates:
+            return None
+        return max(candidates, key=lambda item: item[0])
+
+    def _store_turnover_cache(
+        self,
+        trade_date: str | None,
+        turnover_cny: float | None,
+        updated_at: str | None = None,
+    ) -> None:
+        if self.turnover_cache_path is None or not trade_date or turnover_cny is None or turnover_cny <= 0:
+            return
+        records = self._load_turnover_cache_records()
+        records[trade_date] = {
+            "turnover_cny": round(float(turnover_cny), 2),
+            "updated_at": updated_at or datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(timespec="seconds"),
+        }
+        kept_dates = sorted(records)[-TURNOVER_CACHE_RECORD_LIMIT:]
+        payload = {
+            "version": 1,
+            "records": {cached_date: records[cached_date] for cached_date in kept_dates},
+        }
+        self.turnover_cache_path.parent.mkdir(parents=True, exist_ok=True)
+        temp_path = self.turnover_cache_path.with_suffix(f"{self.turnover_cache_path.suffix}.tmp")
+        temp_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True), encoding="utf-8")
+        temp_path.replace(self.turnover_cache_path)
+
+    def _load_turnover_cache_records(self) -> dict[str, dict[str, Any]]:
+        if self.turnover_cache_path is None or not self.turnover_cache_path.exists():
+            return {}
+        try:
+            payload = json.loads(self.turnover_cache_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return {}
+        records = payload.get("records")
+        if not isinstance(records, dict):
+            return {}
+        return {
+            str(trade_date): record
+            for trade_date, record in records.items()
+            if isinstance(record, dict)
         }
 
     def _fetch_sector_strength(self, limit: int) -> list[MarketSectorStrengthItem]:

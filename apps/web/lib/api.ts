@@ -39,6 +39,9 @@ import type {
   ScreenRunFilters,
   ScreenRunJobState,
   ScreenStrategy,
+  SectorReplicaMode,
+  SectorReplicaRadarResponse,
+  SectorReplicaStocksResponse,
   SectorRadarResponse,
   SectorWorkbenchMode,
   SectorWorkbenchResponse,
@@ -342,6 +345,63 @@ export async function getSectorWorkbenchStatus(tradeDate?: string | null): Promi
     throw new Error(`读取板块采样状态失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<SectorWorkbenchStatusResponse>;
+}
+
+export async function getSectorReplicaRadar(
+  options: {
+    mode?: SectorReplicaMode;
+    selected?: string[];
+    limit?: number;
+    stockLimit?: number;
+  } = {},
+): Promise<SectorReplicaRadarResponse> {
+  const params = new URLSearchParams();
+  if (options.mode) {
+    params.set("mode", options.mode);
+  }
+  if (options.selected?.length) {
+    params.set("selected", options.selected.join(","));
+  }
+  if (options.limit) {
+    params.set("limit", String(options.limit));
+  }
+  if (options.stockLimit) {
+    params.set("stock_limit", String(options.stockLimit));
+  }
+  const suffix = params.toString();
+  const response = await fetch(`${API_BASE_URL}/api/sectors/replica/radar${suffix ? `?${suffix}` : ""}`);
+  if (!response.ok) {
+    throw new Error(`读取短线侠兼容板块雷达失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SectorReplicaRadarResponse>;
+}
+
+export async function getSectorReplicaBoardStocks(
+  boardCode: string,
+  options: {
+    mode?: SectorReplicaMode;
+    subTheme?: string | null;
+    limit?: number;
+  } = {},
+): Promise<SectorReplicaStocksResponse> {
+  const params = new URLSearchParams();
+  if (options.mode) {
+    params.set("mode", options.mode);
+  }
+  if (options.subTheme) {
+    params.set("sub_theme", options.subTheme);
+  }
+  if (options.limit) {
+    params.set("limit", String(options.limit));
+  }
+  const suffix = params.toString();
+  const response = await fetch(
+    `${API_BASE_URL}/api/sectors/replica/boards/${encodeURIComponent(boardCode)}/stocks${suffix ? `?${suffix}` : ""}`,
+  );
+  if (!response.ok) {
+    throw new Error(`读取板块成分股失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SectorReplicaStocksResponse>;
 }
 
 export async function getPlateRotationReference(

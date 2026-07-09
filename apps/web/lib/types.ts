@@ -806,6 +806,73 @@ export type SectorWorkbenchStatusResponse = {
   generated_at: string;
 };
 
+export type SectorReplicaMode = "strength" | "main_flow";
+
+export type SectorReplicaPlate = {
+  code: string;
+  name: string;
+  val: number;
+  ztcount: number;
+  display_value: string | null;
+};
+
+export type SectorReplicaChartSeries = {
+  name: string;
+  type: "line";
+  data: Array<number | null>;
+  smooth: boolean;
+  showSymbol: boolean;
+};
+
+export type SectorReplicaQxLive = {
+  Aaxis: string[];
+  zflist: number[];
+  series: Record<string, Array<number | null>>;
+};
+
+export type SectorReplicaStockRow = {
+  symbol: string;
+  code: string;
+  name: string | null;
+  pct_change: number | null;
+  turnover_cny: number | null;
+  circulating_value_cny: number | null;
+  board_label: string;
+  auction_pct_change: number | null;
+  auction_amount_cny: number | null;
+  auction_volume_ratio: number | null;
+  buy_ratio_pct: number | null;
+  seal_amount_cny: number | null;
+  leader_tag: string | null;
+  themes: string[];
+  industry: string | null;
+  compat_row: unknown[];
+};
+
+export type SectorReplicaStocksResponse = {
+  board_code: string | null;
+  sub_theme: string | null;
+  rows: SectorReplicaStockRow[];
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
+export type SectorReplicaRadarResponse = {
+  result: "success";
+  mode: SectorReplicaMode;
+  trade_date: string | null;
+  axis: string[];
+  qxlive: SectorReplicaQxLive;
+  plates: SectorReplicaPlate[];
+  checkplate: string[];
+  legend: string[];
+  series: SectorReplicaChartSeries[];
+  stocks: SectorReplicaStockRow[];
+  related_tags: string[];
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+};
+
 export type PlateRotationSource = "kaipan" | "ths";
 
 export type PlateRotationThemeItem = {

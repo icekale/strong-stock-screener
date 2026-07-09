@@ -16,6 +16,7 @@ SectorWorkbenchMode = Literal["strength", "main_flow"]
 SectorWorkbenchScope = Literal["theme", "industry"]
 SectorWorkbenchScopeRequest = Literal["theme", "industry", "auto"]
 SectorFlowStatus = Literal["direct", "estimated", "unavailable"]
+SectorReplicaMode = Literal["strength", "main_flow"]
 IndustryStrength = Literal["strong", "neutral", "weak"]
 RiskCheckStatus = Literal["triggered", "clear", "unknown"]
 GsgfAction = Literal["strong_candidate", "watch_candidate", "wait_trigger", "avoid"]
@@ -1035,6 +1036,75 @@ class SectorWorkbenchResponse(BaseModel):
     series: list[SectorWorkbenchSeries] = Field(default_factory=list)
     related_tags: list[str] = Field(default_factory=list)
     stocks: list[SectorWorkbenchStock] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
+class SectorReplicaPlate(BaseModel):
+    code: str
+    name: str
+    val: float
+    ztcount: int = 0
+    display_value: str | None = None
+
+
+class SectorReplicaChartSeries(BaseModel):
+    name: str
+    type: str = "line"
+    data: list[float | None] = Field(default_factory=list)
+    smooth: bool = True
+    showSymbol: bool = False
+
+
+class SectorReplicaQxLive(BaseModel):
+    Aaxis: list[str] = Field(default_factory=list)
+    zflist: list[float] = Field(default_factory=list)
+    series: dict[str, list[float | None]] = Field(default_factory=dict)
+
+
+class SectorReplicaStockRow(BaseModel):
+    symbol: str
+    code: str
+    name: str | None = None
+    pct_change: float | None = None
+    turnover_cny: float | None = None
+    circulating_value_cny: float | None = None
+    board_label: str = "--"
+    auction_pct_change: float | None = None
+    auction_amount_cny: float | None = None
+    auction_volume_ratio: float | None = None
+    buy_ratio_pct: float | None = None
+    seal_amount_cny: float | None = None
+    leader_tag: str | None = None
+    themes: list[str] = Field(default_factory=list)
+    industry: str | None = None
+    compat_row: list[Any] = Field(default_factory=list)
+
+
+class SectorReplicaStocksResponse(BaseModel):
+    board_code: str | None = None
+    sub_theme: str | None = None
+    rows: list[SectorReplicaStockRow] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+
+class SectorReplicaRadarResponse(BaseModel):
+    result: str = "success"
+    mode: SectorReplicaMode
+    trade_date: str | None = None
+    axis: list[str] = Field(default_factory=list)
+    qxlive: SectorReplicaQxLive = Field(default_factory=SectorReplicaQxLive)
+    plates: list[SectorReplicaPlate] = Field(default_factory=list)
+    checkplate: list[str] = Field(default_factory=list)
+    legend: list[str] = Field(default_factory=list)
+    series: list[SectorReplicaChartSeries] = Field(default_factory=list)
+    stocks: list[SectorReplicaStockRow] = Field(default_factory=list)
+    related_tags: list[str] = Field(default_factory=list)
     source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
     generated_at: str = Field(
         default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")

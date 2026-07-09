@@ -57,11 +57,30 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   const sectorsPageSource = existsSync(sectorsPageUrl) ? readFileSync(sectorsPageUrl, "utf8") : "";
   const sectorsWorkspaceUrl = new URL("../app/sectors/SectorPageWorkspace.tsx", import.meta.url);
   const sectorsWorkspaceSource = existsSync(sectorsWorkspaceUrl) ? readFileSync(sectorsWorkspaceUrl, "utf8") : "";
-  const sectorsFlowUrl = new URL("../app/sectors/SectorFlowWorkspace.tsx", import.meta.url);
-  const sectorsFlowSource = existsSync(sectorsFlowUrl) ? readFileSync(sectorsFlowUrl, "utf8") : "";
-  const sectorsThemeUrl = new URL("../app/sectors/SectorThemeWorkbench.tsx", import.meta.url);
-  const sectorsThemeSource = existsSync(sectorsThemeUrl) ? readFileSync(sectorsThemeUrl, "utf8") : "";
-  const sectorsFeatureSource = [sectorsPageSource, sectorsWorkspaceSource, sectorsFlowSource, sectorsThemeSource].join("\n");
+  const sectorsReplicaWorkspaceUrl = new URL("../app/sectors/SectorReplicaWorkspace.tsx", import.meta.url);
+  const sectorsReplicaWorkspaceSource = existsSync(sectorsReplicaWorkspaceUrl)
+    ? readFileSync(sectorsReplicaWorkspaceUrl, "utf8")
+    : "";
+  const sectorsReplicaPanelUrl = new URL("../app/sectors/SectorReplicaPanel.tsx", import.meta.url);
+  const sectorsReplicaPanelSource = existsSync(sectorsReplicaPanelUrl)
+    ? readFileSync(sectorsReplicaPanelUrl, "utf8")
+    : "";
+  const sectorsReplicaUtilsUrl = new URL("./sectorReplica.ts", import.meta.url);
+  const sectorsReplicaUtilsSource = existsSync(sectorsReplicaUtilsUrl)
+    ? readFileSync(sectorsReplicaUtilsUrl, "utf8")
+    : "";
+  const sectorsReplicaChartUrl = new URL("./sectorReplicaChartOption.ts", import.meta.url);
+  const sectorsReplicaChartSource = existsSync(sectorsReplicaChartUrl)
+    ? readFileSync(sectorsReplicaChartUrl, "utf8")
+    : "";
+  const sectorsFeatureSource = [
+    sectorsPageSource,
+    sectorsWorkspaceSource,
+    sectorsReplicaWorkspaceSource,
+    sectorsReplicaPanelSource,
+    sectorsReplicaUtilsSource,
+    sectorsReplicaChartSource,
+  ].join("\n");
   const auctionPageUrl = new URL("../app/auction/page.tsx", import.meta.url);
   const auctionPageSource = existsSync(auctionPageUrl) ? readFileSync(auctionPageUrl, "utf8") : "";
   const auctionWorkspaceUrl = new URL("../app/auction/AuctionWorkspace.tsx", import.meta.url);
@@ -609,42 +628,48 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(typesSource, /SectorWorkbenchStock/);
   assert.match(typesSource, /PlateRotationReferenceResponse/);
   assert.match(typesSource, /PlateRotationThemeItem/);
+  assert.match(typesSource, /SectorReplicaRadarResponse/);
+  assert.match(typesSource, /SectorReplicaStocksResponse/);
+  assert.match(typesSource, /SectorReplicaStockRow/);
   assert.match(apiSource, /getSectorWorkbench/);
   assert.match(apiSource, /getSectorWorkbenchStatus/);
   assert.match(apiSource, /getPlateRotationReference/);
   assert.match(apiSource, /\/api\/sectors\/plate-reference/);
-  assert.match(sectorsFeatureSource, /行业强度工作台/);
-  assert.match(sectorsFeatureSource, /短线题材参考榜/);
-  assert.match(sectorsFeatureSource, /PlateReferencePanel/);
-  assert.match(sectorsFeatureSource, /SectorThemeWorkbench/);
-  assert.match(sectorsFeatureSource, /getSectorWorkbench/);
-  assert.match(sectorsFeatureSource, /getSectorWorkbenchStatus/);
-  assert.match(sectorsFeatureSource, /scope: "industry"/);
-  assert.match(sectorsFeatureSource, /行业多选/);
-  assert.match(sectorsFeatureSource, /采样状态/);
-  assert.match(sectorsFeatureSource, /缓存点/);
-  assert.match(sectorsFeatureSource, /可信度/);
+  assert.match(apiSource, /getSectorReplicaRadar/);
+  assert.match(apiSource, /getSectorReplicaBoardStocks/);
+  assert.match(apiSource, /\/api\/sectors\/replica\/radar/);
+  assert.match(apiSource, /\/api\/sectors\/replica\/boards/);
+  assert.match(sectorsFeatureSource, /SectorReplicaWorkspace/);
+  assert.match(sectorsFeatureSource, /SectorReplicaPanel/);
+  assert.match(sectorsFeatureSource, /sector-replica-shell/);
+  assert.match(sectorsFeatureSource, /板块强度 \/ 主力流入/);
+  assert.match(sectorsFeatureSource, /getSectorReplicaRadar/);
+  assert.match(sectorsFeatureSource, /getSectorReplicaBoardStocks/);
+  assert.match(sectorsFeatureSource, /sessionStorage/);
+  assert.match(sectorsFeatureSource, /15_000/);
+  assert.match(sectorsFeatureSource, /8_000/);
   assert.match(sectorsFeatureSource, /板块强度/);
   assert.match(sectorsFeatureSource, /主力流入/);
-  assert.match(sectorsFeatureSource, /工作模式/);
-  assert.match(sectorsFeatureSource, /theme\.scope === "theme"/);
-  assert.match(sectorsFeatureSource, /等待盘中采样积累/);
-  assert.match(sectorsFeatureSource, /TickFlow 分钟线暂不可用/);
+  assert.match(sectorsFeatureSource, /名称/);
+  assert.match(sectorsFeatureSource, /代码/);
+  assert.match(sectorsFeatureSource, /涨幅/);
+  assert.match(sectorsFeatureSource, /成交/);
+  assert.match(sectorsFeatureSource, /流通/);
+  assert.match(sectorsFeatureSource, /板数/);
+  assert.match(sectorsFeatureSource, /竞涨/);
+  assert.match(sectorsFeatureSource, /竞额/);
+  assert.match(sectorsFeatureSource, /竟量/);
+  assert.match(sectorsFeatureSource, /买成比/);
+  assert.match(sectorsFeatureSource, /封单/);
+  assert.match(sectorsFeatureSource, /buildSectorReplicaChartOption/);
   assert.match(sectorsFeatureSource, /axisPointer/);
-  assert.match(sectorsFeatureSource, /热度曲线/);
-  assert.match(sectorsFeatureSource, /formatHeatValue/);
-  assert.match(sectorsFeatureSource, /buildTradingTimeAxis/);
   assert.match(sectorsFeatureSource, /09:15/);
-  assert.match(sectorsFeatureSource, /09:25/);
-  assert.match(sectorsFeatureSource, /09:30/);
   assert.match(sectorsFeatureSource, /15:00/);
   assert.match(sectorsFeatureSource, /connectNulls/);
   assert.match(sectorsFeatureSource, /ResizeObserver/);
-  assert.match(sectorsFeatureSource, /零轴/);
-  assert.match(sectorsFeatureSource, /smooth: 0\.12/);
-  assert.match(sectorsFeatureSource, /h-\[520px\]/);
   assert.doesNotMatch(sectorsFeatureSource, /max: isStrength \\? 100/);
-  assert.match(sectorsFeatureSource, /加入自选/);
+  assert.doesNotMatch(sectorsWorkspaceSource, /PlateReferencePanel/);
+  assert.doesNotMatch(sectorsWorkspaceSource, /SectorThemeWorkbench/);
   assert.doesNotMatch(sectorsFeatureSource, /题材多选/);
   assert.doesNotMatch(sectorsFeatureSource, /概念\/题材优先/);
   assert.doesNotMatch(sectorsFeatureSource, /trailColor/);

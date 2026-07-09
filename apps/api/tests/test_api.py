@@ -2154,6 +2154,40 @@ def test_sector_workbench_endpoint_returns_theme_mode_and_source_status(tmp_path
     assert payload["source_status"][0]["status"] == "success"
 
 
+def test_sector_replica_radar_endpoint_returns_qxlive_shape(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    _seed_sector_theme_rows(tmp_path)
+    app.state.sector_now = datetime(2026, 7, 3, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    response = client.get("/api/sectors/replica/radar?mode=strength&limit=5&stock_limit=10")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["result"] == "success"
+    assert payload["mode"] == "strength"
+    assert payload["plates"][0]["name"] == "机器人"
+    assert payload["checkplate"]
+    assert payload["legend"]
+    assert payload["qxlive"]["Aaxis"][:3] == ["09:15", "09:16", "09:17"]
+    assert "QX" in payload["qxlive"]["series"]
+
+
+def test_sector_replica_board_stocks_endpoint_returns_rows(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    _seed_sector_theme_rows(tmp_path)
+    app.state.sector_now = datetime(2026, 7, 3, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    radar = client.get("/api/sectors/replica/radar?mode=strength&limit=5&stock_limit=10")
+    board_code = radar.json()["plates"][0]["code"]
+    response = client.get(f"/api/sectors/replica/boards/{board_code}/stocks?mode=strength&limit=10")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["board_code"] == board_code
+    assert payload["rows"][0]["name"] == "涨幅一号"
+    assert payload["rows"][0]["compat_row"][0] == "300001"
+
+
 def test_sector_workbench_endpoint_explicit_industry_scope_ignores_theme_snapshot_status(tmp_path: Path) -> None:
     client = _client(tmp_path)
     _seed_sector_theme_rows(tmp_path)

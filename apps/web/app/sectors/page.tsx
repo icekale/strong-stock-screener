@@ -16,15 +16,12 @@ export default function SectorsPage() {
 
 function SectorFlowPlaceholder() {
   return (
-    <WorkbenchPage
-      description="正在加载全市场板块热度、成交额和涨跌额。"
-      title="行业强度工作台"
-    >
-      <section className="grid gap-4 xl:grid-cols-[300px_minmax(0,1fr)]">
+    <WorkbenchPage contentClassName="sector-replica-page-content">
+      <section className="grid min-h-[calc(100vh-24px)] grid-cols-[226px_minmax(0,1fr)] overflow-hidden border border-[#cfcfcf] bg-white max-[980px]:grid-cols-1">
         <Card className="workbench-panel" size="small">
-          <Skeleton active paragraph={{ rows: 9 }} title={false} />
+          <Skeleton active paragraph={{ rows: 14 }} title={false} />
         </Card>
-        <Card className="workbench-panel min-w-0">
+        <Card className="workbench-panel min-w-0 rounded-none border-0">
           <Skeleton active paragraph={{ rows: 12 }} />
         </Card>
       </section>

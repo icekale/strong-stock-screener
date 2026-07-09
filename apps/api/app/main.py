@@ -51,6 +51,9 @@ from app.models import (
     SectorWorkbenchResponse,
     SectorWorkbenchSeries,
     SectorWorkbenchStatusResponse,
+    SectorReplicaMode,
+    SectorReplicaRadarResponse,
+    SectorReplicaStocksResponse,
     SentimentDetailResponse,
     ShortTermIntradaySentimentResponse,
     ShortTermIntradaySignalDigest,
@@ -145,6 +148,10 @@ from app.services.sector_workbench import (
     build_limit_up_theme_rows_from_candidates,
     build_sector_workbench_from_radar,
     build_sector_workbench_response,
+)
+from app.services.sector_radar_replica import (
+    build_sector_radar_replica_response,
+    build_sector_replica_stock_rows,
 )
 from app.services.sector_workbench_intraday import build_sector_intraday_series
 from app.services.sector_workbench_store import SectorThemeRowsStore, SectorWorkbenchSampleStore
@@ -1408,6 +1415,73 @@ def get_sector_workbench(
     if is_trading_sample_time:
         store.append(snapshot_result, sample_source="snapshot")
     return result.model_dump(mode="json")
+
+
+@app.get("/api/sectors/replica/radar", response_model=SectorReplicaRadarResponse)
+def get_sector_replica_radar(
+    mode: SectorReplicaMode = "strength",
+    selected: str = "",
+    limit: int = 20,
+    stock_limit: int = 50,
+) -> SectorReplicaRadarResponse:
+    selected_codes = [part.strip() for part in selected.split(",") if part.strip()]
+    workbench = SectorWorkbenchResponse.model_validate(
+        get_sector_workbench(
+            mode=mode,
+            scope="auto",
+            selected="",
+            limit=limit,
+            stock_limit=stock_limit,
+        )
+    )
+    return build_sector_radar_replica_response(
+        workbench=workbench,
+        mode=mode,
+        selected_codes=selected_codes,
+        sampled_at=_sector_now(),
+    )
+
+
+@app.get("/api/sectors/replica/boards/{board_code:path}/stocks", response_model=SectorReplicaStocksResponse)
+def get_sector_replica_board_stocks(
+    board_code: str,
+    mode: SectorReplicaMode = "strength",
+    sub_theme: str | None = None,
+    limit: int = 50,
+) -> SectorReplicaStocksResponse:
+    bounded_limit = max(1, min(limit, 200))
+    workbench = SectorWorkbenchResponse.model_validate(
+        get_sector_workbench(
+            mode=mode,
+            scope="auto",
+            selected="",
+            limit=50,
+            stock_limit=bounded_limit,
+        )
+    )
+    rows = build_sector_replica_stock_rows(
+        workbench,
+        board_code=board_code,
+        sub_theme=sub_theme,
+    )[:bounded_limit]
+    return SectorReplicaStocksResponse(
+        board_code=board_code,
+        sub_theme=sub_theme,
+        rows=rows,
+        source_status=workbench.source_status,
+        generated_at=_sector_now().isoformat(timespec="seconds"),
+    )
+
+
+@app.get("/api/sectors/replica/status")
+def get_sector_replica_status(trade_date: str | None = None) -> dict[str, object]:
+    status = get_sector_workbench_status(trade_date=trade_date)
+    return {
+        **status,
+        "calibration_profile_version": "sector-replica-v1",
+        "chart_refresh_seconds": 15,
+        "stock_refresh_seconds": 8,
+    }
 
 
 @app.get("/api/sectors/workbench/status")

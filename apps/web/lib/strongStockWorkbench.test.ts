@@ -813,8 +813,6 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(settingsFeatureSource, /记录 Top3 信号样本/);
   assert.match(settingsFeatureSource, /生成模拟交易样本/);
   assert.match(settingsFeatureSource, /人工交易样本进入训练/);
-  assert.match(appShellSource, /模型维护/);
-  assert.match(appShellSource, /\/model-maintenance/);
   assert.match(sentimentFeatureSource, /ShortTermSentimentResponse/);
   assert.match(sentimentFeatureSource, /ShortTermIntradaySentimentResponse/);
   assert.match(sentimentFeatureSource, /ShortTermIntradaySignalDigest/);
@@ -855,25 +853,6 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(antdProviderSource, /ConfigProvider/);
   assert.match(antdProviderSource, /zhCN/);
   assert.match(antdProviderSource, /autoInsertSpace: false/);
-  assert.match(appShellSource, /antd/);
-  assert.match(appShellSource, /选股工作台/);
-  assert.match(appShellSource, /自选股管理/);
-  assert.match(appShellSource, /板块资金流/);
-  assert.match(appShellSource, /短线情绪/);
-  assert.match(appShellSource, /\/sentiment/);
-  assert.match(appShellSource, /\/auction/);
-  assert.match(appShellSource, /竞价/);
-  assert.match(appShellSource, /数据源配置/);
-  assert.match(appShellSource, /width=\{68\}/);
-  assert.match(appShellSource, /StockMaster/);
-  assert.match(appShellSource, /强势股/);
-  assert.match(appShellSource, /选股/);
-  assert.match(appShellSource, /板块/);
-  assert.match(appShellSource, /自选/);
-  assert.match(appShellSource, /设置/);
-  assert.match(appShellSource, /usePathname/);
-  assert.doesNotMatch(appShellSource, /collapsedWidth=\{0\}/);
-  assert.doesNotMatch(appShellSource, /breakpoint="lg"/);
   assert.match(stockChartSource, /dataProvider/);
   assert.match(stockChartSource, /dataSourceMode/);
   assert.match(stockChartSource, /dataSourceMode === "tickflow"/);
@@ -990,4 +969,26 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.ok(webPackageSource.includes('"smoke:ui": "node ../../scripts/smoke-ui.mjs"'));
   assert.match(smokeUiSource, /hasHorizontalOverflow/);
   assert.match(smokeUiSource, /Next\.js error overlay detected/);
+});
+
+test("app shell uses grouped navigation with responsive collapse and mobile access", () => {
+  const source = readFileSync(new URL("../components/AppShell.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /navigationGroups/);
+  assert.match(source, /getNavigationSelection/);
+  assert.match(source, /readAppShellCollapsed/);
+  assert.match(source, /toggleAppShellCollapsed/);
+  assert.match(source, /resolveMobileNavigationOpen/);
+  assert.match(source, /Drawer/);
+  assert.match(source, /window\.matchMedia\("\(min-width: 980px\)"\)/);
+  assert.match(source, /addEventListener\("change", handleDesktopViewportChange\)/);
+  assert.match(source, /removeEventListener\("change", handleDesktopViewportChange\)/);
+  assert.match(source, /width=\{216\}/);
+  assert.match(source, /collapsedWidth=\{64\}/);
+  assert.match(source, /aria-label="打开导航"/);
+  assert.match(source, /aria-label="主导航"/);
+  assert.match(source, /StockMaster/);
+  assert.doesNotMatch(source, /NAV_ITEMS/);
+  assert.doesNotMatch(source, /STOCK_NAV_ITEMS/);
+  assert.doesNotMatch(source, /DatabaseOutlined/);
 });

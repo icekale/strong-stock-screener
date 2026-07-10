@@ -1,201 +1,196 @@
 "use client";
 
 import {
+  AppstoreOutlined,
   BarChartOutlined,
-  DatabaseOutlined,
-  ExperimentOutlined,
   FolderOpenOutlined,
-  FundProjectionScreenOutlined,
-  HeatMapOutlined,
-  ThunderboltOutlined,
   LineChartOutlined,
+  MenuFoldOutlined,
+  MenuOutlined,
+  MenuUnfoldOutlined,
   RiseOutlined,
   SettingOutlined,
+  ThunderboltOutlined,
 } from "@ant-design/icons";
-import { Layout, Tooltip, Typography } from "antd";
+import { Button, Drawer, Layout, Tooltip } from "antd";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState, type ReactNode } from "react";
+import {
+  getNavigationSelection,
+  navigationGroups,
+  type NavigationItemKey,
+} from "../lib/appNavigation";
+import {
+  readAppShellCollapsed,
+  resolveMobileNavigationOpen,
+  toggleAppShellCollapsed,
+} from "../lib/appShellPresentation";
+import { joinClassNames } from "../lib/workbenchPresentation";
 
-type NavItem = {
-  href: string;
-  icon: React.ReactNode;
-  key: string;
-  label: string;
-  title: string;
+const navigationIcons: Record<NavigationItemKey, ReactNode> = {
+  overview: <AppstoreOutlined />,
+  screener: <BarChartOutlined />,
+  auction: <RiseOutlined />,
+  market: <LineChartOutlined />,
+  watchlist: <FolderOpenOutlined />,
+  sentiment: <ThunderboltOutlined />,
+  system: <SettingOutlined />,
 };
 
-const NAV_ITEMS: NavItem[] = [
-  {
-    href: "/",
-    key: "/",
-    icon: <BarChartOutlined />,
-    label: "选股",
-    title: "选股工作台",
-  },
-  {
-    href: "/watchlist",
-    key: "/watchlist",
-    icon: <FolderOpenOutlined />,
-    label: "自选",
-    title: "自选股管理",
-  },
-  {
-    href: "/sectors",
-    key: "/sectors",
-    icon: <FundProjectionScreenOutlined />,
-    label: "板块",
-    title: "板块资金流",
-  },
-  {
-    href: "/heatmap",
-    key: "/heatmap",
-    icon: <HeatMapOutlined />,
-    label: "热图",
-    title: "市场热力图",
-  },
-  {
-    href: "/auction",
-    key: "/auction",
-    icon: <RiseOutlined />,
-    label: "竞价",
-    title: "竞价雷达",
-  },
-  {
-    href: "/sentiment",
-    key: "/sentiment",
-    icon: <ThunderboltOutlined />,
-    label: "情绪",
-    title: "短线情绪",
-  },
-  {
-    href: "/model-maintenance",
-    key: "/model-maintenance",
-    icon: <ExperimentOutlined />,
-    label: "模型",
-    title: "模型维护",
-  },
-  {
-    href: "/settings",
-    key: "/settings",
-    icon: <SettingOutlined />,
-    label: "设置",
-    title: "数据源配置",
-  },
-];
-
-const STOCK_NAV_ITEMS: NavItem[] = [
-  {
-    href: "#",
-    key: "/stock",
-    icon: <LineChartOutlined />,
-    label: "个股",
-    title: "个股详情",
-  },
-];
-
-export function AppShell({ children }: { children: React.ReactNode }) {
+export function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  const selectedKey = selectedNavKey(pathname);
-  const items = pathname.startsWith("/stock/") ? [...NAV_ITEMS, ...STOCK_NAV_ITEMS] : NAV_ITEMS;
+  const [collapsed, setCollapsed] = useState(false);
+  const [mobileNavigationOpen, setMobileNavigationOpen] = useState(false);
+
+  useEffect(() => {
+    setCollapsed(readAppShellCollapsed(getBrowserStorage()));
+  }, []);
+
+  useEffect(() => {
+    const desktopMediaQuery = window.matchMedia("(min-width: 980px)");
+    const handleDesktopViewportChange = () => {
+      setMobileNavigationOpen((current) => resolveMobileNavigationOpen(current, desktopMediaQuery.matches));
+    };
+
+    handleDesktopViewportChange();
+    desktopMediaQuery.addEventListener("change", handleDesktopViewportChange);
+    return () => desktopMediaQuery.removeEventListener("change", handleDesktopViewportChange);
+  }, []);
+
+  function toggleCollapsed() {
+    setCollapsed((current) => toggleAppShellCollapsed(current, getBrowserStorage()));
+  }
 
   return (
-    <Layout className="app-shell min-h-screen bg-[#f5f3f0]">
+    <Layout className="app-shell" hasSider>
       <Layout.Sider
-        className="app-shell__sider border-r border-[#2b2925] bg-[#1d1b18]"
-        width={68}
+        className="app-shell__desktop-nav"
+        collapsed={collapsed}
+        collapsedWidth={64}
+        trigger={null}
+        width={216}
       >
-        <div className="flex h-full flex-col items-center bg-[#1d1b18] py-5 text-white">
-          <Tooltip placement="right" title="StockMaster · 强势股选股工作台">
-            <Link
-              aria-label="StockMaster 强势股选股工作台"
-              className="flex size-9 items-center justify-center rounded-lg bg-[#f04438] text-sm font-black text-white"
-              href="/"
-            >
-              S
-            </Link>
-          </Tooltip>
-          <span className="sr-only">StockMaster</span>
-          <nav className="mt-9 flex flex-1 flex-col items-center gap-4">
-            {items.map((item) => {
-              const active = selectedKey === item.key;
-              const isDisabled = item.key === "/stock" && !pathname.startsWith("/stock/");
-              const content = (
-                <span
-                  className={`flex size-12 flex-col items-center justify-center rounded-lg text-[10px] font-semibold transition ${
-                    active
-                      ? "bg-[#34312d] text-white"
-                      : "text-[#8c8780] hover:bg-[#282520] hover:text-white"
-                  } ${isDisabled ? "cursor-not-allowed opacity-40" : ""}`}
-                >
-                  <span className="text-lg leading-none">{item.icon}</span>
-                  <span className="mt-1 leading-none">{item.label}</span>
-                </span>
-              );
-              return (
-                <Tooltip key={item.key} placement="right" title={item.title}>
-                  {isDisabled ? (
-                    content
-                  ) : (
-                    <Link aria-label={item.title} href={item.href}>
-                      {content}
-                    </Link>
-                  )}
-                </Tooltip>
-              );
-            })}
-          </nav>
-          <div className="flex flex-col items-center gap-4 border-t border-[#34312d] pt-4">
-            <Tooltip placement="right" title="数据源配置">
-              <Link
-                aria-label="数据源配置"
-                className="flex size-10 items-center justify-center rounded-lg text-[#8c8780] transition hover:bg-[#282520] hover:text-white"
-                href="/settings"
-              >
-                <DatabaseOutlined />
-              </Link>
+        <div className="app-shell__desktop-sidebar">
+          <ProductMark collapsed={collapsed} />
+          <ShellNavigation collapsed={collapsed} pathname={pathname} />
+          <div className="app-shell__sidebar-footer">
+            <Tooltip title={collapsed ? "展开导航" : "收起导航"}>
+              <Button
+                aria-label={collapsed ? "展开导航" : "收起导航"}
+                className="app-shell__collapse-button"
+                icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+                onClick={toggleCollapsed}
+                type="text"
+              />
             </Tooltip>
-            <Tooltip placement="right" title="系统设置">
-              <Link
-                aria-label="系统设置"
-                className="flex size-10 items-center justify-center rounded-lg text-[#8c8780] transition hover:bg-[#282520] hover:text-white"
-                href="/settings"
-              >
-                <SettingOutlined />
-              </Link>
-            </Tooltip>
-            <Typography.Text className="text-[10px] font-black text-[#706b63]">A股</Typography.Text>
           </div>
         </div>
       </Layout.Sider>
-      <Layout className="min-w-0 bg-[#f5f3f0]">{children}</Layout>
+      <Layout className="app-shell__main">
+        <header className="app-shell__mobile-header">
+          <Button
+            aria-label="打开导航"
+            icon={<MenuOutlined />}
+            onClick={() => setMobileNavigationOpen(true)}
+            type="text"
+          />
+          <Link aria-label="StockMaster" className="app-shell__mobile-brand" href="/">
+            <span aria-hidden="true" className="app-shell__mark">
+              S
+            </span>
+            <span>StockMaster</span>
+          </Link>
+        </header>
+        {children}
+      </Layout>
+      <Drawer
+        aria-label="主导航"
+        className="app-shell__drawer"
+        closable={false}
+        onClose={() => setMobileNavigationOpen(false)}
+        open={mobileNavigationOpen}
+        placement="left"
+        title={null}
+      >
+        <div className="app-shell__drawer-content">
+          <ProductMark />
+          <ShellNavigation pathname={pathname} onNavigate={() => setMobileNavigationOpen(false)} />
+        </div>
+      </Drawer>
     </Layout>
   );
 }
 
-function selectedNavKey(pathname: string): string {
-  if (pathname.startsWith("/watchlist")) {
-    return "/watchlist";
+function getBrowserStorage(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
   }
-  if (pathname.startsWith("/sectors")) {
-    return "/sectors";
-  }
-  if (pathname.startsWith("/heatmap")) {
-    return "/heatmap";
-  }
-  if (pathname.startsWith("/auction")) {
-    return "/auction";
-  }
-  if (pathname.startsWith("/sentiment")) {
-    return "/sentiment";
-  }
-  if (pathname.startsWith("/model-maintenance")) {
-    return "/model-maintenance";
-  }
-  if (pathname.startsWith("/settings")) {
-    return "/settings";
-  }
-  if (pathname.startsWith("/stock/")) {
-    return "/stock";
-  }
-  return "/";
+}
+
+function ProductMark({ collapsed = false }: { collapsed?: boolean }) {
+  return (
+    <Link aria-label="StockMaster" className="app-shell__brand" href="/">
+      <span aria-hidden="true" className="app-shell__mark">
+        S
+      </span>
+      {collapsed ? <span className="sr-only">StockMaster</span> : <span className="app-shell__brand-name">StockMaster</span>}
+    </Link>
+  );
+}
+
+function ShellNavigation({
+  collapsed = false,
+  onNavigate,
+  pathname,
+}: {
+  collapsed?: boolean;
+  onNavigate?: () => void;
+  pathname: string;
+}) {
+  const selection = getNavigationSelection(pathname);
+
+  return (
+    <nav aria-label="主导航" className="app-shell__navigation">
+      {navigationGroups.map((group) => (
+        <section
+          className={joinClassNames(
+            "app-shell__navigation-group",
+            selection.groupKey === group.key && "app-shell__navigation-group--active",
+          )}
+          key={group.key}
+        >
+          {collapsed ? null : <h2 className="app-shell__navigation-group-label">{group.label}</h2>}
+          <div className="app-shell__navigation-items">
+            {group.items.map((item) => {
+              const active = selection.itemKey === item.key;
+
+              return (
+                <Tooltip key={item.key} placement="right" title={collapsed ? item.label : undefined}>
+                  <Link
+                    aria-current={active ? "page" : undefined}
+                    aria-label={item.label}
+                    className={joinClassNames(
+                      "app-shell__navigation-link",
+                      collapsed && "app-shell__navigation-link--collapsed",
+                      active && "app-shell__navigation-link--active",
+                    )}
+                    href={item.href}
+                    onClick={onNavigate}
+                  >
+                    <span aria-hidden="true" className="app-shell__navigation-icon">
+                      {navigationIcons[item.key]}
+                    </span>
+                    {collapsed ? null : <span className="app-shell__navigation-label">{item.label}</span>}
+                  </Link>
+                </Tooltip>
+              );
+            })}
+          </div>
+        </section>
+      ))}
+    </nav>
+  );
 }

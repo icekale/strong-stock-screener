@@ -12,14 +12,14 @@ export function AntdAppProvider({ children }: { children: React.ReactNode }) {
         algorithm: theme.defaultAlgorithm,
         token: {
           borderRadius: 8,
-          colorBgBase: "#f8f7f4",
-          colorBgContainer: "#f8f7f4",
-          colorBgLayout: "#f5f3f0",
-          colorBorder: "#ddd8d0",
-          colorInfo: "#11100e",
-          colorPrimary: "#11100e",
-          colorText: "#11100e",
-          colorTextSecondary: "#7b756d",
+          colorBgBase: "#edf3f8",
+          colorBgContainer: "#fff",
+          colorBgLayout: "#edf3f8",
+          colorBorder: "#d9e2ed",
+          colorInfo: "#1769e0",
+          colorPrimary: "#1769e0",
+          colorText: "#182336",
+          colorTextSecondary: "#697991",
           fontFamily:
             '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif',
         },
@@ -36,9 +36,9 @@ export function AntdAppProvider({ children }: { children: React.ReactNode }) {
             itemMarginBottom: 14,
           },
           Layout: {
-            bodyBg: "#f5f3f0",
-            headerBg: "#f8f7f4",
-            siderBg: "#1d1b18",
+            bodyBg: "#edf3f8",
+            headerBg: "#fff",
+            siderBg: "#13233f",
           },
           Menu: {
             itemBorderRadius: 6,
@@ -46,8 +46,8 @@ export function AntdAppProvider({ children }: { children: React.ReactNode }) {
             itemMarginBlock: 3,
           },
           Table: {
-            borderColor: "#ddd8d0",
-            headerBg: "#eee9df",
+            borderColor: "#d9e2ed",
+            headerBg: "#f7f9fc",
           },
         },
       }}

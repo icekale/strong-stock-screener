@@ -33,7 +33,6 @@
 **Files:**
 - Create: `apps/web/lib/appNavigation.ts`
 - Create: `apps/web/lib/appNavigation.test.ts`
-- Modify: `apps/web/lib/strongStockWorkbench.test.ts`
 
 - [ ] **Step 1: Write the failing navigation tests**
 
@@ -88,13 +87,7 @@ export function getLegacyDestination(pathname: string): string | null {
 }
 ```
 
-Implement `getNavigationSelection` by selecting the longest matching href. Update the existing source-level test to assert that `AppShell` imports this module and exposes `/screener` and `/market`, rather than asserting the old icon-only labels.
-
-Add the source fixture before the assertions:
-
-```ts
-const navigationSource = readFileSync(new URL("./appNavigation.ts", import.meta.url), "utf8");
-```
+Implement `getNavigationSelection` by selecting the longest matching href. Keep navigation behavior covered in `appNavigation.test.ts`; do not modify unrelated workbench wiring tests in this task.
 
 - [ ] **Step 4: Run focused and full tests**
 
@@ -105,7 +98,7 @@ Expected: all existing tests and the new navigation tests pass.
 - [ ] **Step 5: Commit the isolated route model**
 
 ```bash
-git add apps/web/lib/appNavigation.ts apps/web/lib/appNavigation.test.ts apps/web/lib/strongStockWorkbench.test.ts
+git add apps/web/lib/appNavigation.ts apps/web/lib/appNavigation.test.ts
 git commit -m "feat: define product navigation model"
 ```
 

@@ -1,9 +1,8 @@
 "use client";
 
-import { ReloadOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSectorReplicaBoardStocks, getSectorReplicaRadar } from "../../lib/api";
-import { nextSectorReplicaSelection } from "../../lib/sectorReplica";
+import { isSectorReplicaStocksForSelection, nextSectorReplicaSelection } from "../../lib/sectorReplica";
 import type {
   SectorReplicaMode,
   SectorReplicaRadarResponse,
@@ -11,8 +10,8 @@ import type {
 } from "../../lib/types";
 import { SectorReplicaPanel } from "./SectorReplicaPanel";
 
-const RADAR_CACHE_KEY = "stockmaster:sector-replica:radar";
-const STOCKS_CACHE_KEY = "stockmaster:sector-replica:stocks";
+const RADAR_CACHE_KEY = "stockmaster:sector-replica:qxlive:v2:radar";
+const STOCKS_CACHE_KEY = "stockmaster:sector-replica:qxlive:v2:stocks";
 
 export function SectorReplicaWorkspace() {
   const [mode, setMode] = useState<SectorReplicaMode>("strength");
@@ -26,6 +25,7 @@ export function SectorReplicaWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const selectedKey = selectedCodes.join(",");
+  const activeBoardName = radar?.plates.find((item) => item.code === activeBoardCode)?.name ?? null;
 
   useEffect(() => {
     if (radar) {
@@ -86,6 +86,7 @@ export function SectorReplicaWorkspace() {
       }
       try {
         const response = await getSectorReplicaBoardStocks(activeBoardCode, {
+          boardName: activeBoardName,
           limit: 100,
           mode,
           subTheme: activeSubTheme,
@@ -101,7 +102,7 @@ export function SectorReplicaWorkspace() {
         }
       }
     },
-    [activeBoardCode, activeSubTheme, mode],
+    [activeBoardCode, activeBoardName, activeSubTheme, mode],
   );
 
   useEffect(() => {
@@ -116,12 +117,15 @@ export function SectorReplicaWorkspace() {
     return () => window.clearInterval(timer);
   }, [loadStocks]);
 
-  const rows = useMemo(() => stocks?.rows ?? radar?.stocks ?? [], [radar, stocks]);
-  const activePlate = useMemo(
-    () => radar?.plates.find((item) => item.code === activeBoardCode) ?? radar?.plates[0] ?? null,
-    [activeBoardCode, radar],
+  const rows = useMemo(
+    () =>
+      isSectorReplicaStocksForSelection(stocks, activeBoardCode, activeSubTheme)
+        ? stocks?.rows ?? []
+        : radar?.stocks ?? [],
+    [activeBoardCode, activeSubTheme, radar, stocks],
   );
-
+  const relatedTags =
+    stocks?.board_code === activeBoardCode ? stocks.related_tags : radar?.related_tags ?? [];
   function changeMode(nextMode: SectorReplicaMode) {
     setMode(nextMode);
     setActiveSubTheme(null);
@@ -151,25 +155,11 @@ export function SectorReplicaWorkspace() {
   }
 
   function chooseSubTheme(tag: string | null) {
-    setStocks(null);
     setActiveSubTheme(tag);
   }
 
   return (
     <div className="sector-replica-workspace">
-      <div className="sector-replica-toolbar">
-        <div>
-          <div className="sector-replica-toolbar-title">板块强度 / 主力流入</div>
-          <div className="sector-replica-toolbar-meta">
-            {radar?.trade_date ?? "-"} · {activePlate?.name ?? "等待板块"} · {radar?.generated_at?.replace("T", " ").slice(0, 16) ?? "-"}
-          </div>
-        </div>
-        <button className="sector-replica-refresh" disabled={loading} onClick={() => setRefreshKey((value) => value + 1)} type="button">
-          <ReloadOutlined />
-          刷新
-        </button>
-      </div>
-
       <SectorReplicaPanel
         activeBoardCode={activeBoardCode}
         activeSubTheme={activeSubTheme}
@@ -178,9 +168,11 @@ export function SectorReplicaWorkspace() {
         mode={mode}
         onActivateBoard={activateBoard}
         onModeChange={changeMode}
+        onRefresh={() => setRefreshKey((value) => value + 1)}
         onSubThemeChange={chooseSubTheme}
         onToggleBoard={toggleBoard}
         radar={radar}
+        relatedTags={relatedTags}
         selectedCodes={selectedCodes}
         stockLoading={stockLoading}
         stocks={rows}

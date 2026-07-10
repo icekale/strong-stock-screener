@@ -1,5 +1,6 @@
 "use client";
 
+import { ReloadOutlined } from "@ant-design/icons";
 import * as echarts from "echarts";
 import Link from "next/link";
 import { useEffect, useMemo, useRef } from "react";
@@ -9,6 +10,9 @@ import {
   formatReplicaMoney,
   formatReplicaNumber,
   formatReplicaPct,
+  formatReplicaReportedMoney,
+  formatReplicaReportedRatio,
+  latestSectorReplicaSeriesTime,
   sourceStatusText,
 } from "../../lib/sectorReplica";
 import { buildStockDetailHref } from "../../lib/stockNavigation";
@@ -27,9 +31,11 @@ type SectorReplicaPanelProps = {
   mode: SectorReplicaMode;
   onActivateBoard: (code: string) => void;
   onModeChange: (mode: SectorReplicaMode) => void;
+  onRefresh: () => void;
   onSubThemeChange: (tag: string | null) => void;
   onToggleBoard: (code: string, checked: boolean) => void;
   radar: SectorReplicaRadarResponse | null;
+  relatedTags: string[];
   selectedCodes: string[];
   stockLoading: boolean;
   stocks: SectorReplicaStockRow[];
@@ -40,6 +46,21 @@ const MODE_LABELS: Record<SectorReplicaMode, string> = {
   main_flow: "主力流入",
 };
 
+const EMOTION_METRICS = [
+  { key: "QX", label: "情绪指标", tone: "warning" },
+  { key: "ZT", label: "涨停家数", tone: "danger" },
+  { key: "DT", label: "跌停家数", tone: "success" },
+  { key: "KQXY", label: "亏钱效应", tone: "warning" },
+  { key: "HSLN", label: "主力流入", tone: "default" },
+  { key: "LBGD", label: "连板高度", tone: "default" },
+  { key: "SZ", label: "上涨家数", tone: "default-red" },
+  { key: "XD", label: "下跌家数", tone: "default-green" },
+  { key: "PB", label: "今日封板率", tone: "default" },
+  { key: "ZTBX", label: "昨涨停表现", tone: "default" },
+  { key: "LBBX", label: "昨连板表现", tone: "default" },
+  { key: "JRLN", label: "今日5分钟量能", tone: "default" },
+] as const;
+
 export function SectorReplicaPanel({
   activeBoardCode,
   activeSubTheme,
@@ -48,67 +69,89 @@ export function SectorReplicaPanel({
   mode,
   onActivateBoard,
   onModeChange,
+  onRefresh,
   onSubThemeChange,
   onToggleBoard,
   radar,
+  relatedTags,
   selectedCodes,
   stockLoading,
   stocks,
 }: SectorReplicaPanelProps) {
   const selectedSet = useMemo(() => new Set(selectedCodes), [selectedCodes]);
   const activePlate = radar?.plates.find((item) => item.code === activeBoardCode) ?? radar?.plates[0] ?? null;
+  const latestSeriesTime = radar ? latestSectorReplicaSeriesTime(radar.axis, radar.series) : null;
 
   return (
     <section className="sector-replica-shell">
-      <aside className="sector-replica-sidebar">
-        <div className="sector-replica-tabs">
-          {(Object.keys(MODE_LABELS) as SectorReplicaMode[]).map((item) => (
-            <button
-              className={item === mode ? "is-active" : ""}
-              key={item}
-              onClick={() => onModeChange(item)}
-              type="button"
-            >
-              {MODE_LABELS[item]}
-            </button>
-          ))}
-        </div>
-        <div className="sector-replica-board-list">
-          {(radar?.plates ?? []).map((plate) => (
-            <BoardListItem
-              active={activeBoardCode === plate.code}
-              checked={selectedSet.has(plate.code)}
-              key={plate.code}
-              mode={mode}
-              onActivate={() => onActivateBoard(plate.code)}
-              onToggle={(checked) => onToggleBoard(plate.code, checked)}
-              plate={plate}
-            />
-          ))}
-          {!radar && (
-            <div className="sector-replica-list-placeholder">
-              {loading ? "正在读取板块..." : "暂无板块数据"}
-            </div>
-          )}
-        </div>
-      </aside>
+      <div className="sector-replica-emotion-grid">
+        {EMOTION_METRICS.map((item) => (
+          <button className={`sector-replica-emotion-button is-${item.tone}`} key={item.key} type="button">
+            {item.label}：<span>{formatEmotionMetric(radar, item.key)}</span>
+          </button>
+        ))}
+      </div>
 
-      <div className="sector-replica-main">
-        {error ? <div className="sector-replica-error">{error}</div> : null}
-        <div className="sector-replica-chart-head">
-          <div className="sector-replica-chart-title">
-            {activePlate?.name ?? "板块分时"}
-            <span>{mode === "strength" ? "强度曲线" : "资金曲线"}</span>
+      <div className="sector-replica-plate-row">
+        <aside className="sector-replica-sidebar">
+          <div className="sector-replica-tabs">
+            {(Object.keys(MODE_LABELS) as SectorReplicaMode[]).map((item) => (
+              <button
+                className={item === mode ? "is-active" : ""}
+                key={item}
+                onClick={() => onModeChange(item)}
+                type="button"
+              >
+                {MODE_LABELS[item]}
+              </button>
+            ))}
           </div>
-          <div className="sector-replica-source">
-            {sourceStatusText(radar?.source_status.find((item) => item.source.includes("短线侠")) ?? radar?.source_status[0])}
+          <div className="sector-replica-board-list">
+            {(radar?.plates ?? []).map((plate) => (
+              <BoardListItem
+                active={activeBoardCode === plate.code}
+                checked={selectedSet.has(plate.code)}
+                key={plate.code}
+                mode={mode}
+                onActivate={() => onActivateBoard(plate.code)}
+                onToggle={(checked) => onToggleBoard(plate.code, checked)}
+                plate={plate}
+              />
+            ))}
+            {!radar && (
+              <div className="sector-replica-list-placeholder">
+                {loading ? "正在读取板块..." : "暂无板块数据"}
+              </div>
+            )}
           </div>
+        </aside>
+
+        <div className="sector-replica-main">
+          {error ? <div className="sector-replica-error">{error}</div> : null}
+          <div className="sector-replica-chart-head">
+            <div className="sector-replica-chart-title">
+              {activePlate?.name ?? "板块分时"}
+              <span>
+                {mode === "strength" ? "板块强度" : "主力流入"} · 截至 {latestSeriesTime ?? "--"}
+              </span>
+            </div>
+            <div className="sector-replica-chart-tools">
+              <span>{sourceStatusText(radar?.source_status.find((source) => source.source.includes("短线侠")) ?? radar?.source_status[0])}</span>
+              <button className="sector-replica-refresh" disabled={loading} onClick={onRefresh} type="button">
+                <ReloadOutlined />
+                刷新
+              </button>
+            </div>
+          </div>
+          <SectorReplicaChart loading={loading && !radar} mode={mode} radar={radar} />
         </div>
-        <SectorReplicaChart loading={loading && !radar} mode={mode} radar={radar} />
+      </div>
+
+      <div className="sector-replica-stock-panel">
         <SubThemeStrip
           activeSubTheme={activeSubTheme}
           onSubThemeChange={onSubThemeChange}
-          tags={radar?.related_tags ?? []}
+          tags={relatedTags}
         />
         <StockTable
           activeBoardName={activePlate?.name ?? null}
@@ -118,11 +161,38 @@ export function SectorReplicaPanel({
         <div className="sector-replica-footer">
           <span>交易日 {radar?.trade_date ?? "-"}</span>
           <span>生成 {formatReplicaDateTime(radar?.generated_at)}</span>
-          <span>{selectedCodes.length}/5 对比</span>
+          <span>{selectedCodes.length}/6 对比</span>
         </div>
       </div>
     </section>
   );
+}
+
+function formatEmotionMetric(radar: SectorReplicaRadarResponse | null, key: string): string {
+  const value = latestMetricValue(radar?.qxlive.series[key]);
+  if (value === null) {
+    return "-";
+  }
+  if (key === "PB") {
+    return `${value.toFixed(0)}%`;
+  }
+  if (key === "HSLN") {
+    return formatReplicaNumber(value);
+  }
+  return formatReplicaNumber(value);
+}
+
+function latestMetricValue(values: Array<number | null> | undefined): number | null {
+  if (!values) {
+    return null;
+  }
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    const value = values[index];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return null;
 }
 
 function BoardListItem({
@@ -253,7 +323,7 @@ function StockTable({
             <th>板数</th>
             <th>竞涨</th>
             <th>竞额</th>
-            <th>竟量</th>
+            <th>竞量</th>
             <th>买成比</th>
             <th>封单</th>
           </tr>
@@ -275,14 +345,14 @@ function StockTable({
               </td>
               <td>{row.code}</td>
               <td className={valueToneClass(row.pct_change)}>{formatReplicaPct(row.pct_change)}</td>
-              <td>{formatReplicaMoney(row.turnover_cny)}</td>
+              <td>{formatReplicaReportedMoney(row.turnover_cny)}</td>
               <td>{formatReplicaMoney(row.circulating_value_cny)}</td>
               <td>{row.board_label}</td>
               <td className={valueToneClass(row.auction_pct_change)}>{formatReplicaPct(row.auction_pct_change)}</td>
-              <td>{formatReplicaMoney(row.auction_amount_cny)}</td>
-              <td>{row.auction_volume_ratio === null ? "-" : row.auction_volume_ratio.toFixed(2)}</td>
-              <td className={valueToneClass(row.buy_ratio_pct)}>{formatReplicaPct(row.buy_ratio_pct)}</td>
-              <td>{formatReplicaMoney(row.seal_amount_cny)}</td>
+              <td>{formatReplicaReportedMoney(row.auction_amount_cny)}</td>
+              <td>{formatReplicaReportedNumber(row.auction_volume_ratio)}</td>
+              <td className={valueToneClass(row.buy_ratio_pct)}>{formatReplicaReportedRatio(row.buy_ratio_pct)}</td>
+              <td>{formatReplicaReportedMoney(row.seal_amount_cny)}</td>
             </tr>
           ))}
           {rows.length === 0 ? (
@@ -303,4 +373,8 @@ function valueToneClass(value: number | null | undefined): string {
     return "";
   }
   return value >= 0 ? "sector-replica-red" : "sector-replica-green";
+}
+
+function formatReplicaReportedNumber(value: number | null | undefined): string {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value.toFixed(2) : "--";
 }

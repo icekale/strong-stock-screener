@@ -17,11 +17,11 @@ export default function SectorsPage() {
 function SectorFlowPlaceholder() {
   return (
     <WorkbenchPage contentClassName="sector-replica-page-content">
-      <section className="grid min-h-[calc(100vh-24px)] grid-cols-[226px_minmax(0,1fr)] overflow-hidden border border-[#cfcfcf] bg-white max-[980px]:grid-cols-1">
+      <section className="grid min-h-[calc(100vh-24px)] grid-cols-[226px_minmax(0,1fr)] overflow-hidden rounded-lg border border-[#ddd8d0] bg-[#f8f7f4] max-[980px]:grid-cols-1">
         <Card className="workbench-panel" size="small">
           <Skeleton active paragraph={{ rows: 14 }} title={false} />
         </Card>
-        <Card className="workbench-panel min-w-0 rounded-none border-0">
+        <Card className="workbench-panel min-w-0 border-0">
           <Skeleton active paragraph={{ rows: 12 }} />
         </Card>
       </section>

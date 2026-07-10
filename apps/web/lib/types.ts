@@ -853,6 +853,7 @@ export type SectorReplicaStocksResponse = {
   board_code: string | null;
   sub_theme: string | null;
   rows: SectorReplicaStockRow[];
+  related_tags: string[];
   source_status: StrongStockSourceStatus[];
   generated_at: string;
 };

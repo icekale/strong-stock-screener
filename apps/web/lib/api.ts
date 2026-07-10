@@ -379,12 +379,16 @@ export async function getSectorReplicaRadar(
 export async function getSectorReplicaBoardStocks(
   boardCode: string,
   options: {
+    boardName?: string | null;
     mode?: SectorReplicaMode;
     subTheme?: string | null;
     limit?: number;
   } = {},
 ): Promise<SectorReplicaStocksResponse> {
   const params = new URLSearchParams();
+  if (options.boardName) {
+    params.set("board_name", options.boardName);
+  }
   if (options.mode) {
     params.set("mode", options.mode);
   }

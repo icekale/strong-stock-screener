@@ -1,10 +1,14 @@
-import type { StrongStockSourceStatus } from "./types";
+import type {
+  SectorReplicaChartSeries,
+  SectorReplicaStocksResponse,
+  StrongStockSourceStatus,
+} from "./types";
 
 export function nextSectorReplicaSelection(
   current: string[],
   code: string,
   checked: boolean,
-  maxCount = 5,
+  maxCount = 6,
 ): string[] {
   if (!checked) {
     return current.length <= 1 ? current : current.filter((item) => item !== code);
@@ -35,6 +39,50 @@ export function formatReplicaMoney(value: number | null | undefined): string {
     return `${sign}${(abs / 10_000).toFixed(2).replace(/\.?0+$/, "")}万`;
   }
   return `${sign}${abs.toFixed(0)}`;
+}
+
+export function formatReplicaReportedMoney(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return "--";
+  }
+  return formatReplicaMoney(value);
+}
+
+export function formatReplicaReportedRatio(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) {
+    return "--";
+  }
+  return `${value.toFixed(2)}%`;
+}
+
+export function isSectorReplicaStocksForSelection(
+  stocks: Pick<SectorReplicaStocksResponse, "board_code" | "sub_theme"> | null,
+  activeBoardCode: string | null,
+  activeSubTheme: string | null,
+): boolean {
+  return Boolean(
+    stocks &&
+      activeBoardCode &&
+      stocks.board_code === activeBoardCode &&
+      (stocks.sub_theme ?? null) === activeSubTheme,
+  );
+}
+
+export function latestSectorReplicaSeriesTime(
+  axis: string[],
+  series: Array<Pick<SectorReplicaChartSeries, "data">>,
+): string | null {
+  let latestIndex = -1;
+  for (const item of series) {
+    for (let index = Math.min(item.data.length, axis.length) - 1; index >= 0; index -= 1) {
+      const value = item.data[index];
+      if (typeof value === "number" && Number.isFinite(value)) {
+        latestIndex = Math.max(latestIndex, index);
+        break;
+      }
+    }
+  }
+  return latestIndex >= 0 ? axis[latestIndex] : null;
 }
 
 export function formatReplicaNumber(value: number | null | undefined): string {

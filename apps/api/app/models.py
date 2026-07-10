@@ -1087,6 +1087,7 @@ class SectorReplicaStocksResponse(BaseModel):
     board_code: str | None = None
     sub_theme: str | None = None
     rows: list[SectorReplicaStockRow] = Field(default_factory=list)
+    related_tags: list[str] = Field(default_factory=list)
     source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
     generated_at: str = Field(
         default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")

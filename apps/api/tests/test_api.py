@@ -28,6 +28,11 @@ from app.models import (
     MarketRankingsResponse,
     MarketSectorStrengthItem,
     MarketTurnoverSummary,
+    SectorReplicaChartSeries,
+    SectorReplicaPlate,
+    SectorReplicaQxLive,
+    SectorReplicaRadarResponse,
+    SectorReplicaStockRow,
     SectorRadarItem,
     SectorRadarResponse,
     StrongStockCandidate,
@@ -1085,6 +1090,85 @@ class FakePlateRotationReferenceProvider:
         )
 
 
+class FakeSectorReplicaLiveProvider:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[str, ...], int]] = []
+        self.stock_calls: list[tuple[str, int]] = []
+        self.stock_rows = [
+            SectorReplicaStockRow(
+                symbol="603137.SH",
+                code="603137",
+                name="恒尚节能",
+                pct_change=10,
+                turnover_cny=327_029_554,
+                circulating_value_cny=2_097_984_017,
+                board_label="8连板",
+                auction_pct_change=5.67,
+                auction_amount_cny=115_656_012,
+                auction_volume_ratio=68.74,
+                buy_ratio_pct=62.87,
+                seal_amount_cny=148_919_200,
+                leader_tag="龙一",
+                compat_row=["603137", "恒尚节能"],
+            )
+        ]
+
+    def get_radar(
+        self,
+        *,
+        mode: str,
+        selected_codes: list[str],
+        limit: int,
+        trade_date: str,
+        generated_at: str,
+    ) -> SectorReplicaRadarResponse:
+        self.calls.append((mode, tuple(selected_codes), limit))
+        return SectorReplicaRadarResponse(
+            mode=mode,
+            trade_date=trade_date,
+            axis=["09:15", "09:16", "09:17"],
+            qxlive=SectorReplicaQxLive(
+                Aaxis=["09:15", "09:16", "09:17"],
+                zflist=[0, 0, 0],
+                series={"QX": [60, 61, 62], "ZT": [48, 49, 50]},
+            ),
+            plates=[
+                SectorReplicaPlate(code="801001", name="芯片", val=33228, ztcount=48),
+                SectorReplicaPlate(code="801660", name="通信", val=7981, ztcount=25),
+                SectorReplicaPlate(code="801807", name="算力", val=7562, ztcount=17),
+            ],
+            checkplate=selected_codes or ["801001", "801660"],
+            legend=["芯片", "通信"],
+            series=[
+                SectorReplicaChartSeries(name="芯片", data=[6006, 8112, 33228], smooth=False),
+                SectorReplicaChartSeries(name="通信", data=[-7257, -5982, 7981], smooth=False),
+            ],
+            source_status=[
+                StrongStockSourceStatus(
+                    source="短线侠 qxlive",
+                    status="success",
+                    detail="fake qxlive",
+                )
+            ],
+            generated_at=generated_at,
+        )
+
+    def get_board_stocks(self, *, board_code: str, limit: int) -> list[SectorReplicaStockRow]:
+        self.stock_calls.append((board_code, limit))
+        return self.stock_rows[:limit]
+
+    def get_board_subplates(self, *, board_code: str) -> list[tuple[str, str]]:
+        return [("801722", "存储"), ("801490", "半导体设备")]
+
+
+class FailingSectorReplicaLiveProvider:
+    def get_radar(self, **_kwargs: object) -> SectorReplicaRadarResponse:
+        raise RuntimeError("qxlive disabled in default tests")
+
+    def get_board_stocks(self, **_kwargs: object) -> list[SectorReplicaStockRow]:
+        raise RuntimeError("qxlive disabled in default tests")
+
+
 def _client(
     tmp_path: Path,
     candidate_provider: object | None = None,
@@ -1133,6 +1217,7 @@ def _client(
         delattr(app.state, "sector_now")
     if hasattr(app.state, "plate_rotation_reference_provider"):
         delattr(app.state, "plate_rotation_reference_provider")
+    app.state.sector_replica_live_provider = FailingSectorReplicaLiveProvider()
     app.state.watchlist_snapshot = WatchlistSnapshot(
         items=[WatchlistItem(symbol="002000.SZ", name="示例股份")]
     )
@@ -2172,6 +2257,24 @@ def test_sector_replica_radar_endpoint_returns_qxlive_shape(tmp_path: Path) -> N
     assert "QX" in payload["qxlive"]["series"]
 
 
+def test_sector_replica_radar_endpoint_prefers_live_qxlive_provider(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    provider = FakeSectorReplicaLiveProvider()
+    app.state.sector_replica_live_provider = provider
+    app.state.sector_now = datetime(2026, 7, 9, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    response = client.get("/api/sectors/replica/radar?mode=strength&limit=5&selected=801001,801660")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["name"] for item in payload["plates"][:3]] == ["芯片", "通信", "算力"]
+    assert payload["checkplate"] == ["801001", "801660"]
+    assert payload["legend"] == ["芯片", "通信"]
+    assert payload["series"][0]["data"] == [6006, 8112, 33228]
+    assert payload["source_status"][0]["source"] == "短线侠 qxlive"
+    assert provider.calls == [("strength", ("801001", "801660"), 5)]
+
+
 def test_sector_replica_board_stocks_endpoint_returns_rows(tmp_path: Path) -> None:
     client = _client(tmp_path)
     _seed_sector_theme_rows(tmp_path)
@@ -2186,6 +2289,81 @@ def test_sector_replica_board_stocks_endpoint_returns_rows(tmp_path: Path) -> No
     assert payload["board_code"] == board_code
     assert payload["rows"][0]["name"] == "涨幅一号"
     assert payload["rows"][0]["compat_row"][0] == "300001"
+
+
+def test_sector_replica_board_stocks_endpoint_prefers_live_numeric_board_code(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    provider = FakeSectorReplicaLiveProvider()
+    app.state.sector_replica_live_provider = provider
+    app.state.sector_now = datetime(2026, 7, 9, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    response = client.get("/api/sectors/replica/boards/801001/stocks?mode=strength&limit=10")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["board_code"] == "801001"
+    assert payload["rows"][0]["symbol"] == "603137.SH"
+    assert payload["rows"][0]["name"] == "恒尚节能"
+    assert payload["rows"][0]["leader_tag"] == "龙一"
+    assert payload["source_status"][0]["source"] == "短线侠 qxlive 成分股"
+    assert provider.stock_calls == [("801001", 10)]
+
+
+def test_sector_replica_board_stocks_endpoint_uses_live_subplate_code(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+    provider = FakeSectorReplicaLiveProvider()
+    app.state.sector_replica_live_provider = provider
+
+    response = client.get(
+        "/api/sectors/replica/boards/801001/stocks"
+        "?mode=strength&board_name=芯片&sub_theme=存储&limit=10"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["related_tags"] == ["存储", "半导体设备"]
+    assert payload["sub_theme"] == "存储"
+    assert provider.stock_calls == [("801722", 10)]
+
+
+def test_sector_replica_board_stocks_endpoint_falls_back_when_live_provider_fails(
+    tmp_path: Path,
+) -> None:
+    client = _client(tmp_path)
+    _seed_sector_theme_rows(tmp_path)
+    app.state.sector_now = datetime(2026, 7, 3, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    response = client.get(
+        "/api/sectors/replica/boards/801159/stocks"
+        "?mode=strength&board_name=机器人&limit=10"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["rows"][0]["name"] == "涨幅一号"
+    assert payload["source_status"][0]["source"] == "短线侠 qxlive 成分股"
+    assert payload["source_status"][0]["status"] == "failed"
+
+
+def test_sector_replica_board_stocks_endpoint_falls_back_when_live_rows_are_empty(
+    tmp_path: Path,
+) -> None:
+    client = _client(tmp_path)
+    _seed_sector_theme_rows(tmp_path)
+    provider = FakeSectorReplicaLiveProvider()
+    provider.stock_rows = []
+    app.state.sector_replica_live_provider = provider
+    app.state.sector_now = datetime(2026, 7, 3, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    response = client.get(
+        "/api/sectors/replica/boards/801159/stocks"
+        "?mode=strength&board_name=机器人&limit=10"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["rows"][0]["name"] == "涨幅一号"
+    assert payload["source_status"][0]["status"] == "stale"
 
 
 def test_sector_workbench_endpoint_explicit_industry_scope_ignores_theme_snapshot_status(tmp_path: Path) -> None:

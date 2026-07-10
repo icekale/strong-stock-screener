@@ -152,7 +152,10 @@ from app.services.sector_workbench import (
 from app.services.sector_radar_replica import (
     build_sector_radar_replica_response,
     build_sector_replica_stock_rows,
+    missing_replica_series_names,
+    replica_theme_names_for_codes,
 )
+from app.services.sector_replica_live import SectorReplicaLiveProvider
 from app.services.sector_workbench_intraday import build_sector_intraday_series
 from app.services.sector_workbench_store import SectorThemeRowsStore, SectorWorkbenchSampleStore
 from app.services.short_term_cache import TtlCache
@@ -1425,6 +1428,29 @@ def get_sector_replica_radar(
     stock_limit: int = 50,
 ) -> SectorReplicaRadarResponse:
     selected_codes = [part.strip() for part in selected.split(",") if part.strip()]
+    sampled_at = _sector_now()
+    try:
+        live_response = _sector_replica_live_provider().get_radar(
+            mode=mode,
+            selected_codes=selected_codes,
+            limit=limit,
+            trade_date=sampled_at.date().isoformat(),
+            generated_at=sampled_at.isoformat(timespec="seconds"),
+        )
+        if live_response.plates and live_response.series:
+            return live_response
+    except Exception as exc:
+        live_status = StrongStockSourceStatus(
+            source="短线侠 qxlive",
+            status="failed",
+            detail=f"真实板块曲线读取失败，已回退本地工作台: {exc.__class__.__name__}",
+        )
+    else:
+        live_status = StrongStockSourceStatus(
+            source="短线侠 qxlive",
+            status="stale",
+            detail="真实板块曲线为空，已回退本地工作台",
+        )
     workbench = SectorWorkbenchResponse.model_validate(
         get_sector_workbench(
             mode=mode,
@@ -1434,27 +1460,109 @@ def get_sector_replica_radar(
             stock_limit=stock_limit,
         )
     )
-    return build_sector_radar_replica_response(
+    selected_names = replica_theme_names_for_codes(workbench.themes, selected_codes=selected_codes)
+    if selected_names:
+        workbench = SectorWorkbenchResponse.model_validate(
+            get_sector_workbench(
+                mode=mode,
+                scope="auto",
+                selected=",".join(selected_names),
+                limit=limit,
+                stock_limit=stock_limit,
+            )
+        )
+    missing_series = missing_replica_series_names(workbench, selected_names)
+    if missing_series:
+        _schedule_sector_intraday_refresh(
+            workbench.model_copy(update={"selected_themes": selected_names}, deep=True)
+        )
+        workbench.source_status.append(
+            StrongStockSourceStatus(
+                source="TickFlow 当日分钟线",
+                status="stale",
+                detail=f"replica 缺少 {len(missing_series)} 条选中板块曲线，已触发后台补齐",
+            )
+        )
+    fallback_response = build_sector_radar_replica_response(
         workbench=workbench,
         mode=mode,
         selected_codes=selected_codes,
-        sampled_at=_sector_now(),
+        sampled_at=sampled_at,
     )
+    fallback_response.source_status.insert(0, live_status)
+    return fallback_response
 
 
 @app.get("/api/sectors/replica/boards/{board_code:path}/stocks", response_model=SectorReplicaStocksResponse)
 def get_sector_replica_board_stocks(
     board_code: str,
     mode: SectorReplicaMode = "strength",
+    board_name: str | None = None,
     sub_theme: str | None = None,
     limit: int = 50,
 ) -> SectorReplicaStocksResponse:
     bounded_limit = max(1, min(limit, 200))
+    normalized_board_code = board_code.replace("theme:", "").strip()
+    live_status: StrongStockSourceStatus | None = None
+    related_tags: list[str] = []
+    if normalized_board_code.isdigit():
+        provider = _sector_replica_live_provider()
+        try:
+            subplates = provider.get_board_subplates(board_code=normalized_board_code)
+        except Exception:
+            subplates = []
+        related_tags = [name for _code, name in subplates]
+        stock_board_code = normalized_board_code
+        if sub_theme:
+            stock_board_code = next(
+                (code for code, name in subplates if name == sub_theme),
+                "",
+            )
+        if not stock_board_code:
+            live_status = StrongStockSourceStatus(
+                source="短线侠 qxlive 成分股",
+                status="stale",
+                detail=f"未找到子题材 {sub_theme} 的真实板块代码，已回退本地工作台",
+            )
+        else:
+            try:
+                rows = provider.get_board_stocks(
+                    board_code=stock_board_code,
+                    limit=bounded_limit,
+                )
+            except Exception as exc:
+                live_status = StrongStockSourceStatus(
+                    source="短线侠 qxlive 成分股",
+                    status="failed",
+                    detail=f"真实开盘啦板块成分股读取失败，已回退本地工作台: {exc.__class__.__name__}",
+                )
+            else:
+                if rows:
+                    return SectorReplicaStocksResponse(
+                        board_code=board_code,
+                        sub_theme=sub_theme,
+                        rows=rows,
+                        related_tags=related_tags,
+                        source_status=[
+                            StrongStockSourceStatus(
+                                source="短线侠 qxlive 成分股",
+                                status="success",
+                                detail=f"读取真实开盘啦板块成分股 {len(rows)} 条",
+                            )
+                        ],
+                        generated_at=_sector_now().isoformat(timespec="seconds"),
+                    )
+                live_status = StrongStockSourceStatus(
+                    source="短线侠 qxlive 成分股",
+                    status="stale",
+                    detail="真实开盘啦板块成分股为空，已回退本地工作台",
+                )
+    fallback_board_name = (board_name or "").strip() or None
     workbench = SectorWorkbenchResponse.model_validate(
         get_sector_workbench(
             mode=mode,
             scope="auto",
-            selected="",
+            selected=fallback_board_name or "",
             limit=50,
             stock_limit=bounded_limit,
         )
@@ -1462,13 +1570,18 @@ def get_sector_replica_board_stocks(
     rows = build_sector_replica_stock_rows(
         workbench,
         board_code=board_code,
+        board_name=fallback_board_name,
         sub_theme=sub_theme,
     )[:bounded_limit]
+    source_status = list(workbench.source_status)
+    if live_status is not None:
+        source_status.insert(0, live_status)
     return SectorReplicaStocksResponse(
         board_code=board_code,
         sub_theme=sub_theme,
         rows=rows,
-        source_status=workbench.source_status,
+        related_tags=related_tags or workbench.related_tags,
+        source_status=source_status,
         generated_at=_sector_now().isoformat(timespec="seconds"),
     )
 
@@ -2791,6 +2904,16 @@ def _plate_rotation_reference_provider() -> object:
     settings = _effective_settings()
     provider = PlateRotationReferenceProvider(timeout_seconds=settings.provider_timeout_seconds)
     app.state.plate_rotation_reference_provider = provider
+    return provider
+
+
+def _sector_replica_live_provider() -> object:
+    injected = getattr(app.state, "sector_replica_live_provider", None)
+    if injected is not None:
+        return injected
+    settings = _effective_settings()
+    provider = SectorReplicaLiveProvider(timeout_seconds=settings.provider_timeout_seconds)
+    app.state.sector_replica_live_provider = provider
     return provider
 
 

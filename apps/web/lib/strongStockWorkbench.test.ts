@@ -24,6 +24,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   const pageSource = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
   const homeWorkspaceUrl = new URL("../app/HomeWorkbench.tsx", import.meta.url);
   const homeWorkspaceSource = existsSync(homeWorkspaceUrl) ? readFileSync(homeWorkspaceUrl, "utf8") : "";
+  const screenerPageUrl = new URL("../app/screener/page.tsx", import.meta.url);
+  const screenerPageSource = existsSync(screenerPageUrl) ? readFileSync(screenerPageUrl, "utf8") : "";
   const homeFeatureSource = [pageSource, homeWorkspaceSource].join("\n");
   const layoutSource = readFileSync(new URL("../app/layout.tsx", import.meta.url), "utf8");
   const antdProviderSource = readFileSync(new URL("../components/AntdAppProvider.tsx", import.meta.url), "utf8");
@@ -584,7 +586,9 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.doesNotMatch(screenerFeatureSource, /xl:grid-cols-\[280px_minmax\(0,1fr\)_320px\]/);
   assert.match(screenerFeatureSource, /点击股票名称查看 K 线详情/);
   assert.match(pageSource, /dynamic[<(]/);
-  assert.match(pageSource, /HomeWorkbench/);
+  assert.match(pageSource, /MarketOverviewWorkbench/);
+  assert.ok(screenerPageSource);
+  assert.match(screenerPageSource, /HomeWorkbench/);
   assert.match(homeFeatureSource, /ScreenerWorkbench/);
   assert.match(homeFeatureSource, /const \[scanLimit, setScanLimit\] = useState\(160\)/);
   assert.doesNotMatch(homeFeatureSource, /createIntradaySnapshot/);

@@ -1,0 +1,103 @@
+"use client";
+
+import { ReloadOutlined } from "@ant-design/icons";
+import { Button, Tag } from "antd";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { DecisionQueue } from "../components/overview/DecisionQueue";
+import { MarketFeed } from "../components/overview/MarketFeed";
+import { MarketPulse } from "../components/overview/MarketPulse";
+import { SectorHeatmapPreview } from "../components/overview/SectorHeatmapPreview";
+import { PageFrame } from "../components/workbench/PageFrame";
+import {
+  getAuctionModelTop3,
+  getLatestScreenRun,
+  getMarketOverview,
+  getSectorRadar,
+  getSentimentSummary,
+} from "../lib/api";
+import {
+  executeLatestOnly,
+  getMarketSession,
+  getShanghaiTradeDate,
+  nextRequestGeneration,
+  toPanelState,
+  type PanelState,
+} from "../lib/marketOverview";
+import type {
+  AuctionModelTop3Response,
+  MarketOverviewResponse,
+  SectorRadarResponse,
+  SentimentSummaryResponse,
+  StrongStockScreeningResponse,
+} from "../lib/types";
+
+export function MarketOverviewWorkbench() {
+  const [screening, setScreening] = useState<PanelState<StrongStockScreeningResponse> | null>(null);
+  const [market, setMarket] = useState<PanelState<MarketOverviewResponse> | null>(null);
+  const [auction, setAuction] = useState<PanelState<AuctionModelTop3Response> | null>(null);
+  const [sectorRadar, setSectorRadar] = useState<PanelState<SectorRadarResponse> | null>(null);
+  const [sentiment, setSentiment] = useState<PanelState<SentimentSummaryResponse> | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const refreshGeneration = useRef(0);
+
+  const refresh = useCallback(() => {
+    const generation = nextRequestGeneration(refreshGeneration.current);
+    refreshGeneration.current = generation;
+    setRefreshing(true);
+    const tradeDate = getShanghaiTradeDate();
+
+    return executeLatestOnly({
+      generation,
+      currentGeneration: () => refreshGeneration.current,
+      execute: () =>
+        Promise.allSettled([
+          getLatestScreenRun(),
+          getMarketOverview(),
+          getAuctionModelTop3(tradeDate, { cacheOnly: true }),
+          getSectorRadar(12),
+          getSentimentSummary(tradeDate, 80, false),
+        ]),
+      apply: ([screeningResult, marketResult, auctionResult, sectorRadarResult, sentimentResult]) => {
+        setScreening((previous) => toPanelState(screeningResult, panelValue(previous)));
+        setMarket((previous) => toPanelState(marketResult, panelValue(previous)));
+        setAuction((previous) => toPanelState(auctionResult, panelValue(previous)));
+        setSectorRadar((previous) => toPanelState(sectorRadarResult, panelValue(previous)));
+        setSentiment((previous) => toPanelState(sentimentResult, panelValue(previous)));
+      },
+      finishLoading: () => setRefreshing(false),
+    });
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const tradeDate = getShanghaiTradeDate();
+  const session = getMarketSession();
+
+  return (
+    <PageFrame
+      actions={
+        <Button disabled={refreshing} icon={<ReloadOutlined />} loading={refreshing} onClick={() => void refresh()} type="primary">
+          刷新
+        </Button>
+      }
+      context={`上海 ${tradeDate} · ${session}`}
+      status={<Tag color="blue">只读</Tag>}
+      title="市场总览"
+    >
+      <div className="space-y-4">
+        <DecisionQueue auction={auction} onRefresh={() => void refresh()} screening={screening} />
+        <MarketPulse market={market} onRefresh={() => void refresh()} sentiment={sentiment} />
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+          <SectorHeatmapPreview onRefresh={() => void refresh()} sectorRadar={sectorRadar} />
+          <MarketFeed onRefresh={() => void refresh()} sectorRadar={sectorRadar} sentiment={sentiment} />
+        </div>
+      </div>
+    </PageFrame>
+  );
+}
+
+function panelValue<T>(state: PanelState<T> | null): T | null {
+  return state && state.kind !== "error" ? state.value : null;
+}

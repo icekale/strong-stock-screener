@@ -76,6 +76,13 @@ test("stock detail context can return to the auction model panel", () => {
   });
 });
 
+test("stock detail href encodes dashboard symbols and retains auction-model context", () => {
+  assert.equal(
+    buildStockDetailHref("SH/600001", { from: "auction-model" }),
+    "/stock/SH%2F600001?from=auction-model",
+  );
+});
+
 test("stock detail context can return to the heatmap workbench", () => {
   assert.equal(
     buildStockDetailHref("603690.SH", {

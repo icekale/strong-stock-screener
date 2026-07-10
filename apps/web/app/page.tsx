@@ -1,37 +1,34 @@
 "use client";
 
-import { Card, Skeleton, Typography } from "antd";
+import { Skeleton } from "antd";
 import dynamic from "next/dynamic";
 import { type ComponentType } from "react";
+import { PageFrame } from "../components/workbench/PageFrame";
 
-const HomeWorkbench = dynamic(
-  () => import("./HomeWorkbench").then((module) => module.HomeWorkbench),
-  { ssr: false, loading: () => <HomeWorkbenchPlaceholder /> },
+const MarketOverviewWorkbench = dynamic(
+  () => import("./MarketOverviewWorkbench").then((module) => module.MarketOverviewWorkbench),
+  { ssr: false, loading: () => <MarketOverviewPlaceholder /> },
 ) as ComponentType;
 
 export default function HomePage() {
-  return <HomeWorkbench />;
+  return <MarketOverviewWorkbench />;
 }
 
-function HomeWorkbenchPlaceholder() {
+function MarketOverviewPlaceholder() {
   return (
-    <main className="min-h-screen bg-[#f5f3f0] text-[#11100e]">
-      <div className="mx-auto max-w-none space-y-4 px-5 py-4">
-        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-          {["总成交额 TOTAL TURNOVER", "情绪指数", "涨跌比", "数据源"].map((title) => (
-            <Card className="workbench-card" key={title}>
-              <Typography.Text className="text-xs font-black uppercase text-[#7b756d]">{title}</Typography.Text>
-              <Skeleton active paragraph={{ rows: 2 }} title={false} />
-            </Card>
-          ))}
-        </section>
-        <Card className="workbench-card">
-          <Typography.Title className="text-base font-black text-[#11100e]" level={2}>
-            选股结果 · Screener Results
-          </Typography.Title>
-          <Skeleton active paragraph={{ rows: 10 }} title={false} />
-        </Card>
+    <PageFrame context="正在读取上海市场数据" title="市场总览">
+      <div className="grid gap-4 xl:grid-cols-2">
+        {["决策队列", "市场脉冲", "板块资金流", "市场动态"].map((title) => (
+          <section className="compact-panel" key={title}>
+            <div className="compact-panel__header">
+              <h2 className="m-0 text-sm font-semibold text-[var(--app-ink)]">{title}</h2>
+            </div>
+            <div className="p-4">
+              <Skeleton active paragraph={{ rows: title === "决策队列" ? 7 : 4 }} title={false} />
+            </div>
+          </section>
+        ))}
       </div>
-    </main>
+    </PageFrame>
   );
 }

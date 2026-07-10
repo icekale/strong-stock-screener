@@ -4,6 +4,8 @@ import test from "node:test";
 const {
   formatReplicaReportedMoney,
   formatReplicaReportedRatio,
+  isSectorReplicaRadarCache,
+  isSectorReplicaStocksCache,
   isSectorReplicaStocksForSelection,
   latestSectorReplicaSeriesTime,
   nextSectorReplicaSelection,
@@ -46,4 +48,30 @@ test("latest series time ignores the fixed future trading axis", () => {
     ]),
     "09:17",
   );
+});
+
+test("sector replica rejects stale session cache payloads", () => {
+  const staleRadar = {
+    result: "success",
+    mode: "strength",
+    axis: [],
+    plates: [],
+    checkplate: [],
+    legend: [],
+    series: [],
+    stocks: [],
+    related_tags: [],
+    source_status: [],
+  };
+  const staleStocks = {
+    board_code: "801001",
+    sub_theme: null,
+    rows: [],
+    source_status: [],
+  };
+
+  assert.equal(isSectorReplicaRadarCache?.(staleRadar), false);
+  assert.equal(isSectorReplicaStocksCache?.(staleStocks), false);
+  assert.equal(isSectorReplicaRadarCache?.({ ...staleRadar, qxlive: { series: {} } }), true);
+  assert.equal(isSectorReplicaStocksCache?.({ ...staleStocks, related_tags: [] }), true);
 });

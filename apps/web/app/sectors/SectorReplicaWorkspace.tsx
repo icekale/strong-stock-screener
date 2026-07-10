@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSectorReplicaBoardStocks, getSectorReplicaRadar } from "../../lib/api";
-import { isSectorReplicaStocksForSelection, nextSectorReplicaSelection } from "../../lib/sectorReplica";
+import {
+  isSectorReplicaRadarCache,
+  isSectorReplicaStocksCache,
+  isSectorReplicaStocksForSelection,
+  nextSectorReplicaSelection,
+} from "../../lib/sectorReplica";
 import type {
   SectorReplicaMode,
   SectorReplicaRadarResponse,
@@ -18,8 +23,12 @@ export function SectorReplicaWorkspace() {
   const [selectedCodes, setSelectedCodes] = useState<string[]>([]);
   const [activeBoardCode, setActiveBoardCode] = useState<string | null>(null);
   const [activeSubTheme, setActiveSubTheme] = useState<string | null>(null);
-  const [radar, setRadar] = useState<SectorReplicaRadarResponse | null>(() => readSessionJson(RADAR_CACHE_KEY));
-  const [stocks, setStocks] = useState<SectorReplicaStocksResponse | null>(() => readSessionJson(STOCKS_CACHE_KEY));
+  const [radar, setRadar] = useState<SectorReplicaRadarResponse | null>(() =>
+    readSessionJson(RADAR_CACHE_KEY, isSectorReplicaRadarCache),
+  );
+  const [stocks, setStocks] = useState<SectorReplicaStocksResponse | null>(() =>
+    readSessionJson(STOCKS_CACHE_KEY, isSectorReplicaStocksCache),
+  );
   const [loading, setLoading] = useState(false);
   const [stockLoading, setStockLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -181,13 +190,21 @@ export function SectorReplicaWorkspace() {
   );
 }
 
-function readSessionJson<T>(key: string): T | null {
+function readSessionJson<T>(key: string, isValid: (value: unknown) => value is T): T | null {
   if (typeof window === "undefined") {
     return null;
   }
   try {
     const value = window.sessionStorage.getItem(key);
-    return value ? (JSON.parse(value) as T) : null;
+    if (!value) {
+      return null;
+    }
+    const parsed: unknown = JSON.parse(value);
+    if (isValid(parsed)) {
+      return parsed;
+    }
+    window.sessionStorage.removeItem(key);
+    return null;
   } catch {
     return null;
   }

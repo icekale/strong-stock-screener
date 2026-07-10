@@ -1,8 +1,33 @@
 import type {
   SectorReplicaChartSeries,
+  SectorReplicaRadarResponse,
   SectorReplicaStocksResponse,
   StrongStockSourceStatus,
 } from "./types";
+
+export function isSectorReplicaRadarCache(value: unknown): value is SectorReplicaRadarResponse {
+  return Boolean(
+    isRecord(value) &&
+      Array.isArray(value.axis) &&
+      Array.isArray(value.plates) &&
+      Array.isArray(value.checkplate) &&
+      Array.isArray(value.series) &&
+      Array.isArray(value.stocks) &&
+      Array.isArray(value.related_tags) &&
+      Array.isArray(value.source_status) &&
+      isRecord(value.qxlive) &&
+      isRecord(value.qxlive.series),
+  );
+}
+
+export function isSectorReplicaStocksCache(value: unknown): value is SectorReplicaStocksResponse {
+  return Boolean(
+    isRecord(value) &&
+      Array.isArray(value.rows) &&
+      Array.isArray(value.related_tags) &&
+      Array.isArray(value.source_status),
+  );
+}
 
 export function nextSectorReplicaSelection(
   current: string[],
@@ -114,4 +139,8 @@ export function sourceStatusText(status: StrongStockSourceStatus | null | undefi
             ? "缺配置"
             : "失败";
   return `${status.source} · ${label}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }

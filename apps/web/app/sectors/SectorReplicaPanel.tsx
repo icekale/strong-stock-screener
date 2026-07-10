@@ -86,7 +86,12 @@ export function SectorReplicaPanel({
     <section className="sector-replica-shell">
       <div className="sector-replica-emotion-grid">
         {EMOTION_METRICS.map((item) => (
-          <button className={`sector-replica-emotion-button is-${item.tone}`} key={item.key} type="button">
+          <button
+            aria-label={`${item.label} ${formatEmotionMetric(radar, item.key)}`}
+            className={`sector-replica-emotion-button is-${item.tone}`}
+            key={item.key}
+            type="button"
+          >
             {item.label}：<span>{formatEmotionMetric(radar, item.key)}</span>
           </button>
         ))}
@@ -98,6 +103,7 @@ export function SectorReplicaPanel({
             {(Object.keys(MODE_LABELS) as SectorReplicaMode[]).map((item) => (
               <button
                 className={item === mode ? "is-active" : ""}
+                aria-pressed={item === mode}
                 key={item}
                 onClick={() => onModeChange(item)}
                 type="button"
@@ -105,6 +111,15 @@ export function SectorReplicaPanel({
                 {MODE_LABELS[item]}
               </button>
             ))}
+          </div>
+          <div className="sector-replica-board-list-head">
+            <div>
+              <strong>{MODE_LABELS[mode]}</strong>
+              <span>板块榜单</span>
+            </div>
+            <span className="sector-replica-selection-count">
+              {selectedCodes.length}/6 <small>对比</small>
+            </span>
           </div>
           <div className="sector-replica-board-list">
             {(radar?.plates ?? []).map((plate) => (
@@ -127,7 +142,11 @@ export function SectorReplicaPanel({
         </aside>
 
         <div className="sector-replica-main">
-          {error ? <div className="sector-replica-error">{error}</div> : null}
+          {error ? (
+            <div aria-live="polite" className="sector-replica-error" role="status">
+              {error}
+            </div>
+          ) : null}
           <div className="sector-replica-chart-head">
             <div className="sector-replica-chart-title">
               {activePlate?.name ?? "板块分时"}
@@ -143,11 +162,13 @@ export function SectorReplicaPanel({
               </button>
             </div>
           </div>
-          <SectorReplicaChart loading={loading && !radar} mode={mode} radar={radar} />
+          <div aria-busy={loading} className="sector-replica-chart-region">
+            <SectorReplicaChart loading={loading && !radar} mode={mode} radar={radar} />
+          </div>
         </div>
       </div>
 
-      <div className="sector-replica-stock-panel">
+      <div aria-busy={stockLoading} className="sector-replica-stock-panel">
         <SubThemeStrip
           activeSubTheme={activeSubTheme}
           onSubThemeChange={onSubThemeChange}
@@ -214,12 +235,17 @@ function BoardListItem({
   return (
     <div className={`sector-replica-board-row${active ? " is-active" : ""}${checked ? " is-checked" : ""}`}>
       <input
-        aria-label={`选择${plate.name}`}
+        aria-label={`加入对比：${plate.name}`}
         checked={checked}
         onChange={(event) => onToggle(event.target.checked)}
         type="checkbox"
       />
-      <button onClick={onActivate} type="button">
+      <button
+        aria-label={`查看${plate.name}板块`}
+        aria-pressed={active}
+        onClick={onActivate}
+        type="button"
+      >
         <span className="sector-replica-board-name">{plate.name}</span>
         <span className="sector-replica-board-value">{value}</span>
         {plate.ztcount > 0 ? <span className="sector-replica-limit-badge">{plate.ztcount}涨停</span> : null}
@@ -245,8 +271,18 @@ function SectorReplicaChart({
       return;
     }
     const chart = echarts.init(chartRef.current);
-    chart.setOption(buildSectorReplicaChartOption({ axis: radar.axis, mode, series: radar.series }));
-    const resize = () => chart.resize();
+    const getChartOption = () =>
+      buildSectorReplicaChartOption({
+        axis: radar.axis,
+        compact: chartRef.current ? chartRef.current.clientWidth < 560 : false,
+        mode,
+        series: radar.series,
+      });
+    chart.setOption(getChartOption());
+    const resize = () => {
+      chart.resize();
+      chart.setOption(getChartOption());
+    };
     if (typeof ResizeObserver !== "undefined") {
       const observer = new ResizeObserver(resize);
       observer.observe(chartRef.current);
@@ -282,21 +318,23 @@ function SubThemeStrip({
 }) {
   const visibleTags = tags.slice(0, 28);
   return (
-    <div className="sector-replica-tags">
-      <button className={activeSubTheme === null ? "is-active" : ""} onClick={() => onSubThemeChange(null)} type="button">
-        全部
-      </button>
-      {visibleTags.map((tag) => (
-        <button
-          className={activeSubTheme === tag ? "is-active" : ""}
-          key={tag}
-          onClick={() => onSubThemeChange(tag)}
-          type="button"
-        >
-          {tag}
+    <div className="sector-replica-tags-scroll">
+      <div className="sector-replica-tags">
+        <button className={activeSubTheme === null ? "is-active" : ""} onClick={() => onSubThemeChange(null)} type="button">
+          全部
         </button>
-      ))}
-      {visibleTags.length === 0 ? <span>暂无关联题材</span> : null}
+        {visibleTags.map((tag) => (
+          <button
+            className={activeSubTheme === tag ? "is-active" : ""}
+            key={tag}
+            onClick={() => onSubThemeChange(tag)}
+            type="button"
+          >
+            {tag}
+          </button>
+        ))}
+        {visibleTags.length === 0 ? <span>暂无关联题材</span> : null}
+      </div>
     </div>
   );
 }

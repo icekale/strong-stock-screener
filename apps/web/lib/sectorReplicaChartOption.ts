@@ -16,11 +16,30 @@ const MARKET_BROWN = "#806044";
 
 export type SectorReplicaChartOptionInput = {
   axis: string[];
+  compact?: boolean;
   series: SectorReplicaChartSeries[];
   mode?: SectorReplicaMode;
 };
 
-export function buildSectorReplicaChartOption({ axis, series, mode = "strength" }: SectorReplicaChartOptionInput) {
+export function buildSectorReplicaChartOption({
+  axis,
+  compact = false,
+  series,
+  mode = "strength",
+}: SectorReplicaChartOptionInput) {
+  const compactLabelIndices = new Set<number>();
+  const keyTimeIndices = axis.reduce<number[]>((indices, value, index) => {
+    if (isReplicaKeyTime(value)) {
+      indices.push(index);
+    }
+    return indices;
+  }, []);
+  keyTimeIndices.forEach((index, ordinal) => {
+    if (ordinal % 2 === 0 || ordinal === keyTimeIndices.length - 1) {
+      compactLabelIndices.add(index);
+    }
+  });
+
   return {
     animationDuration: 160,
     backgroundColor: WORKBENCH_SURFACE,
@@ -35,7 +54,13 @@ export function buildSectorReplicaChartOption({ axis, series, mode = "strength" 
       MARKET_BROWN,
       MARKET_CYAN,
     ],
-    grid: { left: "2.5%", right: "1%", bottom: "5%", top: "10%", containLabel: true },
+    grid: {
+      left: "2.5%",
+      right: compact ? "4%" : "1%",
+      bottom: "5%",
+      top: "10%",
+      containLabel: true,
+    },
     legend: {
       top: 4,
       left: "center",
@@ -68,7 +93,8 @@ export function buildSectorReplicaChartOption({ axis, series, mode = "strength" 
         color: WORKBENCH_MUTED,
         fontSize: 11,
         hideOverlap: true,
-        interval: (_index: number, value: string) => isReplicaKeyTime(value),
+        interval: (index: number, value: string) =>
+          compact ? compactLabelIndices.has(index) : isReplicaKeyTime(value),
       },
       splitLine: { show: false },
     },

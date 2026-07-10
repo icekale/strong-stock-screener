@@ -10,6 +10,10 @@ const {
   resolveHeatmapDisplayStock,
 } = (await import(new URL("./heatmapWorkspaceHelpers.ts", import.meta.url).href)) as typeof import("./heatmapWorkspaceHelpers");
 
+const { buildStockDetailHref, resolveStockDetailContext } = (await import(
+  new URL("../../lib/stockNavigation.ts", import.meta.url).href
+)) as typeof import("../../lib/stockNavigation");
+
 const stockA = {
   symbol: "603690.SH",
   code: "603690",
@@ -109,10 +113,25 @@ test("heatmap source summary does not hide fallback behind partial success", () 
   assert.equal(heatmapSourceSummaryTone(ancillaryFailureStatuses), "warning");
 });
 
-test("heatmap K-line action uses a direct href button without nested interactive elements", () => {
+test("heatmap K-line action uses the shared unified heatmap detail context", () => {
   const source = readFileSync(new URL("./HeatmapWorkspace.tsx", import.meta.url), "utf-8");
 
-  assert.ok(source.includes('<Button block href={heatmapStockHref(displayStock)} type="primary">'));
+  assert.match(
+    source,
+    /<Button\s+block\s+href=\{buildStockDetailHref\(displayStock\.symbol, \{\s+from: "heatmap",\s+industry: displayStock\.industry,\s+name: displayStock\.name,\s+\}\)\}/,
+  );
+  assert.equal(
+    buildStockDetailHref(stockA.symbol, {
+      from: "heatmap",
+      industry: stockA.industry,
+      name: stockA.name,
+    }),
+    "/stock/603690.SH?from=heatmap&name=%E8%87%B3%E7%BA%AF%E7%A7%91%E6%8A%80&industry=%E5%8D%8A%E5%AF%BC%E4%BD%93",
+  );
+  assert.equal(
+    resolveStockDetailContext(new URLSearchParams("from=heatmap")).returnHref,
+    "/market?view=heatmap",
+  );
   assert.equal(source.includes('import Link from "next/link"'), false);
 });
 

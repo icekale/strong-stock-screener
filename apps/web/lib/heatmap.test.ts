@@ -6,7 +6,6 @@ const {
   formatHeatmapMoney,
   HEATMAP_SIZE_MODE_OPTIONS,
   heatmapSourceStatusLabel,
-  heatmapStockHref,
 } = (await import(new URL("./heatmap.ts", import.meta.url).href)) as typeof import("./heatmap");
 
 test("heatmap query maps filters to backend params", () => {
@@ -55,11 +54,4 @@ test("heatmap source status labels make fallback explicit", () => {
   assert.equal(heatmapSourceStatusLabel({ source: "东方财富热图行情", status: "failed", detail: "error" }), "失败");
   assert.equal(heatmapSourceStatusLabel({ source: "东方财富热图行情", status: "disabled", detail: "off" }), "未启用");
   assert.equal(heatmapSourceStatusLabel({ source: "东方财富热图行情", status: "missing_key", detail: "key" }), "缺配置");
-});
-
-test("heatmap stock href returns to heatmap workbench", () => {
-  assert.equal(
-    heatmapStockHref({ symbol: "603690.SH", name: "至纯科技", industry: "半导体" }),
-    "/stock/603690.SH?from=heatmap&name=%E8%87%B3%E7%BA%AF%E7%A7%91%E6%8A%80&industry=%E5%8D%8A%E5%AF%BC%E4%BD%93",
-  );
 });

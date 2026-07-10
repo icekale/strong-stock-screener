@@ -55,6 +55,10 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   const settingsWorkspaceUrl = new URL("../app/settings/SettingsWorkspace.tsx", import.meta.url);
   const settingsWorkspaceSource = existsSync(settingsWorkspaceUrl) ? readFileSync(settingsWorkspaceUrl, "utf8") : "";
   const settingsFeatureSource = [settingsPageSource, settingsWorkspaceSource].join("\n");
+  const marketPageUrl = new URL("../app/market/page.tsx", import.meta.url);
+  const marketPageSource = existsSync(marketPageUrl) ? readFileSync(marketPageUrl, "utf8") : "";
+  const marketWorkspaceUrl = new URL("../app/market/MarketWorkspace.tsx", import.meta.url);
+  const marketWorkspaceSource = existsSync(marketWorkspaceUrl) ? readFileSync(marketWorkspaceUrl, "utf8") : "";
   const sectorsPageUrl = new URL("../app/sectors/page.tsx", import.meta.url);
   const sectorsPageSource = existsSync(sectorsPageUrl) ? readFileSync(sectorsPageUrl, "utf8") : "";
   const sectorsWorkspaceUrl = new URL("../app/sectors/SectorPageWorkspace.tsx", import.meta.url);
@@ -83,6 +87,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
     sectorsReplicaUtilsSource,
     sectorsReplicaChartSource,
   ].join("\n");
+  const heatmapPageUrl = new URL("../app/heatmap/page.tsx", import.meta.url);
+  const heatmapPageSource = existsSync(heatmapPageUrl) ? readFileSync(heatmapPageUrl, "utf8") : "";
   const auctionPageUrl = new URL("../app/auction/page.tsx", import.meta.url);
   const auctionPageSource = existsSync(auctionPageUrl) ? readFileSync(auctionPageUrl, "utf8") : "";
   const auctionWorkspaceUrl = new URL("../app/auction/AuctionWorkspace.tsx", import.meta.url);
@@ -701,8 +707,15 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.doesNotMatch(sectorsFeatureSource, /题材多选/);
   assert.doesNotMatch(sectorsFeatureSource, /概念\/题材优先/);
   assert.doesNotMatch(sectorsFeatureSource, /trailColor/);
-  assert.match(sectorsPageSource, /dynamic[<(]/);
-  assert.match(sectorsPageSource, /SectorPageWorkspace/);
+  assert.match(marketPageSource, /MarketWorkspace/);
+  assert.match(marketWorkspaceSource, /PageFrame/);
+  assert.match(marketWorkspaceSource, /Segmented/);
+  assert.match(marketWorkspaceSource, /normalizeMarketView/);
+  assert.match(marketWorkspaceSource, /router\.replace\("\/market\?view=" \+ next, \{ scroll: false \}\)/);
+  assert.match(sectorsPageSource, /redirect\("\/market\?view=sectors"\)/);
+  assert.match(heatmapPageSource, /redirect\("\/market\?view=heatmap"\)/);
+  assert.doesNotMatch(sectorsPageSource, /"use client"/);
+  assert.doesNotMatch(heatmapPageSource, /"use client"/);
   assert.match(auctionPageSource, /dynamic[<(]/);
   assert.match(auctionFeatureSource, /竞价雷达/);
   assert.match(auctionFeatureSource, /getAuctionLatest/);

@@ -11,7 +11,7 @@ type MarketFeedProps = {
 
 type FeedRow = {
   detail: string;
-  href: "/sectors" | "/sentiment";
+  href: "/market?view=sectors" | "/sentiment";
   label: string;
   timestamp: string;
 };
@@ -70,7 +70,7 @@ function buildRows(sectorRadar: SectorRadarResponse | null, sentiment: Sentiment
       timestamp: sectorRadar.generated_at,
       label: "板块净流入",
       detail: `${sectorRadar.inflow[0].name} ${formatCny(sectorRadar.inflow[0].net_flow_cny)}`,
-      href: "/sectors",
+      href: "/market?view=sectors",
     });
   }
   if (sectorRadar?.outflow[0]) {
@@ -78,7 +78,7 @@ function buildRows(sectorRadar: SectorRadarResponse | null, sentiment: Sentiment
       timestamp: sectorRadar.generated_at,
       label: "板块净流出",
       detail: `${sectorRadar.outflow[0].name} ${formatCny(sectorRadar.outflow[0].net_flow_cny)}`,
-      href: "/sectors",
+      href: "/market?view=sectors",
     });
   }
   if (sentiment) {

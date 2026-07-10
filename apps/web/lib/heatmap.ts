@@ -86,21 +86,3 @@ export function heatmapSourceStatusLabel(status: StrongStockSourceStatus): strin
   }
   return "缺配置";
 }
-
-export function heatmapStockHref(stock: { symbol: string; name?: string | null; industry?: string | null }): string {
-  const query = new URLSearchParams({ from: "heatmap" });
-  const name = cleanText(stock.name);
-  const industry = cleanText(stock.industry);
-  if (name) {
-    query.set("name", name);
-  }
-  if (industry) {
-    query.set("industry", industry);
-  }
-  return `/stock/${encodeURIComponent(stock.symbol)}?${query.toString()}`;
-}
-
-function cleanText(value: string | null | undefined): string | null {
-  const text = value?.trim();
-  return text ? text : null;
-}

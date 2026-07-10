@@ -20,19 +20,18 @@ import {
   message,
 } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { WorkbenchPage } from "../../components/workbench/WorkbenchPage";
 import { getHeatmapTreemap } from "../../lib/api";
 import {
   buildHeatmapQuery,
   formatHeatmapMoney,
   heatmapSourceStatusLabel,
-  heatmapStockHref,
   HEATMAP_MARKET_OPTIONS,
   HEATMAP_PERIOD_OPTIONS,
   HEATMAP_SIZE_MODE_OPTIONS,
   HEATMAP_TREND_OPTIONS,
   type HeatmapQueryState,
 } from "../../lib/heatmap";
+import { buildStockDetailHref } from "../../lib/stockNavigation";
 import type { HeatmapStockNode, HeatmapTreemapResponse, StrongStockSourceStatus } from "../../lib/types";
 import { HeatmapCanvas } from "./HeatmapCanvas";
 import {
@@ -52,6 +51,10 @@ const DEFAULT_QUERY: HeatmapQueryState = {
 };
 
 export function HeatmapWorkspace() {
+  return <HeatmapWorkspaceContent />;
+}
+
+export function HeatmapWorkspaceContent() {
   const [query, setQuery] = useState<HeatmapQueryState>(DEFAULT_QUERY);
   const [data, setData] = useState<HeatmapTreemapResponse | null>(null);
   const [boardNodes, setBoardNodes] = useState<HeatmapTreemapResponse["nodes"]>([]);
@@ -160,21 +163,16 @@ export function HeatmapWorkspace() {
   }
 
   return (
-    <WorkbenchPage
-      actions={
-        <Space wrap>
-          <Typography.Text className="workbench-muted text-xs">
-            更新：{formatDateTime(data?.summary.updated_at ?? data?.generated_at)}
-          </Typography.Text>
-          <Button icon={<ReloadOutlined />} loading={loading} onClick={() => updateQuery({ ...query })} type="primary">
-            刷新
-          </Button>
-        </Space>
-      }
-      description="按行业聚合全 A 涨跌和成交活跃度，热图样本状态会在右侧明确标注。"
-      status={<Tag color={statusTone}>{data ? heatmapSourceSummaryLabel(data.source_status) : "读取中"}</Tag>}
-      title="市场热力图"
-    >
+    <>
+      <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
+        <Typography.Text className="workbench-muted text-xs">
+          更新：{formatDateTime(data?.summary.updated_at ?? data?.generated_at)}
+        </Typography.Text>
+        <Tag color={statusTone}>{data ? heatmapSourceSummaryLabel(data.source_status) : "读取中"}</Tag>
+        <Button icon={<ReloadOutlined />} loading={loading} onClick={() => updateQuery({ ...query })} type="primary">
+          刷新
+        </Button>
+      </div>
 
       {error ? (
         <Alert className="mb-4" title={error} showIcon type="warning" />
@@ -225,7 +223,11 @@ export function HeatmapWorkspace() {
                   selectedStock={selectedStock}
                   onHoverStock={setHoverStock}
                   onOpenStock={(stock) => {
-                    window.location.href = heatmapStockHref(stock);
+                    window.location.href = buildStockDetailHref(stock.symbol, {
+                      from: "heatmap",
+                      industry: stock.industry,
+                      name: stock.name,
+                    });
                   }}
                   onSelectStock={setSelectedStock}
                 />
@@ -247,7 +249,7 @@ export function HeatmapWorkspace() {
           selectedStock={selectedStock}
         />
       </section>
-    </WorkbenchPage>
+    </>
   );
 }
 
@@ -361,7 +363,15 @@ function DetailRail({
               <Descriptions.Item label="总市值">{formatHeatmapMoney(displayStock.total_market_cap_cny)}</Descriptions.Item>
               <Descriptions.Item label="行情时间">{formatDateTime(displayStock.quote_time)}</Descriptions.Item>
             </Descriptions>
-            <Button block href={heatmapStockHref(displayStock)} type="primary">
+            <Button
+              block
+              href={buildStockDetailHref(displayStock.symbol, {
+                from: "heatmap",
+                industry: displayStock.industry,
+                name: displayStock.name,
+              })}
+              type="primary"
+            >
               查看K线
             </Button>
           </div>

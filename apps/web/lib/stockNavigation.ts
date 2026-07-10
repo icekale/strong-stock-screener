@@ -54,9 +54,9 @@ export function resolveStockDetailContext(params: ReadableSearchParams): StockDe
       from === "auction" || from === "auction-model"
         ? "/auction"
         : from === "heatmap"
-          ? "/heatmap"
+          ? "/market?view=heatmap"
           : from === "sectors"
-            ? "/sectors"
+            ? "/market?view=sectors"
             : "/",
     returnLabel:
       from === "auction"

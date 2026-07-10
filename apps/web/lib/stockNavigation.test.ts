@@ -39,7 +39,7 @@ test("stock detail context returns to auction only for the trusted auction sourc
   });
 });
 
-test("stock detail context can return to the sector workbench", () => {
+test("stock detail context returns sectors details to the unified market view", () => {
   assert.equal(
     buildStockDetailHref("603690.SH", {
       from: "sectors",
@@ -53,7 +53,7 @@ test("stock detail context can return to the sector workbench", () => {
     from: "sectors",
     industry: null,
     name: null,
-    returnHref: "/sectors",
+    returnHref: "/market?view=sectors",
     returnLabel: "返回题材工作台",
   });
 });
@@ -83,7 +83,7 @@ test("stock detail href encodes dashboard symbols and retains auction-model cont
   );
 });
 
-test("stock detail context can return to the heatmap workbench", () => {
+test("stock detail context returns heatmap details to the unified market view", () => {
   assert.equal(
     buildStockDetailHref("603690.SH", {
       from: "heatmap",
@@ -97,7 +97,7 @@ test("stock detail context can return to the heatmap workbench", () => {
     from: "heatmap",
     industry: null,
     name: null,
-    returnHref: "/heatmap",
+    returnHref: "/market?view=heatmap",
     returnLabel: "返回市场热图",
   });
 });

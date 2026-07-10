@@ -20,7 +20,7 @@ export function SectorHeatmapPreview({ onRefresh, sectorRadar }: SectorHeatmapPr
           </h2>
           <p className="m-0 text-xs text-[var(--app-muted)]">{data ? `${data.flow_source} · ${flowStatusLabel(data.capital_flow_status)}` : "资金流雷达"}</p>
         </div>
-        <Link className="text-xs font-medium text-[var(--app-primary)] hover:underline" href="/sectors">
+        <Link className="text-xs font-medium text-[var(--app-primary)] hover:underline" href="/market?view=sectors">
           查看板块
         </Link>
       </div>

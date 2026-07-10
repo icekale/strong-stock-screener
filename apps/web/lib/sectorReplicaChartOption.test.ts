@@ -16,3 +16,20 @@ test("sector replica chart option keeps reference-like legend and fixed axis", (
   assert.deepEqual(option.xAxis?.data, ["09:15", "09:16", "15:00"]);
   assert.equal(option.series?.[0]?.showSymbol, false);
 });
+
+test("sector replica chart option reduces key-time labels for compact charts", () => {
+  const axis = ["09:15", "09:30", "10:00", "10:30", "11:00", "13:00", "13:30", "14:00", "14:30", "15:00"];
+  const option = buildSectorReplicaChartOption({
+    axis,
+    compact: true,
+    series: [{ name: "芯片", type: "line", data: axis.map(() => 1), smooth: true, showSymbol: false }],
+  });
+  const interval = option.xAxis?.axisLabel?.interval;
+
+  assert.equal(typeof interval, "function");
+  assert.equal(interval?.(0, axis[0]), true);
+  assert.equal(interval?.(1, axis[1]), false);
+  assert.equal(interval?.(2, axis[2]), true);
+  assert.equal(interval?.(9, axis[9]), true);
+  assert.equal(option.grid?.right, "4%");
+});

@@ -121,7 +121,7 @@ export function WatchlistWorkspace() {
     <WorkbenchPage
       actions={
         <Space wrap>
-          <Button href="/">返回选股</Button>
+          <Button href="/screener">返回选股</Button>
           <Button
             disabled={saving}
             onClick={() => {

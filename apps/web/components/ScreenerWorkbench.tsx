@@ -21,7 +21,7 @@ import type {
 import { FilterLogicRail } from "./screener/FilterLogicRail";
 import { MarketOverviewPanels, SectorFlowHeatmapPanel, SectorStrengthPanel } from "./screener/MarketOverviewPanels";
 import { buildMarketDashboardStats, sourceSummary } from "./screener/screenerUtils";
-import { buildWorkbenchContentClassName, buildWorkbenchPageClassName } from "./workbench/workbenchLayout";
+import { PageFrame } from "./workbench/PageFrame";
 
 const CandidateResults = dynamic(
   () => import("./screener/CandidateResults").then((module) => module.CandidateResults),
@@ -113,10 +113,17 @@ export function ScreenerWorkbench({
   }, [message, watchlistMessage]);
 
   return (
-    <main className={buildWorkbenchPageClassName("text-[#11100e]")}>
-      <div className={buildWorkbenchContentClassName("gap-0 px-5")}>
-        <CoreWorkflowNav sourceOk={sourceSummary(sources).ok} />
-
+    <PageFrame
+      contentClassName="p-0"
+      context={`交易日 ${tradeDate} · 数据源 ${sourceSummary(sources).label}`}
+      status={
+        <span className="rounded-full border border-[var(--app-border)] px-2 py-0.5 text-xs font-medium text-[var(--app-muted)]">
+          {screenJob?.message ?? (running ? "筛选中" : "待运行")}
+        </span>
+      }
+      title="强势选股"
+    >
+      <div className="flex flex-col gap-0 px-5 pt-4">
         <MarketOverviewPanels
           candidates={candidates}
           generatedAt={marketOverview?.generated_at ?? result?.generated_at ?? null}
@@ -182,37 +189,7 @@ export function ScreenerWorkbench({
           <span>Data: TickFlow / iFinD / 东方财富 · Delayed 15min · 仅作规则辅助，不构成投资建议</span>
         </div>
       </div>
-    </main>
-  );
-}
-
-function CoreWorkflowNav({ sourceOk }: { sourceOk: boolean }) {
-  const items = [
-    { href: "/", label: "今日选股", meta: "模型筛选" },
-    { href: "/auction", label: "竞价雷达", meta: "09:25 作战" },
-    { href: "/sectors", label: "题材强度", meta: "板块曲线" },
-    { href: "/watchlist", label: "自选观察池", meta: "计划复盘" },
-  ];
-  return (
-    <section className="mb-3 rounded-lg border border-[#ddd8d0] bg-[#f8f7f4] px-3 py-2">
-      <div className="flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-        <div className="flex min-w-0 overflow-x-auto max-w-full gap-1">
-          {items.map((item) => (
-            <Link
-              className="shrink-0 rounded-md border border-[#e3ddd3] bg-white px-3 py-2 text-sm font-black text-[#11100e] no-underline hover:border-[#d92d20]"
-              href={item.href}
-              key={item.href}
-            >
-              {item.label}
-              <span className="ml-2 text-xs font-semibold text-[#7b756d]">{item.meta}</span>
-            </Link>
-          ))}
-        </div>
-        <div className="shrink-0 text-xs font-bold text-[#7b756d]">
-          可信度：{sourceOk ? "数据源在线，结果以实时源和缓存状态为准" : "数据源待确认，请先检查设置页"}
-        </div>
-      </div>
-    </section>
+    </PageFrame>
   );
 }
 

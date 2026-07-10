@@ -123,7 +123,10 @@ body {
 }
 
 .sector-replica-shell {
-  min-height: calc(100vh - 16px);
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 16px);
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--workbench-border);
   border-radius: 8px;
@@ -204,14 +207,19 @@ body {
 
 .sector-replica-plate-row {
   display: grid;
+  flex: 1 1 auto;
   grid-template-columns: minmax(268px, 280px) minmax(0, 1fr);
   gap: 12px;
+  min-height: 0;
   padding: 12px;
   background: var(--workbench-surface);
 }
 
 .sector-replica-sidebar {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--workbench-border);
   border-radius: 8px;
@@ -293,8 +301,9 @@ body {
 }
 
 .sector-replica-board-list {
-  height: 370px;
+  flex: 1 1 auto;
   overflow-y: auto;
+  min-height: 0;
   background: var(--workbench-surface);
 }
 
@@ -378,7 +387,11 @@ body {
 }
 
 .sector-replica-main {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   min-width: 0;
+  min-height: 0;
   overflow: hidden;
   border: 1px solid var(--workbench-border);
   border-radius: 8px;
@@ -386,7 +399,10 @@ body {
 }
 
 .sector-replica-chart-region {
+  display: flex;
+  flex: 1 1 auto;
   min-width: 0;
+  min-height: 0;
 }
 
 .sector-replica-error {
@@ -474,19 +490,24 @@ body {
 }
 
 .sector-replica-chart {
-  height: 380px;
+  flex: 1 1 auto;
+  height: 100%;
+  min-height: 380px;
   width: 100%;
 }
 
 .sector-replica-chart-empty {
   display: grid;
+  flex: 1 1 auto;
   place-items: center;
-  height: 380px;
+  height: 100%;
+  min-height: 380px;
   color: var(--workbench-muted);
   font-size: 13px;
 }
 
 .sector-replica-stock-panel {
+  flex: 0 0 auto;
   margin: 0 12px 12px;
   overflow: hidden;
   border: 1px solid var(--workbench-border);
@@ -649,6 +670,11 @@ body {
 }
 
 @media (max-width: 980px) {
+  .sector-replica-shell {
+    height: auto;
+    min-height: calc(100vh - 12px);
+  }
+
   .sector-replica-page-content {
     padding: 6px !important;
   }
@@ -659,6 +685,7 @@ body {
   }
 
   .sector-replica-plate-row {
+    flex: 0 0 auto;
     grid-template-columns: 1fr;
     padding: 8px;
   }

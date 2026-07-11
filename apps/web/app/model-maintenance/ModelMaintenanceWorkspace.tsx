@@ -15,7 +15,7 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { WorkbenchPage } from "../../components/workbench/WorkbenchPage";
 import {
   analyzeModelMaintenance,
@@ -37,7 +37,28 @@ import type {
   ModelMaintenanceSuggestionStatus,
 } from "../../lib/types";
 
+type ModelMaintenanceContentProps = {
+  renderPage?: (content: ReactNode, actions?: ReactNode) => ReactNode;
+};
+
 export function ModelMaintenanceWorkspace() {
+  return (
+    <ModelMaintenanceContent
+      renderPage={(content, actions) => (
+        <WorkbenchPage
+          actions={actions}
+          description="把筛选结果、复盘样本、竞价 Top3 训练和数据源状态整理成维护包，再交给 Codex / DeepSeek 分析。"
+          eyebrow="Model Maintenance"
+          title="AI 模型维护"
+        >
+          {content}
+        </WorkbenchPage>
+      )}
+    />
+  );
+}
+
+export function ModelMaintenanceContent({ renderPage }: ModelMaintenanceContentProps) {
   const { message } = App.useApp();
   const [packet, setPacket] = useState<ModelMaintenancePacket | null>(null);
   const [report, setReport] = useState<ModelMaintenanceReport | null>(null);
@@ -51,7 +72,11 @@ export function ModelMaintenanceWorkspace() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void loadMaintenanceState();
+    let active = true;
+    void loadMaintenanceState(() => active);
+    return () => {
+      active = false;
+    };
   }, []);
 
   const pendingSuggestions = useMemo(
@@ -60,7 +85,7 @@ export function ModelMaintenanceWorkspace() {
   );
   const packetLink = useMemo(() => buildPacketLink(packet), [packet]);
 
-  async function loadMaintenanceState() {
+  async function loadMaintenanceState(canCommit: () => boolean = () => true) {
     setLoading(true);
     setError(null);
     try {
@@ -70,14 +95,21 @@ export function ModelMaintenanceWorkspace() {
         getAuctionTop3TrainingSummary(),
         getAuctionTop3TrainingPerformance(),
       ]);
+      if (!canCommit()) {
+        return;
+      }
       setPacket(nextPacket);
       setReport(nextReport);
       setTrainingSummary(nextTrainingSummary);
       setPerformance(nextPerformance);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "读取模型维护状态失败");
+      if (canCommit()) {
+        setError(err instanceof Error ? err.message : "读取模型维护状态失败");
+      }
     } finally {
-      setLoading(false);
+      if (canCommit()) {
+        setLoading(false);
+      }
     }
   }
 
@@ -176,36 +208,31 @@ export function ModelMaintenanceWorkspace() {
     }
   }
 
-  return (
-    <WorkbenchPage
-      actions={
-        <Space wrap>
-          <Button
-            disabled={loading || analyzing || generatingPacket}
-            icon={<ReloadOutlined />}
-            onClick={() => void loadMaintenanceState()}
-          >
-            重新读取
-          </Button>
-          <Button icon={<FileTextOutlined />} loading={generatingPacket} onClick={() => void handleGeneratePacket()}>
-            生成数据包
-          </Button>
-          <Button
-            disabled={!packet}
-            icon={<RobotOutlined />}
-            loading={analyzing}
-            onClick={() => void handleAnalyze()}
-            type="primary"
-          >
-            提交 AI 分析
-          </Button>
-        </Space>
-      }
-      description="把筛选结果、复盘样本、竞价 Top3 训练和数据源状态整理成维护包，再交给 Codex / DeepSeek 分析。"
-      eyebrow="Model Maintenance"
-      title="AI 模型维护"
-    >
-
+  const actions = (
+    <Space wrap>
+      <Button
+        disabled={loading || analyzing || generatingPacket}
+        icon={<ReloadOutlined />}
+        onClick={() => void loadMaintenanceState()}
+      >
+        重新读取
+      </Button>
+      <Button icon={<FileTextOutlined />} loading={generatingPacket} onClick={() => void handleGeneratePacket()}>
+        生成数据包
+      </Button>
+      <Button
+        disabled={!packet}
+        icon={<RobotOutlined />}
+        loading={analyzing}
+        onClick={() => void handleAnalyze()}
+        type="primary"
+      >
+        提交 AI 分析
+      </Button>
+    </Space>
+  );
+  const content = (
+    <>
       {error && <Alert className="mb-4" showIcon title={error} type="error" />}
 
       {loading ? (
@@ -444,8 +471,10 @@ export function ModelMaintenanceWorkspace() {
           </Space>
         </div>
       )}
-    </WorkbenchPage>
+    </>
   );
+
+  return renderPage ? renderPage(content, actions) : content;
 }
 
 function WorkflowStep({

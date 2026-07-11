@@ -18,7 +18,7 @@ import {
   Tag,
   Typography,
 } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { SystemStatusPanel } from "../../components/system/SystemStatusPanel";
 import { WorkbenchPage } from "../../components/workbench/WorkbenchPage";
 import { checkRuntimeSettingsHealth, getRuntimeSettings, getSystemStatus, saveRuntimeSettings } from "../../lib/api";
@@ -133,7 +133,28 @@ const DEFAULT_DRAFT: SettingsDraft = {
   auction_top3_simulated_position_pct: 0.33,
 };
 
+type SettingsPageOptions = {
+  actions?: ReactNode;
+  description: string;
+};
+
+type SettingsContentProps = {
+  renderPage?: (content: ReactNode, options: SettingsPageOptions) => ReactNode;
+};
+
 export function SettingsWorkspace() {
+  return (
+    <SettingsContent
+      renderPage={(content, { actions, description }) => (
+        <WorkbenchPage actions={actions} description={description} eyebrow="Settings" title="数据源配置">
+          {content}
+        </WorkbenchPage>
+      )}
+    />
+  );
+}
+
+export function SettingsContent({ renderPage }: SettingsContentProps) {
   const [form] = Form.useForm<SettingsDraft>();
   const [draft, setDraft] = useState<SettingsDraft>(DEFAULT_DRAFT);
   const [config, setConfig] = useState<RuntimeSettingsConfig | null>(null);
@@ -148,8 +169,12 @@ export function SettingsWorkspace() {
   const [systemStatusError, setSystemStatusError] = useState<string | null>(null);
 
   useEffect(() => {
-    void loadSettings();
-    void loadSystemStatus();
+    let active = true;
+    void loadSettings(() => active);
+    void loadSystemStatus(() => active);
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -158,11 +183,14 @@ export function SettingsWorkspace() {
     }
   }, [draft, form, loading]);
 
-  async function loadSettings() {
+  async function loadSettings(canCommit: () => boolean = () => true) {
     setLoading(true);
     setError(null);
     try {
       const response = await getRuntimeSettings();
+      if (!canCommit()) {
+        return;
+      }
       setConfig(response.config);
       applyDraft({
         candidate_provider: response.config.candidate_provider,
@@ -183,21 +211,33 @@ export function SettingsWorkspace() {
       });
       setMessage("已读取当前设置");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "读取设置失败");
+      if (canCommit()) {
+        setError(err instanceof Error ? err.message : "读取设置失败");
+      }
     } finally {
-      setLoading(false);
+      if (canCommit()) {
+        setLoading(false);
+      }
     }
   }
 
-  async function loadSystemStatus() {
+  async function loadSystemStatus(canCommit: () => boolean = () => true) {
     setSystemStatusLoading(true);
     setSystemStatusError(null);
     try {
-      setSystemStatus(await getSystemStatus());
+      const status = await getSystemStatus();
+      if (!canCommit()) {
+        return;
+      }
+      setSystemStatus(status);
     } catch (err) {
-      setSystemStatusError(err instanceof Error ? err.message : "读取系统状态失败");
+      if (canCommit()) {
+        setSystemStatusError(err instanceof Error ? err.message : "读取系统状态失败");
+      }
     } finally {
-      setSystemStatusLoading(false);
+      if (canCommit()) {
+        setSystemStatusLoading(false);
+      }
     }
   }
 
@@ -280,35 +320,28 @@ export function SettingsWorkspace() {
   }, [config]);
 
   if (loading && !config) {
-    return (
-      <WorkbenchPage
-        description="正在读取独立选股工作台的数据源、模型和健康检查配置。"
-        eyebrow="Settings"
-        title="数据源配置"
-      >
-        <Card className="workbench-panel">
-          <Skeleton active paragraph={{ rows: 8 }} title={false} />
-        </Card>
-      </WorkbenchPage>
+    const content = (
+      <Card className="workbench-panel">
+        <Skeleton active paragraph={{ rows: 8 }} title={false} />
+      </Card>
     );
+    return renderPage
+      ? renderPage(content, { description: "正在读取独立选股工作台的数据源、模型和健康检查配置。" })
+      : content;
   }
 
-  return (
-    <WorkbenchPage
-      actions={
-        <Space wrap>
-          <Button disabled={loading || runningHealth} icon={<ReloadOutlined />} onClick={() => void loadSettings()}>
-            重新读取
-          </Button>
-          <Button icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()} type="primary">
-            保存设置
-          </Button>
-        </Space>
-      }
-      description="独立选股工作台的行情源、候选源和 iFinD 研究增强配置。"
-      eyebrow="Settings"
-      title="数据源配置"
-    >
+  const actions = (
+    <Space wrap>
+      <Button disabled={loading || runningHealth} icon={<ReloadOutlined />} onClick={() => void loadSettings()}>
+        重新读取
+      </Button>
+      <Button icon={<SaveOutlined />} loading={saving} onClick={() => void handleSave()} type="primary">
+        保存设置
+      </Button>
+    </Space>
+  );
+  const content = (
+    <>
         {error && <Alert showIcon title={error} type="error" />}
         {message && <Alert showIcon title={message} type="success" />}
 
@@ -749,8 +782,15 @@ export function SettingsWorkspace() {
             </Card>
           </Col>
         </Row>
-    </WorkbenchPage>
+    </>
   );
+
+  return renderPage
+    ? renderPage(content, {
+        actions,
+        description: "独立选股工作台的行情源、候选源和 iFinD 研究增强配置。",
+      })
+    : content;
 }
 
 function KeyStatus({ configured }: { configured: boolean }) {

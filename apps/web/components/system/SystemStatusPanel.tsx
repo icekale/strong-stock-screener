@@ -41,7 +41,7 @@ export function SystemStatusPanel({ loading, status, error, onRefresh }: Props) 
 
   return (
     <Card
-      className="workbench-panel"
+      className="app-panel"
       title="系统运行状态"
       extra={
         <Button loading={loading} onClick={onRefresh} size="small">
@@ -59,13 +59,13 @@ export function SystemStatusPanel({ loading, status, error, onRefresh }: Props) 
             >
               {statusLabel}
             </Tag>
-            <Typography.Text className="workbench-muted text-xs">生成时间：{status.generated_at}</Typography.Text>
+            <Typography.Text className="app-muted text-xs">生成时间：{status.generated_at}</Typography.Text>
           </div>
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
             {status.jobs.map((job) => (
-              <div className="rounded-md border border-[#ddd8d0] bg-white px-3 py-2" key={job.name}>
-                <div className="text-sm font-bold text-[#11100e]">{job.name}</div>
-                <div className="mt-1 text-xs text-[#7b756d]">{job.detail}</div>
+              <div className="app-inset px-3 py-2" key={job.name}>
+                <div className="app-ink text-sm font-bold">{job.name}</div>
+                <div className="app-muted mt-1 text-xs">{job.detail}</div>
                 <Tag
                   className={job.running ? "market-green-badge mt-2" : "mt-2"}
                   color={job.running ? undefined : job.enabled ? "orange" : "default"}
@@ -86,7 +86,7 @@ export function SystemStatusPanel({ loading, status, error, onRefresh }: Props) 
           />
         </div>
       ) : (
-        <Typography.Text className="workbench-muted">暂无系统状态，请点击刷新。</Typography.Text>
+        <Typography.Text className="app-muted">暂无系统状态，请点击刷新。</Typography.Text>
       )}
     </Card>
   );

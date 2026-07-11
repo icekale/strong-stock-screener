@@ -16,7 +16,7 @@ import {
   Typography,
 } from "antd";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { WorkbenchPage } from "../../components/workbench/WorkbenchPage";
+import { PageFrame } from "../../components/workbench/PageFrame";
 import {
   analyzeModelMaintenance,
   generateAuctionTop3TrainingSamples,
@@ -45,14 +45,13 @@ export function ModelMaintenanceWorkspace() {
   return (
     <ModelMaintenanceContent
       renderPage={(content, actions) => (
-        <WorkbenchPage
+        <PageFrame
           actions={actions}
-          description="把筛选结果、复盘样本、竞价 Top3 训练和数据源状态整理成维护包，再交给 Codex / DeepSeek 分析。"
-          eyebrow="Model Maintenance"
+          context="把筛选结果、复盘样本、竞价 Top3 训练和数据源状态整理成维护包，再交给 Codex / DeepSeek 分析。"
           title="AI 模型维护"
         >
           {content}
-        </WorkbenchPage>
+        </PageFrame>
       )}
     />
   );
@@ -236,13 +235,13 @@ export function ModelMaintenanceContent({ renderPage }: ModelMaintenanceContentP
       {error && <Alert className="mb-4" showIcon title={error} type="error" />}
 
       {loading ? (
-        <Card className="workbench-panel">
+        <Card className="app-panel">
           <Skeleton active paragraph={{ rows: 10 }} />
         </Card>
       ) : (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(360px,0.8fr)]">
           <Space className="min-w-0" direction="vertical" size={16}>
-            <Card className="workbench-panel" title="维护流程">
+            <Card className="app-panel" title="维护流程">
               <div className="grid gap-3 md:grid-cols-3">
                 <WorkflowStep
                   active={Boolean(packet)}
@@ -263,17 +262,17 @@ export function ModelMaintenanceContent({ renderPage }: ModelMaintenanceContentP
             </Card>
 
             {report ? (
-              <Card className="workbench-panel" title="维护结论">
+              <Card className="app-panel" title="维护结论">
                 <Space className="mb-4" wrap>
                   <HealthTag status={report.health_status} />
                   <Tag>{report.provider}</Tag>
                   <Tag>{report.model}</Tag>
                   <Tag>{report.generated_at}</Tag>
                 </Space>
-                <Typography.Paragraph className="!mb-0 text-base text-[#34312d]">{report.summary}</Typography.Paragraph>
+                <Typography.Paragraph className="app-ink !mb-0 text-base">{report.summary}</Typography.Paragraph>
               </Card>
             ) : (
-              <Card className="workbench-panel">
+              <Card className="app-panel">
                 <Empty
                   description="还没有模型维护报告。先生成数据包，再提交 AI 分析；也可以把链接复制给 Codex 单独分析。"
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
@@ -290,7 +289,7 @@ export function ModelMaintenanceContent({ renderPage }: ModelMaintenanceContentP
               </Card>
             )}
 
-            <Card className="workbench-panel" title="关键发现">
+            <Card className="app-panel" title="关键发现">
               {report?.key_findings.length ? (
                 <List
                   dataSource={report.key_findings}
@@ -305,7 +304,7 @@ export function ModelMaintenanceContent({ renderPage }: ModelMaintenanceContentP
               )}
             </Card>
 
-            <Card className="workbench-panel" title="规则诊断">
+            <Card className="app-panel" title="规则诊断">
               {report?.rule_diagnostics.length ? (
                 <List
                   dataSource={report.rule_diagnostics}
@@ -332,7 +331,7 @@ export function ModelMaintenanceContent({ renderPage }: ModelMaintenanceContentP
 
           <Space className="min-w-0" direction="vertical" size={16}>
             <Card
-              className="workbench-panel"
+              className="app-panel"
               extra={
                 packetLink ? (
                   <Button
@@ -366,7 +365,7 @@ export function ModelMaintenanceContent({ renderPage }: ModelMaintenanceContentP
             </Card>
 
             <Card
-              className="workbench-panel"
+              className="app-panel"
               extra={
                 <Button loading={generatingTraining} onClick={() => void handleGenerateTrainingSamples()} size="small">
                   生成模拟样本
@@ -396,7 +395,7 @@ export function ModelMaintenanceContent({ renderPage }: ModelMaintenanceContentP
               />
             </Card>
 
-            <Card className="workbench-panel" title="待确认建议">
+            <Card className="app-panel" title="待确认建议">
               <Descriptions className="mb-3" column={1} size="small">
                 <Descriptions.Item label="报告 ID">{report?.report_id ?? "--"}</Descriptions.Item>
                 <Descriptions.Item label="数据包 ID">{report?.packet_id ?? packet?.packet_id ?? "--"}</Descriptions.Item>
@@ -421,13 +420,13 @@ export function ModelMaintenanceContent({ renderPage }: ModelMaintenanceContentP
                             <Tag>{suggestion.type}</Tag>
                             <Tag>{Math.round(suggestion.confidence * 100)}%</Tag>
                           </div>
-                          <Typography.Paragraph className="!mb-0 text-[#4a4640]">
+                          <Typography.Paragraph className="app-ink !mb-0">
                             {suggestion.reason}
                           </Typography.Paragraph>
-                          <Typography.Paragraph className="!mb-0 workbench-muted">
+                          <Typography.Paragraph className="!mb-0 app-muted">
                             建议动作：{suggestion.suggested_action}
                           </Typography.Paragraph>
-                          <Typography.Paragraph className="!mb-0 workbench-muted">
+                          <Typography.Paragraph className="!mb-0 app-muted">
                             风险：{suggestion.risk}
                           </Typography.Paragraph>
                           <Space wrap>
@@ -487,12 +486,12 @@ function WorkflowStep({
   title: string;
 }) {
   return (
-    <div className="rounded-lg border border-[#ded8cf] bg-white p-3">
+    <div className="app-panel rounded-lg border p-3">
       <Space className="mb-1" wrap>
         <Badge status={active ? "success" : "default"} />
         <Typography.Text strong>{title}</Typography.Text>
       </Space>
-      <Typography.Text className="workbench-muted block text-xs">{description}</Typography.Text>
+      <Typography.Text className="app-muted block text-xs">{description}</Typography.Text>
     </div>
   );
 }

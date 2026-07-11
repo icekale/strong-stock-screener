@@ -165,7 +165,7 @@ export function HeatmapWorkspaceContent() {
   return (
     <>
       <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
-        <Typography.Text className="workbench-muted text-xs">
+        <Typography.Text className="app-muted text-xs">
           更新：{formatDateTime(data?.summary.updated_at ?? data?.generated_at)}
         </Typography.Text>
         <Tag color={statusTone}>{data ? heatmapSourceSummaryLabel(data.source_status) : "读取中"}</Tag>
@@ -188,11 +188,11 @@ export function HeatmapWorkspaceContent() {
 
         <Card
           ref={canvasPanelRef}
-          className="workbench-panel min-h-[560px] min-w-0 overflow-hidden xl:min-h-[calc(100vh-146px)]"
+          className="app-panel min-h-[560px] min-w-0 overflow-hidden xl:min-h-[calc(100vh-146px)]"
           styles={{ body: { height: "100%", minHeight: 560, padding: 0 } }}
         >
-          <div className="flex h-full min-h-[560px] flex-col">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#34302a] bg-[#171512] px-3 py-2 text-[#c8bda9]">
+          <div className="market-heatmap-stage flex h-full min-h-[560px] flex-col">
+            <div className="market-heatmap-stage__toolbar flex flex-wrap items-center justify-between gap-2 px-3 py-2">
               <Space size={8} wrap>
                 <Tag color="default">{marketLabel(query.market)}</Tag>
                 <Tag color="default">{periodLabel(query.period)}</Tag>
@@ -211,7 +211,7 @@ export function HeatmapWorkspaceContent() {
                 </Button>
               </Space>
             </div>
-            <div className="min-h-0 flex-1 bg-[#171512]">
+            <div className="min-h-0 flex-1">
               {loading && !data ? (
                 <div className="p-4">
                   <Skeleton active paragraph={{ rows: 12 }} />
@@ -265,7 +265,7 @@ function ControlRail({
   onChange: (next: Partial<HeatmapQueryState>) => void;
 }) {
   return (
-    <Card className="workbench-panel" size="small" title="筛选">
+    <Card className="app-panel" size="small" title="筛选">
       <div className="space-y-4">
         <FilterSelect label="市场范围">
           <Select
@@ -309,7 +309,7 @@ function ControlRail({
             onChange={(period) => onChange({ period })}
           />
         </FilterSelect>
-        <div className="rounded-md border border-[#ddd8d0] bg-[#eee9df] p-3 text-xs leading-5 text-[#7b756d]">
+        <div className="app-inset p-3 text-xs leading-5">
           鼠标悬停查看个股，点击固定右侧详情。画布支持拖拽、滚轮缩放和键盘平移。
         </div>
       </div>
@@ -320,7 +320,7 @@ function ControlRail({
 function FilterSelect({ children, label }: { children: React.ReactNode; label: string }) {
   return (
     <label className="block">
-      <span className="mb-1 block text-xs font-bold text-[#7b756d]">{label}</span>
+      <span className="app-muted mb-1 block text-xs font-bold">{label}</span>
       <div>{children}</div>
     </label>
   );
@@ -341,14 +341,14 @@ function DetailRail({
 
   return (
     <div className="space-y-4">
-      <Card className="workbench-panel" loading={loading && !data} size="small" title={selectedStock ? "已选个股" : "个股详情"}>
+      <Card className="app-panel" loading={loading && !data} size="small" title={selectedStock ? "已选个股" : "个股详情"}>
         {displayStock ? (
           <div className="space-y-3">
             <div>
-              <Typography.Title className="m-0 text-[#11100e]" level={4}>
+              <Typography.Title className="app-ink m-0" level={4}>
                 {displayStock.name}
               </Typography.Title>
-              <Typography.Text className="workbench-muted">
+              <Typography.Text className="app-muted">
                 {displayStock.symbol} · {displayStock.industry}
               </Typography.Text>
             </div>
@@ -380,13 +380,13 @@ function DetailRail({
         )}
       </Card>
 
-      <Card className="workbench-panel" loading={loading && !data} size="small" title="市场概览">
+      <Card className="app-panel" loading={loading && !data} size="small" title="市场概览">
         {summary ? (
           <div className="grid grid-cols-2 gap-2">
             <SmallStat label="股票数" value={String(summary.stock_count)} />
             <SmallStat label="行业数" value={String(summary.board_count)} />
-            <SmallStat label="上涨" value={String(summary.advance_count)} valueClass="text-[#d92d20]" />
-            <SmallStat label="下跌" value={String(summary.decline_count)} valueClass="market-green-text" />
+            <SmallStat label="上涨" value={String(summary.advance_count)} valueClass="market-rise-text" />
+            <SmallStat label="下跌" value={String(summary.decline_count)} valueClass="market-fall-text" />
             <SmallStat label="成交额" value={formatHeatmapMoney(summary.turnover_cny)} />
             <SmallStat label="成交变化" value={formatPct(summary.turnover_change_pct)} valueClass={pctClass(summary.turnover_change_pct)} />
           </div>
@@ -395,27 +395,27 @@ function DetailRail({
         )}
       </Card>
 
-      <Card className="workbench-panel" size="small" title="图例">
+      <Card className="app-panel" size="small" title="图例">
         <div className="grid grid-cols-3 gap-2 text-xs">
-          <LegendItem color="#dc2626" label="上涨" />
-          <LegendItem color="#4b5563" label="平盘" />
-          <LegendItem color="#059669" label="下跌" />
+          <LegendItem color="var(--market-rise)" label="上涨" />
+          <LegendItem color="var(--app-muted)" label="平盘" />
+          <LegendItem color="var(--market-fall)" label="下跌" />
         </div>
       </Card>
 
-      <Card className="workbench-panel" size="small" title="数据源">
+      <Card className="app-panel" size="small" title="数据源">
         <div className="space-y-2">
           {(data?.source_status ?? []).map((item) => (
-            <div key={`${item.source}-${item.status}`} className="rounded-md border border-[#ddd8d0] bg-[#f5f3f0] p-2">
+            <div key={`${item.source}-${item.status}`} className="app-inset p-2">
               <div className="flex items-center justify-between gap-2">
-                <Typography.Text className="text-xs font-bold text-[#11100e]">{item.source}</Typography.Text>
+                <Typography.Text className="app-ink text-xs font-bold">{item.source}</Typography.Text>
                 <Tag color={sourceStatusColor(item.status)}>{heatmapSourceStatusLabel(item)}</Tag>
               </div>
-              <Typography.Text className="workbench-muted text-xs">{item.detail}</Typography.Text>
+              <Typography.Text className="app-muted text-xs">{item.detail}</Typography.Text>
             </div>
           ))}
           {data?.source_status.length === 0 ? (
-            <Typography.Text className="workbench-muted text-xs">暂无数据源状态</Typography.Text>
+            <Typography.Text className="app-muted text-xs">暂无数据源状态</Typography.Text>
           ) : null}
         </div>
       </Card>
@@ -426,15 +426,15 @@ function DetailRail({
 function SmallStat({
   label,
   value,
-  valueClass = "text-[#11100e]",
+  valueClass = "app-ink",
 }: {
   label: string;
   value: string;
   valueClass?: string;
 }) {
   return (
-    <div className="rounded-md border border-[#ddd8d0] bg-[#f5f3f0] px-3 py-2">
-      <Typography.Text className="workbench-muted block text-xs">{label}</Typography.Text>
+    <div className="app-inset px-3 py-2">
+      <Typography.Text className="app-muted block text-xs">{label}</Typography.Text>
       <Typography.Text className={`block text-sm font-black tabular-nums ${valueClass}`}>{value}</Typography.Text>
     </div>
   );
@@ -442,9 +442,9 @@ function SmallStat({
 
 function LegendItem({ color, label }: { color: string; label: string }) {
   return (
-    <div className="flex items-center gap-2 rounded-md border border-[#ddd8d0] bg-[#f5f3f0] px-2 py-1">
+    <div className="app-inset flex items-center gap-2 px-2 py-1">
       <span className="size-3 rounded-sm" style={{ background: color }} />
-      <span className="font-semibold text-[#11100e]">{label}</span>
+      <span className="app-ink font-semibold">{label}</span>
     </div>
   );
 }
@@ -479,9 +479,9 @@ function formatPct(value: number | null | undefined): string {
 
 function pctClass(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value) || Math.abs(value) <= 0.1) {
-    return "text-[#11100e]";
+    return "app-ink";
   }
-  return value > 0 ? "text-[#d92d20]" : "market-green-text";
+  return value > 0 ? "market-rise-text" : "market-fall-text";
 }
 
 function formatPrice(value: number | null): string {

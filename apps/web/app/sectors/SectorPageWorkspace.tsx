@@ -5,5 +5,9 @@ export function SectorPageWorkspace() {
 }
 
 export function SectorPageWorkspaceContent() {
-  return <SectorReplicaWorkspace />;
+  return (
+    <div className="market-radar-page">
+      <SectorReplicaWorkspace />
+    </div>
+  );
 }

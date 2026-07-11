@@ -14,7 +14,7 @@ export default function SystemPage() {
 function SystemWorkspaceFallback() {
   return (
     <PageFrame title="模型与数据源">
-      <section aria-busy="true" className="workbench-panel p-4">
+      <section aria-busy="true" className="app-panel p-4">
         <Skeleton active paragraph={{ rows: 8 }} />
       </section>
     </PageFrame>

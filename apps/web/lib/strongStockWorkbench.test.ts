@@ -149,7 +149,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   ].join("\n");
   const appShellSource = readFileSync(new URL("../components/AppShell.tsx", import.meta.url), "utf8");
   const globalsSource = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
-  const sectorReplicaCssSource = globalsSource.slice(globalsSource.indexOf(".sector-replica-page-content"));
+  const sectorReplicaCssSource = globalsSource.slice(globalsSource.indexOf(".market-radar-page-content"));
   const composeSource = readFileSync(new URL("../../../docker-compose.yml", import.meta.url), "utf8");
   const rootDockerfileSource = readFileSync(new URL("../../../Dockerfile", import.meta.url), "utf8");
   const dockerignoreSource = readFileSync(new URL("../../../.dockerignore", import.meta.url), "utf8");
@@ -681,7 +681,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(apiSource, /\/api\/sectors\/replica\/boards/);
   assert.match(sectorsFeatureSource, /SectorReplicaWorkspace/);
   assert.match(sectorsFeatureSource, /SectorReplicaPanel/);
-  assert.match(sectorsFeatureSource, /sector-replica-shell/);
+  assert.match(sectorsFeatureSource, /market-radar-shell/);
   assert.match(sectorsFeatureSource, /情绪指标/);
   assert.match(sectorsFeatureSource, /涨停家数/);
   assert.match(sectorsFeatureSource, /今日封板率/);
@@ -710,8 +710,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(sectorsFeatureSource, /15:00/);
   assert.match(sectorsFeatureSource, /connectNulls/);
   assert.match(sectorsFeatureSource, /ResizeObserver/);
-  assert.match(sectorReplicaCssSource, /var\(--workbench-surface\)/);
-  assert.match(sectorReplicaCssSource, /var\(--workbench-border\)/);
+  assert.match(sectorReplicaCssSource, /var\(--app-surface\)/);
+  assert.match(sectorReplicaCssSource, /var\(--app-border\)/);
   assert.match(sectorReplicaCssSource, /font: inherit/);
   assert.doesNotMatch(sectorReplicaCssSource, /font-family:\s*Arial/);
   assert.doesNotMatch(sectorReplicaCssSource, /#d9534f|#d43f3a|#f0ad4e|#5cb85c/);
@@ -1075,4 +1075,63 @@ test("PageFrame flush content variant overrides default padding for stock K-line
     assert.match(source, /contentVariant="flush"/);
     assert.doesNotMatch(source, /contentClassName="p-0"/);
   }
+});
+
+test("merged market workspaces use product-frame presentation contracts", () => {
+  const marketWorkspaceSource = readFileSync(new URL("../app/market/MarketWorkspace.tsx", import.meta.url), "utf8");
+  const heatmapWorkspaceSource = readFileSync(new URL("../app/heatmap/HeatmapWorkspace.tsx", import.meta.url), "utf8");
+  const sectorWorkspaceSource = readFileSync(new URL("../app/sectors/SectorPageWorkspace.tsx", import.meta.url), "utf8");
+  const sectorReplicaWorkspaceSource = readFileSync(
+    new URL("../app/sectors/SectorReplicaWorkspace.tsx", import.meta.url),
+    "utf8",
+  );
+  const sectorReplicaPanelSource = readFileSync(new URL("../app/sectors/SectorReplicaPanel.tsx", import.meta.url), "utf8");
+  const systemPageSource = readFileSync(new URL("../app/system/page.tsx", import.meta.url), "utf8");
+  const systemWorkspaceSource = readFileSync(new URL("../app/system/SystemWorkspace.tsx", import.meta.url), "utf8");
+  const systemStatusPanelSource = readFileSync(new URL("../components/system/SystemStatusPanel.tsx", import.meta.url), "utf8");
+  const modelMaintenanceWorkspaceSource = readFileSync(
+    new URL("../app/model-maintenance/ModelMaintenanceWorkspace.tsx", import.meta.url),
+    "utf8",
+  );
+  const settingsWorkspaceSource = readFileSync(new URL("../app/settings/SettingsWorkspace.tsx", import.meta.url), "utf8");
+  const globalsSource = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  const retiredWorkbenchPageUrl = new URL("../components/workbench/WorkbenchPage.tsx", import.meta.url);
+  const retiredWorkbenchLayoutUrl = new URL("../components/workbench/workbenchLayout.ts", import.meta.url);
+  const framedWorkspaceSources = [
+    marketWorkspaceSource,
+    systemWorkspaceSource,
+    modelMaintenanceWorkspaceSource,
+    settingsWorkspaceSource,
+  ];
+  const embeddedWorkspaceSources = [
+    heatmapWorkspaceSource,
+    sectorWorkspaceSource,
+    sectorReplicaWorkspaceSource,
+    sectorReplicaPanelSource,
+  ];
+  const presentationSources = [systemPageSource, systemStatusPanelSource];
+  const allWorkspaceSources = [...framedWorkspaceSources, ...embeddedWorkspaceSources, ...presentationSources];
+
+  for (const source of framedWorkspaceSources) {
+    assert.match(source, /<PageFrame\b/);
+  }
+  assert.match(heatmapWorkspaceSource, /app-panel/);
+  assert.match(sectorWorkspaceSource, /market-radar-page/);
+  assert.match(sectorReplicaWorkspaceSource, /className="market-radar-workspace"/);
+  assert.match(sectorReplicaPanelSource, /market-radar-/);
+  for (const source of presentationSources) {
+    assert.match(source, /app-panel/);
+  }
+
+  for (const source of allWorkspaceSources) {
+    assert.doesNotMatch(source, /WorkbenchPage|workbenchLayout|workbench-(?:panel|page|muted|ink|panel-divider)/);
+    assert.doesNotMatch(source, /(?:bg|border|text)-\[#(?:f5f3f0|eee9df|ddd8d0|11100e|7b756d|1d1b18|34302a|171512|c8bda9)\]/);
+  }
+
+  assert.doesNotMatch(sectorReplicaPanelSource, /sector-replica-/);
+  assert.doesNotMatch(sectorReplicaWorkspaceSource, /className="sector-replica-workspace"/);
+  assert.doesNotMatch(globalsSource, /--workbench-/);
+  assert.doesNotMatch(globalsSource, /\.sector-replica-/);
+  assert.equal(existsSync(retiredWorkbenchPageUrl), false);
+  assert.equal(existsSync(retiredWorkbenchLayoutUrl), false);
 });

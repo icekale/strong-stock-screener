@@ -33,7 +33,7 @@ export function MarketWorkspace() {
           onChange={changeView}
         />
       }
-      contentClassName={view === "sectors" ? "sector-replica-page-content" : undefined}
+      contentClassName={view === "sectors" ? "market-radar-page-content" : undefined}
       title="板块与热图"
     >
       {view === "heatmap" ? <HeatmapWorkspaceContent /> : <SectorPageWorkspaceContent />}

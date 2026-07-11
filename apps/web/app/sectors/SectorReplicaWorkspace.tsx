@@ -168,7 +168,7 @@ export function SectorReplicaWorkspace() {
   }
 
   return (
-    <div className="sector-replica-workspace">
+    <div className="market-radar-workspace">
       <SectorReplicaPanel
         activeBoardCode={activeBoardCode}
         activeSubTheme={activeSubTheme}

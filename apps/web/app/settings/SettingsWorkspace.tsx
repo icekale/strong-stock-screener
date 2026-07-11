@@ -20,7 +20,7 @@ import {
 } from "antd";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { SystemStatusPanel } from "../../components/system/SystemStatusPanel";
-import { WorkbenchPage } from "../../components/workbench/WorkbenchPage";
+import { PageFrame } from "../../components/workbench/PageFrame";
 import { checkRuntimeSettingsHealth, getRuntimeSettings, getSystemStatus, saveRuntimeSettings } from "../../lib/api";
 import type {
   GsgfAutoReviewConfig,
@@ -146,9 +146,9 @@ export function SettingsWorkspace() {
   return (
     <SettingsContent
       renderPage={(content, { actions, description }) => (
-        <WorkbenchPage actions={actions} description={description} eyebrow="Settings" title="数据源配置">
+        <PageFrame actions={actions} context={description} title="数据源配置">
           {content}
-        </WorkbenchPage>
+        </PageFrame>
       )}
     />
   );
@@ -321,7 +321,7 @@ export function SettingsContent({ renderPage }: SettingsContentProps) {
 
   if (loading && !config) {
     const content = (
-      <Card className="workbench-panel">
+      <Card className="app-panel">
         <Skeleton active paragraph={{ rows: 8 }} title={false} />
       </Card>
     );
@@ -355,7 +355,7 @@ export function SettingsContent({ renderPage }: SettingsContentProps) {
         <Row gutter={[16, 16]}>
           <Col lg={16} xs={24}>
             <Space className="w-full" orientation="vertical" size={16}>
-              <Card className="workbench-panel" title="当前状态">
+              <Card className="app-panel" title="当前状态">
                 <Descriptions bordered column={{ lg: 3, md: 2, xs: 1 }} size="small">
                   <Descriptions.Item label="状态摘要">{summary}</Descriptions.Item>
                   <Descriptions.Item label="候选源">{config?.candidate_provider ?? "未读取"}</Descriptions.Item>
@@ -387,7 +387,7 @@ export function SettingsContent({ renderPage }: SettingsContentProps) {
               </Card>
 
               <Form className="space-y-4" form={form} layout="vertical" onValuesChange={(_, values) => updateDraft(values)}>
-                <Card className="workbench-panel" title="行情与候选源">
+                <Card className="app-panel" title="行情与候选源">
                   <Row gutter={12}>
                     <Col md={12} xs={24}>
                       <Form.Item label="候选源" name="candidate_provider">
@@ -430,7 +430,7 @@ export function SettingsContent({ renderPage }: SettingsContentProps) {
                   </Row>
                 </Card>
 
-                <Card className="workbench-panel" title="iFinD 研究增强">
+                <Card className="app-panel" title="iFinD 研究增强">
                 <Alert
                   className="mb-4"
                   showIcon
@@ -471,7 +471,7 @@ export function SettingsContent({ renderPage }: SettingsContentProps) {
                   </Row>
                 </Card>
 
-                <Card className="workbench-panel" title="通达信 MCP 补充源">
+                <Card className="app-panel" title="通达信 MCP 补充源">
                 <Alert
                   className="mb-4"
                   showIcon
@@ -501,7 +501,7 @@ export function SettingsContent({ renderPage }: SettingsContentProps) {
                   </Row>
                 </Card>
 
-                <Card className="workbench-panel" title="AI 分析服务">
+                <Card className="app-panel" title="AI 分析服务">
                 <Alert
                   className="mb-4"
                   showIcon
@@ -564,7 +564,7 @@ export function SettingsContent({ renderPage }: SettingsContentProps) {
                   </Row>
                 </Card>
 
-                <Card className="workbench-panel" title="竞价 Top3 训练">
+                <Card className="app-panel" title="竞价 Top3 训练">
                 <Alert
                   className="mb-4"
                   showIcon
@@ -613,7 +613,7 @@ export function SettingsContent({ renderPage }: SettingsContentProps) {
                   </Row>
                 </Card>
 
-                <Card className="workbench-panel" title="GSGF 自动复盘">
+                <Card className="app-panel" title="GSGF 自动复盘">
                 <Alert
                   className="mb-4"
                   showIcon
@@ -674,7 +674,7 @@ export function SettingsContent({ renderPage }: SettingsContentProps) {
                   </Row>
                 </Card>
 
-                <Card className="workbench-panel" title="通知渠道">
+                <Card className="app-panel" title="通知渠道">
                 <Alert
                   className="mb-4"
                   showIcon
@@ -749,7 +749,7 @@ export function SettingsContent({ renderPage }: SettingsContentProps) {
 
           <Col lg={8} xs={24}>
             <Card
-              className="workbench-panel"
+              className="app-panel"
               extra={
                 <Button loading={runningHealth} onClick={() => void handleHealthCheck()} type="primary">
                   运行健康检查
@@ -757,7 +757,7 @@ export function SettingsContent({ renderPage }: SettingsContentProps) {
               }
               title="手动健康检查"
             >
-              <Typography.Paragraph className="workbench-muted">
+              <Typography.Paragraph className="app-muted">
                 健康检查需要手动触发，避免设置页加载时自动消耗 TickFlow 或 iFinD 请求额度。
               </Typography.Paragraph>
               <Space className="w-full" orientation="vertical" size={10}>
@@ -765,11 +765,11 @@ export function SettingsContent({ renderPage }: SettingsContentProps) {
                   <Alert showIcon title="暂无健康检查结果" type="info" />
                 ) : (
                   probes.map((probe) => (
-                    <Card className="workbench-panel" key={probe.name} size="small">
+                    <Card className="app-panel" key={probe.name} size="small">
                       <div className="flex items-start justify-between gap-3">
                         <div>
                           <Typography.Text strong>{probe.name}</Typography.Text>
-                          <Typography.Text className="workbench-muted mt-1 block text-xs">
+                          <Typography.Text className="app-muted mt-1 block text-xs">
                             {probe.latency_ms} ms · {probe.detail}
                           </Typography.Text>
                         </div>

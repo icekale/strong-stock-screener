@@ -83,12 +83,12 @@ export function SectorReplicaPanel({
   const latestSeriesTime = radar ? latestSectorReplicaSeriesTime(radar.axis, radar.series) : null;
 
   return (
-    <section className="sector-replica-shell">
-      <div className="sector-replica-emotion-grid">
+    <section className="market-radar-shell">
+      <div className="market-radar-emotion-grid">
         {EMOTION_METRICS.map((item) => (
           <button
             aria-label={`${item.label} ${formatEmotionMetric(radar, item.key)}`}
-            className={`sector-replica-emotion-button is-${item.tone}`}
+            className={`market-radar-emotion-button is-${item.tone}`}
             key={item.key}
             type="button"
           >
@@ -97,9 +97,9 @@ export function SectorReplicaPanel({
         ))}
       </div>
 
-      <div className="sector-replica-plate-row">
-        <aside className="sector-replica-sidebar">
-          <div className="sector-replica-tabs">
+      <div className="market-radar-plate-row">
+        <aside className="market-radar-sidebar">
+          <div className="market-radar-tabs">
             {(Object.keys(MODE_LABELS) as SectorReplicaMode[]).map((item) => (
               <button
                 className={item === mode ? "is-active" : ""}
@@ -112,16 +112,16 @@ export function SectorReplicaPanel({
               </button>
             ))}
           </div>
-          <div className="sector-replica-board-list-head">
+          <div className="market-radar-board-list-head">
             <div>
               <strong>{MODE_LABELS[mode]}</strong>
               <span>板块榜单</span>
             </div>
-            <span className="sector-replica-selection-count">
+            <span className="market-radar-selection-count">
               {selectedCodes.length}/6 <small>对比</small>
             </span>
           </div>
-          <div className="sector-replica-board-list">
+          <div className="market-radar-board-list">
             {(radar?.plates ?? []).map((plate) => (
               <BoardListItem
                 active={activeBoardCode === plate.code}
@@ -134,41 +134,41 @@ export function SectorReplicaPanel({
               />
             ))}
             {!radar && (
-              <div className="sector-replica-list-placeholder">
+              <div className="market-radar-list-placeholder">
                 {loading ? "正在读取板块..." : "暂无板块数据"}
               </div>
             )}
           </div>
         </aside>
 
-        <div className="sector-replica-main">
+        <div className="market-radar-main">
           {error ? (
-            <div aria-live="polite" className="sector-replica-error" role="status">
+            <div aria-live="polite" className="market-radar-error" role="status">
               {error}
             </div>
           ) : null}
-          <div className="sector-replica-chart-head">
-            <div className="sector-replica-chart-title">
+          <div className="market-radar-chart-head">
+            <div className="market-radar-chart-title">
               {activePlate?.name ?? "板块分时"}
               <span>
                 {mode === "strength" ? "板块强度" : "主力流入"} · 截至 {latestSeriesTime ?? "--"}
               </span>
             </div>
-            <div className="sector-replica-chart-tools">
+            <div className="market-radar-chart-tools">
               <span>{sourceStatusText(radar?.source_status.find((source) => source.source.includes("短线侠")) ?? radar?.source_status[0])}</span>
-              <button className="sector-replica-refresh" disabled={loading} onClick={onRefresh} type="button">
+              <button className="market-radar-refresh" disabled={loading} onClick={onRefresh} type="button">
                 <ReloadOutlined />
                 刷新
               </button>
             </div>
           </div>
-          <div aria-busy={loading} className="sector-replica-chart-region">
+          <div aria-busy={loading} className="market-radar-chart-region">
             <SectorReplicaChart loading={loading && !radar} mode={mode} radar={radar} />
           </div>
         </div>
       </div>
 
-      <div aria-busy={stockLoading} className="sector-replica-stock-panel">
+      <div aria-busy={stockLoading} className="market-radar-stock-panel">
         <SubThemeStrip
           activeSubTheme={activeSubTheme}
           onSubThemeChange={onSubThemeChange}
@@ -179,7 +179,7 @@ export function SectorReplicaPanel({
           loading={stockLoading && stocks.length === 0}
           rows={stocks}
         />
-        <div className="sector-replica-footer">
+        <div className="market-radar-footer">
           <span>交易日 {radar?.trade_date ?? "-"}</span>
           <span>生成 {formatReplicaDateTime(radar?.generated_at)}</span>
           <span>{selectedCodes.length}/6 对比</span>
@@ -233,7 +233,7 @@ function BoardListItem({
 }) {
   const value = mode === "main_flow" ? plate.display_value ?? formatReplicaMoney(plate.val) : formatReplicaNumber(plate.val);
   return (
-    <div className={`sector-replica-board-row${active ? " is-active" : ""}${checked ? " is-checked" : ""}`}>
+    <div className={`market-radar-board-row${active ? " is-active" : ""}${checked ? " is-checked" : ""}`}>
       <input
         aria-label={`加入对比：${plate.name}`}
         checked={checked}
@@ -246,9 +246,9 @@ function BoardListItem({
         onClick={onActivate}
         type="button"
       >
-        <span className="sector-replica-board-name">{plate.name}</span>
-        <span className="sector-replica-board-value">{value}</span>
-        {plate.ztcount > 0 ? <span className="sector-replica-limit-badge">{plate.ztcount}涨停</span> : null}
+        <span className="market-radar-board-name">{plate.name}</span>
+        <span className="market-radar-board-value">{value}</span>
+        {plate.ztcount > 0 ? <span className="market-radar-limit-badge">{plate.ztcount}涨停</span> : null}
       </button>
     </div>
   );
@@ -299,12 +299,12 @@ function SectorReplicaChart({
   }, [hasSeries, mode, radar]);
 
   if (loading) {
-    return <div className="sector-replica-chart-empty">正在加载分时曲线...</div>;
+    return <div className="market-radar-chart-empty">正在加载分时曲线...</div>;
   }
   if (!hasSeries) {
-    return <div className="sector-replica-chart-empty">暂无分时曲线，等待后台采样</div>;
+    return <div className="market-radar-chart-empty">暂无分时曲线，等待后台采样</div>;
   }
-  return <div className="sector-replica-chart" ref={chartRef} />;
+  return <div className="market-radar-chart" ref={chartRef} />;
 }
 
 function SubThemeStrip({
@@ -318,8 +318,8 @@ function SubThemeStrip({
 }) {
   const visibleTags = tags.slice(0, 28);
   return (
-    <div className="sector-replica-tags-scroll">
-      <div className="sector-replica-tags">
+    <div className="market-radar-tags-scroll">
+      <div className="market-radar-tags">
         <button className={activeSubTheme === null ? "is-active" : ""} onClick={() => onSubThemeChange(null)} type="button">
           全部
         </button>
@@ -349,8 +349,8 @@ function StockTable({
   rows: SectorReplicaStockRow[];
 }) {
   return (
-    <div className="sector-replica-table-wrap">
-      <table className="sector-replica-table">
+    <div className="market-radar-table-wrap">
+      <table className="market-radar-table">
         <thead>
           <tr>
             <th>名称</th>
@@ -369,7 +369,7 @@ function StockTable({
         <tbody>
           {rows.map((row) => (
             <tr key={row.symbol}>
-              <td className="sector-replica-name-cell">
+              <td className="market-radar-name-cell">
                 <Link
                   href={buildStockDetailHref(row.symbol, {
                     from: "sectors",
@@ -395,7 +395,7 @@ function StockTable({
           ))}
           {rows.length === 0 ? (
             <tr>
-              <td className="sector-replica-empty-row" colSpan={11}>
+              <td className="market-radar-empty-row" colSpan={11}>
                 {loading ? "正在读取成分股..." : "暂无成分股"}
               </td>
             </tr>
@@ -410,7 +410,7 @@ function valueToneClass(value: number | null | undefined): string {
   if (typeof value !== "number") {
     return "";
   }
-  return value >= 0 ? "sector-replica-red" : "sector-replica-green";
+  return value >= 0 ? "market-radar-red" : "market-radar-green";
 }
 
 function formatReplicaReportedNumber(value: number | null | undefined): string {

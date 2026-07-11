@@ -251,7 +251,10 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.doesNotMatch(singleStartSource, /next.*start/);
   assert.match(nextConfigSource, /\/api\/:path\*/);
   assert.match(nextConfigSource, /http:\/\/127\.0\.0\.1:8010\/api\/:path\*/);
-  assert.match(nextConfigSource, /distDir: process\.env\.NEXT_DIST_DIR \|\| "\.next"/);
+  assert.match(
+    nextConfigSource,
+    /distDir: process\.env\.NEXT_DIST_DIR \|\| \(process\.env\.NODE_ENV === "development" \? "\.next-dev" : "\.next"\)/,
+  );
   assert.match(nextConfigSource, /output: "standalone"/);
   assert.match(nextConfigSource, /proxyTimeout: 240_000/);
   assert.match(webPackageSource, /NEXT_DIST_DIR=\.next-dev next dev/);

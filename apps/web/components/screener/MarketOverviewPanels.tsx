@@ -91,28 +91,29 @@ export function MarketTickerBar({
   const indices = marketOverview?.indices ?? [];
 
   return (
-    <header className="rounded-lg border border-[var(--app-border)] bg-[var(--app-raised)]">
+    <header className="rounded-md border border-[var(--app-border)] bg-[var(--app-raised)]">
       <div className="flex flex-col gap-3 px-4 py-3 xl:flex-row xl:items-center xl:justify-between">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <MarketIndexPill index={findMarketIndex(indices, "000001.SH", "上证")} />
-          <MarketIndexPill index={findMarketIndex(indices, "399001.SZ", "深证")} />
-          <MarketIndexPill index={findMarketIndex(indices, "399006.SZ", "创业板")} />
-          <MarketIndexPill index={findMarketIndex(indices, "000688.SH", "科创50")} />
-          <span className="mx-2 hidden h-7 w-px bg-[var(--app-border)] xl:block" />
-          <span className="inline-flex h-8 items-center gap-2 rounded-full px-3 text-xs font-semibold text-[var(--app-muted)]">
-            <span className={`size-2 rounded-full ${sourceState.ok ? "market-green-fill" : "bg-amber-500"}`} />
-            LIVE · {generatedAt ? formatDateTime(generatedAt) : "等待筛选"}
-          </span>
-          <Tag className="m-0" color={sourceState.ok ? "green" : "orange"}>
-            数据源 {sourceState.label}
-          </Tag>
+        <div className="min-w-0 flex-1">
+          <div className="screener-index-strip">
+            <MarketIndexItem index={findMarketIndex(indices, "000001.SH", "上证")} />
+            <MarketIndexItem index={findMarketIndex(indices, "399001.SZ", "深证")} />
+            <MarketIndexItem index={findMarketIndex(indices, "399006.SZ", "创业板")} />
+            <MarketIndexItem index={findMarketIndex(indices, "000688.SH", "科创50")} />
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--app-muted)]">
+            <span className={`size-2 rounded-full ${sourceState.ok ? "market-green-fill" : "bg-[var(--market-warning)]"}`} />
+            <span>数据时间 {generatedAt ? formatDateTime(generatedAt) : "等待筛选"}</span>
+            <Tag className="m-0" color={sourceState.ok ? undefined : "orange"}>
+              数据源 {sourceState.label}
+            </Tag>
+          </div>
         </div>
         <div className="flex w-full min-w-0 flex-wrap items-center justify-start gap-2 xl:w-auto xl:justify-end">
           <Input
             className="w-full min-w-0 xl:w-[300px]"
             disabled
             prefix={<SearchOutlined />}
-            placeholder="Search stock, code..."
+            placeholder="搜索股票名称或代码"
           />
           <Button
             icon={<ThunderboltOutlined />}
@@ -120,7 +121,7 @@ export function MarketTickerBar({
             onClick={onRun}
             type="primary"
           >
-            {running ? "筛选中" : "运行 AI 筛选"}
+            {running ? "筛选中" : "运行筛选"}
           </Button>
           <Button
             disabled={candidates.length === 0}
@@ -150,7 +151,7 @@ function findMarketIndex(
   };
 }
 
-function MarketIndexPill({ index }: { index: MarketOverviewResponse["indices"][number] }) {
+function MarketIndexItem({ index }: { index: MarketOverviewResponse["indices"][number] }) {
   const changePct = index.change_pct;
   const hasChange = changePct !== null && changePct !== undefined && Number.isFinite(changePct);
   const isUp = hasChange && changePct >= 0;
@@ -160,19 +161,12 @@ function MarketIndexPill({ index }: { index: MarketOverviewResponse["indices"][n
     : index.last_price.toFixed(2);
 
   return (
-    <span
-      className={`inline-flex h-9 items-center gap-2 rounded-full border px-4 text-xs font-bold ${
-        !hasChange
-          ? "border-[var(--app-border)] bg-[var(--app-raised)] text-[var(--app-muted)]"
-          : isUp
-            ? "border-red-200 bg-red-50 text-red-700"
-            : "market-green-badge"
-      }`}
-      title={`${index.name} · ${index.source}`}
-    >
+    <span className="screener-index-strip__item" title={`${index.name} · ${index.source}`}>
       <span className="text-[var(--app-muted)]">{index.name}</span>
       {price ? <span className="hidden tabular-nums sm:inline">{price}</span> : null}
-      <span className="tabular-nums">{status}</span>
+      <span className={`tabular-nums ${!hasChange ? "text-[var(--app-muted)]" : isUp ? "text-[var(--market-rise)]" : "market-green-text"}`}>
+        {status}
+      </span>
     </span>
   );
 }
@@ -204,40 +198,40 @@ function MarketEnvironmentPanel({
   const turnoverSourceLabel = realtimeTurnoverSourceLabel(marketOverview);
 
   return (
-    <section className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-      <TerminalMetricCard
-        label="总成交额 TOTAL TURNOVER"
+    <section className="screener-metrics">
+      <MarketMetric
+        label="总成交额"
         value={formatCnyCompact(turnover?.total_cny)}
         subValue={formatTurnoverChange(turnover)}
-        footerLabel={turnoverSourceLabel ? "Source" : "Trade Date"}
+        footerLabel={turnoverSourceLabel ? "数据口径" : "交易日"}
         footerValue={marketOverview?.trade_date ?? result?.trade_date ?? "--"}
         helper={turnoverSourceLabel ? realtimeTurnoverSubtitles[turnoverSourceLabel] : undefined}
         tone={turnover?.change_cny === null || turnover?.change_cny === undefined ? "neutral" : turnover.change_cny >= 0 ? "positive" : "warning"}
       />
-      <TerminalMetricCard
-        label="情绪指数 SENTIMENT"
+      <MarketMetric
+        label="情绪指数"
         value={sentimentMetric.score === null ? "--" : String(sentimentMetric.score)}
         suffix="/100"
         subValue={sentimentMetric.subValue}
-        footerLabel="Short-term"
+        footerLabel="短线情绪"
         footerValue={sentimentMetric.footerValue}
         tone={sentimentMetric.tone}
       />
-      <MarketBreadthCard
-        label="涨跌比 ADVANCE/DECLINE"
+      <MarketBreadthMetric
+        label="上涨 / 下跌"
         advanceCount={advanceCount}
         declineCount={declineCount}
         subValue={unchangedCount === null ? "全A市场口径，等待数据" : `上涨/下跌 · 平盘 ${unchangedCount}`}
-        footerLabel="Market Breadth"
+        footerLabel="市场广度"
         footerValue={marketOverview?.trade_date ?? "--"}
         progress={advanceWidth}
         declineProgress={breadthTotal > 0 && declineCount !== null ? Math.round((declineCount / breadthTotal) * 100) : 0}
       />
-      <TerminalMetricCard
-        label="数据可信 SOURCE"
+      <MarketMetric
+        label="数据覆盖"
         value={marketOverview || sectorRadar ? "全A" : "--"}
         subValue={sectorRadarSourceSummary(sectorRadar) || marketOverviewSourceSummary(marketOverview) || (sourceState.ok ? "数据源可用" : "数据源待配置")}
-        footerLabel="Source"
+        footerLabel="板块覆盖"
         footerValue={`${sectorRadar ? sectorRadar.inflow.length + sectorRadar.outflow.length : marketOverview?.sectors.length ?? 0} 板块`}
         tone={
           (sectorRadar && sectorRadar.source_status.some((item) => item.status === "success")) ||
@@ -274,7 +268,7 @@ function buildSentimentMetric(sentimentSummary: SentimentSummaryResponse | null)
   };
 }
 
-function MarketBreadthCard({
+function MarketBreadthMetric({
   advanceCount,
   declineCount,
   declineProgress,
@@ -297,9 +291,9 @@ function MarketBreadthCard({
   const downWidth = Math.max(0, Math.min(100 - upWidth, declineProgress));
 
   return (
-    <article className="rounded-xl border border-[var(--app-border)] bg-[var(--app-raised)] p-4">
-      <p className="text-xs font-semibold uppercase text-[var(--app-muted)]">{label}</p>
-      <div className="mt-2 flex items-baseline gap-1 text-3xl font-black leading-none tabular-nums">
+    <article className="screener-metric screener-metric--breadth">
+      <p className="text-xs font-semibold text-[var(--app-muted)]">{label}</p>
+      <div className="screener-metric__value mt-2 flex items-baseline gap-1 text-3xl font-black leading-none tabular-nums">
         {advanceCount === null || declineCount === null ? (
           <span className="text-[var(--app-ink)]">--</span>
         ) : (
@@ -323,7 +317,7 @@ function MarketBreadthCard({
   );
 }
 
-function TerminalMetricCard({
+function MarketMetric({
   footerLabel,
   footerValue,
   helper,
@@ -346,8 +340,8 @@ function TerminalMetricCard({
 }) {
   const toneClass = tone === "positive" ? "market-green-text" : tone === "warning" ? "text-[var(--market-rise)]" : "text-[var(--app-ink)]";
   return (
-    <article className="rounded-xl border border-[var(--app-border)] bg-[var(--app-raised)] p-4">
-      <p className="text-xs font-semibold uppercase text-[var(--app-muted)]">{label}</p>
+    <article className="screener-metric">
+      <p className="text-xs font-semibold text-[var(--app-muted)]">{label}</p>
       <div className={`mt-2 text-3xl font-black leading-none tabular-nums ${toneClass}`}>
         {value}
         {suffix && <span className="ml-1 text-base text-[var(--app-muted)]">{suffix}</span>}
@@ -368,7 +362,7 @@ function TerminalMetricCard({
 
 export function SectorStrengthPanel() {
   return (
-    <section className="rounded-xl border border-[var(--app-border)] bg-[var(--app-raised)] p-4">
+    <section className="rounded-md border border-[var(--app-border)] bg-[var(--app-raised)] p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-black text-[var(--app-ink)]">板块强度 · Sector Strength</h2>
@@ -402,7 +396,7 @@ export function SectorFlowHeatmapPanel({ sectorRadar }: { sectorRadar: SectorRad
   );
 
   return (
-    <section className="rounded-xl border border-[var(--app-border)] bg-[var(--app-raised)] p-4">
+    <section className="rounded-md border border-[var(--app-border)] bg-[var(--app-raised)] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-base font-black text-[var(--app-ink)]">板块资金流热力 · Sector Flow</h2>

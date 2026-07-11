@@ -578,6 +578,91 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+.screener-index-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  background: var(--app-border);
+}
+
+.screener-index-strip__item {
+  display: flex;
+  min-width: 0;
+  min-height: 32px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--app-surface);
+  color: var(--app-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.screener-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-border);
+}
+
+.screener-metric {
+  min-width: 0;
+  padding: 14px 16px;
+  background: var(--app-raised);
+}
+
+.screener-filter-panel {
+  margin-top: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--app-border);
+  border-radius: 6px;
+  background: var(--app-raised);
+}
+
+.candidate-decision {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.candidate-decision-meta {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.candidate-decision-meta__detail {
+  overflow: hidden;
+  color: var(--app-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.candidate-industry-summary {
+  min-width: 0;
+}
+
+.candidate-filter-scroll {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.candidate-filter-scroll .ant-segmented {
+  min-width: max-content;
+}
+
 .decision-queue .data-state {
   padding: 14px 10px;
 }
@@ -809,6 +894,11 @@ body {
   .market-index-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .screener-index-strip,
+  .screener-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 560px) {
@@ -824,6 +914,19 @@ body {
 
   .market-index-strip__item {
     padding: 9px 10px;
+  }
+
+  .screener-index-strip__item {
+    padding-inline: 8px;
+  }
+
+  .screener-metric {
+    padding: 12px;
+  }
+
+  .screener-metric--breadth .screener-metric__value {
+    gap: 2px;
+    font-size: 24px;
   }
 }
 

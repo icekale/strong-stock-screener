@@ -1,7 +1,7 @@
 "use client";
 
 import type { ColumnsType } from "antd/es/table";
-import { Alert, Button, Card, Checkbox, Empty, Input, Segmented, Space, Table, Tag, Typography } from "antd";
+import { Alert, Button, Card, Checkbox, Empty, Input, Segmented, Space, Table, Tag } from "antd";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type {
@@ -22,7 +22,6 @@ import {
   type CandidateStatusFilter,
 } from "./types";
 import {
-  gsgfFinalStatusTone,
   gsgfLabel,
   primaryRiskSummary,
   splitTags,
@@ -138,9 +137,9 @@ function CandidateTable({
   const columns = useMemo<ColumnsType<StrongStockScreeningItem>>(
     () => [
       {
-        title: "股票 STOCK",
+        title: "股票",
         dataIndex: "name",
-        width: 260,
+        width: 200,
         render: (_, item) => (
           <div className="min-w-0">
             <Link
@@ -155,35 +154,30 @@ function CandidateTable({
         ),
       },
       {
-        title: "决策 SCORE",
-        width: 150,
+        title: "决策",
+        width: 300,
         render: (_, item) => {
           const view = statusCopy[item.status];
           return (
-            <Space orientation="vertical" size={6}>
-              <span className={`inline-flex h-7 items-center whitespace-nowrap rounded-full px-2.5 text-xs font-bold ring-1 ${view.tone}`}>
-                {view.label}
-              </span>
-              <Typography.Text className="text-xs font-black tabular-nums text-[var(--app-ink)]">
-                得分 {item.score}
-              </Typography.Text>
-              {item.gsgf && <div className="flex max-w-[180px] flex-wrap gap-1"><GsgfSummaryPills gsgf={item.gsgf} /></div>}
-            </Space>
+            <div className="candidate-decision">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className={`inline-flex min-h-6 items-center rounded-md px-2 text-xs font-semibold ring-1 ${view.tone}`}>
+                  {view.label}
+                </span>
+                <span className="text-xs font-semibold tabular-nums text-[var(--app-ink)]">得分 {item.score}</span>
+              </div>
+              <GsgfSummaryText gsgf={item.gsgf} />
+            </div>
           );
         },
       },
       {
-        title: "板块 SECTOR",
+        title: "板块",
         width: 170,
-        render: (_, item) => (
-          <div className="flex flex-wrap items-center gap-1.5">
-            <IndustryBadge industry={item.industry} />
-            <IndustryStrengthBadge item={item} />
-          </div>
-        ),
+        render: (_, item) => <IndustrySummary item={item} />,
       },
       {
-        title: "风险 RISK",
+        title: "风险",
         width: 220,
         render: (_, item) => {
           const riskSummary = primaryRiskSummary(item);
@@ -191,7 +185,7 @@ function CandidateTable({
         },
       },
       {
-        title: "操作 ACTION",
+        title: "操作",
         align: "right",
         fixed: "right",
         width: 180,
@@ -235,18 +229,18 @@ function CandidateTable({
   );
 
   return (
-    <Card className="mt-4 min-w-0 overflow-hidden rounded-xl border-[var(--app-border)] bg-[var(--app-raised)]" styles={{ body: { padding: 0 } }}>
+    <Card className="mt-4 min-w-0 overflow-hidden rounded-md border-[var(--app-border)] bg-[var(--app-raised)]" styles={{ body: { padding: 0 } }}>
       <div className="flex flex-col gap-3 border-b border-[var(--app-border)] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-base font-black text-[var(--app-ink)]">选股结果 · Screener Results</h2>
+            <h2 className="text-base font-black text-[var(--app-ink)]">选股结果</h2>
             <span className="rounded-md border border-[var(--app-border)] px-2 py-0.5 text-xs font-bold text-[var(--app-muted)]">{items.length}</span>
           </div>
           <p className="mt-1 text-xs font-medium text-[var(--app-muted)]">
             {generatedAt ? new Date(generatedAt).toLocaleString("zh-CN") : "暂无运行结果"}
           </p>
         </div>
-        <span className="rounded-lg border border-[var(--app-border)] bg-[var(--app-raised)] px-3 py-1.5 text-xs font-bold text-[var(--app-muted)]">
+        <span className="text-xs font-medium text-[var(--app-muted)]">
           点击股票名称查看 K 线详情
         </span>
       </div>
@@ -371,18 +365,15 @@ function CandidateCardList({
                 <span className="block truncate text-sm font-black text-slate-950">{item.name}</span>
                 <span className="mt-1 block text-xs font-semibold text-slate-400">{item.symbol}</span>
               </button>
-              <span className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ring-1 ${view.tone}`}>
+              <span className={`shrink-0 rounded-md px-2 py-1 text-xs font-semibold ring-1 ${view.tone}`}>
                 {view.label}
               </span>
             </div>
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              <span className="inline-flex h-6 items-center rounded-full bg-slate-100 px-2 text-[11px] font-bold text-slate-700">
-                得分 {item.score}
-              </span>
-              <GsgfSummaryPills gsgf={item.gsgf} />
-              <IndustryBadge industry={item.industry} />
-              <IndustryStrengthBadge item={item} />
+            <div className="candidate-decision mt-3">
+              <span className="text-xs font-semibold tabular-nums text-[var(--app-ink)]">得分 {item.score}</span>
+              <GsgfSummaryText gsgf={item.gsgf} />
             </div>
+            <div className="mt-3"><IndustrySummary item={item} /></div>
             <p className={`mt-3 line-clamp-2 text-xs leading-5 ${riskSummary.tone}`}>{riskSummary.text}</p>
             <div className="mt-3 grid grid-cols-2 gap-2">
               <a
@@ -441,16 +432,18 @@ function CandidateFilterBar({
             显示 {visibleCount}
           </Tag>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Segmented
-            onChange={(value) => onStatusFilterChange(value as CandidateStatusFilter)}
-            options={candidateStatusFilters.map((filter) => ({
-              label: `${filter.label} ${statusCounts[filter.value]}`,
-              value: filter.value,
-            }))}
-            size="small"
-            value={candidateStatusFilter}
-          />
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <div className="candidate-filter-scroll flex-1">
+            <Segmented
+              onChange={(value) => onStatusFilterChange(value as CandidateStatusFilter)}
+              options={candidateStatusFilters.map((filter) => ({
+                label: `${filter.label} ${statusCounts[filter.value]}`,
+                value: filter.value,
+              }))}
+              size="small"
+              value={candidateStatusFilter}
+            />
+          </div>
           <Button
             aria-pressed={strongIndustryOnly}
             onClick={() => onStrongIndustryOnlyChange(!strongIndustryOnly)}
@@ -462,12 +455,14 @@ function CandidateFilterBar({
         </div>
       </div>
       <div className="mt-3 flex flex-col gap-2 xl:flex-row xl:items-center xl:justify-between">
-        <Segmented
-          onChange={(value) => onGsgfSignalFilterChange(value as GsgfSignalFilter)}
-          options={gsgfSignalFilterOptions}
-          size="small"
-          value={gsgfSignalFilter}
-        />
+        <div className="candidate-filter-scroll">
+          <Segmented
+            onChange={(value) => onGsgfSignalFilterChange(value as GsgfSignalFilter)}
+            options={gsgfSignalFilterOptions}
+            size="small"
+            value={gsgfSignalFilter}
+          />
+        </div>
         <Checkbox
           checked={excludeGsgfGlobalRisk}
           onChange={(event) => onExcludeGsgfGlobalRiskChange(event.target.checked)}
@@ -570,98 +565,39 @@ function FilteredTableState() {
   );
 }
 
-function GsgfSummaryPills({ gsgf }: { gsgf: GsgfAnalysis | null }) {
+function GsgfSummaryText({ gsgf }: { gsgf: GsgfAnalysis | null }) {
   if (!gsgf) {
     return null;
   }
-  const riskTone =
-    gsgf.action === "avoid" || gsgf.zone === "c_zone"
-      ? "bg-red-50 text-red-700 ring-red-100"
-      : "bg-violet-50 text-violet-700 ring-violet-100";
-  const statusTone = gsgfFinalStatusTone(gsgf.final_status);
-  return (
-    <>
-      <span className={`inline-flex h-6 items-center rounded-full px-2 text-[11px] font-bold ring-1 ${riskTone}`}>
-        股是股非 {gsgf.total_score}
-      </span>
-      <span className={`inline-flex h-6 items-center rounded-full px-2 text-[11px] font-bold ring-1 ${statusTone}`}>
-        {gsgf.final_status}
-      </span>
-      <span className="inline-flex h-6 items-center rounded-full bg-slate-100 px-2 text-[11px] font-bold text-slate-700 ring-1 ring-slate-200">
-        {gsgfLabel(gsgf.zone)}
-      </span>
-      <span className="inline-flex h-6 items-center rounded-full bg-white px-2 text-[11px] font-bold text-slate-600 ring-1 ring-slate-200">
-        {gsgfLabel(gsgf.action)}
-      </span>
-      {gsgf.setup_type && (
-        <span className="inline-flex h-6 items-center rounded-full px-2 text-[11px] font-bold ring-1 market-green-badge market-green-ring">
-          setup {gsgfLabel(gsgf.setup_type)}
-        </span>
-      )}
-      {gsgf.confirm_type && (
-        <span className="inline-flex h-6 items-center rounded-full bg-sky-50 px-2 text-[11px] font-bold text-sky-700 ring-1 ring-sky-100">
-          确认信号 {gsgfLabel(gsgf.confirm_type)}
-        </span>
-      )}
-      <GsgfEvidencePill refs={gsgf.evidence_refs} />
-      <GsgfDiagnosticsPill diagnostics={gsgf.diagnostics} />
-    </>
-  );
-}
-
-function GsgfEvidencePill({ refs }: { refs: string[] }) {
-  if (refs.length === 0) {
-    return null;
-  }
-  return (
-    <span
-      className="inline-flex h-6 max-w-[180px] items-center truncate rounded-full bg-white px-2 text-[11px] font-bold text-slate-600 ring-1 ring-slate-200"
-      title={refs.join(" / ")}
-    >
-      证据链 {refs.length}
-    </span>
-  );
-}
-
-function GsgfDiagnosticsPill({ diagnostics }: { diagnostics: GsgfAnalysis["diagnostics"] }) {
-  const names = Object.entries(diagnostics)
+  const diagnostics = Object.entries(gsgf.diagnostics)
     .filter(([, item]) => item.flags.length > 0 || item.score !== null)
     .map(([name]) => gsgfLabel(name))
-    .slice(0, 3);
-  if (names.length === 0) {
-    return null;
-  }
+    .slice(0, 2);
+  const detail = [
+    gsgf.setup_type ? `形态 ${gsgfLabel(gsgf.setup_type)}` : null,
+    gsgf.confirm_type ? `确认 ${gsgfLabel(gsgf.confirm_type)}` : null,
+    gsgf.evidence_refs.length > 0 ? `证据链 ${gsgf.evidence_refs.length}` : null,
+    diagnostics.length > 0 ? `诊断 ${diagnostics.join("/")}` : null,
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(" · ");
+  const tone = gsgf.action === "avoid" || gsgf.zone === "c_zone" ? "text-[var(--market-warning-text)]" : "text-[var(--app-muted)]";
+
   return (
-    <span
-      className="inline-flex h-6 max-w-[180px] items-center truncate rounded-full bg-slate-100 px-2 text-[11px] font-bold text-slate-700 ring-1 ring-slate-200"
-      title={names.join(" / ")}
-    >
-      诊断 {names.join("/")}
-    </span>
+    <div className={`candidate-decision-meta ${tone}`}>
+      <div>股是股非 {gsgf.total_score} · {gsgf.final_status} · {gsgfLabel(gsgf.zone)} · {gsgfLabel(gsgf.action)}</div>
+      {detail ? <div className="candidate-decision-meta__detail" title={detail}>{detail}</div> : null}
+    </div>
   );
 }
 
-function IndustryStrengthBadge({ item }: { item: StrongStockScreeningItem }) {
-  if (!item.industry_strength) {
-    return null;
-  }
-  const view = industryStrengthCopy[item.industry_strength];
-  const scoreText = item.industry_score > 0 ? ` +${item.industry_score}` : "";
+function IndustrySummary({ item }: { item: StrongStockScreeningItem }) {
+  const strength = item.industry_strength ? industryStrengthCopy[item.industry_strength].label : null;
+  const score = item.industry_score > 0 ? ` +${item.industry_score}` : item.industry_score < 0 ? ` ${item.industry_score}` : "";
   return (
-    <span className={`inline-flex h-6 items-center rounded-full px-2 text-[11px] font-bold ring-1 ${view.tone}`}>
-      板块强度 {view.label}
-      {scoreText}
-    </span>
-  );
-}
-
-function IndustryBadge({ industry }: { industry: string | null }) {
-  if (!industry) {
-    return null;
-  }
-  return (
-    <span className="inline-flex h-6 items-center rounded-full bg-indigo-50 px-2 text-[11px] font-bold text-indigo-700 ring-1 ring-indigo-100">
-      行业 {industry}
-    </span>
+    <div className="candidate-industry-summary">
+      <div className="truncate text-sm font-semibold text-[var(--app-ink)]" title={item.industry ?? "未标注"}>{item.industry ?? "未标注"}</div>
+      <div className="mt-1 text-xs text-[var(--app-muted)]">{strength ? `板块强度 ${strength}${score}` : "板块强度待数据"}</div>
+    </div>
   );
 }

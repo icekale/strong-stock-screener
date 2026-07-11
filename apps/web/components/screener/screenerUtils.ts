@@ -1,6 +1,5 @@
 import type {
   DataSourceStatusResponse,
-  GsgfAnalysis,
   MarketOverviewResponse,
   ScreenRunFilters,
   ScreenStrategy,
@@ -45,18 +44,6 @@ export function gsgfLabel(value: string | null | undefined): string {
     volume_breakout_confirmation: "放量突破确认",
   };
   return value ? labels[value] ?? value : "--";
-}
-
-export function gsgfFinalStatusTone(status: GsgfAnalysis["final_status"]) {
-  const tones: Record<GsgfAnalysis["final_status"], string> = {
-    候选: "bg-sky-50 text-sky-700 ring-sky-100",
-    低吸观察: "market-green-badge ring-1 market-green-ring",
-    减仓: "bg-amber-50 text-amber-700 ring-amber-100",
-    回避: "bg-red-50 text-red-700 ring-red-100",
-    确认买点: "market-green-badge ring-1 market-green-ring",
-    观察: "bg-slate-100 text-slate-600 ring-slate-200",
-  };
-  return tones[status];
 }
 
 export function primaryRiskSummary(item: StrongStockScreeningItem) {

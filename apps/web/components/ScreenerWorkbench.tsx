@@ -186,7 +186,7 @@ export function ScreenerWorkbench({
       <div className="border-t border-[var(--app-border)] bg-[var(--app-raised)] px-5 py-3 text-xs text-[var(--app-muted)]">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span className="font-black text-[var(--app-ink)]">StockMaster · A股选股工作台</span>
-          <span>Data: TickFlow / iFinD / 东方财富 · Delayed 15min · 仅作规则辅助，不构成投资建议</span>
+          <span>数据源：TickFlow / iFinD / 东方财富 · 行情可能延迟约 15 分钟 · 仅作规则辅助，不构成投资建议</span>
         </div>
       </div>
     </PageFrame>
@@ -214,7 +214,7 @@ function HomepageMarketSupportPanel({
 
   return (
     <section className="mt-4">
-      <details className="rounded-xl border border-[var(--app-border)] bg-[var(--app-raised)]" onToggle={handleToggle}>
+      <details className="rounded-md border border-[var(--app-border)] bg-[var(--app-raised)]" onToggle={handleToggle}>
         <summary className="cursor-pointer list-none px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
@@ -246,12 +246,12 @@ function HomepageMarketSupportPanel({
 function HomepageModelMaintenancePanel() {
   return (
     <section className="mt-4">
-      <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-raised)] px-4 py-3">
+      <div className="rounded-md border border-[var(--app-border)] bg-[var(--app-raised)] px-4 py-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-base font-black text-[var(--app-ink)]">AI 模型维护</h2>
+            <h2 className="text-base font-black text-[var(--app-ink)]">模型维护</h2>
             <p className="mt-1 text-xs font-medium text-[var(--app-muted)]">
-              复盘样本、校准结果和数据源状态集中到独立页面，由 AI 生成待确认维护建议。
+              复盘样本、校准结果和数据源状态集中到独立页面，并生成待确认的维护建议。
             </p>
           </div>
           <Link
@@ -268,8 +268,8 @@ function HomepageModelMaintenancePanel() {
 
 function ScreenerResultsPlaceholder({ loading = false }: { loading?: boolean }) {
   return (
-    <section className="mt-4 rounded-xl border border-[var(--app-border)] bg-[var(--app-raised)] px-5 py-8 text-center">
-      <h2 className="text-base font-black text-[var(--app-ink)]">选股结果 · Screener Results</h2>
+    <section className="mt-4 rounded-md border border-[var(--app-border)] bg-[var(--app-raised)] px-5 py-8 text-center">
+      <h2 className="text-base font-black text-[var(--app-ink)]">选股结果</h2>
       <p className="mt-2 text-sm font-medium text-[var(--app-muted)]">
         {loading ? "正在加载候选结果组件..." : "运行筛选后显示候选股票。"}
       </p>

@@ -57,24 +57,22 @@ export function FilterLogicRail({
   tradeDate: string;
   visibleCount: number;
 }) {
+  const filterSummary = currentFilterSummary(filters, scanLimit, strategy);
+
   return (
-    <section className="mt-4 rounded-xl border border-[var(--app-border)] bg-[var(--app-raised)] px-4 py-3">
+    <section className="screener-filter-panel">
       <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="mr-2 border-r border-[var(--app-border)] pr-4 text-xs font-black uppercase text-[var(--app-ink)]">FILTER LOGIC</span>
-          <FilterChip active label="20日内涨停" />
-          <FilterChip active label={strategyName(strategy)} />
-          <FilterChip active label={`扫描 ${scanLimit}`} />
-          <FilterChip active={Boolean(filters.kdj_j_max)} label={filters.kdj_j_max ? `KDJ-J < ${filters.kdj_j_max}` : "KDJ-J 不限"} />
-          <FilterChip active={Boolean(filters.min_market_cap_billion || filters.max_market_cap_billion)} label={marketCapFilterLabel(filters)} />
-          {(filters.market_types ?? []).map((market) => <FilterChip active key={market} label={marketTypeLabel(market)} />)}
-          {(filters.industries ?? []).map((industry) => <FilterChip active key={industry} label={industry} />)}
+        <div className="min-w-0">
+          <div className="text-xs font-semibold text-[var(--app-ink)]">当前筛选</div>
+          <div className="mt-1 text-xs leading-5 text-[var(--app-muted)]" title={filterSummary.join(" · ")}>
+            {filterSummary.join(" · ")}
+          </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-[var(--app-muted)]">Matched: <b className="text-[var(--app-ink)]">{visibleCount}</b> stocks</span>
+          <span className="text-xs font-medium text-[var(--app-muted)]">匹配 <b className="text-[var(--app-ink)]">{visibleCount}</b> 只</span>
           <Button onClick={onRefreshSources} size="small">刷新源</Button>
           <Button loading={running} onClick={onRun} size="small" type="primary">运行筛选</Button>
-          <Button onClick={() => onScreenFiltersChange({})} size="small">Reset</Button>
+          <Button onClick={() => onScreenFiltersChange({})} size="small">重置</Button>
         </div>
       </div>
 
@@ -83,7 +81,7 @@ export function FilterLogicRail({
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
             <span className="font-black text-[var(--app-ink)]">筛选任务</span>
             <span className="font-bold text-[var(--app-muted)]">{screenJob.message || jobStatusLabel(screenJob.status)}</span>
-            <span className="font-mono text-[var(--app-muted)]">
+            <span className="tabular-nums text-[var(--app-muted)]">
               {Math.min(screenJob.progress_current, screenJob.progress_total)}/{Math.max(1, screenJob.progress_total)}
             </span>
           </div>
@@ -155,14 +153,16 @@ function jobStatusLabel(status: ScreenRunJobState["status"]): string {
   return "失败";
 }
 
-function FilterChip({ active, label }: { active: boolean; label: string }) {
-  return (
-    <span className={`inline-flex h-8 items-center rounded-md border px-3 text-xs font-bold ${
-      active ? "border-[var(--app-ink)] bg-[var(--app-ink)] text-white" : "border-[var(--app-border)] bg-[var(--app-raised)] text-[var(--app-muted)]"
-    }`}>
-      {active ? "✓ " : ""}{label}
-    </span>
-  );
+function currentFilterSummary(filters: ScreenRunFilters, scanLimit: number, strategy: ScreenStrategy): string[] {
+  return [
+    "20日内涨停",
+    strategyName(strategy),
+    `扫描 ${scanLimit}`,
+    filters.kdj_j_max ? `KDJ-J < ${filters.kdj_j_max}` : "KDJ-J 不限",
+    marketCapFilterLabel(filters),
+    ...(filters.market_types ?? []).map(marketTypeLabel),
+    ...(filters.industries ?? []),
+  ];
 }
 
 function DataSourceStrip({
@@ -489,7 +489,7 @@ function WatchlistGroupSection({
                 <p className="mt-0.5 text-[11px] font-semibold text-slate-400">{item.symbol}</p>
               </div>
               {item.industry && (
-                <span className="max-w-[120px] truncate rounded-full bg-indigo-50 px-2 py-0.5 text-[11px] font-bold text-indigo-700 ring-1 ring-indigo-100">
+                <span className="max-w-[120px] truncate text-[11px] font-semibold text-[var(--app-muted)]" title={item.industry}>
                   {item.industry}
                 </span>
               )}

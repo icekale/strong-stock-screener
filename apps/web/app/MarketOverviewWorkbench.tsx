@@ -4,7 +4,6 @@ import { ReloadOutlined } from "@ant-design/icons";
 import { Button, Tag } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DecisionQueue } from "../components/overview/DecisionQueue";
-import { MarketFeed } from "../components/overview/MarketFeed";
 import { MarketPulse } from "../components/overview/MarketPulse";
 import { SectorHeatmapPreview } from "../components/overview/SectorHeatmapPreview";
 import { PageFrame } from "../components/workbench/PageFrame";
@@ -89,13 +88,12 @@ export function MarketOverviewWorkbench() {
       status={<Tag color="blue">只读</Tag>}
       title="市场总览"
     >
-      <div className="space-y-4">
-        <DecisionQueue auction={auction} onRefresh={() => void refresh()} screening={screening} />
-        <MarketPulse market={market} onRefresh={() => void refresh()} sentiment={sentiment} />
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,0.8fr)]">
+      <div className="market-overview-layout">
+        <div className="market-overview-lead">
           <SectorHeatmapPreview onRefresh={() => void refresh()} sectorRadar={sectorRadar} />
-          <MarketFeed onRefresh={() => void refresh()} sectorRadar={sectorRadar} sentiment={sentiment} />
+          <MarketPulse market={market} onRefresh={() => void refresh()} sentiment={sentiment} />
         </div>
+        <DecisionQueue auction={auction} onRefresh={() => void refresh()} screening={screening} />
       </div>
     </PageFrame>
   );

@@ -20,7 +20,7 @@ const riskActionCopy = {
 
 export function DecisionQueue({ auction, onRefresh, screening }: DecisionQueueProps) {
   return (
-    <section aria-labelledby="decision-queue-title" className="compact-panel overflow-hidden">
+    <section aria-labelledby="decision-queue-title" className="compact-panel decision-queue overflow-hidden">
       <div className="compact-panel__header">
         <div>
           <h2 className="m-0 text-sm font-semibold text-[var(--app-ink)]" id="decision-queue-title">
@@ -43,7 +43,7 @@ function AuctionBlock({ onRefresh, state }: { onRefresh: () => void; state: Pane
   const isCacheMissing = state?.kind === "missing";
 
   return (
-    <article className="min-w-0 p-4">
+    <article className="decision-queue__block min-w-0 p-4">
       <BlockTitle title="竞价 Top3" />
       {!data && !isCacheMissing ? <DataState action={{ onClick: onRefresh }} kind={state?.kind === "error" ? "error" : "loading"} subject="竞价模型" /> : null}
       {isCacheMissing ? (
@@ -84,7 +84,7 @@ function ScreeningBlock({ onRefresh, state }: { onRefresh: () => void; state: Pa
   const data = state && state.kind !== "error" ? state.value : null;
 
   return (
-    <article className="min-w-0 p-4">
+    <article className="decision-queue__block min-w-0 p-4">
       <BlockTitle title="强势选股" />
       {!data ? <DataState action={{ onClick: onRefresh }} kind={state?.kind === "error" ? "error" : "loading"} subject="筛选结果" /> : null}
       {state?.kind === "stale" ? <DataState action={{ onClick: onRefresh }} kind="stale" subject="筛选结果" /> : null}
@@ -120,7 +120,7 @@ function WatchlistRiskBlock({ onRefresh, state }: { onRefresh: () => void; state
   const data = state && state.kind !== "error" ? state.value : null;
 
   return (
-    <article className="min-w-0 p-4">
+    <article className="decision-queue__block min-w-0 p-4">
       <BlockTitle title="自选风险" />
       {!data ? <DataState action={{ onClick: onRefresh }} kind={state?.kind === "error" ? "error" : "loading"} subject="自选风险" /> : null}
       {state?.kind === "stale" ? <DataState action={{ onClick: onRefresh }} kind="stale" subject="自选风险" /> : null}

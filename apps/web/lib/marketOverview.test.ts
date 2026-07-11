@@ -49,6 +49,14 @@ test("market pulse exposes prominent breadth and compact index strip", () => {
   assert.match(source, /market-index-strip/);
 });
 
+test("homepage renders market direction before the decision queue without the duplicate feed", () => {
+  const source = readFileSync(new URL("../app/MarketOverviewWorkbench.tsx", import.meta.url), "utf8");
+
+  assert.ok(source.indexOf("<SectorHeatmapPreview") < source.indexOf("<DecisionQueue"));
+  assert.ok(source.indexOf("<MarketPulse") < source.indexOf("<DecisionQueue"));
+  assert.doesNotMatch(source, /<MarketFeed/);
+});
+
 test("selectTop3 keeps only selected items in ascending rank order", () => {
   const items = [
     auctionItem("B", "selected", 2),

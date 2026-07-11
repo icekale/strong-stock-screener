@@ -329,6 +329,11 @@ body {
   align-items: stretch;
 }
 
+.market-overview-layout {
+  display: grid;
+  gap: 16px;
+}
+
 .sector-flow-panel,
 .market-state-panel {
   min-width: 0;
@@ -550,6 +555,23 @@ body {
 .market-index-strip__item b {
   font-size: 11px;
   font-variant-numeric: tabular-nums;
+}
+
+.decision-queue .data-state {
+  padding: 14px 10px;
+}
+
+.decision-queue .data-state--loading {
+  padding-block: 10px;
+}
+
+.decision-queue .data-state--empty .ant-empty-image {
+  height: 32px;
+  margin-bottom: 6px;
+}
+
+.decision-queue .data-state__description {
+  font-size: 12px;
 }
 
 .market-heatmap-stage {

@@ -240,7 +240,7 @@ export function ModelMaintenanceContent({ renderPage }: ModelMaintenanceContentP
         </Card>
       ) : (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.4fr)_minmax(360px,0.8fr)]">
-          <Space className="min-w-0" direction="vertical" size={16}>
+          <Space className="min-w-0" orientation="vertical" size={16}>
             <Card className="app-panel" title="维护流程">
               <div className="grid gap-3 md:grid-cols-3">
                 <WorkflowStep
@@ -329,7 +329,7 @@ export function ModelMaintenanceContent({ renderPage }: ModelMaintenanceContentP
             </Card>
           </Space>
 
-          <Space className="min-w-0" direction="vertical" size={16}>
+          <Space className="min-w-0" orientation="vertical" size={16}>
             <Card
               className="app-panel"
               extra={

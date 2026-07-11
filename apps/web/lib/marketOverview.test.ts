@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { AuctionModelPredictionItem, StrongStockScreeningResponse } from "./types";
 const {
@@ -12,6 +13,12 @@ const {
   selectWatchlistRisks,
   toPanelState,
 } = (await import(new URL("./marketOverview.ts", import.meta.url).href)) as typeof import("./marketOverview");
+
+test("decision queue avoids deprecated Ant Design Tag props", () => {
+  const source = readFileSync(new URL("../components/overview/DecisionQueue.tsx", import.meta.url), "utf8");
+
+  assert.doesNotMatch(source, /bordered=\{false\}/);
+});
 
 test("selectTop3 keeps only selected items in ascending rank order", () => {
   const items = [

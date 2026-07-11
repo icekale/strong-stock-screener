@@ -90,7 +90,7 @@ function ScreeningBlock({ onRefresh, state }: { onRefresh: () => void; state: Pa
             >
               <div className="flex items-center justify-between gap-3">
                 <span className="truncate font-semibold text-[var(--app-ink)]">{item.name}</span>
-                <Tag bordered={false} className="m-0 shrink-0" color={item.status === "reduce_risk" ? "orange" : "blue"}>
+                <Tag className="m-0 shrink-0" color={item.status === "reduce_risk" ? "orange" : "blue"} variant="filled">
                   {statusCopy[item.status].label}
                 </Tag>
               </div>
@@ -126,7 +126,7 @@ function WatchlistRiskBlock({ onRefresh, state }: { onRefresh: () => void; state
             >
               <div className="flex items-center justify-between gap-3">
                 <span className="truncate font-semibold text-[var(--app-ink)]">{item.name}</span>
-                <Tag bordered={false} className="m-0 shrink-0" color={item.risk_action === "hold_watch" ? "blue" : "orange"}>
+                <Tag className="m-0 shrink-0" color={item.risk_action === "hold_watch" ? "blue" : "orange"} variant="filled">
                   {riskActionCopy[item.risk_action]}
                 </Tag>
               </div>

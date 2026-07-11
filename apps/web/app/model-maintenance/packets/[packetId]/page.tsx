@@ -58,7 +58,7 @@ export default function ModelMaintenancePacketPage() {
         </Card>
       ) : packet ? (
         <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
-          <Space className="min-w-0" direction="vertical" size={16}>
+          <Space className="min-w-0" orientation="vertical" size={16}>
             <Card className="workbench-panel" title="摘要">
               <Descriptions column={1} size="small">
                 <Descriptions.Item label="数据包 ID">{packet.packet_id}</Descriptions.Item>
@@ -92,7 +92,7 @@ export default function ModelMaintenancePacketPage() {
 
             <Card className="workbench-panel" title="数据质量">
               {packet.data_quality_notes.length ? (
-                <Space direction="vertical">
+                <Space orientation="vertical">
                   {packet.data_quality_notes.map((note) => (
                     <Alert key={note} showIcon title={note} type="warning" />
                   ))}

@@ -1135,3 +1135,15 @@ test("merged market workspaces use product-frame presentation contracts", () => 
   assert.equal(existsSync(retiredWorkbenchPageUrl), false);
   assert.equal(existsSync(retiredWorkbenchLayoutUrl), false);
 });
+
+test("model maintenance uses supported Ant Design Space orientation props", () => {
+  const modelMaintenanceSource = readFileSync(
+    new URL("../app/model-maintenance/ModelMaintenanceWorkspace.tsx", import.meta.url),
+    "utf8",
+  );
+  const packetPageSource = readFileSync(new URL("../app/model-maintenance/packets/[packetId]/page.tsx", import.meta.url), "utf8");
+
+  for (const source of [modelMaintenanceSource, packetPageSource]) {
+    assert.doesNotMatch(source, /direction="vertical"/);
+  }
+});

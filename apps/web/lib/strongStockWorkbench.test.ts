@@ -6,6 +6,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   const typesSource = readFileSync(new URL("./types.ts", import.meta.url), "utf8");
   const apiSource = readFileSync(new URL("./api.ts", import.meta.url), "utf8");
   const componentSource = readFileSync(new URL("../components/ScreenerWorkbench.tsx", import.meta.url), "utf8");
+  const nestedScreenerSupportSource = componentSource.slice(componentSource.indexOf("function HomepageMarketSupportPanel"));
   const marketPanelsUrl = new URL("../components/screener/MarketOverviewPanels.tsx", import.meta.url);
   const marketPanelsSource = existsSync(marketPanelsUrl) ? readFileSync(marketPanelsUrl, "utf8") : "";
   const filterRailUrl = new URL("../components/screener/FilterLogicRail.tsx", import.meta.url);
@@ -434,10 +435,14 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(marketPanelsSource, /SectorFlowHeatmapPanel/);
   assert.match(filterRailSource, /FilterLogicRail/);
   assert.match(filterRailSource, /AdvancedScreenFilters/);
+  assert.doesNotMatch(filterRailSource, /var\(--app-/);
   assert.match(candidateResultsSource, /CandidateResults/);
   assert.match(candidateResultsSource, /CandidateTable/);
   assert.match(gsgfPanelsSource, /GsgfReviewPanel/);
   assert.match(gsgfPanelsSource, /GsgfCalibrationPanel/);
+  assert.doesNotMatch(gsgfFunnelSource, /var\(--app-/);
+  assert.doesNotMatch(marketPanelsSource, /var\(--app-/);
+  assert.doesNotMatch(nestedScreenerSupportSource, /var\(--app-/);
   assert.match(screenerUtilsSource, /export function formatCnyCompact/);
   assert.match(screenerUtilsSource, /export function exportCandidatesCsv/);
   assert.match(screenerTypesSource, /export type CandidateStatusFilter/);
@@ -579,7 +584,22 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(screenerFeatureSource, /CandidateCardList/);
   assert.match(screenerFeatureSource, /lg:hidden/);
   assert.match(screenerFeatureSource, /hidden overflow-x-auto lg:block/);
-  assert.match(componentSource, /PageFrame/);
+  for (const source of [
+    auctionWorkspaceSource,
+    componentSource,
+    watchlistWorkspaceSource,
+    sentimentWorkspaceSource,
+    stockWorkspaceSource,
+  ]) {
+    assert.doesNotMatch(source, /WorkbenchPage/);
+    assert.match(source, /<PageFrame\b/);
+  }
+  for (const source of [auctionPageSource, watchlistPageSource, sentimentPageSource, stockPageSource]) {
+    assert.doesNotMatch(source, /WorkbenchPage/);
+    assert.match(source, /<PageFrame\b/);
+    assert.match(source, /aria-busy/);
+    assert.match(source, /Skeleton/);
+  }
   assert.match(screenerFeatureSource, /grid items-stretch gap-4 xl:grid-cols-\[minmax\(0,2fr\)_minmax\(360px,1fr\)\]/);
   assert.match(componentSource, /HomepageMarketSupportPanel/);
   assert.match(componentSource, /onLoadMarketSupport/);
@@ -617,7 +637,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(watchlistFeatureSource, /dynamic[<(]/);
   assert.match(watchlistFeatureSource, /WatchlistEditorPanel/);
   assert.match(watchlistFeatureSource, /WatchlistManagerPanel/);
-  assert.match(watchlistFeatureSource, /WorkbenchPage/);
+  assert.doesNotMatch(watchlistFeatureSource, /WorkbenchPage/);
   assert.match(watchlistFeatureSource, /workbench-panel/);
   assert.match(watchlistFeatureSource, /from "antd"/);
   assert.match(watchlistFeatureSource, /<Table/);
@@ -1036,4 +1056,23 @@ test("app shell uses grouped navigation with responsive collapse and mobile acce
   assert.doesNotMatch(source, /NAV_ITEMS/);
   assert.doesNotMatch(source, /STOCK_NAV_ITEMS/);
   assert.doesNotMatch(source, /DatabaseOutlined/);
+});
+
+test("PageFrame flush content variant overrides default padding for stock K-line surfaces", () => {
+  const pageFrameSource = readFileSync(new URL("../components/workbench/PageFrame.tsx", import.meta.url), "utf8");
+  const globalsSource = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+  const stockWorkspaceSource = readFileSync(new URL("../app/stock/[symbol]/StockKlineWorkspace.tsx", import.meta.url), "utf8");
+  const stockPageSource = readFileSync(new URL("../app/stock/[symbol]/page.tsx", import.meta.url), "utf8");
+  const defaultContentRule = globalsSource.indexOf(".page-frame__content {");
+  const flushContentRule = globalsSource.indexOf(".page-frame__content.page-frame__content--flush {");
+
+  assert.match(pageFrameSource, /contentVariant\?: "default" \| "flush"/);
+  assert.match(pageFrameSource, /contentVariant === "flush" && "page-frame__content--flush"/);
+  assert.match(globalsSource, /\.page-frame__content\.page-frame__content--flush\s*\{\s*padding:\s*0;/);
+  assert.ok(defaultContentRule >= 0);
+  assert.ok(flushContentRule > defaultContentRule);
+  for (const source of [stockWorkspaceSource, stockPageSource]) {
+    assert.match(source, /contentVariant="flush"/);
+    assert.doesNotMatch(source, /contentClassName="p-0"/);
+  }
 });

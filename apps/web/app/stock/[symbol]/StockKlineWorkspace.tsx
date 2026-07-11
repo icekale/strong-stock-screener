@@ -17,6 +17,7 @@ import {
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { TickFlowKlineChart, type KlineChartDataSourceMode } from "../../../components/TickFlowKlineChart";
+import { PageFrame } from "../../../components/workbench/PageFrame";
 import { getLatestScreenRun, getStockKline, getStockQuote, getStockResearch } from "../../../lib/api";
 import {
   buildKlineIndicatorState,
@@ -252,7 +253,12 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 text-slate-950">
+    <PageFrame
+      actions={<Button href={stockDetailContext.returnHref}>{stockDetailContext.returnLabel}</Button>}
+      context={currentStock?.industry ? `${currentStock.industry} · ${symbol}` : symbol}
+      contentVariant="flush"
+      title="个股 K 线"
+    >
       <div
         className={`grid min-h-screen transition-[grid-template-columns] duration-200 ${
           candidateListCollapsed ? "lg:grid-cols-[168px_minmax(0,1fr)]" : "lg:grid-cols-[248px_minmax(0,1fr)]"
@@ -264,8 +270,6 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
           items={stockList}
           loading={listLoading}
           onToggleCollapsed={() => setCandidateListCollapsed((value) => !value)}
-          returnHref={stockDetailContext.returnHref}
-          returnLabel={stockDetailContext.returnLabel}
           sourceFrom={stockDetailContext.from}
         />
 
@@ -283,7 +287,7 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
           <div className="grid gap-3 p-3 sm:p-4">
             {error && <Alert showIcon title={error} type="error" />}
 
-            <Card className="workbench-card min-w-0 overflow-hidden" styles={{ body: { padding: 0 } }}>
+            <Card className="border-[var(--app-border)] bg-[var(--app-surface)] min-w-0 overflow-hidden" styles={{ body: { padding: 0 } }}>
               <ChartTabs activeTab={activeChartTab} onChange={setActiveChartTab} />
               <div className="px-3 py-3 sm:px-4">
                 <ChartControlBar
@@ -354,7 +358,7 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
           </div>
         </section>
       </div>
-    </main>
+    </PageFrame>
   );
 }
 
@@ -595,8 +599,6 @@ function StockListPanel({
   items,
   loading,
   onToggleCollapsed,
-  returnHref,
-  returnLabel,
   sourceFrom,
 }: {
   collapsed: boolean;
@@ -604,8 +606,6 @@ function StockListPanel({
   items: StockListItem[];
   loading: boolean;
   onToggleCollapsed: () => void;
-  returnHref: string;
-  returnLabel: string;
   sourceFrom: StockDetailFrom;
 }) {
   const [searchText, setSearchText] = useState("");
@@ -620,16 +620,9 @@ function StockListPanel({
       <div className="sticky top-0 flex h-screen flex-col border-r border-slate-200">
         <div className={`${collapsed ? "px-3 py-3" : "px-4 py-4"} border-b border-slate-100`}>
           <div className="flex items-center justify-between gap-2">
-            {!collapsed && (
-              <Button href={returnHref} size="small" type="link">
-                {returnLabel}
-              </Button>
-            )}
-            {collapsed && (
-              <Typography.Text className="truncate text-xs font-black text-slate-500">
-                紧凑列表
-              </Typography.Text>
-            )}
+            <Typography.Text className="truncate text-xs font-black text-slate-500">
+              {collapsed ? "紧凑列表" : "股票列表"}
+            </Typography.Text>
             <Button
               aria-label={collapsed ? "展开股票列表" : "收起股票列表"}
               onClick={onToggleCollapsed}
@@ -771,7 +764,7 @@ function QuoteSummary({
       <div className="flex min-h-[112px] flex-col gap-3 px-4 py-4 xl:flex-row xl:items-center xl:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <Typography.Title className="mb-0 text-xl font-black tracking-tight text-slate-950" level={1}>
+            <Typography.Title className="mb-0 text-xl font-black tracking-tight text-slate-950" level={2}>
               {currentStock?.name ?? symbol}
             </Typography.Title>
             <Tag className="m-0" color="red">{marketPrefix(symbol)}</Tag>
@@ -941,7 +934,7 @@ function pickResearchValue(research: StockResearchResponse | null, keys: string[
 
 function InfoCard({ label, tone = "text-slate-950", value }: { label: string; tone?: string; value: string }) {
   return (
-    <Card className="workbench-card" size="small">
+    <Card className="border-[var(--app-border)] bg-[var(--app-surface)]" size="small">
       <Statistic
         styles={{ content: { fontSize: 16, fontWeight: 900 } }}
         title={<span className="text-xs font-bold text-slate-400">{label}</span>}

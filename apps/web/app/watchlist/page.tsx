@@ -1,9 +1,9 @@
 "use client";
 
-import { Card, Skeleton } from "antd";
+import { Skeleton } from "antd";
 import dynamic from "next/dynamic";
 import { type ComponentType } from "react";
-import { WorkbenchPage } from "../../components/workbench/WorkbenchPage";
+import { PageFrame } from "../../components/workbench/PageFrame";
 
 const WatchlistWorkspace = dynamic(
   () => import("./WatchlistWorkspace").then((module) => module.WatchlistWorkspace),
@@ -16,22 +16,18 @@ export default function WatchlistPage() {
 
 function WatchlistWorkspacePlaceholder() {
   return (
-    <WorkbenchPage
-      description="正在加载分组、标签和观察池。"
-      eyebrow="Watchlist"
-      title="自选股管理"
-    >
-        <div className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)_320px]">
-          <Card className="workbench-panel" size="small">
+    <PageFrame context="正在加载分组、标签和观察池。" title="自选股管理">
+        <div aria-busy="true" aria-label="正在加载自选股管理" className="grid gap-4 xl:grid-cols-[240px_minmax(0,1fr)_320px]">
+          <section className="compact-panel p-4">
             <Skeleton active paragraph={{ rows: 10 }} />
-          </Card>
-          <Card className="workbench-panel min-w-0">
+          </section>
+          <section className="compact-panel min-w-0 p-4">
             <Skeleton active paragraph={{ rows: 12 }} />
-          </Card>
-          <Card className="workbench-panel">
+          </section>
+          <section className="compact-panel p-4">
             <Skeleton active paragraph={{ rows: 8 }} />
-          </Card>
+          </section>
         </div>
-    </WorkbenchPage>
+    </PageFrame>
   );
 }

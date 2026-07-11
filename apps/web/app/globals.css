@@ -262,6 +262,10 @@ body {
   padding: 16px 20px 24px;
 }
 
+.page-frame__content.page-frame__content--flush {
+  padding: 0;
+}
+
 .compact-panel {
   border: 1px solid var(--app-border);
   border-radius: 8px;

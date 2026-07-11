@@ -5,7 +5,7 @@ import { Alert, Button, Empty, Progress, Select, Skeleton, Space, Tag, Typograph
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ComponentType } from "react";
-import { WorkbenchPage } from "../../components/workbench/WorkbenchPage";
+import { PageFrame } from "../../components/workbench/PageFrame";
 import {
   getMarketRankings,
   getSentimentDecision,
@@ -292,11 +292,11 @@ export function SentimentWorkspace() {
   }, [data]);
 
   return (
-    <WorkbenchPage
+    <PageFrame
       actions={
         <Space wrap>
           <input
-            className="h-8 rounded-lg border border-[#d8d2c8] bg-white px-3 text-sm font-semibold text-[#11100e]"
+            className="h-8 rounded-lg border border-[var(--app-border)] bg-white px-3 text-sm font-semibold text-[var(--app-ink)]"
             onChange={(event) => setTradeDate(event.target.value)}
             type="date"
             value={tradeDate}
@@ -309,14 +309,13 @@ export function SentimentWorkspace() {
           </Button>
         </Space>
       }
-      description="基于近20日涨停候选池派生涨停池、炸板池、连板天梯和主线板块关联。"
       title="短线情绪中心"
     >
 
       {error && <Alert className="mb-4" showIcon title={error} type="error" />}
 
       {summaryLoading && !summary && !data ? (
-        <div className="workbench-panel rounded-xl border p-5">
+        <div className="border-[var(--app-border)] bg-[var(--app-surface)] rounded-xl border p-5">
           <Skeleton active paragraph={{ rows: 12 }} />
         </div>
       ) : summary || data ? (
@@ -334,7 +333,7 @@ export function SentimentWorkspace() {
             onStop={() => void handleMonitorAction("stop")}
             status={monitorStatus}
           />
-          <section className="workbench-panel rounded-xl border p-4">
+          <section className="border-[var(--app-border)] bg-[var(--app-surface)] rounded-xl border p-4">
             <div className="text-sm font-black text-[#11100e]">规则校准</div>
             <div className="mt-1 text-xs text-[#7b756d]">
               每日归档情绪结论，后续对照次日表现统计命中率。
@@ -362,7 +361,7 @@ export function SentimentWorkspace() {
           />
 
           <section className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
-            <aside className="workbench-panel rounded-xl border">
+            <aside className="border-[var(--app-border)] bg-[var(--app-surface)] rounded-xl border">
               <div className="workbench-panel-divider border-b px-4 py-3">
                 <div className="text-sm font-black text-[#11100e]">主线关联</div>
                 <div className="text-xs text-[#7b756d]">
@@ -380,7 +379,7 @@ export function SentimentWorkspace() {
               </div>
             </aside>
 
-            <section className="workbench-panel rounded-xl border">
+            <section className="border-[var(--app-border)] bg-[var(--app-surface)] rounded-xl border">
               <div className="workbench-panel-divider border-b px-4 py-3">
                 <div className="text-sm font-black text-[#11100e]">连板天梯</div>
                 <div className="text-xs text-[#7b756d]">从高连板到首板展示，帮助判断空间板和接力高度。</div>
@@ -417,11 +416,11 @@ export function SentimentWorkspace() {
           </section>
         </div>
       ) : (
-        <div className="workbench-panel rounded-xl border p-8">
+        <div className="border-[var(--app-border)] bg-[var(--app-surface)] rounded-xl border p-8">
           <Empty description="暂无短线情绪数据" />
         </div>
       )}
-    </WorkbenchPage>
+    </PageFrame>
   );
 }
 

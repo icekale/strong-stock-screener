@@ -1,9 +1,9 @@
 "use client";
 
-import { Card, Skeleton, Typography } from "antd";
+import { Skeleton } from "antd";
 import dynamic from "next/dynamic";
 import { type ComponentType } from "react";
-import { WorkbenchPage } from "../../components/workbench/WorkbenchPage";
+import { PageFrame } from "../../components/workbench/PageFrame";
 
 const SentimentWorkspace = dynamic(
   () => import("./SentimentWorkspace").then((module) => module.SentimentWorkspace),
@@ -16,23 +16,20 @@ export default function SentimentPage() {
 
 function SentimentWorkspacePlaceholder() {
   return (
-    <WorkbenchPage
-      description="正在加载涨停池、炸板池、连板天梯和盘中情绪。"
-      title="短线情绪中心"
-    >
-      <div className="space-y-4">
+    <PageFrame context="正在加载涨停池、炸板池、连板天梯和盘中情绪。" title="短线情绪中心">
+      <div aria-busy="true" aria-label="正在加载短线情绪中心" className="space-y-4">
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           {["市场情绪仪表盘", "情绪指标", "亏钱效应", "今日封板率"].map((title) => (
-            <Card className="workbench-panel" key={title} size="small">
-              <Typography.Text className="text-xs font-black text-[#7b756d]">{title}</Typography.Text>
+            <section className="compact-panel p-4" key={title}>
+              <span className="text-xs font-black text-[var(--app-muted)]">{title}</span>
               <Skeleton active paragraph={{ rows: 2 }} title={false} />
-            </Card>
+            </section>
           ))}
         </section>
-        <Card className="workbench-panel">
+        <section className="compact-panel p-4">
           <Skeleton active paragraph={{ rows: 12 }} />
-        </Card>
+        </section>
       </div>
-    </WorkbenchPage>
+    </PageFrame>
   );
 }

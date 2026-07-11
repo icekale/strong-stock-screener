@@ -183,9 +183,9 @@ export function ScreenerWorkbench({
         <HomepageModelMaintenancePanel />
       </div>
 
-      <div className="border-t border-[#ddd8d0] bg-[#f5f3f0] px-5 py-3 text-xs text-[#7b756d]">
+      <div className="border-t border-[var(--app-border)] bg-[var(--app-raised)] px-5 py-3 text-xs text-[var(--app-muted)]">
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <span className="font-black text-[#11100e]">StockMaster · A股选股工作台</span>
+          <span className="font-black text-[var(--app-ink)]">StockMaster · A股选股工作台</span>
           <span>Data: TickFlow / iFinD / 东方财富 · Delayed 15min · 仅作规则辅助，不构成投资建议</span>
         </div>
       </div>

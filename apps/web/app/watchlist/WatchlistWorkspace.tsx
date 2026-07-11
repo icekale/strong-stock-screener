@@ -3,7 +3,7 @@
 import { Alert, App, Button, Card, Skeleton, Space, Typography } from "antd";
 import dynamic from "next/dynamic";
 import { useEffect, useState, type ComponentType } from "react";
-import { WorkbenchPage } from "../../components/workbench/WorkbenchPage";
+import { PageFrame } from "../../components/workbench/PageFrame";
 import { addWatchlistPoolItem, getWatchlistGsgfStatus, getWatchlistPool, saveWatchlistPool } from "../../lib/api";
 import type { GsgfAnalysis, WatchlistPoolItem } from "../../lib/types";
 import { emptyDraft, type DraftItem } from "./types";
@@ -118,7 +118,7 @@ export function WatchlistWorkspace() {
   }
 
   return (
-    <WorkbenchPage
+    <PageFrame
       actions={
         <Space wrap>
           <Button href="/screener">返回选股</Button>
@@ -134,8 +134,6 @@ export function WatchlistWorkspace() {
           </Button>
         </Space>
       }
-      description="管理分组、标签、行业和备注。"
-      eyebrow="Watchlist"
       title="自选股管理"
     >
         {error && <Alert showIcon title={error} type="error" />}
@@ -159,14 +157,14 @@ export function WatchlistWorkspace() {
             selected={Boolean(selectedItem)}
           />
         </div>
-    </WorkbenchPage>
+    </PageFrame>
   );
 }
 
 function WatchlistEditorPlaceholder() {
   return (
-    <Card className="workbench-panel xl:sticky xl:top-4" styles={{ body: { padding: 20 } }}>
-      <Typography.Text className="workbench-muted text-sm font-medium">正在加载编辑面板...</Typography.Text>
+    <Card className="border-[var(--app-border)] bg-[var(--app-surface)] xl:sticky xl:top-4" styles={{ body: { padding: 20 } }}>
+      <Typography.Text className="text-[var(--app-muted)] text-sm font-medium">正在加载编辑面板...</Typography.Text>
     </Card>
   );
 }
@@ -174,10 +172,10 @@ function WatchlistEditorPlaceholder() {
 function WatchlistManagerPlaceholder() {
   return (
     <>
-      <Card className="workbench-panel" size="small">
+      <Card className="border-[var(--app-border)] bg-[var(--app-surface)]" size="small">
         <Skeleton active paragraph={{ rows: 10 }} />
       </Card>
-      <Card className="workbench-panel min-w-0">
+      <Card className="border-[var(--app-border)] bg-[var(--app-surface)] min-w-0">
         <Skeleton active paragraph={{ rows: 12 }} />
       </Card>
     </>

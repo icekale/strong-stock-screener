@@ -4,7 +4,7 @@ import { ExperimentOutlined, ReloadOutlined } from "@ant-design/icons";
 import { Alert, App, Button, Collapse, Empty, Input, InputNumber, Progress, Segmented, Select, Table, Tag, Typography } from "antd";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { WorkbenchPage } from "../../components/workbench/WorkbenchPage";
+import { PageFrame } from "../../components/workbench/PageFrame";
 import {
   addWatchlistPoolItem,
   createAuctionModelTop3Job,
@@ -389,48 +389,47 @@ export function AuctionWorkspace() {
   }
 
   return (
-    <WorkbenchPage contentClassName="py-3 lg:py-5">
-      <section className="auction-status-strip auction-command-strip workbench-panel mb-4 rounded-xl border px-4 py-3">
-        <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(220px,auto)] xl:items-start">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <Typography.Title className="m-0 text-[#11100e]" level={3}>
-                竞价雷达
-              </Typography.Title>
-              <Tag color={sessionColor(data?.session)}>{sessionLabel(data?.session)}</Tag>
-              <Tag color={snapshotStatusColor(data?.snapshot_status)}>{snapshotStatusLabel(data?.snapshot_status)}</Tag>
-              <Tag color="red">早盘作战台</Tag>
-            </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-semibold text-[#7b756d]">
-              <span>{data?.trade_date ?? "等待数据"}</span>
-              <span>缓存年龄 {formatCacheAge(data?.cache_age_seconds)}</span>
-              <span>自动快照 · TickFlow 全A实时行情 · 09:25 锁定主榜</span>
-              <span>{concentration.message}</span>
-            </div>
-          </div>
-          <div className="flex min-w-[180px] flex-col items-stretch gap-2 sm:items-end">
-            <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void refresh()} type="primary">
-              刷新竞价
-            </Button>
-            {refreshJob && refreshing && (
-              <div className="w-full max-w-[260px] rounded-lg border border-[#eee7db] bg-white px-3 py-2 text-xs text-[#7b756d]">
-                <div className="mb-1 flex items-center justify-between gap-2">
-                  <span className="truncate font-semibold">{refreshJob.message || "竞价刷新运行中"}</span>
-                  <span className="shrink-0 font-black text-[#d92d20]">
-                    {refreshJob.progress_current}/{refreshJob.progress_total || 1}
-                  </span>
-                </div>
-                <Progress
-                  percent={jobProgressPercent(refreshJob)}
-                  showInfo={false}
-                  size="small"
-                  status={refreshJob.status === "failed" ? "exception" : "active"}
-                  strokeColor="#d92d20"
-                />
+    <PageFrame
+      actions={
+        <div className="flex min-w-[180px] flex-col items-stretch gap-2 sm:items-end">
+          <Button icon={<ReloadOutlined />} loading={refreshing} onClick={() => void refresh()} type="primary">
+            刷新竞价
+          </Button>
+          {refreshJob && refreshing && (
+            <div className="w-full max-w-[260px] rounded-lg border border-[var(--app-border)] bg-white px-3 py-2 text-xs text-[var(--app-muted)]">
+              <div className="mb-1 flex items-center justify-between gap-2">
+                <span className="truncate font-semibold">{refreshJob.message || "竞价刷新运行中"}</span>
+                <span className="shrink-0 font-black text-[#d92d20]">
+                  {refreshJob.progress_current}/{refreshJob.progress_total || 1}
+                </span>
               </div>
-            )}
-          </div>
+              <Progress
+                percent={jobProgressPercent(refreshJob)}
+                showInfo={false}
+                size="small"
+                status={refreshJob.status === "failed" ? "exception" : "active"}
+                strokeColor="#d92d20"
+              />
+            </div>
+          )}
         </div>
+      }
+      contentClassName="py-3 lg:py-5"
+      context={
+        <span>
+          {data?.trade_date ?? "等待数据"} · 缓存年龄 {formatCacheAge(data?.cache_age_seconds)} · 自动快照 · TickFlow 全A实时行情 · 09:25 锁定主榜 · {concentration.message}
+        </span>
+      }
+      status={
+        <div className="flex flex-wrap items-center gap-2">
+          <Tag color={sessionColor(data?.session)}>{sessionLabel(data?.session)}</Tag>
+          <Tag color={snapshotStatusColor(data?.snapshot_status)}>{snapshotStatusLabel(data?.snapshot_status)}</Tag>
+          <Tag color="red">早盘作战台</Tag>
+        </div>
+      }
+      title="竞价雷达"
+    >
+      <section className="auction-status-strip auction-command-strip border-[var(--app-border)] bg-[var(--app-surface)] mb-4 rounded-xl border px-4 py-3">
         <div className="mt-3 grid grid-cols-2 gap-2 xl:grid-cols-4">
           <MetricCard compact label="竞价候选" value={data?.metrics.candidate_count ?? null} suffix="只" />
           <MetricCard compact label="强势高开" value={data?.metrics.strong_high_open_count ?? null} suffix="只" tone="red" />
@@ -551,7 +550,7 @@ export function AuctionWorkspace() {
           </section>
         </aside>
       </section>
-    </WorkbenchPage>
+    </PageFrame>
   );
 }
 

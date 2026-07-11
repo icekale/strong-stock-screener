@@ -6,6 +6,7 @@ type PageFrameProps = {
   children: ReactNode;
   className?: string;
   contentClassName?: string;
+  contentVariant?: "default" | "flush";
   context?: ReactNode;
   status?: ReactNode;
   title: ReactNode;
@@ -16,6 +17,7 @@ export function PageFrame({
   children,
   className,
   contentClassName,
+  contentVariant = "default",
   context,
   status,
   title,
@@ -36,7 +38,15 @@ export function PageFrame({
         </div>
         {actions ? <div className="command-bar__actions">{actions}</div> : null}
       </header>
-      <div className={joinClassNames("page-frame__content", contentClassName)}>{children}</div>
+      <div
+        className={joinClassNames(
+          "page-frame__content",
+          contentVariant === "flush" && "page-frame__content--flush",
+          contentClassName,
+        )}
+      >
+        {children}
+      </div>
     </main>
   );
 }

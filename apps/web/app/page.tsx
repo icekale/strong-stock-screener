@@ -23,6 +23,10 @@ function MarketOverviewPlaceholder() {
           <PlaceholderPanel rows={5} title="市场状态" />
         </div>
         <PlaceholderPanel rows={1} title="指数快照" />
+        <div className="market-trend-grid">
+          <PlaceholderPanel rows={6} title="板块轮动" />
+          <PlaceholderPanel rows={6} title="盘中情绪走势" />
+        </div>
       </div>
     </PageFrame>
   );

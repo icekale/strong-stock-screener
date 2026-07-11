@@ -334,6 +334,94 @@ body {
   gap: 16px;
 }
 
+.market-trend-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.85fr);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.market-trend-panel {
+  min-width: 0;
+}
+
+.market-trend-chart {
+  width: 100%;
+}
+
+.market-trend-chart--sector {
+  height: 286px;
+}
+
+.market-trend-chart--emotion {
+  height: 226px;
+}
+
+.market-trend-state {
+  display: flex;
+  min-height: 286px;
+  align-items: center;
+  justify-content: center;
+}
+
+.market-trend-state--emotion {
+  min-height: 226px;
+}
+
+.market-trend-empty {
+  max-width: 280px;
+  padding: 20px;
+  text-align: center;
+}
+
+.market-trend-empty strong {
+  color: var(--app-ink);
+  font-size: 13px;
+}
+
+.market-trend-empty p {
+  margin: 6px 0 12px;
+  color: var(--app-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.market-trend-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--app-border);
+}
+
+.market-trend-summary__item {
+  min-width: 0;
+  padding: 10px 12px;
+  border-right: 1px solid var(--app-border);
+}
+
+.market-trend-summary__item:last-child {
+  border-right: 0;
+}
+
+.market-trend-summary__item > span {
+  display: block;
+  color: var(--app-muted);
+  font-size: 10px;
+}
+
+.market-trend-summary__item > strong {
+  display: block;
+  margin-top: 3px;
+  overflow: hidden;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.market-trend-summary__item b {
+  font-weight: 700;
+}
+
 .sector-flow-panel,
 .market-state-panel {
   min-width: 0;
@@ -792,6 +880,10 @@ body {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .market-trend-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
   .sector-flow-chart {
     display: none;
   }
@@ -927,6 +1019,22 @@ body {
   .screener-metric--breadth .screener-metric__value {
     gap: 2px;
     font-size: 24px;
+  }
+
+  .market-trend-chart--sector,
+  .market-trend-state {
+    height: 238px;
+    min-height: 238px;
+  }
+
+  .market-trend-chart--emotion,
+  .market-trend-state--emotion {
+    height: 220px;
+    min-height: 220px;
+  }
+
+  .market-trend-summary__item {
+    padding-inline: 9px;
   }
 }
 

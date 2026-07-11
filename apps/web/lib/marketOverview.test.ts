@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import test from "node:test";
 import type { AuctionModelPredictionItem, SectorRadarItem, StrongStockScreeningResponse } from "./types";
 const {
@@ -49,6 +49,25 @@ test("market pulse exposes prominent breadth and compact index strip", () => {
   assert.match(source, /market-index-strip/);
 });
 
+test("homepage trend panels expose sector rotation and intraday emotion views", () => {
+  const panelsUrl = new URL("../components/overview/MarketTrendPanels.tsx", import.meta.url);
+  const chartUrl = new URL("../components/overview/OverviewTrendChart.tsx", import.meta.url);
+  const panels = existsSync(panelsUrl) ? readFileSync(panelsUrl, "utf8") : "";
+  const chart = existsSync(chartUrl) ? readFileSync(chartUrl, "utf8") : "";
+  const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(panels, /板块轮动/);
+  assert.match(panels, /盘中情绪走势/);
+  assert.match(panels, /盘中样本不足/);
+  assert.match(panels, /累计 2 个点后绘制/);
+  assert.match(panels, /href="\/market\?view=sectors"/);
+  assert.match(panels, /href="\/sentiment"/);
+  assert.match(chart, /import\("echarts"\)/);
+  assert.match(styles, /\.market-trend-grid/);
+  assert.match(styles, /\.market-trend-chart/);
+  assert.match(styles, /\.market-trend-summary/);
+});
+
 test("homepage only loads market direction data", () => {
   const source = readFileSync(new URL("../app/MarketOverviewWorkbench.tsx", import.meta.url), "utf8");
 
@@ -58,6 +77,13 @@ test("homepage only loads market direction data", () => {
   assert.match(source, /getMarketOverview\(\)/);
   assert.match(source, /getSectorRadar\(12\)/);
   assert.match(source, /getSentimentSummary\(tradeDate, 80, false\)/);
+  assert.match(source, /getSectorReplicaRadar/);
+  assert.match(source, /getMarketEmotionSnapshot/);
+  assert.match(source, /MarketTrendPanels/);
+  assert.match(source, /IntersectionObserver/);
+  assert.match(source, /rootMargin: "240px"/);
+  assert.doesNotMatch(source, /disabled=\{refreshing \|\| trendsRefreshing\}/);
+  assert.doesNotMatch(source, /setTrendsRefreshing/);
   assert.doesNotMatch(source, /<MarketFeed/);
 });
 
@@ -66,6 +92,8 @@ test("homepage loading placeholder matches the focused composition", () => {
 
   assert.ok(source.indexOf("板块资金流") < source.indexOf("市场状态"));
   assert.ok(source.indexOf("市场状态") < source.indexOf("指数快照"));
+  assert.ok(source.indexOf("指数快照") < source.indexOf("板块轮动"));
+  assert.ok(source.indexOf("板块轮动") < source.indexOf("盘中情绪走势"));
   assert.doesNotMatch(source, /决策队列/);
   assert.doesNotMatch(source, /市场动态/);
 });

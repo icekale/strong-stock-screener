@@ -1,5 +1,6 @@
 import type {
   AuctionModelPredictionItem,
+  SectorRadarItem,
   StrongStockScreeningResponse,
   WatchlistRiskItem,
 } from "./types";
@@ -11,6 +12,11 @@ export type PanelState<T> =
   | { kind: "stale"; value: T }
   | { kind: "missing"; value: null }
   | { kind: "error"; value: null };
+
+export type SectorFlowRow = {
+  item: SectorRadarItem;
+  widthPercent: number;
+};
 
 export function selectTop3(items: AuctionModelPredictionItem[]): AuctionModelPredictionItem[] {
   return items
@@ -27,6 +33,24 @@ export function selectScreenCandidates(
 
 export function selectWatchlistRisks(response: StrongStockScreeningResponse | null): WatchlistRiskItem[] {
   return (response?.watchlist_risk_items ?? []).slice(0, 3);
+}
+
+export function buildSectorFlowRows(items: SectorRadarItem[], limit = 4): SectorFlowRow[] {
+  const selected = items.filter((item) => item.net_flow_cny !== null).slice(0, limit);
+  const maximum = Math.max(...selected.map((item) => Math.abs(item.net_flow_cny ?? 0)), 0);
+
+  return selected.map((item) => ({
+    item,
+    widthPercent: maximum === 0 ? 0 : Number(((Math.abs(item.net_flow_cny ?? 0) / maximum) * 100).toFixed(2)),
+  }));
+}
+
+export function marketBreadthPercent(advanceCount: number | null, declineCount: number | null): number {
+  if (advanceCount === null || declineCount === null) {
+    return 0;
+  }
+  const total = advanceCount + declineCount;
+  return total === 0 ? 0 : Number(((advanceCount / total) * 100).toFixed(2));
 }
 
 export function toPanelState<T>(result: PromiseSettledResult<T>, previous: T | null = null): PanelState<T> {

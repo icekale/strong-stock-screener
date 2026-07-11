@@ -1,13 +1,15 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import type { AuctionModelPredictionItem, StrongStockScreeningResponse } from "./types";
+import type { AuctionModelPredictionItem, SectorRadarItem, StrongStockScreeningResponse } from "./types";
 const {
+  buildSectorFlowRows,
   executeLatestOnly,
   getAuctionCacheTradeDate,
   getMarketSession,
   getShanghaiTradeDate,
   isLatestRequestGeneration,
+  marketBreadthPercent,
   nextRequestGeneration,
   selectScreenCandidates,
   selectTop3,
@@ -107,6 +109,37 @@ test("selectWatchlistRisks returns at most three response risk rows", () => {
     selectWatchlistRisks(response).map((item) => item.symbol),
     ["600001.SH", "600002.SH", "600003.SH"],
   );
+});
+
+test("sector flow rows ignore null values, keep four items, and normalize each direction", () => {
+  const rows = buildSectorFlowRows([
+    sectorItem("A", 20),
+    sectorItem("B", 10),
+    sectorItem("C", null),
+    sectorItem("D", 5),
+    sectorItem("E", 2),
+    sectorItem("F", 1),
+  ]);
+
+  assert.deepEqual(
+    rows.map((row) => [row.item.name, row.widthPercent]),
+    [
+      ["A", 100],
+      ["B", 50],
+      ["D", 25],
+      ["E", 10],
+    ],
+  );
+});
+
+test("sector flow rows remain finite when the largest absolute flow is zero", () => {
+  assert.deepEqual(buildSectorFlowRows([sectorItem("A", 0)]), [{ item: sectorItem("A", 0), widthPercent: 0 }]);
+});
+
+test("market breadth percentage excludes unchanged stocks and handles an empty denominator", () => {
+  assert.equal(marketBreadthPercent(3772, 1678), 69.21);
+  assert.equal(marketBreadthPercent(null, 10), 0);
+  assert.equal(marketBreadthPercent(0, 0), 0);
 });
 
 test("toPanelState reports an initial rejected panel as an error", () => {
@@ -256,6 +289,20 @@ function screeningItem(
     data_status: "complete",
     source_trace: [],
     gsgf: null,
+  };
+}
+
+function sectorItem(name: string, netFlowCny: number | null): SectorRadarItem {
+  return {
+    name,
+    source: "test",
+    change_pct: 1,
+    turnover_cny: 100,
+    advance_count: 1,
+    decline_count: 0,
+    leader: `${name} leader`,
+    net_flow_cny: netFlowCny,
+    strength_score: 10,
   };
 }
 

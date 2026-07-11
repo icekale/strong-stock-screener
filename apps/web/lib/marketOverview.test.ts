@@ -33,6 +33,22 @@ test("decision queue keeps a missing Top3 cache recoverable", () => {
   assert.match(workbenchSource, /isAuctionModelTop3CacheMiss/);
 });
 
+test("sector flow preview uses normalized rows and a mobile direction switch", () => {
+  const source = readFileSync(new URL("../components/overview/SectorHeatmapPreview.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /buildSectorFlowRows/);
+  assert.match(source, /aria-pressed/);
+  assert.match(source, /sector-flow-chart/);
+});
+
+test("market pulse exposes prominent breadth and compact index strip", () => {
+  const source = readFileSync(new URL("../components/overview/MarketPulse.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /marketBreadthPercent/);
+  assert.match(source, /market-state__value/);
+  assert.match(source, /market-index-strip/);
+});
+
 test("selectTop3 keeps only selected items in ascending rank order", () => {
   const items = [
     auctionItem("B", "selected", 2),

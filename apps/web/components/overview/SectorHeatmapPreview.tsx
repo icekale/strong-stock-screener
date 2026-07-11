@@ -1,86 +1,142 @@
+"use client";
+
 import Link from "next/link";
+import { useState, type CSSProperties } from "react";
+import { buildSectorFlowRows, type PanelState, type SectorFlowRow } from "../../lib/marketOverview";
+import type { SectorRadarResponse } from "../../lib/types";
 import { DataState } from "../workbench/DataState";
-import type { PanelState } from "../../lib/marketOverview";
-import type { SectorRadarItem, SectorRadarResponse } from "../../lib/types";
 
 type SectorHeatmapPreviewProps = {
   onRefresh: () => void;
   sectorRadar: PanelState<SectorRadarResponse> | null;
 };
 
+type FlowDirection = "inflow" | "outflow";
+
 export function SectorHeatmapPreview({ onRefresh, sectorRadar }: SectorHeatmapPreviewProps) {
   const data = sectorRadar && sectorRadar.kind !== "error" ? sectorRadar.value : null;
+  const [mobileDirection, setMobileDirection] = useState<FlowDirection>("inflow");
+  const inflowRows = buildSectorFlowRows(data?.inflow ?? []);
+  const outflowRows = buildSectorFlowRows(data?.outflow ?? []);
+  const mobileRows = mobileDirection === "inflow" ? inflowRows : outflowRows;
 
   return (
-    <section aria-labelledby="sector-preview-title" className="compact-panel overflow-hidden">
+    <section aria-labelledby="sector-preview-title" className="compact-panel sector-flow-panel overflow-hidden">
       <div className="compact-panel__header">
-        <div>
+        <div className="min-w-0">
           <h2 className="m-0 text-sm font-semibold text-[var(--app-ink)]" id="sector-preview-title">
             板块资金流
           </h2>
-          <p className="m-0 text-xs text-[var(--app-muted)]">{data ? `${data.flow_source} · ${flowStatusLabel(data.capital_flow_status)}` : "资金流雷达"}</p>
+          <p className="m-0 truncate text-xs text-[var(--app-muted)]">
+            {data ? `${data.flow_source} · ${flowStatusLabel(data.capital_flow_status)}` : "资金流雷达"}
+          </p>
         </div>
-        <Link className="text-xs font-medium text-[var(--app-primary)] hover:underline" href="/market?view=sectors">
+        <Link className="shrink-0 text-xs font-medium text-[var(--app-primary)] hover:underline" href="/market?view=sectors">
           查看板块
         </Link>
       </div>
       {!data ? <DataState action={{ onClick: onRefresh }} kind={sectorRadar?.kind === "error" ? "error" : "loading"} subject="板块资金流" /> : null}
       {sectorRadar?.kind === "stale" ? <DataState action={{ onClick: onRefresh }} kind="stale" subject="板块资金流" /> : null}
       {data ? (
-        <div className="grid divide-y divide-[var(--app-border)] lg:grid-cols-2 lg:divide-x lg:divide-y-0">
-          <SectorColumn items={data.inflow} label="净流入" onRefresh={onRefresh} />
-          <SectorColumn items={data.outflow} label="净流出" onRefresh={onRefresh} />
-        </div>
+        <>
+          <div className="sector-flow-chart" aria-label="板块净流入与净流出对比图">
+            <div aria-hidden="true" className="sector-flow-axis" />
+            <div className="sector-flow-chart__labels" aria-hidden="true">
+              <span>净流出</span>
+              <span>净流入</span>
+            </div>
+            {Array.from({ length: Math.max(inflowRows.length, outflowRows.length) }, (_, index) => (
+              <div className="sector-flow-pair" key={`sector-flow-${index}`}>
+                <DesktopFlowCell direction="outflow" row={outflowRows[index]} />
+                <DesktopFlowCell direction="inflow" row={inflowRows[index]} />
+              </div>
+            ))}
+            {inflowRows.length === 0 && outflowRows.length === 0 ? <DataState action={{ onClick: onRefresh }} kind="empty" subject="板块资金流" /> : null}
+          </div>
+
+          <div className="sector-flow-mobile">
+            <div aria-label="资金流方向" className="sector-flow-segment" role="group">
+              <button aria-pressed={mobileDirection === "inflow"} onClick={() => setMobileDirection("inflow")} type="button">
+                净流入
+              </button>
+              <button aria-pressed={mobileDirection === "outflow"} onClick={() => setMobileDirection("outflow")} type="button">
+                净流出
+              </button>
+            </div>
+            {mobileRows.length > 0 ? (
+              <div className="sector-flow-mobile__list">
+                {mobileRows.map((row) => (
+                  <MobileFlowRow direction={mobileDirection} key={`${mobileDirection}-${row.item.name}`} row={row} />
+                ))}
+              </div>
+            ) : (
+              <DataState action={{ onClick: onRefresh }} kind="empty" subject={mobileDirection === "inflow" ? "净流入" : "净流出"} />
+            )}
+          </div>
+        </>
       ) : null}
     </section>
   );
 }
 
-function SectorColumn({ items, label, onRefresh }: { items: SectorRadarItem[]; label: string; onRefresh: () => void }) {
+function DesktopFlowCell({ direction, row }: { direction: FlowDirection; row: SectorFlowRow | undefined }) {
+  if (!row) {
+    return <div className={`sector-flow-cell sector-flow-cell--${direction}`} />;
+  }
+
   return (
-    <div className="min-w-0">
-      <h3 className="border-b border-[var(--app-border)] px-4 py-3 text-sm font-semibold text-[var(--app-ink)]">{label}</h3>
-      {items.length === 0 ? <DataState action={{ onClick: onRefresh }} kind="empty" subject={label} /> : null}
-      <div className="divide-y divide-[var(--app-border)]">
-        {items.slice(0, 4).map((item) => (
-          <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-3 px-4 py-3" key={`${label}-${item.name}`}>
-            <div className="min-w-0">
-              <div className="truncate text-sm font-medium text-[var(--app-ink)]">{item.name}</div>
-              <div className="mt-1 truncate text-xs text-[var(--app-muted)]">领涨：{item.leader ?? "-"}</div>
-            </div>
-            <div className="text-right text-xs tabular-nums text-[var(--app-muted)]">
-              <div className="font-semibold text-[var(--app-ink)]">{formatCny(item.net_flow_cny)}</div>
-              <div className="mt-1">{formatPercent(item.change_pct)} · 强度 {item.strength_score.toFixed(1)}</div>
-            </div>
-          </div>
-        ))}
+    <div
+      aria-label={flowAriaLabel(row)}
+      className={`sector-flow-cell sector-flow-cell--${direction}`}
+      title={flowAriaLabel(row)}
+    >
+      <div
+        className={`sector-flow-bar sector-flow-bar--${direction}`}
+        style={{ "--sector-flow-width": `${row.widthPercent}%` } as CSSProperties}
+      >
+        <span>{row.item.name}</span>
+        <strong>{formatCny(row.item.net_flow_cny)}</strong>
+      </div>
+      <div className="sector-flow-meta">
+        {row.item.leader ?? "-"} · {formatPercent(row.item.change_pct)} · 强度 {row.item.strength_score.toFixed(1)}
       </div>
     </div>
   );
 }
 
+function MobileFlowRow({ direction, row }: { direction: FlowDirection; row: SectorFlowRow }) {
+  return (
+    <div aria-label={flowAriaLabel(row)} className="sector-flow-mobile__row">
+      <div className="sector-flow-mobile__heading">
+        <span>{row.item.name}</span>
+        <strong className={direction === "inflow" ? "market-rise-text" : "market-fall-text"}>{formatCny(row.item.net_flow_cny)}</strong>
+      </div>
+      <div className={`sector-flow-mobile__track sector-flow-mobile__track--${direction}`}>
+        <span style={{ width: `${row.widthPercent}%` }} />
+      </div>
+      <div className="sector-flow-meta">
+        {row.item.leader ?? "-"} · {formatPercent(row.item.change_pct)} · 强度 {row.item.strength_score.toFixed(1)}
+      </div>
+    </div>
+  );
+}
+
+function flowAriaLabel(row: SectorFlowRow) {
+  return `${row.item.name}，净流额 ${formatCny(row.item.net_flow_cny)}，领涨 ${row.item.leader ?? "暂无"}，涨跌幅 ${formatPercent(row.item.change_pct)}，强度 ${row.item.strength_score.toFixed(1)}`;
+}
+
 function flowStatusLabel(value: SectorRadarResponse["capital_flow_status"]) {
-  if (value === "direct") {
-    return "直接口径";
-  }
-  if (value === "estimated") {
-    return "估算口径";
-  }
+  if (value === "direct") return "直接口径";
+  if (value === "estimated") return "估算口径";
   return "不可用";
 }
 
 function formatCny(value: number | null) {
-  if (value === null) {
-    return "-";
-  }
+  if (value === null) return "-";
   const absolute = Math.abs(value);
-  if (absolute >= 100_000_000) {
-    return `${(value / 100_000_000).toFixed(1)}亿`;
-  }
-  if (absolute >= 10_000) {
-    return `${(value / 10_000).toFixed(0)}万`;
-  }
-  return value.toFixed(0);
+  if (absolute >= 100_000_000) return `${value > 0 ? "+" : ""}${(value / 100_000_000).toFixed(1)}亿`;
+  if (absolute >= 10_000) return `${value > 0 ? "+" : ""}${(value / 10_000).toFixed(0)}万`;
+  return `${value > 0 ? "+" : ""}${value.toFixed(0)}`;
 }
 
 function formatPercent(value: number | null) {

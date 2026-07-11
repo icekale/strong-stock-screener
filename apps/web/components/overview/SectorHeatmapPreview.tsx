@@ -93,7 +93,8 @@ function DesktopFlowCell({ direction, row }: { direction: FlowDirection; row: Se
       <div
         className={`sector-flow-bar sector-flow-bar--${direction}`}
         style={{ "--sector-flow-width": `${row.widthPercent}%` } as CSSProperties}
-      >
+      />
+      <div className="sector-flow-bar__label">
         <span>{row.item.name}</span>
         <strong>{formatCny(row.item.net_flow_cny)}</strong>
       </div>

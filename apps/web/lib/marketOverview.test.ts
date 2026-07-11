@@ -39,6 +39,7 @@ test("sector flow preview uses normalized rows and a mobile direction switch", (
   assert.match(source, /buildSectorFlowRows/);
   assert.match(source, /aria-pressed/);
   assert.match(source, /sector-flow-chart/);
+  assert.match(source, /sector-flow-bar__label/);
 });
 
 test("market pulse exposes prominent breadth and compact index strip", () => {
@@ -55,6 +56,17 @@ test("homepage renders market direction before the decision queue without the du
   assert.ok(source.indexOf("<SectorHeatmapPreview") < source.indexOf("<DecisionQueue"));
   assert.ok(source.indexOf("<MarketPulse") < source.indexOf("<DecisionQueue"));
   assert.doesNotMatch(source, /<MarketFeed/);
+});
+
+test("decision queue uses content-height blocks and compact empty states", () => {
+  const source = readFileSync(new URL("../components/overview/DecisionQueue.tsx", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(source, /decision-queue__grid/);
+  assert.match(styles, /\.decision-queue__grid\s*\{[\s\S]*?align-items:\s*start/);
+  assert.match(styles, /\.decision-queue \.ant-empty\s*\{[\s\S]*?margin-block:\s*0/);
+  assert.match(styles, /\.decision-queue \.data-state--empty \.ant-empty-image\s*\{[\s\S]*?display:\s*none/);
+  assert.doesNotMatch(styles, /\.sector-flow-cell--outflow \.sector-flow-bar__label\s*\{[\s\S]*?flex-direction:\s*row-reverse/);
 });
 
 test("selectTop3 keeps only selected items in ascending rank order", () => {

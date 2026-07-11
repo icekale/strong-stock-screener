@@ -29,7 +29,7 @@ export function DecisionQueue({ auction, onRefresh, screening }: DecisionQueuePr
           <p className="m-0 text-xs text-[var(--app-muted)]">竞价、筛选和自选风险</p>
         </div>
       </div>
-      <div className="grid divide-y divide-[var(--app-border)] xl:grid-cols-3 xl:divide-x xl:divide-y-0">
+      <div className="decision-queue__grid grid divide-y divide-[var(--app-border)] xl:grid-cols-3 xl:divide-x xl:divide-y-0">
         <AuctionBlock onRefresh={onRefresh} state={auction} />
         <ScreeningBlock onRefresh={onRefresh} state={screening} />
         <WatchlistRiskBlock onRefresh={onRefresh} state={screening} />

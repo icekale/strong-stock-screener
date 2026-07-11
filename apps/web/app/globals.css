@@ -375,6 +375,7 @@ body {
 }
 
 .sector-flow-cell {
+  position: relative;
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -386,28 +387,10 @@ body {
 }
 
 .sector-flow-bar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
   width: var(--sector-flow-width);
   min-width: 3px;
   height: 24px;
-  padding: 0 7px;
-  overflow: hidden;
   border-radius: 3px;
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.sector-flow-bar span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.sector-flow-bar strong {
-  flex: 0 0 auto;
-  font-variant-numeric: tabular-nums;
 }
 
 .sector-flow-bar--inflow {
@@ -420,6 +403,46 @@ body {
   background: var(--market-green-bg);
   color: var(--market-fall);
   border-radius: 3px 0 0 3px;
+}
+
+.sector-flow-bar__label {
+  position: absolute;
+  top: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 0 7px;
+  color: var(--app-ink);
+  font-size: 11px;
+  line-height: 24px;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+
+.sector-flow-cell--outflow .sector-flow-bar__label {
+  text-align: right;
+}
+
+.sector-flow-bar__label span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sector-flow-bar__label strong {
+  flex: 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.sector-flow-cell--inflow .sector-flow-bar__label strong {
+  color: var(--market-red-text);
+}
+
+.sector-flow-cell--outflow .sector-flow-bar__label strong {
+  color: var(--market-fall);
 }
 
 .sector-flow-meta {
@@ -561,13 +584,24 @@ body {
   padding: 14px 10px;
 }
 
+.decision-queue__grid {
+  align-items: start;
+}
+
+.decision-queue__block {
+  align-self: start;
+}
+
+.decision-queue .ant-empty {
+  margin-block: 0;
+}
+
 .decision-queue .data-state--loading {
   padding-block: 10px;
 }
 
 .decision-queue .data-state--empty .ant-empty-image {
-  height: 32px;
-  margin-bottom: 6px;
+  display: none;
 }
 
 .decision-queue .data-state__description {

@@ -371,77 +371,76 @@ body {
 }
 
 .sector-flow-pair {
-  min-height: 58px;
+  min-height: 62px;
 }
 
 .sector-flow-cell {
-  position: relative;
   display: flex;
   min-width: 0;
   flex-direction: column;
   justify-content: center;
 }
 
-.sector-flow-cell--outflow {
-  align-items: flex-end;
-}
-
-.sector-flow-bar {
-  width: var(--sector-flow-width);
-  height: 24px;
-  border-radius: 3px;
-}
-
-.sector-flow-bar--inflow {
-  background: var(--market-red-bg);
-  color: var(--market-red-text);
-  border-radius: 0 3px 3px 0;
-}
-
-.sector-flow-bar--outflow {
-  background: var(--market-green-bg);
-  color: var(--market-fall);
-  border-radius: 3px 0 0 3px;
-}
-
-.sector-flow-bar__label {
-  position: absolute;
-  top: 50%;
+.sector-flow-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
   width: 100%;
   min-width: 0;
-  padding: 0 7px;
   color: var(--app-ink);
   font-size: 11px;
-  line-height: 24px;
-  transform: translateY(-50%);
-  pointer-events: none;
+  line-height: 16px;
 }
 
-.sector-flow-cell--outflow .sector-flow-bar__label {
-  text-align: right;
-}
-
-.sector-flow-bar__label span {
+.sector-flow-heading span {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.sector-flow-bar__label strong {
+.sector-flow-heading strong {
   flex: 0 0 auto;
   font-variant-numeric: tabular-nums;
 }
 
-.sector-flow-cell--inflow .sector-flow-bar__label strong {
+.sector-flow-cell--inflow .sector-flow-heading strong {
   color: var(--market-red-text);
 }
 
-.sector-flow-cell--outflow .sector-flow-bar__label strong {
+.sector-flow-cell--outflow .sector-flow-heading strong {
   color: var(--market-fall);
+}
+
+.sector-flow-track {
+  display: flex;
+  width: 100%;
+  height: 10px;
+  margin-top: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--app-raised);
+}
+
+.sector-flow-cell--outflow .sector-flow-track {
+  justify-content: flex-end;
+}
+
+.sector-flow-bar {
+  width: var(--sector-flow-width);
+  height: 100%;
+}
+
+.sector-flow-bar--inflow {
+  background: var(--market-red-bg);
+  color: var(--market-red-text);
+  border-radius: 0 2px 2px 0;
+}
+
+.sector-flow-bar--outflow {
+  background: var(--market-green-bg);
+  color: var(--market-fall);
+  border-radius: 2px 0 0 2px;
 }
 
 .sector-flow-meta {

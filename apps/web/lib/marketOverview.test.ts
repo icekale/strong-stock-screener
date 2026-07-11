@@ -25,12 +25,9 @@ test("decision queue avoids deprecated Ant Design Tag props", () => {
 
 test("decision queue keeps a missing Top3 cache recoverable", () => {
   const source = readFileSync(new URL("../components/overview/DecisionQueue.tsx", import.meta.url), "utf8");
-  const workbenchSource = readFileSync(new URL("../app/MarketOverviewWorkbench.tsx", import.meta.url), "utf8");
 
   assert.match(source, /state\?\.kind === "missing"/);
   assert.match(source, /href="\/auction"/);
-  assert.match(workbenchSource, /getAuctionCacheTradeDate\(\)/);
-  assert.match(workbenchSource, /isAuctionModelTop3CacheMiss/);
 });
 
 test("sector flow preview uses normalized rows and a mobile direction switch", () => {
@@ -39,7 +36,8 @@ test("sector flow preview uses normalized rows and a mobile direction switch", (
   assert.match(source, /buildSectorFlowRows/);
   assert.match(source, /aria-pressed/);
   assert.match(source, /sector-flow-chart/);
-  assert.match(source, /sector-flow-bar__label/);
+  assert.match(source, /sector-flow-heading/);
+  assert.match(source, /sector-flow-track/);
 });
 
 test("market pulse exposes prominent breadth and compact index strip", () => {
@@ -51,21 +49,24 @@ test("market pulse exposes prominent breadth and compact index strip", () => {
   assert.match(source, /market-index-strip/);
 });
 
-test("homepage renders market direction before the decision queue without the duplicate feed", () => {
+test("homepage only loads market direction data", () => {
   const source = readFileSync(new URL("../app/MarketOverviewWorkbench.tsx", import.meta.url), "utf8");
 
-  assert.ok(source.indexOf("<SectorHeatmapPreview") < source.indexOf("<DecisionQueue"));
-  assert.ok(source.indexOf("<MarketPulse") < source.indexOf("<DecisionQueue"));
-  assert.ok(source.indexOf("<MarketIndexStrip") < source.indexOf("<DecisionQueue"));
+  assert.doesNotMatch(source, /DecisionQueue/);
+  assert.doesNotMatch(source, /getLatestScreenRun/);
+  assert.doesNotMatch(source, /getAuctionModelTop3/);
+  assert.match(source, /getMarketOverview\(\)/);
+  assert.match(source, /getSectorRadar\(12\)/);
+  assert.match(source, /getSentimentSummary\(tradeDate, 80, false\)/);
   assert.doesNotMatch(source, /<MarketFeed/);
 });
 
-test("homepage loading placeholder preserves the redesigned reading order", () => {
+test("homepage loading placeholder matches the focused composition", () => {
   const source = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
 
   assert.ok(source.indexOf("板块资金流") < source.indexOf("市场状态"));
   assert.ok(source.indexOf("市场状态") < source.indexOf("指数快照"));
-  assert.ok(source.indexOf("指数快照") < source.indexOf("决策队列"));
+  assert.doesNotMatch(source, /决策队列/);
   assert.doesNotMatch(source, /市场动态/);
 });
 
@@ -77,10 +78,20 @@ test("decision queue uses content-height blocks and compact empty states", () =>
   assert.match(styles, /\.decision-queue__grid\s*\{[\s\S]*?align-items:\s*start/);
   assert.match(styles, /\.decision-queue \.ant-empty\s*\{[\s\S]*?margin-block:\s*0/);
   assert.match(styles, /\.decision-queue \.data-state--empty \.ant-empty-image\s*\{[\s\S]*?display:\s*none/);
-  assert.doesNotMatch(styles, /\.sector-flow-cell--outflow \.sector-flow-bar__label\s*\{[\s\S]*?flex-direction:\s*row-reverse/);
   assert.match(styles, /\.market-index-strip\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4/);
   assert.match(styles, /\.sector-flow-segment button\s*\{[\s\S]*?min-height:\s*44px/);
   assert.doesNotMatch(styles, /\.sector-flow-bar\s*\{[\s\S]*?min-width:\s*3px/);
+});
+
+test("desktop sector flow keeps labels and bars in normal flow", () => {
+  const source = readFileSync(new URL("../components/overview/SectorHeatmapPreview.tsx", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(source, /sector-flow-heading/);
+  assert.match(source, /sector-flow-track/);
+  assert.doesNotMatch(source, /sector-flow-bar__label/);
+  assert.doesNotMatch(styles, /\.sector-flow-heading\s*\{[\s\S]*?position:\s*absolute/);
+  assert.match(styles, /\.sector-flow-track\s*\{[\s\S]*?display:\s*flex/);
 });
 
 test("sector flow accessible labels state the direction explicitly", () => {

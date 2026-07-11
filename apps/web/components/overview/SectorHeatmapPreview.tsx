@@ -90,13 +90,15 @@ function DesktopFlowCell({ direction, row }: { direction: FlowDirection; row: Se
       className={`sector-flow-cell sector-flow-cell--${direction}`}
       title={flowAriaLabel(direction, row)}
     >
-      <div
-        className={`sector-flow-bar sector-flow-bar--${direction}`}
-        style={{ "--sector-flow-width": `${row.widthPercent}%` } as CSSProperties}
-      />
-      <div className="sector-flow-bar__label">
+      <div className="sector-flow-heading">
         <span>{row.item.name}</span>
         <strong>{formatCny(row.item.net_flow_cny)}</strong>
+      </div>
+      <div className="sector-flow-track">
+        <div
+          className={`sector-flow-bar sector-flow-bar--${direction}`}
+          style={{ "--sector-flow-width": `${row.widthPercent}%` } as CSSProperties}
+        />
       </div>
       <div className="sector-flow-meta">
         {row.item.leader ?? "-"} · {formatPercent(row.item.change_pct)} · 强度 {row.item.strength_score.toFixed(1)}

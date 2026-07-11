@@ -23,7 +23,6 @@ function MarketOverviewPlaceholder() {
           <PlaceholderPanel rows={5} title="市场状态" />
         </div>
         <PlaceholderPanel rows={1} title="指数快照" />
-        <PlaceholderPanel rows={4} title="决策队列" />
       </div>
     </PageFrame>
   );

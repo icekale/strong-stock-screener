@@ -9,6 +9,7 @@ export type MarketSession = "盘前竞价" | "盘中" | "收盘复盘" | "休市
 export type PanelState<T> =
   | { kind: "ready"; value: T }
   | { kind: "stale"; value: T }
+  | { kind: "missing"; value: null }
   | { kind: "error"; value: null };
 
 export function selectTop3(items: AuctionModelPredictionItem[]): AuctionModelPredictionItem[] {
@@ -78,6 +79,22 @@ export function getShanghaiTradeDate(now = new Date()): string {
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
 
   return `${values.year}-${values.month}-${values.day}`;
+}
+
+export function getAuctionCacheTradeDate(now = new Date()): string {
+  const tradeDate = getShanghaiTradeDate(now);
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Shanghai",
+    weekday: "short",
+  }).format(now);
+
+  if (weekday !== "Sat" && weekday !== "Sun") {
+    return tradeDate;
+  }
+
+  const date = new Date(`${tradeDate}T00:00:00.000Z`);
+  date.setUTCDate(date.getUTCDate() - (weekday === "Sat" ? 1 : 2));
+  return date.toISOString().slice(0, 10);
 }
 
 export function getMarketSession(now = new Date()): MarketSession {

@@ -75,12 +75,31 @@ class FakeThsClient:
 
 
 class FakeMarketOverviewHttpClient:
-    def __init__(self, limit_down_pool_error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        limit_down_pool_error: Exception | None = None,
+        limit_up_pool_error: Exception | None = None,
+    ) -> None:
         self.requests: list[dict[str, object]] = []
         self.limit_down_pool_error = limit_down_pool_error
+        self.limit_up_pool_error = limit_up_pool_error
 
     def get(self, url: str, **kwargs: object) -> FakeResponse:
         self.requests.append({"url": url, **kwargs})
+        if "getTopicZTPool" in url:
+            if self.limit_up_pool_error is not None:
+                raise self.limit_up_pool_error
+            return FakeResponse(
+                {
+                    "data": {
+                        "pool": [
+                            {"c": "300001", "n": "涨停一号", "zdp": 20.0},
+                            {"c": "600002", "n": "涨停二号", "zdp": 10.0},
+                            {"c": "002003", "n": "涨停三号", "zdp": 9.98},
+                        ],
+                    }
+                }
+            )
         if "getTopicDTPool" in url:
             if self.limit_down_pool_error is not None:
                 raise self.limit_down_pool_error
@@ -224,6 +243,13 @@ class FailingIndexAmountHistoryHttpClient(FakeMarketOverviewHttpClient):
     def get(self, url: str, **kwargs: object) -> FakeResponse:
         if "stock/kline/get" in url:
             raise RuntimeError("index history down")
+        return super().get(url, **kwargs)
+
+
+class FailingIndexSnapshotHttpClient(FakeMarketOverviewHttpClient):
+    def get(self, url: str, **kwargs: object) -> FakeResponse:
+        if "ulist.np/get" in url:
+            raise RuntimeError("index snapshot down")
         return super().get(url, **kwargs)
 
 
@@ -524,6 +550,50 @@ def test_market_overview_falls_back_to_tickflow_realtime_turnover() -> None:
     assert overview.source_status[0].status == "failed"
     assert overview.source_status[1].source == "TickFlow 实时指数"
     assert overview.source_status[1].status == "success"
+
+
+def test_market_overview_uses_full_a_tickflow_breadth_and_limit_pools() -> None:
+    quote_provider = FakeTickFlowRankingQuoteProvider()
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FakeMarketOverviewHttpClient(),
+        realtime_quote_provider=quote_provider,
+        ifind_index_provider=FakeIfindIndexProvider(error=RuntimeError("ifind down")),
+    )
+
+    overview = provider.get_overview()
+
+    assert quote_provider.universe_calls == ["CN_Equity_A"]
+    assert overview.advance_decline.advance_count == 3
+    assert overview.advance_decline.decline_count == 1
+    assert overview.advance_decline.unchanged_count == 0
+    assert overview.advance_decline.limit_up_count == 3
+    assert overview.advance_decline.limit_down_count == 2
+    assert any(
+        status.source == "TickFlow 全A市场广度" and status.status == "success"
+        for status in overview.source_status
+    )
+    assert any(
+        status.source == "东方财富涨停池" and status.status == "success"
+        for status in overview.source_status
+    )
+
+
+def test_market_overview_falls_back_to_full_a_eastmoney_breadth() -> None:
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FailingIndexSnapshotHttpClient(),
+        realtime_quote_provider=FakeTickFlowRankingQuoteProvider(universe_error=RuntimeError("tickflow down")),
+        ifind_index_provider=FakeIfindIndexProvider(error=RuntimeError("ifind down")),
+    )
+
+    overview = provider.get_overview()
+
+    assert overview.advance_decline.advance_count == 5
+    assert overview.advance_decline.decline_count == 5
+    assert overview.advance_decline.unchanged_count == 0
+    assert any(
+        status.source == "东方财富全A市场广度" and status.status == "success"
+        for status in overview.source_status
+    )
 
 
 def test_market_overview_uses_cached_turnover_when_index_history_fails(tmp_path: Path) -> None:

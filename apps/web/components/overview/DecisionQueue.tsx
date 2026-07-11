@@ -40,11 +40,20 @@ export function DecisionQueue({ auction, onRefresh, screening }: DecisionQueuePr
 
 function AuctionBlock({ onRefresh, state }: { onRefresh: () => void; state: PanelState<AuctionModelTop3Response> | null }) {
   const data = state && state.kind !== "error" ? state.value : null;
+  const isCacheMissing = state?.kind === "missing";
 
   return (
     <article className="min-w-0 p-4">
       <BlockTitle title="竞价 Top3" />
-      {!data ? <DataState action={{ onClick: onRefresh }} kind={state?.kind === "error" ? "error" : "loading"} subject="竞价模型" /> : null}
+      {!data && !isCacheMissing ? <DataState action={{ onClick: onRefresh }} kind={state?.kind === "error" ? "error" : "loading"} subject="竞价模型" /> : null}
+      {isCacheMissing ? (
+        <div className="rounded-md border border-[var(--app-border)] px-3 py-3 text-sm text-[var(--app-muted)]">
+          <p className="m-0">暂无可用的竞价 Top3 缓存</p>
+          <Link className="mt-2 inline-block font-medium text-[var(--app-primary)] hover:underline" href="/auction">
+            前往竞价雷达
+          </Link>
+        </div>
+      ) : null}
       {state?.kind === "stale" ? <DataState action={{ onClick: onRefresh }} kind="stale" subject="竞价模型" /> : null}
       {data ? (
         <div className="space-y-2">

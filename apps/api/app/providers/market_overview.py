@@ -185,6 +185,68 @@ class EastmoneyMarketOverviewProvider:
                 )
             )
 
+        tickflow_breadth: dict[str, int] | None = None
+        if self.realtime_quote_provider is None:
+            source_status.append(
+                StrongStockSourceStatus(
+                    source="TickFlow 全A市场广度",
+                    status="disabled",
+                    detail="未配置 TickFlow 实时行情源，保留指数口径涨跌家数",
+                )
+            )
+        else:
+            try:
+                tickflow_breadth = self._fetch_tickflow_a_share_breadth()
+                advance_decline.advance_count = tickflow_breadth["advance_count"]
+                advance_decline.decline_count = tickflow_breadth["decline_count"]
+                advance_decline.unchanged_count = tickflow_breadth["unchanged_count"]
+                source_status.append(
+                    StrongStockSourceStatus(
+                        source="TickFlow 全A市场广度",
+                        status="success",
+                        detail=(
+                            f"CN_Equity_A 返回 {tickflow_breadth['stock_count']} 只股票，"
+                            f"上涨 {tickflow_breadth['advance_count']} / "
+                            f"下跌 {tickflow_breadth['decline_count']} / "
+                            f"平盘 {tickflow_breadth['unchanged_count']}"
+                        ),
+                    )
+                )
+            except Exception as exc:
+                source_status.append(
+                    StrongStockSourceStatus(
+                        source="TickFlow 全A市场广度",
+                        status="failed",
+                        detail=f"全A实时涨跌统计失败: {exc.__class__.__name__}; 检查备用全市场口径",
+                    )
+                )
+                if not _has_market_breadth(advance_decline):
+                    try:
+                        eastmoney_breadth = self._fetch_eastmoney_a_share_breadth()
+                        advance_decline.advance_count = eastmoney_breadth["advance_count"]
+                        advance_decline.decline_count = eastmoney_breadth["decline_count"]
+                        advance_decline.unchanged_count = eastmoney_breadth["unchanged_count"]
+                        source_status.append(
+                            StrongStockSourceStatus(
+                                source="东方财富全A市场广度",
+                                status="success",
+                                detail=(
+                                    f"全A实时列表返回 {eastmoney_breadth['stock_count']} 只股票，"
+                                    f"上涨 {eastmoney_breadth['advance_count']} / "
+                                    f"下跌 {eastmoney_breadth['decline_count']} / "
+                                    f"平盘 {eastmoney_breadth['unchanged_count']}"
+                                ),
+                            )
+                        )
+                    except Exception as fallback_exc:
+                        source_status.append(
+                            StrongStockSourceStatus(
+                                source="东方财富全A市场广度",
+                                status="failed",
+                                detail=f"全A实时涨跌统计失败: {fallback_exc.__class__.__name__}; 保留指数口径",
+                            )
+                        )
+
         try:
             if not indices:
                 try:
@@ -279,6 +341,46 @@ class EastmoneyMarketOverviewProvider:
             )
 
         try:
+            limit_up_count = self._fetch_direct_limit_up_count(eastmoney_trade_date)
+            advance_decline.limit_up_count = limit_up_count
+            source_status.append(
+                StrongStockSourceStatus(
+                    source="东方财富涨停池",
+                    status="success",
+                    detail=f"直接涨停池返回，涨停 {limit_up_count} 只",
+                )
+            )
+        except Exception as exc:
+            source_status.append(
+                StrongStockSourceStatus(
+                    source="东方财富涨停池",
+                    status="failed",
+                    detail=f"直接涨停池获取失败: {exc.__class__.__name__}; fallback 到全A实时涨跌幅估算",
+                )
+            )
+            try:
+                if tickflow_breadth is not None:
+                    limit_up_count = tickflow_breadth["limit_up_count"]
+                    source = "TickFlow 全A涨停估算"
+                    detail = f"基于 {tickflow_breadth['stock_count']} 只全A实时行情按交易所规则估算，涨停 {limit_up_count} 只"
+                else:
+                    limit_up_count = self._fetch_limit_up_count_from_realtime_rows()
+                    source = "东方财富全A涨停估算"
+                    detail = f"基于全A实时涨跌幅按交易所规则估算，涨停 {limit_up_count} 只"
+                advance_decline.limit_up_count = limit_up_count
+                source_status.append(
+                    StrongStockSourceStatus(source=source, status="success", detail=detail)
+                )
+            except Exception as fallback_exc:
+                source_status.append(
+                    StrongStockSourceStatus(
+                        source="全A涨停估算",
+                        status="failed",
+                        detail=f"涨停家数估算失败: {fallback_exc.__class__.__name__}",
+                    )
+                )
+
+        try:
             limit_down_count = self._fetch_direct_limit_down_count(eastmoney_trade_date)
             advance_decline.limit_down_count = limit_down_count
             source_status.append(
@@ -297,19 +399,26 @@ class EastmoneyMarketOverviewProvider:
                 )
             )
             try:
-                limit_down_count = self._fetch_limit_down_count_from_realtime_rows()
+                if tickflow_breadth is not None:
+                    limit_down_count = tickflow_breadth["limit_down_count"]
+                    source = "TickFlow 全A跌停估算"
+                    detail = f"基于 {tickflow_breadth['stock_count']} 只全A实时行情按交易所规则估算，跌停 {limit_down_count} 只"
+                else:
+                    limit_down_count = self._fetch_limit_down_count_from_realtime_rows()
+                    source = "东方财富全A跌停估算"
+                    detail = f"基于全A实时涨跌幅按交易所规则估算，跌停 {limit_down_count} 只"
                 advance_decline.limit_down_count = limit_down_count
                 source_status.append(
                     StrongStockSourceStatus(
-                        source="东方财富全A跌停估算",
+                        source=source,
                         status="success",
-                        detail=f"基于全A实时涨跌幅按交易所规则估算，跌停 {limit_down_count} 只",
+                        detail=detail,
                     )
                 )
             except Exception as fallback_exc:
                 source_status.append(
                     StrongStockSourceStatus(
-                        source="东方财富全A跌停估算",
+                        source="全A跌停估算",
                         status="failed",
                         detail=f"跌停家数估算失败: {fallback_exc.__class__.__name__}",
                     )
@@ -779,6 +888,54 @@ class EastmoneyMarketOverviewProvider:
         response.raise_for_status()
         rows = _extract_pool_rows(response.json())
         return len(rows)
+
+    def _fetch_direct_limit_up_count(self, date: str) -> int:
+        response = self.http_client.get(
+            "https://push2ex.eastmoney.com/getTopicZTPool",
+            params={
+                "ut": "7eea3edcaed734bea9cbfc24409ed989",
+                "dpt": "wz.ztzt",
+                "Pageindex": "0",
+                "pagesize": "10000",
+                "sort": "fund:asc",
+                "date": date,
+            },
+            headers={"User-Agent": USER_AGENT},
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        rows = _extract_pool_rows(response.json())
+        return len(rows)
+
+    def _fetch_tickflow_a_share_breadth(self) -> dict[str, int]:
+        if not hasattr(self.realtime_quote_provider, "get_quotes_by_universe"):
+            raise ValueError("TickFlow provider does not support all-A universe quotes")
+        quotes = self.realtime_quote_provider.get_quotes_by_universe(TICKFLOW_A_SHARE_UNIVERSE)
+        values = [
+            (
+                _number(getattr(quote, "pct_change", None)),
+                str(getattr(quote, "symbol", "") or "").strip().upper().split(".", 1)[0],
+                str(getattr(quote, "name", "") or "").strip().upper(),
+            )
+            for quote in quotes
+        ]
+        return _summarize_a_share_breadth(values, source="TickFlow")
+
+    def _fetch_eastmoney_a_share_breadth(self) -> dict[str, int]:
+        rows = self._fetch_a_share_realtime_rows()
+        values = [
+            (
+                _number(row.get("f3")),
+                str(row.get("f12") or "").strip(),
+                str(row.get("f14") or "").strip().upper(),
+            )
+            for row in rows
+        ]
+        return _summarize_a_share_breadth(values, source="东方财富")
+
+    def _fetch_limit_up_count_from_realtime_rows(self) -> int:
+        rows = self._fetch_a_share_realtime_rows()
+        return sum(1 for row in rows if _is_limit_up_row(row))
 
     def _fetch_limit_down_count_from_realtime_rows(self) -> int:
         rows = self._fetch_a_share_realtime_rows()
@@ -1334,12 +1491,58 @@ def _tickflow_rankings_status_detail(
 
 def _is_limit_down_row(row: dict[str, Any]) -> bool:
     pct_change = _number(row.get("f3"))
-    if pct_change is None:
-        return False
     code = str(row.get("f12") or "").strip()
     name = str(row.get("f14") or "").strip().upper()
+    return _is_limit_down_pct(pct_change, code, name)
+
+
+def _is_limit_up_row(row: dict[str, Any]) -> bool:
+    pct_change = _number(row.get("f3"))
+    code = str(row.get("f12") or "").strip()
+    name = str(row.get("f14") or "").strip().upper()
+    return _is_limit_up_pct(pct_change, code, name)
+
+
+def _summarize_a_share_breadth(
+    values: list[tuple[float | None, str, str]],
+    *,
+    source: str,
+) -> dict[str, int]:
+    valid_values = [(pct_change, code, name) for pct_change, code, name in values if pct_change is not None]
+    if not valid_values:
+        raise ValueError(f"empty {source} all-A percent changes")
+    return {
+        "stock_count": len(valid_values),
+        "advance_count": sum(1 for pct_change, _, _ in valid_values if pct_change > 0),
+        "decline_count": sum(1 for pct_change, _, _ in valid_values if pct_change < 0),
+        "unchanged_count": sum(1 for pct_change, _, _ in valid_values if pct_change == 0),
+        "limit_up_count": sum(
+            1 for pct_change, code, name in valid_values if _is_limit_up_pct(pct_change, code, name)
+        ),
+        "limit_down_count": sum(
+            1 for pct_change, code, name in valid_values if _is_limit_down_pct(pct_change, code, name)
+        ),
+    }
+
+
+def _has_market_breadth(summary: MarketAdvanceDeclineSummary) -> bool:
+    if summary.advance_count is None or summary.decline_count is None:
+        return False
+    return summary.advance_count + summary.decline_count + (summary.unchanged_count or 0) > 0
+
+
+def _is_limit_down_pct(pct_change: float | None, code: str, name: str) -> bool:
+    if pct_change is None:
+        return False
     threshold = _limit_down_threshold_pct(code, name)
     return pct_change <= threshold + 0.05
+
+
+def _is_limit_up_pct(pct_change: float | None, code: str, name: str) -> bool:
+    if pct_change is None:
+        return False
+    threshold = _limit_up_threshold_pct(code, name)
+    return pct_change >= threshold - 0.05
 
 
 def _limit_down_threshold_pct(code: str, name: str) -> float:
@@ -1350,6 +1553,16 @@ def _limit_down_threshold_pct(code: str, name: str) -> float:
     if code.startswith(("8", "4", "920")):
         return -30.0
     return -10.0
+
+
+def _limit_up_threshold_pct(code: str, name: str) -> float:
+    if "ST" in name:
+        return 5.0
+    if code.startswith(("300", "301", "688")):
+        return 20.0
+    if code.startswith(("8", "4", "920")):
+        return 30.0
+    return 10.0
 
 
 def _parse_kline_amount(value: str) -> dict[str, Any]:

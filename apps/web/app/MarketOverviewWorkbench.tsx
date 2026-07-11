@@ -14,9 +14,11 @@ import {
   getMarketOverview,
   getSectorRadar,
   getSentimentSummary,
+  isAuctionModelTop3CacheMiss,
 } from "../lib/api";
 import {
   executeLatestOnly,
+  getAuctionCacheTradeDate,
   getMarketSession,
   getShanghaiTradeDate,
   nextRequestGeneration,
@@ -45,6 +47,7 @@ export function MarketOverviewWorkbench() {
     refreshGeneration.current = generation;
     setRefreshing(true);
     const tradeDate = getShanghaiTradeDate();
+    const auctionTradeDate = getAuctionCacheTradeDate();
 
     return executeLatestOnly({
       generation,
@@ -53,14 +56,14 @@ export function MarketOverviewWorkbench() {
         Promise.allSettled([
           getLatestScreenRun(),
           getMarketOverview(),
-          getAuctionModelTop3(tradeDate, { cacheOnly: true }),
+          getAuctionModelTop3(auctionTradeDate, { cacheOnly: true }),
           getSectorRadar(12),
           getSentimentSummary(tradeDate, 80, false),
         ]),
       apply: ([screeningResult, marketResult, auctionResult, sectorRadarResult, sentimentResult]) => {
         setScreening((previous) => toPanelState(screeningResult, panelValue(previous)));
         setMarket((previous) => toPanelState(marketResult, panelValue(previous)));
-        setAuction((previous) => toPanelState(auctionResult, panelValue(previous)));
+        setAuction((previous) => toAuctionPanelState(auctionResult, panelValue(previous)));
         setSectorRadar((previous) => toPanelState(sectorRadarResult, panelValue(previous)));
         setSentiment((previous) => toPanelState(sentimentResult, panelValue(previous)));
       },
@@ -99,5 +102,15 @@ export function MarketOverviewWorkbench() {
 }
 
 function panelValue<T>(state: PanelState<T> | null): T | null {
-  return state && state.kind !== "error" ? state.value : null;
+  return state?.kind === "ready" || state?.kind === "stale" ? state.value : null;
+}
+
+function toAuctionPanelState(
+  result: PromiseSettledResult<AuctionModelTop3Response>,
+  previous: AuctionModelTop3Response | null,
+): PanelState<AuctionModelTop3Response> {
+  if (result.status === "rejected" && previous === null && isAuctionModelTop3CacheMiss(result.reason)) {
+    return { kind: "missing", value: null };
+  }
+  return toPanelState(result, previous);
 }

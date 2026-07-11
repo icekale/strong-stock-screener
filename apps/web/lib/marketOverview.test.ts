@@ -4,6 +4,7 @@ import test from "node:test";
 import type { AuctionModelPredictionItem, StrongStockScreeningResponse } from "./types";
 const {
   executeLatestOnly,
+  getAuctionCacheTradeDate,
   getMarketSession,
   getShanghaiTradeDate,
   isLatestRequestGeneration,
@@ -18,6 +19,16 @@ test("decision queue avoids deprecated Ant Design Tag props", () => {
   const source = readFileSync(new URL("../components/overview/DecisionQueue.tsx", import.meta.url), "utf8");
 
   assert.doesNotMatch(source, /bordered=\{false\}/);
+});
+
+test("decision queue keeps a missing Top3 cache recoverable", () => {
+  const source = readFileSync(new URL("../components/overview/DecisionQueue.tsx", import.meta.url), "utf8");
+  const workbenchSource = readFileSync(new URL("../app/MarketOverviewWorkbench.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /state\?\.kind === "missing"/);
+  assert.match(source, /href="\/auction"/);
+  assert.match(workbenchSource, /getAuctionCacheTradeDate\(\)/);
+  assert.match(workbenchSource, /isAuctionModelTop3CacheMiss/);
 });
 
 test("selectTop3 keeps only selected items in ascending rank order", () => {
@@ -174,6 +185,12 @@ test("latest-only execution applies and finishes only the newest settled batch",
 test("getShanghaiTradeDate uses the Shanghai calendar date", () => {
   assert.equal(getShanghaiTradeDate(new Date("2026-07-09T16:30:00.000Z")), "2026-07-10");
   assert.equal(getShanghaiTradeDate(new Date("2026-07-10T16:30:00.000Z")), "2026-07-11");
+});
+
+test("getAuctionCacheTradeDate uses Friday during the weekend", () => {
+  assert.equal(getAuctionCacheTradeDate(new Date("2026-07-10T16:30:00.000Z")), "2026-07-10");
+  assert.equal(getAuctionCacheTradeDate(new Date("2026-07-11T16:30:00.000Z")), "2026-07-10");
+  assert.equal(getAuctionCacheTradeDate(new Date("2026-07-12T16:30:00.000Z")), "2026-07-13");
 });
 
 test("getMarketSession labels Shanghai auction, trading, lunch, and close", () => {

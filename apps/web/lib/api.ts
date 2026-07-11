@@ -78,6 +78,17 @@ function defaultApiBaseUrl(): string {
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL ?? defaultApiBaseUrl();
 
+export class AuctionModelTop3CacheMissError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuctionModelTop3CacheMissError";
+  }
+}
+
+export function isAuctionModelTop3CacheMiss(error: unknown): error is AuctionModelTop3CacheMissError {
+  return error instanceof AuctionModelTop3CacheMissError;
+}
+
 export async function getDataSourceStatus(): Promise<DataSourceStatusResponse> {
   const response = await fetch(`${API_BASE_URL}/api/data-sources/status`);
   if (!response.ok) {
@@ -221,7 +232,11 @@ export async function getAuctionModelTop3(
   }
   const response = await fetch(`${API_BASE_URL}/api/auction/model/top3?${params.toString()}`);
   if (!response.ok) {
-    throw new Error(`读取竞价模型Top3失败：${response.status} ${await response.text()}`);
+    const detail = await response.text();
+    if (options.cacheOnly && response.status === 404) {
+      throw new AuctionModelTop3CacheMissError(detail);
+    }
+    throw new Error(`读取竞价模型Top3失败：${response.status} ${detail}`);
   }
   return response.json() as Promise<AuctionModelTop3Response>;
 }

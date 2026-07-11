@@ -55,7 +55,7 @@ const StockPoolTable = dynamic(
 function SentimentPanelPlaceholder({ title }: { title: string }) {
   return (
     <section className="workbench-panel rounded-xl border p-4">
-      <div className="mb-3 text-sm font-black text-[#11100e]">{title}</div>
+      <div className="mb-3 text-sm font-black text-[var(--app-ink)]">{title}</div>
       <Skeleton active paragraph={{ rows: 4 }} />
     </section>
   );
@@ -334,8 +334,8 @@ export function SentimentWorkspace() {
             status={monitorStatus}
           />
           <section className="border-[var(--app-border)] bg-[var(--app-surface)] rounded-xl border p-4">
-            <div className="text-sm font-black text-[#11100e]">规则校准</div>
-            <div className="mt-1 text-xs text-[#7b756d]">
+            <div className="text-sm font-black text-[var(--app-ink)]">规则校准</div>
+            <div className="mt-1 text-xs text-[var(--app-muted)]">
               每日归档情绪结论，后续对照次日表现统计命中率。
             </div>
           </section>
@@ -363,8 +363,8 @@ export function SentimentWorkspace() {
           <section className="grid gap-4 xl:grid-cols-[360px_minmax(0,1fr)]">
             <aside className="border-[var(--app-border)] bg-[var(--app-surface)] rounded-xl border">
               <div className="workbench-panel-divider border-b px-4 py-3">
-                <div className="text-sm font-black text-[#11100e]">主线关联</div>
-                <div className="text-xs text-[#7b756d]">
+                <div className="text-sm font-black text-[var(--app-ink)]">主线关联</div>
+                <div className="text-xs text-[var(--app-muted)]">
                   {(data?.trade_date ?? summary?.trade_date) || tradeDate} · 数据源：{sourceSummary}
                 </div>
               </div>
@@ -381,17 +381,17 @@ export function SentimentWorkspace() {
 
             <section className="border-[var(--app-border)] bg-[var(--app-surface)] rounded-xl border">
               <div className="workbench-panel-divider border-b px-4 py-3">
-                <div className="text-sm font-black text-[#11100e]">连板天梯</div>
-                <div className="text-xs text-[#7b756d]">从高连板到首板展示，帮助判断空间板和接力高度。</div>
+                <div className="text-sm font-black text-[var(--app-ink)]">连板天梯</div>
+                <div className="text-xs text-[var(--app-muted)]">从高连板到首板展示，帮助判断空间板和接力高度。</div>
               </div>
               <div className="grid gap-3 p-4 lg:grid-cols-2 xl:grid-cols-3">
                 {detailLoading && !data ? (
                   <Skeleton active className="col-span-full" paragraph={{ rows: 5 }} />
                 ) : data?.ladder.length ? (
                   data.ladder.map((group) => (
-                    <div className="rounded-lg border border-[#e3ddd3] bg-white p-3" key={group.board_count}>
+                    <div className="rounded-lg border border-[var(--app-border)] bg-white p-3" key={group.board_count}>
                       <div className="mb-3 flex items-center justify-between">
-                        <span className="text-base font-black text-[#11100e]">{group.label}</span>
+                        <span className="text-base font-black text-[var(--app-ink)]">{group.label}</span>
                         <Tag color={group.board_count >= 3 ? "red" : group.board_count === 2 ? "orange" : "default"}>
                           {group.items.length} 只
                         </Tag>
@@ -444,8 +444,8 @@ function SentimentDecisionCard({
     <section className="workbench-panel rounded-xl border">
       <div className="workbench-panel-divider flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
         <div>
-          <div className="text-sm font-black text-[#11100e]">情绪交易许可</div>
-          <div className="text-xs text-[#7b756d]">市场状态、交易许可和风险等级先行，下面再展开原始情绪数据。</div>
+          <div className="text-sm font-black text-[var(--app-ink)]">情绪交易许可</div>
+          <div className="text-xs text-[var(--app-muted)]">市场状态、交易许可和风险等级先行，下面再展开原始情绪数据。</div>
         </div>
         <Space wrap>
           <Tag color={marketStateColor(decision?.market_state)}>市场状态：{decision?.market_state ?? "--"}</Tag>
@@ -454,17 +454,17 @@ function SentimentDecisionCard({
         </Space>
       </div>
       <div className="grid gap-3 p-4 lg:grid-cols-[260px_minmax(0,1fr)_minmax(0,1fr)]">
-        <div className="rounded-lg border border-[#e3ddd3] bg-white px-4 py-3">
-          <div className="text-xs font-black text-[#7b756d]">交易许可</div>
+        <div className="rounded-lg border border-[var(--app-border)] bg-white px-4 py-3">
+          <div className="text-xs font-black text-[var(--app-muted)]">交易许可</div>
           <div className={`mt-2 text-2xl font-black ${permissionTextClass(decision?.trade_permission)}`}>
             {decision?.trade_permission ?? "--"}
           </div>
-          <div className="mt-1 text-xs text-[#7b756d]">
+          <div className="mt-1 text-xs text-[var(--app-muted)]">
             情绪变化 {decision?.score_change === null || decision?.score_change === undefined ? "--" : formatSigned(decision.score_change)}
           </div>
         </div>
-        <div className="rounded-lg border border-[#e3ddd3] bg-white px-4 py-3">
-          <div className="text-xs font-black text-[#7b756d]">成立原因</div>
+        <div className="rounded-lg border border-[var(--app-border)] bg-white px-4 py-3">
+          <div className="text-xs font-black text-[var(--app-muted)]">成立原因</div>
           <div className="mt-2 flex flex-wrap gap-1">
             {(decision?.reasons.length ? decision.reasons : ["等待情绪快照"]).map((item) => (
               <Tag key={item}>{item}</Tag>
@@ -480,8 +480,8 @@ function SentimentDecisionCard({
             </div>
           ) : null}
         </div>
-        <div className="rounded-lg border border-[#e3ddd3] bg-white px-4 py-3">
-          <div className="text-xs font-black text-[#7b756d]">风险提示</div>
+        <div className="rounded-lg border border-[var(--app-border)] bg-white px-4 py-3">
+          <div className="text-xs font-black text-[var(--app-muted)]">风险提示</div>
           <div className="mt-2 flex flex-wrap gap-1">
             {risks.map((item) => (
               <Tag color={item === "暂无硬风险" ? "green" : "orange"} key={item}>
@@ -523,8 +523,8 @@ function SentimentWatchlistAlertsCard({
     <section className="workbench-panel rounded-xl border">
       <div className="workbench-panel-divider flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
         <div>
-          <div className="text-sm font-black text-[#11100e]">自选股联动</div>
-          <div className="text-xs text-[#7b756d]">把当前情绪许可和主线方向映射到自选股池，优先处理需要盯盘的股票。</div>
+          <div className="text-sm font-black text-[var(--app-ink)]">自选股联动</div>
+          <div className="text-xs text-[var(--app-muted)]">把当前情绪许可和主线方向映射到自选股池，优先处理需要盯盘的股票。</div>
         </div>
         <Space wrap>
           <Tag color="red">重点盯 {groups[0].items.length}</Tag>
@@ -539,16 +539,16 @@ function SentimentWatchlistAlertsCard({
       ) : (
         <div className="grid gap-3 p-4 xl:grid-cols-3">
           {groups.map((group) => (
-            <div className="rounded-lg border border-[#e3ddd3] bg-white" key={group.action}>
-              <div className="flex items-center justify-between border-b border-[#efe8dd] px-3 py-2">
-                <span className="text-sm font-black text-[#11100e]">{group.action}</span>
+            <div className="rounded-lg border border-[var(--app-border)] bg-white" key={group.action}>
+              <div className="flex items-center justify-between border-b border-[var(--app-border)] px-3 py-2">
+                <span className="text-sm font-black text-[var(--app-ink)]">{group.action}</span>
                 <Tag color={watchlistActionColor(group.action)}>{group.items.length} 只</Tag>
               </div>
               <div className="space-y-2 p-3">
                 {group.items.length ? (
                   group.items.slice(0, 8).map((item) => <WatchlistAlertRow item={item} key={item.symbol} />)
                 ) : (
-                  <div className="rounded-md bg-[#f7f3ed] px-3 py-4 text-center text-xs text-[#7b756d]">暂无股票</div>
+                  <div className="rounded-md bg-[var(--app-raised)] px-3 py-4 text-center text-xs text-[var(--app-muted)]">暂无股票</div>
                 )}
               </div>
             </div>
@@ -561,13 +561,13 @@ function SentimentWatchlistAlertsCard({
 
 function WatchlistAlertRow({ item }: { item: SentimentWatchlistAlert }) {
   return (
-    <div className="rounded-md border border-[#efe8dd] bg-[#fffdf9] px-3 py-2">
+    <div className="rounded-md border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <Link className="block truncate text-sm font-black text-[#11100e]" href={`/stock/${item.symbol}`}>
+          <Link className="block truncate text-sm font-black text-[var(--app-ink)]" href={`/stock/${item.symbol}`}>
             {item.name}
           </Link>
-          <div className="mt-0.5 text-xs text-[#7b756d]">{item.symbol}</div>
+          <div className="mt-0.5 text-xs text-[var(--app-muted)]">{item.symbol}</div>
         </div>
         {item.matched_sector ? <Tag color="red">{item.matched_sector}</Tag> : null}
       </div>
@@ -610,8 +610,8 @@ function SentimentMonitorPanel({
     <section className="workbench-panel rounded-xl border">
       <div className="workbench-panel-divider flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
         <div>
-          <div className="text-sm font-black text-[#11100e]">后台监控</div>
-          <div className="text-xs text-[#7b756d]">
+          <div className="text-sm font-black text-[var(--app-ink)]">后台监控</div>
+          <div className="text-xs text-[var(--app-muted)]">
             交易时段自动采样短线情绪，出现情绪突变时通过已配置的企业微信、飞书、Telegram 或邮件提醒。
           </div>
         </div>
@@ -664,17 +664,17 @@ function SentimentMonitorPanel({
       ) : null}
       <div className="px-4 pb-4">
         {lastAlerts.length ? (
-          <div className="space-y-2 rounded-lg border border-[#e3ddd3] bg-white p-3">
+          <div className="space-y-2 rounded-lg border border-[var(--app-border)] bg-white p-3">
             {lastAlerts.slice(0, 5).map((alert) => (
               <div className="flex flex-wrap items-center justify-between gap-2 text-xs" key={`${alert.type}-${alert.generated_at}`}>
-                <span className="font-black text-[#11100e]">{alert.title}</span>
-                <span className="min-w-0 flex-1 text-[#625b52]">{alert.message}</span>
+                <span className="font-black text-[var(--app-ink)]">{alert.title}</span>
+                <span className="min-w-0 flex-1 text-[var(--app-muted)]">{alert.message}</span>
                 <Tag color={alert.severity === "high" ? "red" : "orange"}>{alert.severity}</Tag>
               </div>
             ))}
           </div>
         ) : (
-          <div className="rounded-lg border border-[#e3ddd3] bg-white p-3 text-xs text-[#7b756d]">
+          <div className="rounded-lg border border-[var(--app-border)] bg-white p-3 text-xs text-[var(--app-muted)]">
             暂无突变提醒。后台只在 09:25-11:30、13:00-15:05 自动采样；手动采样不受交易时段限制。
           </div>
         )}
@@ -736,8 +736,8 @@ function MarketRankingPanel({
     <section className="workbench-panel rounded-xl border">
       <div className="workbench-panel-divider flex items-center justify-between gap-3 border-b px-4 py-3">
         <div>
-          <div className="text-sm font-black text-[#11100e]">{title}</div>
-          <div className="text-xs text-[#7b756d]">全A实时 quotes 批量排序，作为情绪强弱的直接观察窗口。</div>
+          <div className="text-sm font-black text-[var(--app-ink)]">{title}</div>
+          <div className="text-xs text-[var(--app-muted)]">全A实时 quotes 批量排序，作为情绪强弱的直接观察窗口。</div>
         </div>
         <Tag color={tickflowStatus?.status === "success" ? "green" : "default"}>
           {tickflowStatus?.status === "success" ? "实时" : "待更新"}
@@ -753,22 +753,22 @@ function MarketRankingPanel({
               const isUp = (item.pct_change ?? 0) >= 0;
               return (
                 <Link
-                  className="grid grid-cols-[34px_minmax(0,1fr)_92px] items-center gap-3 rounded-lg border border-[#e3ddd3] bg-white px-3 py-2 no-underline transition hover:border-[#c9bca8]"
+                  className="grid grid-cols-[34px_minmax(0,1fr)_92px] items-center gap-3 rounded-lg border border-[var(--app-border)] bg-white px-3 py-2 no-underline transition hover:bg-[var(--app-raised)]"
                   href={`/stock/${item.symbol}`}
                   key={`${title}-${item.symbol}`}
                 >
-                  <span className="text-xs font-black text-[#7b756d]">#{index + 1}</span>
+                  <span className="text-xs font-black text-[var(--app-muted)]">#{index + 1}</span>
                   <span className="min-w-0">
-                    <span className="block truncate text-sm font-black text-[#11100e]">{item.name || item.symbol}</span>
-                    <span className="block truncate text-xs text-[#7b756d]">
+                    <span className="block truncate text-sm font-black text-[var(--app-ink)]">{item.name || item.symbol}</span>
+                    <span className="block truncate text-xs text-[var(--app-muted)]">
                       {item.symbol} · 换手 {formatPct(item.turnover_rate)}
                     </span>
                   </span>
                   <span className="text-right">
-                    <span className={`block text-sm font-black ${isUp ? "text-[#d92d20]" : "market-green-text"}`}>
+                    <span className={`block text-sm font-black ${isUp ? "text-[var(--market-rise)]" : "market-green-text"}`}>
                       {valueFormatter(value)}
                     </span>
-                    <span className="block text-[11px] font-semibold text-[#7b756d]">{valueLabel}</span>
+                    <span className="block text-[11px] font-semibold text-[var(--app-muted)]">{valueLabel}</span>
                   </span>
                 </Link>
               );
@@ -784,9 +784,9 @@ function MarketRankingPanel({
 
 function MonitorInfoCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-[#e3ddd3] bg-white px-3 py-2">
-      <div className="text-xs font-black text-[#7b756d]">{label}</div>
-      <div className="mt-1 truncate text-sm font-black text-[#11100e]">{value}</div>
+    <div className="rounded-lg border border-[var(--app-border)] bg-white px-3 py-2">
+      <div className="text-xs font-black text-[var(--app-muted)]">{label}</div>
+      <div className="mt-1 truncate text-sm font-black text-[var(--app-ink)]">{value}</div>
     </div>
   );
 }
@@ -843,12 +843,12 @@ function permissionTextClass(value: SentimentDecisionResponse["trade_permission"
     return "market-green-text";
   }
   if (value === "只卖不追") {
-    return "text-[#b45309]";
+    return "text-[var(--market-warning)]";
   }
   if (value === "强势进攻" || value === "轻仓试错") {
-    return "text-[#d92d20]";
+    return "text-[var(--market-rise)]";
   }
-  return "text-[#11100e]";
+  return "text-[var(--app-ink)]";
 }
 
 function watchlistActionColor(value: SentimentWatchlistAlert["action"]): string {
@@ -906,8 +906,8 @@ function MarketEmotionDashboard({
     <section className="workbench-panel rounded-xl border">
       <div className="workbench-panel-divider flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
         <div>
-          <div className="text-sm font-black text-[#11100e]">市场情绪仪表盘</div>
-          <div className="text-xs text-[#7b756d]">
+          <div className="text-sm font-black text-[var(--app-ink)]">市场情绪仪表盘</div>
+          <div className="text-xs text-[var(--app-muted)]">
             盘中实时快照：涨停/炸板 + 全A涨跌家数 + 成交额变化。曲线与涨跌分布只展示真实可得数据。
           </div>
         </div>
@@ -975,7 +975,7 @@ function MarketEmotionDashboard({
             <EmotionHistoryChart level={level} samples={data?.samples ?? []} score={score} />
           </div>
           {(data?.notes.length || summary?.notes.length) ? (
-            <div className="rounded-lg border border-[#e3ddd3] bg-white px-3 py-2 text-xs leading-5 text-[#625b52]">
+            <div className="rounded-lg border border-[var(--app-border)] bg-white px-3 py-2 text-xs leading-5 text-[var(--app-muted)]">
               {(data?.notes ?? summary?.notes ?? []).join(" ")}
             </div>
           ) : null}
@@ -987,8 +987,8 @@ function MarketEmotionDashboard({
 
 function EmotionScoreCard({ score, level }: { score: number; level: string }) {
   return (
-    <div className="rounded-lg border border-[#e3ddd3] bg-white px-3 py-2">
-      <div className="text-xs font-black text-[#7b756d]">情绪指标</div>
+    <div className="rounded-lg border border-[var(--app-border)] bg-white px-3 py-2">
+      <div className="text-xs font-black text-[var(--app-muted)]">情绪指标</div>
       <div className="mt-2 flex items-center gap-3">
         <Progress
           format={() => score.toFixed(0)}
@@ -998,8 +998,8 @@ function EmotionScoreCard({ score, level }: { score: number; level: string }) {
           type="circle"
         />
         <div>
-          <div className="text-xl font-black text-[#11100e]">{level}</div>
-          <div className="text-xs text-[#7b756d]">0 冰点 · 100 火爆</div>
+          <div className="text-xl font-black text-[var(--app-ink)]">{level}</div>
+          <div className="text-xs text-[var(--app-muted)]">0 冰点 · 100 火爆</div>
         </div>
       </div>
     </div>
@@ -1021,18 +1021,18 @@ function RealtimeMetricCard({
 }) {
   const toneClass =
     tone === "red"
-      ? "text-[#d92d20]"
+      ? "text-[var(--market-rise)]"
       : tone === "green"
         ? "market-green-text"
         : tone === "amber"
-          ? "text-[#b45309]"
-          : "text-[#11100e]";
+          ? "text-[var(--market-warning)]"
+          : "text-[var(--app-ink)]";
   return (
-    <div className="rounded-lg border border-[#e3ddd3] bg-white px-3 py-2">
-      <div className="text-xs font-black text-[#7b756d]">{label}</div>
+    <div className="rounded-lg border border-[var(--app-border)] bg-white px-3 py-2">
+      <div className="text-xs font-black text-[var(--app-muted)]">{label}</div>
       <div className={`mt-1 flex items-baseline gap-1 text-2xl font-black ${toneClass}`}>
         {formatter ? formatter(value) : value === null ? "--" : formatNumber(value)}
-        {!formatter && suffix ? <span className="text-sm font-semibold text-[#7b756d]">{suffix}</span> : null}
+        {!formatter && suffix ? <span className="text-sm font-semibold text-[var(--app-muted)]">{suffix}</span> : null}
       </div>
     </div>
   );
@@ -1042,11 +1042,11 @@ function DistributionPanel({ buckets }: { buckets: MarketEmotionBucket[] }) {
   const maxCount = Math.max(...buckets.map((bucket) => bucket.count ?? 0), 1);
   const hasData = buckets.some((bucket) => bucket.count !== null);
   return (
-    <div className="rounded-lg border border-[#e3ddd3] bg-white p-3">
+    <div className="rounded-lg border border-[var(--app-border)] bg-white p-3">
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <div className="text-sm font-black text-[#11100e]">涨跌幅分布</div>
-          <div className="text-xs text-[#7b756d]">等待全市场实时个股行情源后显示真实分布。</div>
+          <div className="text-sm font-black text-[var(--app-ink)]">涨跌幅分布</div>
+          <div className="text-xs text-[var(--app-muted)]">等待全市场实时个股行情源后显示真实分布。</div>
         </div>
         <Tag color={hasData ? "green" : "default"}>{hasData ? "实时" : "待接入"}</Tag>
       </div>
@@ -1056,14 +1056,14 @@ function DistributionPanel({ buckets }: { buckets: MarketEmotionBucket[] }) {
           const isUp = (bucket.min_pct ?? -1) >= 0;
           return (
             <div className="grid grid-cols-[70px_minmax(0,1fr)_48px] items-center gap-2" key={bucket.label}>
-              <span className="text-xs font-semibold text-[#625b52]">{bucket.label}</span>
-              <div className="h-3 overflow-hidden rounded-full bg-[#eee9df]">
+              <span className="text-xs font-semibold text-[var(--app-muted)]">{bucket.label}</span>
+              <div className="h-3 overflow-hidden rounded-full bg-[var(--app-border)]">
                 <div
-                  className={`h-full rounded-full ${isUp ? "bg-[#d92d20]" : "market-green-fill"}`}
+                  className={`h-full rounded-full ${isUp ? "bg-[var(--market-rise)]" : "market-green-fill"}`}
                   style={{ width: `${width}%` }}
                 />
               </div>
-              <span className="text-right text-xs font-black text-[#11100e]">
+              <span className="text-right text-xs font-black text-[var(--app-ink)]">
                 {bucket.count === null ? "--" : bucket.count}
               </span>
             </div>
@@ -1108,22 +1108,22 @@ function EmotionHistoryChart({
   const bands = [
     { label: "冰点", width: "25%", className: "bg-[#dbeafe]", text: "text-[#1d4ed8]" },
     { label: "一般", width: "25%", className: "bg-[#e5e7eb]", text: "text-[#4b5563]" },
-    { label: "良好", width: "25%", className: "bg-[#fef3c7]", text: "text-[#92400e]" },
-    { label: "火爆", width: "25%", className: "bg-[#fee2e2]", text: "text-[#b91c1c]" },
+    { label: "良好", width: "25%", className: "bg-[#fef3c7]", text: "text-[var(--market-warning)]" },
+    { label: "火爆", width: "25%", className: "bg-[#fee2e2]", text: "text-[var(--market-rise)]" },
   ];
   const timelineLabels = ["竞价定调", "开盘承接", "情绪确认", "上午定性", "尾盘风险"];
   return (
-    <div className="rounded-lg border border-[#e3ddd3] bg-white p-3">
+    <div className="rounded-lg border border-[var(--app-border)] bg-white p-3">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-black text-[#11100e]">日内情绪落点</div>
-          <div className="text-xs text-[#7b756d]">
+          <div className="text-sm font-black text-[var(--app-ink)]">日内情绪落点</div>
+          <div className="text-xs text-[var(--app-muted)]">
             真实采样曲线：每次刷新追加一个点，后台任务流启用后会自动变成连续曲线。
           </div>
         </div>
         <Tag color={samples.length > 1 ? "green" : "default"}>{samples.length || 1} 点</Tag>
       </div>
-      <div className="relative mt-8 h-24 rounded-lg border border-[#e3ddd3] bg-[#f8f7f4] p-3">
+      <div className="relative mt-8 h-24 rounded-lg border border-[var(--app-border)] bg-[var(--app-raised)] p-3">
         <div className="flex h-full overflow-hidden rounded-md">
           {bands.map((band) => (
             <div className={`${band.className} flex items-end justify-center pb-2`} key={band.label} style={{ width: band.width }}>
@@ -1136,7 +1136,7 @@ function EmotionHistoryChart({
             <polyline
               fill="none"
               points={points.map((point) => `${point.x},${point.y}`).join(" ")}
-              stroke="#11100e"
+              stroke="var(--app-ink)"
               strokeLinecap="round"
               strokeLinejoin="round"
               strokeWidth="2.5"
@@ -1147,14 +1147,14 @@ function EmotionHistoryChart({
             <circle
               cx={point.x}
               cy={point.y}
-              fill={index === points.length - 1 ? emotionLevelHex(level) : "#11100e"}
+              fill={index === points.length - 1 ? emotionLevelHex(level) : "var(--app-ink)"}
               key={`${point.x}-${point.y}-${index}`}
               r={index === points.length - 1 ? 2.8 : 1.8}
             />
           ))}
         </svg>
-        <div className="absolute top-2 h-[calc(100%-16px)] w-0.5 bg-[#11100e]" style={{ left: markerLeft }}>
-          <div className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-[#11100e] px-2 py-0.5 text-xs font-black text-white">
+        <div className="absolute top-2 h-[calc(100%-16px)] w-0.5 bg-[var(--app-ink)]" style={{ left: markerLeft }}>
+          <div className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-[var(--app-ink)] px-2 py-0.5 text-xs font-black text-white">
             {score.toFixed(0)} · {level}
           </div>
         </div>
@@ -1188,17 +1188,17 @@ function buildEmotionPolyline(samples: MarketEmotionSample[]): Array<{ x: number
 
 function IndustryStrengthRow({ item, rank }: { item: ShortTermSentimentIndustryItem; rank: number }) {
   return (
-    <div className="rounded-lg border border-[#e3ddd3] bg-white p-3">
+    <div className="rounded-lg border border-[var(--app-border)] bg-white p-3">
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="truncate text-sm font-black text-[#11100e]">
+          <div className="truncate text-sm font-black text-[var(--app-ink)]">
             #{rank} {item.name}
           </div>
-          <div className="mt-1 text-xs text-[#7b756d]">核心：{item.leader ?? "--"}</div>
+          <div className="mt-1 text-xs text-[var(--app-muted)]">核心：{item.leader ?? "--"}</div>
         </div>
         <div className="text-right">
-          <div className="text-lg font-black text-[#d92d20]">{item.strength_score.toFixed(1)}</div>
-          <div className="text-[11px] text-[#7b756d]">强度</div>
+          <div className="text-lg font-black text-[var(--market-rise)]">{item.strength_score.toFixed(1)}</div>
+          <div className="text-[11px] text-[var(--app-muted)]">强度</div>
         </div>
       </div>
       <div className="mt-3 flex flex-wrap gap-1">
@@ -1213,23 +1213,23 @@ function IndustryStrengthRow({ item, rank }: { item: ShortTermSentimentIndustryI
 function StockMiniRow({ item }: { item: ShortTermSentimentStockItem }) {
   return (
     <Link
-      className="flex items-center justify-between gap-3 rounded-md bg-[#f8f7f4] px-3 py-2 transition hover:bg-[#eee9df]"
+      className="flex items-center justify-between gap-3 rounded-md bg-[var(--app-raised)] px-3 py-2 transition hover:bg-[var(--app-border)]"
       href={`/stock/${item.symbol}`}
     >
       <span className="min-w-0">
-        <span className="block truncate text-sm font-black text-[#11100e]">{item.name}</span>
-        <span className="block text-xs text-[#7b756d]">{item.symbol}</span>
+        <span className="block truncate text-sm font-black text-[var(--app-ink)]">{item.name}</span>
+        <span className="block text-xs text-[var(--app-muted)]">{item.symbol}</span>
       </span>
-      <span className="text-right text-xs font-semibold text-[#7b756d]">{item.first_seal_time ?? "--"}</span>
+      <span className="text-right text-xs font-semibold text-[var(--app-muted)]">{item.first_seal_time ?? "--"}</span>
     </Link>
   );
 }
 
 function SmallMetric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border border-[#e3ddd3] bg-white px-3 py-2">
-      <div className="text-xs font-black text-[#7b756d]">{label}</div>
-      <div className="mt-1 text-xl font-black text-[#11100e]">{value}</div>
+    <div className="rounded-lg border border-[var(--app-border)] bg-white px-3 py-2">
+      <div className="text-xs font-black text-[var(--app-muted)]">{label}</div>
+      <div className="mt-1 text-xl font-black text-[var(--app-ink)]">{value}</div>
     </div>
   );
 }
@@ -1249,13 +1249,13 @@ function emotionLevelColor(level: string): string {
 
 function emotionLevelHex(level: string): string {
   if (level === "火爆") {
-    return "#d92d20";
+    return "var(--market-rise)";
   }
   if (level === "良好") {
-    return "#b45309";
+    return "var(--market-warning)";
   }
   if (level === "一般") {
-    return "#625b52";
+    return "var(--app-muted)";
   }
   return "#2563eb";
 }

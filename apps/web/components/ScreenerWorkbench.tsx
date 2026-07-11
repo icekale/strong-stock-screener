@@ -214,28 +214,28 @@ function HomepageMarketSupportPanel({
 
   return (
     <section className="mt-4">
-      <details className="rounded-xl border border-[#ddd8d0] bg-[#f8f7f4]" onToggle={handleToggle}>
+      <details className="rounded-xl border border-[var(--app-border)] bg-[var(--app-raised)]" onToggle={handleToggle}>
         <summary className="cursor-pointer list-none px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
-              <h2 className="text-base font-black text-[#11100e]">市场辅助</h2>
-              <p className="mt-1 text-xs font-medium text-[#7b756d]">
+              <h2 className="text-base font-black text-[var(--app-ink)]">市场辅助</h2>
+              <p className="mt-1 text-xs font-medium text-[var(--app-muted)]">
                 板块资金流和强度只作为选股后的辅助确认，完整板块工作台仍在独立页面。
               </p>
             </div>
-            <span className="rounded-full border border-[#ddd8d0] bg-white px-3 py-1 text-xs font-bold text-[#7b756d]">
+            <span className="rounded-full border border-[var(--app-border)] bg-white px-3 py-1 text-xs font-bold text-[var(--app-muted)]">
               {marketSupportLoading ? "正在加载" : marketSupportOpen ? "收起辅助" : "展开查看"}
             </span>
           </div>
         </summary>
-        <div className="border-t border-[#ddd8d0] px-4 pb-4">
+        <div className="border-t border-[var(--app-border)] px-4 pb-4">
           {marketSupportOpen ? (
             <div className="mt-4 grid items-stretch gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(360px,1fr)]">
               <SectorFlowHeatmapPanel sectorRadar={sectorRadar} />
               <SectorStrengthPanel />
             </div>
           ) : (
-            <p className="mt-4 text-sm font-medium text-[#7b756d]">展开后加载板块资金流辅助数据。</p>
+            <p className="mt-4 text-sm font-medium text-[var(--app-muted)]">展开后加载板块资金流辅助数据。</p>
           )}
         </div>
       </details>
@@ -246,16 +246,16 @@ function HomepageMarketSupportPanel({
 function HomepageModelMaintenancePanel() {
   return (
     <section className="mt-4">
-      <div className="rounded-xl border border-[#ddd8d0] bg-[#f8f7f4] px-4 py-3">
+      <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-raised)] px-4 py-3">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h2 className="text-base font-black text-[#11100e]">AI 模型维护</h2>
-            <p className="mt-1 text-xs font-medium text-[#7b756d]">
+            <h2 className="text-base font-black text-[var(--app-ink)]">AI 模型维护</h2>
+            <p className="mt-1 text-xs font-medium text-[var(--app-muted)]">
               复盘样本、校准结果和数据源状态集中到独立页面，由 AI 生成待确认维护建议。
             </p>
           </div>
           <Link
-            className="inline-flex items-center justify-center rounded-md border border-[#11100e] bg-[#11100e] px-3 py-2 text-xs font-black text-white no-underline hover:bg-[#34312d]"
+            className="inline-flex items-center justify-center rounded-md border border-[var(--app-ink)] bg-[var(--app-ink)] px-3 py-2 text-xs font-black text-white no-underline hover:opacity-90"
             href="/model-maintenance"
           >
             查看模型维护
@@ -268,9 +268,9 @@ function HomepageModelMaintenancePanel() {
 
 function ScreenerResultsPlaceholder({ loading = false }: { loading?: boolean }) {
   return (
-    <section className="mt-4 rounded-xl border border-[#ddd8d0] bg-[#f8f7f4] px-5 py-8 text-center">
-      <h2 className="text-base font-black text-[#11100e]">选股结果 · Screener Results</h2>
-      <p className="mt-2 text-sm font-medium text-[#7b756d]">
+    <section className="mt-4 rounded-xl border border-[var(--app-border)] bg-[var(--app-raised)] px-5 py-8 text-center">
+      <h2 className="text-base font-black text-[var(--app-ink)]">选股结果 · Screener Results</h2>
+      <p className="mt-2 text-sm font-medium text-[var(--app-muted)]">
         {loading ? "正在加载候选结果组件..." : "运行筛选后显示候选股票。"}
       </p>
     </section>

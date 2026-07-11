@@ -1,18 +1,17 @@
 import type { SectorReplicaChartSeries, SectorReplicaMode } from "./types";
 
-const WORKBENCH_SURFACE = "#f8f7f4";
-const WORKBENCH_SURFACE_MUTED = "#eee9df";
-const WORKBENCH_BORDER = "#ddd8d0";
-const WORKBENCH_INK = "#11100e";
-const WORKBENCH_MUTED = "#7b756d";
-const MARKET_RED = "#b42318";
-const MARKET_GREEN = "#2f6f4a";
-const MARKET_WARNING = "#8a5a10";
-const MARKET_BLUE = "#2563a8";
-const MARKET_PURPLE = "#6955a3";
-const MARKET_CYAN = "#287f7f";
-const MARKET_MAGENTA = "#9f4f78";
-const MARKET_BROWN = "#806044";
+const APP_RAISED = "#f7f9fc";
+const APP_BORDER = "#d9e2ed";
+const APP_INK = "#182336";
+const APP_MUTED = "#697991";
+const MARKET_RISE = "#d9363e";
+const MARKET_FALL = "#07845e";
+const MARKET_WARNING = "#a86000";
+const MARKET_BLUE = "#1769e0";
+const MARKET_PURPLE = "#7552a5";
+const MARKET_CYAN = "#087a86";
+const MARKET_MAGENTA = "#b23a7c";
+const MARKET_GOLD = "#b88813";
 
 export type SectorReplicaChartOptionInput = {
   axis: string[];
@@ -42,16 +41,16 @@ export function buildSectorReplicaChartOption({
 
   return {
     animationDuration: 160,
-    backgroundColor: WORKBENCH_SURFACE,
+    backgroundColor: APP_RAISED,
     color: [
-      MARKET_RED,
+      MARKET_RISE,
       MARKET_WARNING,
       MARKET_BLUE,
       MARKET_PURPLE,
-      MARKET_GREEN,
+      MARKET_FALL,
       MARKET_MAGENTA,
-      WORKBENCH_MUTED,
-      MARKET_BROWN,
+      APP_MUTED,
+      MARKET_GOLD,
       MARKET_CYAN,
     ],
     grid: {
@@ -67,19 +66,19 @@ export function buildSectorReplicaChartOption({
       itemGap: 18,
       itemHeight: 8,
       itemWidth: 18,
-      textStyle: { color: WORKBENCH_INK, fontSize: 12 },
+      textStyle: { color: APP_INK, fontSize: 12 },
       data: series.map((item) => item.name),
     },
     tooltip: {
       trigger: "axis",
       confine: true,
-      backgroundColor: "rgba(248,247,244,0.96)",
-      borderColor: WORKBENCH_BORDER,
+      backgroundColor: "rgba(247,249,252,0.96)",
+      borderColor: APP_BORDER,
       borderWidth: 1,
-      textStyle: { color: WORKBENCH_INK, fontSize: 12 },
+      textStyle: { color: APP_INK, fontSize: 12 },
       axisPointer: {
         type: "cross",
-        lineStyle: { color: WORKBENCH_MUTED, type: "dashed", width: 1 },
+        lineStyle: { color: APP_MUTED, type: "dashed", width: 1 },
       },
       valueFormatter: (value: unknown) => formatReplicaAxisValue(value, mode),
     },
@@ -87,10 +86,10 @@ export function buildSectorReplicaChartOption({
       type: "category",
       boundaryGap: false,
       data: axis,
-      axisLine: { lineStyle: { color: WORKBENCH_BORDER } },
+      axisLine: { lineStyle: { color: APP_BORDER } },
       axisTick: { show: false },
       axisLabel: {
-        color: WORKBENCH_MUTED,
+        color: APP_MUTED,
         fontSize: 11,
         hideOverlap: true,
         interval: (index: number, value: string) =>
@@ -103,11 +102,11 @@ export function buildSectorReplicaChartOption({
       axisLine: { show: false },
       axisTick: { show: false },
       axisLabel: {
-        color: WORKBENCH_MUTED,
+        color: APP_MUTED,
         fontSize: 11,
         formatter: (value: number) => formatReplicaAxisValue(value, mode),
       },
-      splitLine: { lineStyle: { color: WORKBENCH_SURFACE_MUTED, width: 1 } },
+      splitLine: { lineStyle: { color: APP_BORDER, width: 1 } },
       splitNumber: 6,
     },
     series: series.map((item, index) => ({

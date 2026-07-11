@@ -435,14 +435,14 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(marketPanelsSource, /SectorFlowHeatmapPanel/);
   assert.match(filterRailSource, /FilterLogicRail/);
   assert.match(filterRailSource, /AdvancedScreenFilters/);
-  assert.doesNotMatch(filterRailSource, /var\(--app-/);
+  assert.match(filterRailSource, /var\(--app-/);
   assert.match(candidateResultsSource, /CandidateResults/);
   assert.match(candidateResultsSource, /CandidateTable/);
   assert.match(gsgfPanelsSource, /GsgfReviewPanel/);
   assert.match(gsgfPanelsSource, /GsgfCalibrationPanel/);
-  assert.doesNotMatch(gsgfFunnelSource, /var\(--app-/);
-  assert.doesNotMatch(marketPanelsSource, /var\(--app-/);
-  assert.doesNotMatch(nestedScreenerSupportSource, /var\(--app-/);
+  assert.match(gsgfFunnelSource, /var\(--app-/);
+  assert.match(marketPanelsSource, /var\(--app-/);
+  assert.match(nestedScreenerSupportSource, /var\(--app-/);
   assert.match(screenerUtilsSource, /export function formatCnyCompact/);
   assert.match(screenerUtilsSource, /export function exportCandidatesCsv/);
   assert.match(screenerTypesSource, /export type CandidateStatusFilter/);
@@ -462,8 +462,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(screenerFeatureSource, /<Segmented/);
   assert.match(screenerFeatureSource, /<Alert/);
   assert.match(screenerFeatureSource, /message\.success/);
-  assert.match(screenerFeatureSource, /href=\{`\/stock\/\$\{item\.symbol\}`\}/);
-  assert.match(screenerFeatureSource, /block font-black text-\[#11100e\] transition hover:text-\[#f04438\]/);
+  assert.match(screenerFeatureSource, /buildStockDetailHref\(item\.symbol, \{ from: "screener" \}\)/);
+  assert.match(screenerFeatureSource, /block font-black text-\[var\(--app-ink\)\] transition hover:text-\[var\(--market-rise\)\]/);
   assert.match(screenerFeatureSource, /selectedSymbol/);
   assert.match(screenerFeatureSource, /selectedCandidateSymbols/);
   assert.match(screenerFeatureSource, /candidateStatusFilter/);
@@ -716,7 +716,8 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.doesNotMatch(sectorReplicaCssSource, /font-family:\s*Arial/);
   assert.doesNotMatch(sectorReplicaCssSource, /#d9534f|#d43f3a|#f0ad4e|#5cb85c/);
   assert.doesNotMatch(sectorReplicaCssSource, /#fff(?:fff)?\b/);
-  assert.match(sectorsReplicaChartSource, /backgroundColor: WORKBENCH_SURFACE/);
+  assert.match(sectorsReplicaChartSource, /backgroundColor: APP_RAISED/);
+  assert.doesNotMatch(sectorsReplicaChartSource, /WORKBENCH_/);
   assert.match(sectorsReplicaChartSource, /smooth: item\.smooth \? 0\.32 : false/);
   assert.doesNotMatch(sectorsReplicaChartSource, /backgroundColor:\s*"#ffffff"/);
   assert.doesNotMatch(sectorsFeatureSource, /max: isStrength \\? 100/);
@@ -1145,5 +1146,58 @@ test("model maintenance uses supported Ant Design Space orientation props", () =
 
   for (const source of [modelMaintenanceSource, packetPageSource]) {
     assert.doesNotMatch(source, /direction="vertical"/);
+  }
+});
+
+test("operational workspaces preserve screener detail context and supported Alert props", () => {
+  const candidateResultsSource = readFileSync(new URL("../components/screener/CandidateResults.tsx", import.meta.url), "utf8");
+  const gsgfFunnelSource = readFileSync(new URL("../components/screener/GsgfFunnelPanel.tsx", import.meta.url), "utf8");
+  const systemStatusPanelSource = readFileSync(new URL("../components/system/SystemStatusPanel.tsx", import.meta.url), "utf8");
+  const auctionWorkspaceSource = readFileSync(new URL("../app/auction/AuctionWorkspace.tsx", import.meta.url), "utf8");
+
+  assert.match(candidateResultsSource, /buildStockDetailHref\(item\.symbol, \{ from: "screener" \}\)/);
+  assert.match(gsgfFunnelSource, /buildStockDetailHref\(item\.symbol, \{ from: "screener" \}\)/);
+  assert.doesNotMatch(systemStatusPanelSource, /<Alert[^>]*\bmessage=/);
+  assert.doesNotMatch(auctionWorkspaceSource, /<Alert[^>]*\bmessage=/);
+});
+
+test("operational workspaces no longer use the retired workbench palette", () => {
+  const sources = [
+    "../app/auction/AuctionWorkspace.tsx",
+    "../components/ScreenerWorkbench.tsx",
+    "../components/screener/FilterLogicRail.tsx",
+    "../components/screener/CandidateResults.tsx",
+    "../components/screener/MarketOverviewPanels.tsx",
+    "../components/screener/GsgfWorkflowPanels.tsx",
+    "../components/screener/GsgfFunnelPanel.tsx",
+    "../app/sentiment/SentimentWorkspace.tsx",
+    "../app/sentiment/IntradaySentimentPanel.tsx",
+    "../app/sentiment/StockPoolTables.tsx",
+    "../app/watchlist/WatchlistManagerPanel.tsx",
+    "../app/model-maintenance/packets/[packetId]/page.tsx",
+    "../lib/sectorReplicaChartOption.ts",
+  ].map((path) => readFileSync(new URL(path, import.meta.url), "utf8"));
+  const retiredPalette = /#(?:11100e|1d1b18|34312d|3b3833|433f38|5f5a53|625b52|7b756d|8a4b12|9a948c|c9bca8|d6d0c7|d9d4cb|ddd8d0|e3ddd3|e5e0d8|e6e0d7|ece7df|eee7db|eee8dc|eee9df|efe8dd|f1efea|f5f3f0|f6f2ea|f7f3ed|f8f7f4|faf7f1|fff3f0|fffdf9|f04438|d92d20|d93025|b45309|92400e|b91c1c)/i;
+
+  for (const source of sources) {
+    assert.doesNotMatch(source, retiredPalette);
+  }
+});
+
+test("screener ticker gives mobile controls a full-width wrapping row", () => {
+  const source = readFileSync(new URL("../components/screener/MarketOverviewPanels.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /flex w-full min-w-0 flex-wrap items-center justify-start gap-2 xl:w-auto xl:justify-end/);
+  assert.match(source, /className="w-full min-w-0 xl:w-\[300px\]"/);
+});
+
+test("operational palette migration keeps hover feedback distinct from idle state", () => {
+  const screenerSource = readFileSync(new URL("../components/ScreenerWorkbench.tsx", import.meta.url), "utf8");
+  const auctionSource = readFileSync(new URL("../app/auction/AuctionWorkspace.tsx", import.meta.url), "utf8");
+  const sentimentSource = readFileSync(new URL("../app/sentiment/SentimentWorkspace.tsx", import.meta.url), "utf8");
+
+  assert.doesNotMatch(screenerSource, /bg-\[var\(--app-ink\)\][^"]*hover:bg-\[var\(--app-ink\)\]/);
+  for (const source of [auctionSource, sentimentSource]) {
+    assert.doesNotMatch(source, /border-\[var\(--app-border\)\][^"]*hover:border-\[var\(--app-border\)\]/);
   }
 });

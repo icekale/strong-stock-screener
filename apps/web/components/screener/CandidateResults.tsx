@@ -9,6 +9,7 @@ import type {
   StrongStockScreeningItem,
   WatchlistPoolItem,
 } from "../../lib/types";
+import { buildStockDetailHref } from "../../lib/stockNavigation";
 import {
   filterStockListByGsgf,
   type GsgfSignalFilter,
@@ -143,13 +144,13 @@ function CandidateTable({
         render: (_, item) => (
           <div className="min-w-0">
             <Link
-              className="block font-black text-[#11100e] transition hover:text-[#f04438]"
-              href={`/stock/${item.symbol}`}
+              className="block font-black text-[var(--app-ink)] transition hover:text-[var(--market-rise)]"
+              href={buildStockDetailHref(item.symbol, { from: "screener" })}
               onClick={(event) => event.stopPropagation()}
             >
               {item.name}
             </Link>
-            <p className="mt-1 text-xs font-medium text-[#7b756d]">{item.symbol}</p>
+            <p className="mt-1 text-xs font-medium text-[var(--app-muted)]">{item.symbol}</p>
           </div>
         ),
       },
@@ -163,7 +164,7 @@ function CandidateTable({
               <span className={`inline-flex h-7 items-center whitespace-nowrap rounded-full px-2.5 text-xs font-bold ring-1 ${view.tone}`}>
                 {view.label}
               </span>
-              <Typography.Text className="text-xs font-black tabular-nums text-[#11100e]">
+              <Typography.Text className="text-xs font-black tabular-nums text-[var(--app-ink)]">
                 得分 {item.score}
               </Typography.Text>
               {item.gsgf && <div className="flex max-w-[180px] flex-wrap gap-1"><GsgfSummaryPills gsgf={item.gsgf} /></div>}
@@ -208,7 +209,7 @@ function CandidateTable({
                 高亮
               </Button>
               <Button
-                href={`/stock/${item.symbol}`}
+                href={buildStockDetailHref(item.symbol, { from: "screener" })}
                 onClick={(event) => event.stopPropagation()}
                 size="small"
               >
@@ -234,18 +235,18 @@ function CandidateTable({
   );
 
   return (
-    <Card className="mt-4 min-w-0 overflow-hidden rounded-xl border-[#ddd8d0] bg-[#f8f7f4]" styles={{ body: { padding: 0 } }}>
-      <div className="flex flex-col gap-3 border-b border-[#ddd8d0] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+    <Card className="mt-4 min-w-0 overflow-hidden rounded-xl border-[var(--app-border)] bg-[var(--app-raised)]" styles={{ body: { padding: 0 } }}>
+      <div className="flex flex-col gap-3 border-b border-[var(--app-border)] px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-base font-black text-[#11100e]">选股结果 · Screener Results</h2>
-            <span className="rounded-md border border-[#ddd8d0] px-2 py-0.5 text-xs font-bold text-[#7b756d]">{items.length}</span>
+            <h2 className="text-base font-black text-[var(--app-ink)]">选股结果 · Screener Results</h2>
+            <span className="rounded-md border border-[var(--app-border)] px-2 py-0.5 text-xs font-bold text-[var(--app-muted)]">{items.length}</span>
           </div>
-          <p className="mt-1 text-xs font-medium text-[#7b756d]">
+          <p className="mt-1 text-xs font-medium text-[var(--app-muted)]">
             {generatedAt ? new Date(generatedAt).toLocaleString("zh-CN") : "暂无运行结果"}
           </p>
         </div>
-        <span className="rounded-lg border border-[#ddd8d0] bg-[#f5f3f0] px-3 py-1.5 text-xs font-bold text-[#7b756d]">
+        <span className="rounded-lg border border-[var(--app-border)] bg-[var(--app-raised)] px-3 py-1.5 text-xs font-bold text-[var(--app-muted)]">
           点击股票名称查看 K 线详情
         </span>
       </div>
@@ -386,7 +387,7 @@ function CandidateCardList({
             <div className="mt-3 grid grid-cols-2 gap-2">
               <a
                 className="inline-flex min-h-[36px] items-center justify-center rounded-md bg-white px-3 text-xs font-bold text-slate-700 ring-1 ring-slate-200"
-                href={`/stock/${item.symbol}`}
+                href={buildStockDetailHref(item.symbol, { from: "screener" })}
               >
                 K线
               </a>

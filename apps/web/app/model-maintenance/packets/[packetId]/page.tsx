@@ -35,7 +35,7 @@ export default function ModelMaintenancePacketPage() {
           <Typography.Text className="workbench-muted text-xs font-semibold uppercase">
             Model Maintenance Packet
           </Typography.Text>
-          <Typography.Title className="m-0 text-[#11100e]" level={3}>
+          <Typography.Title className="m-0 text-[var(--app-ink)]" level={3}>
             模型维护数据包
           </Typography.Title>
           <Typography.Text className="workbench-muted">
@@ -104,7 +104,7 @@ export default function ModelMaintenancePacketPage() {
           </Space>
 
           <Card className="workbench-panel min-w-0" title="原始数据包">
-            <pre className="max-h-[70vh] overflow-auto rounded-lg bg-[#11100e] p-4 text-xs leading-5 text-[#f6f2ea]">
+            <pre className="max-h-[70vh] overflow-auto rounded-lg bg-[var(--app-ink)] p-4 text-xs leading-5 text-white">
               {JSON.stringify(packet, null, 2)}
             </pre>
           </Card>

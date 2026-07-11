@@ -1,4 +1,4 @@
-export type StockDetailFrom = "auction" | "auction-model" | "heatmap" | "home" | "sectors";
+export type StockDetailFrom = "auction" | "auction-model" | "heatmap" | "home" | "screener" | "sectors";
 
 export type StockDetailLinkContext = {
   from?: StockDetailFrom;
@@ -24,6 +24,7 @@ export function buildStockDetailHref(symbol: string, context: StockDetailLinkCon
     context.from === "auction" ||
     context.from === "auction-model" ||
     context.from === "heatmap" ||
+    context.from === "screener" ||
     context.from === "sectors"
   ) {
     query.set("from", context.from);
@@ -43,7 +44,7 @@ export function buildStockDetailHref(symbol: string, context: StockDetailLinkCon
 export function resolveStockDetailContext(params: ReadableSearchParams): StockDetailContext {
   const source = params.get("from");
   const from: StockDetailFrom =
-    source === "auction" || source === "auction-model" || source === "heatmap" || source === "sectors"
+    source === "auction" || source === "auction-model" || source === "heatmap" || source === "screener" || source === "sectors"
       ? source
       : "home";
   return {
@@ -55,6 +56,8 @@ export function resolveStockDetailContext(params: ReadableSearchParams): StockDe
         ? "/auction"
         : from === "heatmap"
           ? "/market?view=heatmap"
+          : from === "screener"
+            ? "/screener"
           : from === "sectors"
             ? "/market?view=sectors"
             : "/",
@@ -65,6 +68,8 @@ export function resolveStockDetailContext(params: ReadableSearchParams): StockDe
           ? "返回竞价模型"
           : from === "heatmap"
             ? "返回市场热图"
+            : from === "screener"
+              ? "返回选股工作台"
             : from === "sectors"
               ? "返回题材工作台"
               : "返回选股工作台",

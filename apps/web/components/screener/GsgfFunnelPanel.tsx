@@ -3,6 +3,7 @@
 import { Button, Tag } from "antd";
 import Link from "next/link";
 import { useMemo } from "react";
+import { buildStockDetailHref } from "../../lib/stockNavigation";
 import type { StrongStockScreeningItem, StrongStockScreeningResponse, WatchlistPoolItem } from "../../lib/types";
 import { industryStrengthCopy } from "./types";
 import { gsgfLabel } from "./screenerUtils";
@@ -47,11 +48,11 @@ export function GsgfFunnelPanel({
     : [];
 
   return (
-    <section className="mt-4 rounded-xl border border-[#ddd8d0] bg-[#f8f7f4] px-4 py-3">
+    <section className="mt-4 rounded-xl border border-[var(--app-border)] bg-[var(--app-raised)] px-4 py-3">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
-          <h2 className="text-base font-black text-[#11100e]">漏斗诊断</h2>
-          <p className="mt-1 text-xs font-medium text-[#7b756d]">
+          <h2 className="text-base font-black text-[var(--app-ink)]">漏斗诊断</h2>
+          <p className="mt-1 text-xs font-medium text-[var(--app-muted)]">
             早期观察池不进入最终买点列表，用来跟踪 B区A点等未确认结构
           </p>
         </div>
@@ -66,22 +67,22 @@ export function GsgfFunnelPanel({
         <div className="mt-3 grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(420px,1.2fr)]">
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-2 2xl:grid-cols-3">
             {funnelRows.map(([label, value]) => (
-              <div className="rounded-lg border border-[#e3ddd3] bg-white px-3 py-2" key={label}>
-                <div className="text-[11px] font-black text-[#7b756d]">{label}</div>
-                <div className="mt-1 text-xl font-black tabular-nums text-[#11100e]">{value}</div>
+              <div className="rounded-lg border border-[var(--app-border)] bg-white px-3 py-2" key={label}>
+                <div className="text-[11px] font-black text-[var(--app-muted)]">{label}</div>
+                <div className="mt-1 text-xl font-black tabular-nums text-[var(--app-ink)]">{value}</div>
               </div>
             ))}
           </div>
 
-          <div className="min-w-0 rounded-lg border border-[#ddd8d0] bg-[#f5f3f0]">
-            <div className="flex items-center justify-between gap-2 border-b border-[#ddd8d0] px-3 py-2">
-              <h3 className="text-sm font-black text-[#11100e]">早期观察池</h3>
+          <div className="min-w-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-raised)]">
+            <div className="flex items-center justify-between gap-2 border-b border-[var(--app-border)] px-3 py-2">
+              <h3 className="text-sm font-black text-[var(--app-ink)]">早期观察池</h3>
               <Tag className="m-0">{observationItems.length}</Tag>
             </div>
             {observationItems.length > 0 ? (
               <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-[#ddd8d0] text-left text-xs">
-                  <thead className="bg-[#f5f3f0] text-[#7b756d]">
+                <table className="min-w-full divide-y divide-[var(--app-border)] text-left text-xs">
+                  <thead className="bg-[var(--app-raised)] text-[var(--app-muted)]">
                     <tr>
                       <th className="px-3 py-2 font-black">股票</th>
                       <th className="px-3 py-2 font-black">结构</th>
@@ -90,25 +91,25 @@ export function GsgfFunnelPanel({
                       <th className="px-3 py-2 text-right font-black">操作</th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#e5e0d8] bg-white">
+                  <tbody className="divide-y divide-[var(--app-border)] bg-white">
                     {observationItems.slice(0, 8).map((item) => {
                       const alreadyAdded = watchlistSymbols.has(item.symbol);
                       return (
                         <tr key={item.symbol}>
                           <td className="px-3 py-2">
-                            <Link className="font-black text-[#11100e] hover:text-[#f04438]" href={`/stock/${item.symbol}`}>
+                            <Link className="font-black text-[var(--app-ink)] hover:text-[var(--app-primary)]" href={buildStockDetailHref(item.symbol, { from: "screener" })}>
                               {item.name}
                             </Link>
-                            <div className="mt-0.5 text-[11px] font-semibold text-[#7b756d]">{item.symbol}</div>
+                            <div className="mt-0.5 text-[11px] font-semibold text-[var(--app-muted)]">{item.symbol}</div>
                           </td>
-                          <td className="px-3 py-2 text-[#7b756d]">
+                          <td className="px-3 py-2 text-[var(--app-muted)]">
                             {gsgfLabel(item.gsgf?.setup_type ?? item.gsgf?.zone)}
                             <div className="mt-0.5 text-[11px]">{item.gsgf?.final_status ?? "--"}</div>
                           </td>
-                          <td className="px-3 py-2 font-black tabular-nums text-[#11100e]">
+                          <td className="px-3 py-2 font-black tabular-nums text-[var(--app-ink)]">
                             {item.gsgf?.total_score ?? item.score}
                           </td>
-                          <td className="px-3 py-2 text-[#7b756d]">
+                          <td className="px-3 py-2 text-[var(--app-muted)]">
                             {item.industry ?? "--"}
                             <div className="mt-0.5 text-[11px]">{item.industry_strength ? industryStrengthCopy[item.industry_strength].label : "--"}</div>
                           </td>
@@ -128,12 +129,12 @@ export function GsgfFunnelPanel({
                 </table>
               </div>
             ) : (
-              <p className="px-3 py-5 text-sm font-medium text-[#7b756d]">本轮没有未确认的 B区A点观察项。</p>
+              <p className="px-3 py-5 text-sm font-medium text-[var(--app-muted)]">本轮没有未确认的 B区A点观察项。</p>
             )}
           </div>
         </div>
       ) : (
-        <p className="mt-3 rounded-lg bg-[#f5f3f0] px-3 py-2 text-sm text-[#7b756d]">
+        <p className="mt-3 rounded-lg bg-[var(--app-raised)] px-3 py-2 text-sm text-[var(--app-muted)]">
           运行筛选后会显示从候选池到最终展示的逐层数量。
         </p>
       )}

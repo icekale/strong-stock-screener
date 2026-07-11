@@ -16,8 +16,8 @@ export function StockPoolTable({ dataSource, loading, title }: StockPoolTablePro
     <section className="workbench-panel min-w-0 overflow-hidden rounded-xl border">
       <div className="workbench-panel-divider flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
         <div>
-          <div className="text-sm font-black text-[#11100e]">{title}</div>
-          <div className="text-xs text-[#7b756d]">点击股票名称进入 K 线详情页。</div>
+          <div className="text-sm font-black text-[var(--app-ink)]">{title}</div>
+          <div className="text-xs text-[var(--app-muted)]">点击股票名称进入 K 线详情页。</div>
         </div>
         <Tag color={title === "涨停池" ? "red" : "green"}>{dataSource.length} 只</Tag>
       </div>
@@ -42,9 +42,9 @@ const stockColumns: ColumnsType<ShortTermSentimentStockItem> = [
     dataIndex: "name",
     fixed: "left",
     render: (value: string, item) => (
-      <Link className="font-black text-[#11100e] hover:text-[#d92d20]" href={`/stock/${item.symbol}`}>
+      <Link className="font-black text-[var(--app-ink)] hover:text-[var(--app-primary)]" href={`/stock/${item.symbol}`}>
         {value}
-        <span className="ml-2 text-xs font-semibold text-[#7b756d]">{item.symbol}</span>
+        <span className="ml-2 text-xs font-semibold text-[var(--app-muted)]">{item.symbol}</span>
       </Link>
     ),
   },

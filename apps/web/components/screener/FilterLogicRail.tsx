@@ -58,10 +58,10 @@ export function FilterLogicRail({
   visibleCount: number;
 }) {
   return (
-    <section className="mt-4 rounded-xl border border-[#ddd8d0] bg-[#f8f7f4] px-4 py-3">
+    <section className="mt-4 rounded-xl border border-[var(--app-border)] bg-[var(--app-raised)] px-4 py-3">
       <div className="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className="mr-2 border-r border-[#d6d0c7] pr-4 text-xs font-black uppercase text-[#11100e]">FILTER LOGIC</span>
+          <span className="mr-2 border-r border-[var(--app-border)] pr-4 text-xs font-black uppercase text-[var(--app-ink)]">FILTER LOGIC</span>
           <FilterChip active label="20日内涨停" />
           <FilterChip active label={strategyName(strategy)} />
           <FilterChip active label={`扫描 ${scanLimit}`} />
@@ -71,7 +71,7 @@ export function FilterLogicRail({
           {(filters.industries ?? []).map((industry) => <FilterChip active key={industry} label={industry} />)}
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <span className="text-xs font-medium text-[#7b756d]">Matched: <b className="text-[#11100e]">{visibleCount}</b> stocks</span>
+          <span className="text-xs font-medium text-[var(--app-muted)]">Matched: <b className="text-[var(--app-ink)]">{visibleCount}</b> stocks</span>
           <Button onClick={onRefreshSources} size="small">刷新源</Button>
           <Button loading={running} onClick={onRun} size="small" type="primary">运行筛选</Button>
           <Button onClick={() => onScreenFiltersChange({})} size="small">Reset</Button>
@@ -79,32 +79,32 @@ export function FilterLogicRail({
       </div>
 
       {screenJob && (
-        <div className="mt-3 rounded-lg border border-[#ddd8d0] bg-white px-3 py-2">
+        <div className="mt-3 rounded-lg border border-[var(--app-border)] bg-white px-3 py-2">
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
-            <span className="font-black text-[#11100e]">筛选任务</span>
-            <span className="font-bold text-[#7b756d]">{screenJob.message || jobStatusLabel(screenJob.status)}</span>
-            <span className="font-mono text-[#7b756d]">
+            <span className="font-black text-[var(--app-ink)]">筛选任务</span>
+            <span className="font-bold text-[var(--app-muted)]">{screenJob.message || jobStatusLabel(screenJob.status)}</span>
+            <span className="font-mono text-[var(--app-muted)]">
               {Math.min(screenJob.progress_current, screenJob.progress_total)}/{Math.max(1, screenJob.progress_total)}
             </span>
           </div>
-          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[#ece7df]">
+          <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--app-border)]">
             <div
-              className="h-full rounded-full bg-[#11100e] transition-all"
+              className="h-full rounded-full bg-[var(--app-ink)] transition-all"
               style={{ width: `${screenJobProgressPercent(screenJob)}%` }}
             />
           </div>
         </div>
       )}
 
-      <details className="mt-3 border-t border-[#ddd8d0] pt-3">
-        <summary className="cursor-pointer text-xs font-bold text-[#7b756d]">编辑筛选参数</summary>
+      <details className="mt-3 border-t border-[var(--app-border)] pt-3">
+        <summary className="cursor-pointer text-xs font-bold text-[var(--app-muted)]">编辑筛选参数</summary>
         <div className="mt-3 grid gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
           <div className="grid gap-3 sm:grid-cols-3 xl:grid-cols-1">
-            <label className="text-xs font-bold text-[#7b756d]">
+            <label className="text-xs font-bold text-[var(--app-muted)]">
               交易日
               <Input className="mt-1" onChange={(event) => onTradeDateChange(event.target.value)} value={tradeDate} />
             </label>
-            <label className="text-xs font-bold text-[#7b756d]">
+            <label className="text-xs font-bold text-[var(--app-muted)]">
               策略模型
               <Segmented
                 className="mt-1 w-full"
@@ -113,7 +113,7 @@ export function FilterLogicRail({
                 value={strategy}
               />
             </label>
-            <label className="text-xs font-bold text-[#7b756d]">
+            <label className="text-xs font-bold text-[var(--app-muted)]">
               扫描候选数
               <InputNumber className="mt-1 w-full" max={300} min={1} onChange={(value) => onScanLimitChange(normalizeScanLimit(value))} value={scanLimit} />
             </label>
@@ -158,7 +158,7 @@ function jobStatusLabel(status: ScreenRunJobState["status"]): string {
 function FilterChip({ active, label }: { active: boolean; label: string }) {
   return (
     <span className={`inline-flex h-8 items-center rounded-md border px-3 text-xs font-bold ${
-      active ? "border-[#11100e] bg-[#11100e] text-white" : "border-[#ddd8d0] bg-[#f5f3f0] text-[#7b756d]"
+      active ? "border-[var(--app-ink)] bg-[var(--app-ink)] text-white" : "border-[var(--app-border)] bg-[var(--app-raised)] text-[var(--app-muted)]"
     }`}>
       {active ? "✓ " : ""}{label}
     </span>

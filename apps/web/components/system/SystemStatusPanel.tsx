@@ -49,7 +49,7 @@ export function SystemStatusPanel({ loading, status, error, onRefresh }: Props) 
         </Button>
       }
     >
-      {error && <Alert className="mb-3" showIcon type="error" message={error} />}
+      {error && <Alert className="mb-3" showIcon title={error} type="error" />}
       {status ? (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center gap-2">

@@ -399,7 +399,7 @@ export function AuctionWorkspace() {
             <div className="w-full max-w-[260px] rounded-lg border border-[var(--app-border)] bg-white px-3 py-2 text-xs text-[var(--app-muted)]">
               <div className="mb-1 flex items-center justify-between gap-2">
                 <span className="truncate font-semibold">{refreshJob.message || "竞价刷新运行中"}</span>
-                <span className="shrink-0 font-black text-[#d92d20]">
+                <span className="shrink-0 font-black text-[var(--market-rise)]">
                   {refreshJob.progress_current}/{refreshJob.progress_total || 1}
                 </span>
               </div>
@@ -408,7 +408,7 @@ export function AuctionWorkspace() {
                 showInfo={false}
                 size="small"
                 status={refreshJob.status === "failed" ? "exception" : "active"}
-                strokeColor="#d92d20"
+                strokeColor="var(--market-rise)"
               />
             </div>
           )}
@@ -462,8 +462,8 @@ export function AuctionWorkspace() {
           <section className="workbench-panel overflow-hidden rounded-xl border">
             <div className="workbench-panel-divider flex flex-col gap-3 border-b px-4 py-3 xl:flex-row xl:items-start xl:justify-between">
               <div>
-                <div className="text-sm font-black text-[#11100e]">竞价强度榜</div>
-                <div className="text-xs text-[#7b756d]">
+                <div className="text-sm font-black text-[var(--app-ink)]">竞价强度榜</div>
+                <div className="text-xs text-[var(--app-muted)]">
                   当前显示 {visibleItems.length}/{data?.items.length ?? 0} 只，09:25 后主榜不再被盘中行情覆盖，{getAuctionSortDescription(auctionSortMode)}
                 </div>
               </div>
@@ -523,20 +523,20 @@ export function AuctionWorkspace() {
                   key: "source",
                   label: (
                     <div>
-                      <div className="text-sm font-black text-[#11100e]">数据源状态</div>
-                      <div className="text-xs text-[#7b756d]">默认收起，避免早盘盯盘时占主视野。</div>
+                      <div className="text-sm font-black text-[var(--app-ink)]">数据源状态</div>
+                      <div className="text-xs text-[var(--app-muted)]">默认收起，避免早盘盯盘时占主视野。</div>
                     </div>
                   ),
                   children: (
                     <div className="space-y-2">
                       {(data?.source_status ?? []).length ? (
                         (data?.source_status ?? []).map((item, index) => (
-                          <div className="rounded-lg border border-[#e3ddd3] bg-white p-3 text-xs" key={`${item.source}-${index}`}>
+                          <div className="rounded-lg border border-[var(--app-border)] bg-white p-3 text-xs" key={`${item.source}-${index}`}>
                             <div className="flex items-center justify-between gap-2">
-                              <span className="font-black text-[#11100e]">{item.source}</span>
+                              <span className="font-black text-[var(--app-ink)]">{item.source}</span>
                               <Tag color={item.status === "success" ? "green" : "orange"}>{item.status}</Tag>
                             </div>
-                            <div className="mt-1 leading-5 text-[#7b756d]">{item.detail}</div>
+                            <div className="mt-1 leading-5 text-[var(--app-muted)]">{item.detail}</div>
                           </div>
                         ))
                       ) : (
@@ -602,14 +602,14 @@ function AuctionModelTrialPanel({
   const shouldShowPreviewItems = previewItems.length > 0;
   const shouldShowBody = Boolean(error || loadingMode || run);
   return (
-    <section className="mt-2 overflow-hidden rounded-lg border border-[#e3ddd3] bg-white">
+    <section className="mt-2 overflow-hidden rounded-lg border border-[var(--app-border)] bg-white">
       <div className="flex flex-col gap-2 px-3 py-2.5 xl:flex-row xl:items-center xl:justify-between">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-black text-[#11100e]">模型 Top3 试运行</span>
+            <span className="text-sm font-black text-[var(--app-ink)]">模型 Top3 试运行</span>
             <Tag color="orange">研究信号 · 非自动交易</Tag>
           </div>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#7b756d]">
+          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--app-muted)]">
             <span>{statusText}</span>
             <span>{run?.model_version ?? "free-stockdb 五年模型"}</span>
             {run ? <span>{auctionModelCacheStatusLabel(run.cache_status)} · 生成 {formatAuctionModelGeneratedAt(run.generated_at)}</span> : null}
@@ -649,11 +649,11 @@ function AuctionModelTrialPanel({
       </div>
 
       {shouldShowBody ? (
-        <div className="min-w-0 border-t border-[#eee7db] px-3 py-2">
+        <div className="min-w-0 border-t border-[var(--app-border)] px-3 py-2">
           {error ? <Alert className="mb-2" showIcon title={error} type="warning" /> : null}
-          {liveConfirmationError ? <Alert className="mb-2" message={liveConfirmationError} showIcon type="warning" /> : null}
+          {liveConfirmationError ? <Alert className="mb-2" showIcon title={liveConfirmationError} type="warning" /> : null}
           {loadingMode ? (
-            <div className="mb-2 rounded-md border border-dashed border-[#e3ddd3] bg-[#faf7f1] px-3 py-2 text-xs font-semibold text-[#7b756d]">
+            <div className="mb-2 rounded-md border border-dashed border-[var(--app-border)] bg-[var(--app-raised)] px-3 py-2 text-xs font-semibold text-[var(--app-muted)]">
               {loadingMode === "refresh"
                 ? modelRefreshJob?.message || "正在读取候选池和K线，完成后自动读取本地缓存。"
                 : "正在读取本地缓存结果。"}
@@ -663,17 +663,17 @@ function AuctionModelTrialPanel({
             <>
               {backtest ? (
                 <div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
-                  <span className="rounded-md bg-[#faf7f1] px-2 py-1 text-[#7b756d]">
-                    历史胜率 <b className="text-[#11100e]">{formatRatioPct(backtest.win_rate)}</b>
+                  <span className="rounded-md bg-[var(--app-raised)] px-2 py-1 text-[var(--app-muted)]">
+                    历史胜率 <b className="text-[var(--app-ink)]">{formatRatioPct(backtest.win_rate)}</b>
                   </span>
-                  <span className="rounded-md bg-[#fff3f0] px-2 py-1 text-[#7b756d]">
-                    赔率 <b className="text-[#d92d20]">{formatNumber(backtest.payoff_ratio)}</b>
+                  <span className="rounded-md bg-red-50 px-2 py-1 text-[var(--app-muted)]">
+                    赔率 <b className="text-[var(--market-rise)]">{formatNumber(backtest.payoff_ratio)}</b>
                   </span>
-                  <span className="rounded-md bg-[#fff3f0] px-2 py-1 text-[#7b756d]">
-                    期望收益 <b className="text-[#d92d20]">{formatSignedRatioPct(backtest.expectancy)}</b>
+                  <span className="rounded-md bg-red-50 px-2 py-1 text-[var(--app-muted)]">
+                    期望收益 <b className="text-[var(--market-rise)]">{formatSignedRatioPct(backtest.expectancy)}</b>
                   </span>
-                  <span className="rounded-md bg-[#faf7f1] px-2 py-1 text-[#7b756d]">
-                    单账户回测 <b className="text-[#11100e]">{formatRawPct(backtest.capital_return_pct)}</b>
+                  <span className="rounded-md bg-[var(--app-raised)] px-2 py-1 text-[var(--app-muted)]">
+                    单账户回测 <b className="text-[var(--app-ink)]">{formatRawPct(backtest.capital_return_pct)}</b>
                   </span>
                 </div>
               ) : null}
@@ -681,26 +681,26 @@ function AuctionModelTrialPanel({
                 {previewItems.map((item) => {
                   const liveItem = liveConfirmationBySymbol.get(item.symbol);
                   return (
-                    <div className="rounded-lg border border-[#e3ddd3] bg-[#faf7f1] px-3 py-2" key={item.symbol}>
+                    <div className="rounded-lg border border-[var(--app-border)] bg-[var(--app-raised)] px-3 py-2" key={item.symbol}>
                       <div className="flex items-start justify-between gap-2">
-                        <Link className="min-w-0 font-black text-[#11100e]" href={modelStockHref(item)}>
+                        <Link className="min-w-0 font-black text-[var(--app-ink)]" href={modelStockHref(item)}>
                           <span className="block truncate">{item.name || item.symbol}</span>
-                          <span className="block text-xs font-semibold text-[#7b756d]">{item.symbol}</span>
+                          <span className="block text-xs font-semibold text-[var(--app-muted)]">{item.symbol}</span>
                         </Link>
                         <Tag className="m-0 shrink-0" color={auctionModelBucketColor(item.bucket)}>
                           {auctionModelBucketLabel(item.bucket)}
                         </Tag>
                       </div>
                       <div className="mt-1 flex flex-wrap items-center gap-1 text-xs">
-                        <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">排名 #{item.rank ?? "--"}</span>
-                        <span className="rounded-md bg-[#fff3f0] px-2 py-1 font-black text-[#d92d20]">
+                        <span className="rounded-md bg-white px-2 py-1 text-[var(--app-muted)]">排名 #{item.rank ?? "--"}</span>
+                        <span className="rounded-md bg-red-50 px-2 py-1 font-black text-[var(--market-rise)]">
                           概率 {formatProbability(item.prob_3pct)}
                         </span>
-                        <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">前收 {formatPrice(item.prev_close_price)}</span>
-                        <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">
+                        <span className="rounded-md bg-white px-2 py-1 text-[var(--app-muted)]">前收 {formatPrice(item.prev_close_price)}</span>
+                        <span className="rounded-md bg-white px-2 py-1 text-[var(--app-muted)]">
                           流通 {formatCny(item.market_cap_float)}
                         </span>
-                        <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">
+                        <span className="rounded-md bg-white px-2 py-1 text-[var(--app-muted)]">
                           3日均额 {formatCny(item.avg_amount_3d)}
                         </span>
                       </div>
@@ -713,7 +713,7 @@ function AuctionModelTrialPanel({
                           ))}
                         </div>
                       ) : null}
-                      <div className="mt-1 truncate text-xs leading-5 text-[#7b756d]">
+                      <div className="mt-1 truncate text-xs leading-5 text-[var(--app-muted)]">
                         {(item.trend_reasons.length ? item.trend_reasons : item.data_quality).join(" · ") || "--"}
                       </div>
                       {liveItem ? <AuctionModelLiveConfirmationBlock item={liveItem} /> : null}
@@ -733,7 +733,7 @@ function AuctionModelTrialPanel({
               </div>
             </>
           ) : loadingMode && !run ? null : (
-            <div className="rounded-md border border-dashed border-[#e3ddd3] bg-[#faf7f1] px-3 py-2 text-xs text-[#7b756d]">
+            <div className="rounded-md border border-dashed border-[var(--app-border)] bg-[var(--app-raised)] px-3 py-2 text-xs text-[var(--app-muted)]">
               暂无可展示候选，请确认训练数据和交易日。
             </div>
           )}
@@ -757,17 +757,17 @@ function AuctionModelLiveConfirmationBlock({ item }: { item: AuctionTop3LiveConf
   const reasons = item.reasons.slice(0, 2);
   const risks = item.risk_flags.slice(0, 2);
   return (
-    <div className="mt-2 border-t border-[#e3ddd3] pt-2">
+    <div className="mt-2 border-t border-[var(--app-border)] pt-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-black text-[#11100e]">实盘确认</span>
+        <span className="text-xs font-black text-[var(--app-ink)]">实盘确认</span>
         <Tag className="m-0" color={auctionModelLiveConfirmationColor(item.confirmation)}>
           {auctionModelLiveConfirmationLabel(item.confirmation)}
         </Tag>
       </div>
       <div className="mt-1 flex flex-wrap gap-1 text-xs">
-        <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">高开 {formatPct(realtime?.open_gap_pct ?? null)}</span>
-        <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">现涨 {formatPct(realtime?.current_pct_change ?? null)}</span>
-        <span className="rounded-md bg-white px-2 py-1 text-[#7b756d]">竞额 {formatCny(realtime?.turnover_cny ?? null)}</span>
+        <span className="rounded-md bg-white px-2 py-1 text-[var(--app-muted)]">高开 {formatPct(realtime?.open_gap_pct ?? null)}</span>
+        <span className="rounded-md bg-white px-2 py-1 text-[var(--app-muted)]">现涨 {formatPct(realtime?.current_pct_change ?? null)}</span>
+        <span className="rounded-md bg-white px-2 py-1 text-[var(--app-muted)]">竞额 {formatCny(realtime?.turnover_cny ?? null)}</span>
       </div>
       {reasons.length || risks.length ? (
         <div className="mt-1 flex flex-wrap gap-1">
@@ -800,8 +800,8 @@ function AuctionTrustStrip({ data }: { data: AuctionSnapshotResponse | null }) {
           ? "竞价可信度：缓存/待刷新"
           : "竞价可信度：可用";
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-[#e3ddd3] bg-white px-3 py-2 text-xs">
-      <span className="font-black text-[#7b756d]">数据可信度</span>
+    <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-[var(--app-border)] bg-white px-3 py-2 text-xs">
+      <span className="font-black text-[var(--app-muted)]">数据可信度</span>
       <Tag className="m-0" color={snapshotStatusColor(data?.snapshot_status)}>
         {snapshotStatusLabel(data?.snapshot_status)}
       </Tag>
@@ -811,7 +811,7 @@ function AuctionTrustStrip({ data }: { data: AuctionSnapshotResponse | null }) {
       <Tag className="m-0" color={sourceStatus.length ? "blue" : "default"}>
         数据源 {sourceStatus.length || "--"}
       </Tag>
-      <span className="text-[#7b756d]">缓存年龄 {formatCacheAge(data?.cache_age_seconds)}</span>
+      <span className="text-[var(--app-muted)]">缓存年龄 {formatCacheAge(data?.cache_age_seconds)}</span>
     </div>
   );
 }
@@ -849,7 +849,7 @@ function AuctionControlBar({
   return (
     <div className="workbench-panel-divider flex flex-col gap-2 border-b px-4 py-2.5">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="shrink-0 text-xs font-black text-[#7b756d]">排序</span>
+        <span className="shrink-0 text-xs font-black text-[var(--app-muted)]">排序</span>
         <Segmented
           className="max-w-full overflow-x-auto"
           onChange={(value) => onSelectAuctionSortMode(value as AuctionSortMode)}
@@ -857,10 +857,10 @@ function AuctionControlBar({
           size="small"
           value={auctionSortMode}
         />
-        <span className="text-xs text-[#7b756d]">{getAuctionSortDescription(auctionSortMode)}</span>
+        <span className="text-xs text-[var(--app-muted)]">{getAuctionSortDescription(auctionSortMode)}</span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="shrink-0 text-xs font-black text-[#7b756d]">分层</span>
+        <span className="shrink-0 text-xs font-black text-[var(--app-muted)]">分层</span>
         {TIER_FILTERS.map((item) => (
           <Button
             key={item.value}
@@ -871,7 +871,7 @@ function AuctionControlBar({
             {item.label}
           </Button>
         ))}
-        <span className="ml-0 shrink-0 text-xs font-black text-[#7b756d] lg:ml-2">高开风险阈值</span>
+        <span className="ml-0 shrink-0 text-xs font-black text-[var(--app-muted)] lg:ml-2">高开风险阈值</span>
         <InputNumber
           className="w-[88px]"
           max={20}
@@ -882,7 +882,7 @@ function AuctionControlBar({
           step={0.5}
           value={highOpenRiskThreshold}
         />
-        <span className="text-xs text-[#7b756d]">% · {concentrationMessage}</span>
+        <span className="text-xs text-[var(--app-muted)]">% · {concentrationMessage}</span>
       </div>
       <IndustryQuickFilter
         activeIndustry={activeIndustry}
@@ -910,8 +910,8 @@ function AuctionReviewPanel({
     <section className="workbench-panel mt-4 rounded-xl border">
       <div className="workbench-panel-divider flex flex-col gap-3 border-b px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <div className="text-sm font-black text-[#11100e]">竞价复盘</div>
-          <div className="text-xs text-[#7b756d]">
+          <div className="text-sm font-black text-[var(--app-ink)]">竞价复盘</div>
+          <div className="text-xs text-[var(--app-muted)]">
             按 10:00 强度、当日结果和次日反馈归因，持续校准竞价规则。
           </div>
         </div>
@@ -926,11 +926,11 @@ function AuctionReviewPanel({
           <MetricCard compact label="待归因" value={summary?.pending_count ?? null} suffix="只" />
           <MetricCard compact label="数据缺口" value={summary?.data_incomplete_count ?? null} suffix="只" tone="amber" />
         </div>
-        <section className="rounded-lg border border-[#e3ddd3] bg-white">
-          <div className="flex items-center justify-between gap-3 border-b border-[#eee7db] px-3 py-2">
+        <section className="rounded-lg border border-[var(--app-border)] bg-white">
+          <div className="flex items-center justify-between gap-3 border-b border-[var(--app-border)] px-3 py-2">
             <div>
-              <div className="text-sm font-black text-[#11100e]">规则统计</div>
-              <div className="text-xs text-[#7b756d]">{summary?.trade_date ?? "暂无复盘日期"} · 规则分桶表现</div>
+              <div className="text-sm font-black text-[var(--app-ink)]">规则统计</div>
+              <div className="text-xs text-[var(--app-muted)]">{summary?.trade_date ?? "暂无复盘日期"} · 规则分桶表现</div>
             </div>
             <Tag color={summary?.buckets.length ? "red" : "default"}>{summary?.buckets.length ?? 0} 组</Tag>
           </div>
@@ -940,7 +940,7 @@ function AuctionReviewPanel({
                 title: "规则",
                 dataIndex: "rule_tag",
                 width: 110,
-                render: (value: string) => <span className="font-black text-[#11100e]">{value}</span>,
+                render: (value: string) => <span className="font-black text-[var(--app-ink)]">{value}</span>,
               },
               {
                 title: "样本",
@@ -965,7 +965,7 @@ function AuctionReviewPanel({
               {
                 title: "建议",
                 dataIndex: "suggestion",
-                render: (value: string) => <span className="text-xs text-[#7b756d]">{value}</span>,
+                render: (value: string) => <span className="text-xs text-[var(--app-muted)]">{value}</span>,
               },
             ]}
             dataSource={summary?.buckets ?? []}
@@ -976,22 +976,22 @@ function AuctionReviewPanel({
             size="small"
           />
         </section>
-        <section className="rounded-lg border border-[#e3ddd3] bg-white">
-          <div className="border-b border-[#eee7db] px-3 py-2">
-            <div className="text-sm font-black text-[#11100e]">失败样本</div>
-            <div className="text-xs text-[#7b756d]">高分但当日表现偏弱的样本，用来反推过滤条件。</div>
+        <section className="rounded-lg border border-[var(--app-border)] bg-white">
+          <div className="border-b border-[var(--app-border)] px-3 py-2">
+            <div className="text-sm font-black text-[var(--app-ink)]">失败样本</div>
+            <div className="text-xs text-[var(--app-muted)]">高分但当日表现偏弱的样本，用来反推过滤条件。</div>
           </div>
           <div className="space-y-2 p-3">
             {loading ? (
               <SkeletonRows />
             ) : failures.length ? (
               failures.map((item) => (
-                <Link className="block rounded-lg border border-[#eee7db] p-2 hover:border-[#d92d20]" href={auctionStockHref(item)} key={`${item.trade_date}-${item.symbol}-${item.selected_at_label}`}>
+                <Link className="block rounded-lg border border-[var(--app-border)] p-2 hover:border-[var(--market-rise)]" href={auctionStockHref(item)} key={`${item.trade_date}-${item.symbol}-${item.selected_at_label}`}>
                   <div className="flex items-center justify-between gap-2">
-                    <span className="truncate text-sm font-black text-[#11100e]">{item.name || item.symbol}</span>
+                    <span className="truncate text-sm font-black text-[var(--app-ink)]">{item.name || item.symbol}</span>
                     <Tag color="orange">{formatNumber(item.score.total_score)}</Tag>
                   </div>
-                  <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs text-[#7b756d]">
+                  <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-xs text-[var(--app-muted)]">
                     <span>{item.selected_at_label}</span>
                     <span>收盘 {formatPct(item.day_result.close_pct)}</span>
                     <span>回撤 {formatPct(item.day_result.drawdown_pct)}</span>
@@ -1034,7 +1034,7 @@ function IndustryQuickFilter({
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <span className="shrink-0 text-xs font-black text-[#7b756d]">行业筛选</span>
+        <span className="shrink-0 text-xs font-black text-[var(--app-muted)]">行业筛选</span>
         <div
           aria-label="热门行业快捷筛选"
           className="-my-1 flex min-w-0 flex-1 gap-1 overflow-x-auto py-1"
@@ -1047,7 +1047,7 @@ function IndustryQuickFilter({
             type={activeIndustry === "all" ? "primary" : "default"}
           >
             全部行业
-            <span className={activeIndustry === "all" ? "ml-1 opacity-80" : "ml-1 text-[#7b756d]"}>
+            <span className={activeIndustry === "all" ? "ml-1 opacity-80" : "ml-1 text-[var(--app-muted)]"}>
               {totalCount}
             </span>
           </Button>
@@ -1060,7 +1060,7 @@ function IndustryQuickFilter({
               type={activeIndustry === item.industry ? "primary" : "default"}
             >
               {item.industry}
-              <span className={activeIndustry === item.industry ? "ml-1 opacity-80" : "ml-1 text-[#7b756d]"}>
+              <span className={activeIndustry === item.industry ? "ml-1 opacity-80" : "ml-1 text-[var(--app-muted)]"}>
                 {item.count}
               </span>
             </Button>
@@ -1080,7 +1080,7 @@ function IndustryQuickFilter({
       </div>
       {focusIndustryStats.length ? (
         <div className="flex min-w-0 items-center gap-2">
-          <span className="shrink-0 text-xs font-black text-[#7b756d]">关注</span>
+          <span className="shrink-0 text-xs font-black text-[var(--app-muted)]">关注</span>
           <div className="-my-1 flex min-w-0 flex-1 gap-1 overflow-x-auto py-1" role="group" aria-label="关注行业筛选">
             {focusIndustryStats.map((item) => (
               <Button
@@ -1091,7 +1091,7 @@ function IndustryQuickFilter({
                 type={activeIndustry === item.industry ? "primary" : "default"}
               >
                 {item.industry}
-                <span className={activeIndustry === item.industry ? "ml-1 opacity-80" : "ml-1 text-[#7b756d]"}>
+                <span className={activeIndustry === item.industry ? "ml-1 opacity-80" : "ml-1 text-[var(--app-muted)]"}>
                   {item.count}
                 </span>
               </Button>
@@ -1120,8 +1120,8 @@ function MainlineTopPanel({
     <section className="workbench-panel rounded-xl border p-3">
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-black text-[#11100e]">主线行业 Top</div>
-          <div className="text-xs text-[#7b756d]">看竞价是否集中到少数方向。</div>
+          <div className="text-sm font-black text-[var(--app-ink)]">主线行业 Top</div>
+          <div className="text-xs text-[var(--app-muted)]">看竞价是否集中到少数方向。</div>
         </div>
         <Button onClick={() => onSelectIndustry("all")} size="small" type={activeIndustry === "all" ? "primary" : "default"}>
           全部
@@ -1136,23 +1136,23 @@ function MainlineTopPanel({
             return (
               <button
                 className={`w-full rounded-lg border px-3 py-2 text-left transition ${
-                  activeIndustry === item.industry ? "border-[#d92d20] bg-white" : "border-[#e3ddd3] bg-white hover:border-[#c9bca8]"
+                  activeIndustry === item.industry ? "border-[var(--market-rise)] bg-white" : "border-[var(--app-border)] bg-white hover:bg-[var(--app-raised)]"
                 }`}
                 key={item.industry}
                 onClick={() => onSelectIndustry(item.industry)}
                 type="button"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="min-w-0 truncate text-sm font-black text-[#11100e]">
+                  <span className="min-w-0 truncate text-sm font-black text-[var(--app-ink)]">
                     {index + 1}. {item.industry}
                   </span>
-                  <span className="text-xs font-black text-[#d92d20]">{item.count} 只</span>
+                  <span className="text-xs font-black text-[var(--market-rise)]">{item.count} 只</span>
                 </div>
                 <div className="mt-1 flex items-center gap-2">
-                  <Progress className="m-0 flex-1" percent={percent} showInfo={false} strokeColor="#d92d20" />
-                  <span className="w-9 text-right text-xs font-semibold text-[#7b756d]">{percent}%</span>
+                  <Progress className="m-0 flex-1" percent={percent} showInfo={false} strokeColor="var(--market-rise)" />
+                  <span className="w-9 text-right text-xs font-semibold text-[var(--app-muted)]">{percent}%</span>
                 </div>
-                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[#7b756d]">
+                <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-[var(--app-muted)]">
                   <span>均开 {formatPct(item.avgOpenGapPct)}</span>
                   <span>强势 {item.strongCount}</span>
                   <span>{formatCny(item.turnoverCny)}</span>
@@ -1181,8 +1181,8 @@ function RiskFocusPanel({
     <section className="workbench-panel rounded-xl border p-3">
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
-          <div className="text-sm font-black text-[#11100e]">风险与观察</div>
-          <div className="text-xs text-[#7b756d]">高开 {highOpenRiskThreshold}% 以上、低开转强和风险标记优先看。</div>
+          <div className="text-sm font-black text-[var(--app-ink)]">风险与观察</div>
+          <div className="text-xs text-[var(--app-muted)]">高开 {highOpenRiskThreshold}% 以上、低开转强和风险标记优先看。</div>
         </div>
         <Tag color={items.length ? "orange" : "default"}>{items.length} 条</Tag>
       </div>
@@ -1192,15 +1192,15 @@ function RiskFocusPanel({
         ) : items.length ? (
           selectAuctionRiskFocusItems(items).map((item) => (
             <Link
-              className="block rounded-lg border border-[#e3ddd3] bg-white px-3 py-2 no-underline transition hover:border-[#c9bca8]"
+              className="block rounded-lg border border-[var(--app-border)] bg-white px-3 py-2 no-underline transition hover:bg-[var(--app-raised)]"
               href={auctionStockHref(item)}
               key={item.symbol}
             >
               <div className="flex items-center justify-between gap-2">
-                <span className="min-w-0 truncate text-sm font-black text-[#11100e]">{item.name || item.symbol}</span>
-                <span className="text-xs font-black text-[#d92d20]">{formatPct(item.open_gap_pct)}</span>
+                <span className="min-w-0 truncate text-sm font-black text-[var(--app-ink)]">{item.name || item.symbol}</span>
+                <span className="text-xs font-black text-[var(--market-rise)]">{formatPct(item.open_gap_pct)}</span>
               </div>
-              <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-[#7b756d]">
+              <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-[var(--app-muted)]">
                 <span>{item.symbol}</span>
                 <span>{item.industry || "--"}</span>
                 <Tag color={tierColor(item.tier)}>{tierLabel(item.tier)}</Tag>
@@ -1223,37 +1223,37 @@ function AuctionTimelinePanel({ timeline }: { timeline: AuctionTimelineResponse 
     <section className="workbench-panel rounded-xl border">
       <div className="workbench-panel-divider flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5">
         <div>
-          <div className="text-sm font-black text-[#11100e]">竞价时间轴 · 阶段快照</div>
-          <div className="text-xs text-[#7b756d]">锁定 09:20、09:23、09:24:50、09:25，先看候选数和强势延续。</div>
+          <div className="text-sm font-black text-[var(--app-ink)]">竞价时间轴 · 阶段快照</div>
+          <div className="text-xs text-[var(--app-muted)]">锁定 09:20、09:23、09:24:50、09:25，先看候选数和强势延续。</div>
         </div>
         <Tag color="blue">连续出现优先，新晋谨慎确认</Tag>
       </div>
       <div className="grid gap-2 p-2 lg:grid-cols-4">
         {points.length ? (
           points.map((point) => (
-            <div className="rounded-lg border border-[#e3ddd3] bg-white px-3 py-2" key={point.label}>
+            <div className="rounded-lg border border-[var(--app-border)] bg-white px-3 py-2" key={point.label}>
               <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-black text-[#11100e]">{point.label}</span>
+                <span className="text-sm font-black text-[var(--app-ink)]">{point.label}</span>
                 <Tag color={point.snapshot_status === "captured" ? "green" : "default"}>
                   {point.snapshot_status === "captured" ? "已锁定" : "等待"}
                 </Tag>
               </div>
               <div className="mt-1 grid grid-cols-2 gap-2 text-xs">
-                <span className="rounded-md bg-[#faf7f1] px-2 py-1 text-[#7b756d]">候选 {point.metrics.candidate_count}</span>
-                <span className="rounded-md bg-[#fff3f0] px-2 py-1 font-black text-[#d92d20]">
+                <span className="rounded-md bg-[var(--app-raised)] px-2 py-1 text-[var(--app-muted)]">候选 {point.metrics.candidate_count}</span>
+                <span className="rounded-md bg-red-50 px-2 py-1 font-black text-[var(--market-rise)]">
                   强势 {point.metrics.strong_high_open_count}
                 </span>
               </div>
               {point.items[0] ? (
                 <Link
-                  className="mt-2 block rounded-md border border-[#eee8dc] bg-[#faf7f1] px-2 py-1.5 no-underline"
+                  className="mt-2 block rounded-md border border-[var(--app-border)] bg-[var(--app-raised)] px-2 py-1.5 no-underline"
                   href={auctionStockHref(point.items[0])}
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 truncate text-xs font-black text-[#11100e]">
+                    <span className="min-w-0 truncate text-xs font-black text-[var(--app-ink)]">
                       {point.items[0].name || point.items[0].symbol}
                     </span>
-                    <span className="shrink-0 text-xs font-black text-[#d92d20]">
+                    <span className="shrink-0 text-xs font-black text-[var(--market-rise)]">
                       {formatPct(point.items[0].open_gap_pct)}
                     </span>
                   </div>
@@ -1263,14 +1263,14 @@ function AuctionTimelinePanel({ timeline }: { timeline: AuctionTimelineResponse 
                   </div>
                 </Link>
               ) : (
-                <div className="mt-2 rounded-md border border-dashed border-[#e3ddd3] px-3 py-2 text-center text-xs text-[#7b756d]">
+                <div className="mt-2 rounded-md border border-dashed border-[var(--app-border)] px-3 py-2 text-center text-xs text-[var(--app-muted)]">
                   等待后台采样
                 </div>
               )}
             </div>
           ))
         ) : (
-          <div className="rounded-lg border border-dashed border-[#e3ddd3] px-3 py-5 text-center text-xs text-[#7b756d] lg:col-span-4">
+          <div className="rounded-lg border border-dashed border-[var(--app-border)] px-3 py-5 text-center text-xs text-[var(--app-muted)] lg:col-span-4">
             暂无竞价时间轴快照
           </div>
         )}
@@ -1301,9 +1301,9 @@ function AuctionTable({
           fixed: "left",
           width: 190,
           render: (_, item) => (
-            <Link className="font-black text-[#11100e]" href={auctionStockHref(item)}>
+            <Link className="font-black text-[var(--app-ink)]" href={auctionStockHref(item)}>
               {item.name || item.symbol}
-              <span className="ml-2 text-xs font-semibold text-[#7b756d]">{item.symbol}</span>
+              <span className="ml-2 text-xs font-semibold text-[var(--app-muted)]">{item.symbol}</span>
             </Link>
           ),
         },
@@ -1312,7 +1312,7 @@ function AuctionTable({
           dataIndex: "industry",
           width: 120,
           render: (value: string | null) => (
-            <Typography.Text className="text-xs text-[#7b756d]">{value || "--"}</Typography.Text>
+            <Typography.Text className="text-xs text-[var(--app-muted)]">{value || "--"}</Typography.Text>
           ),
         },
         {
@@ -1330,7 +1330,7 @@ function AuctionTable({
                   {item.theme_auction_rank ? <Tag>题材内 {item.theme_auction_rank}</Tag> : null}
                 </div>
               ) : (
-                <span className="text-xs text-[#7b756d]">--</span>
+                <span className="text-xs text-[var(--app-muted)]">--</span>
               )}
             </div>
           ),
@@ -1341,8 +1341,8 @@ function AuctionTable({
           width: 150,
           render: (value: number) => (
             <div className="min-w-[120px]">
-              <Progress percent={Math.max(0, Math.min(value, 100))} showInfo={false} strokeColor="#d92d20" />
-              <div className="mt-1 text-xs font-black text-[#11100e]">{value.toFixed(1)}</div>
+              <Progress percent={Math.max(0, Math.min(value, 100))} showInfo={false} strokeColor="var(--market-rise)" />
+              <div className="mt-1 text-xs font-black text-[var(--app-ink)]">{value.toFixed(1)}</div>
             </div>
           ),
           sorter: (a, b) => a.auction_score - b.auction_score,
@@ -1383,7 +1383,7 @@ function AuctionTable({
                   <Tag color={tierColor(item.tier)}>{tierLabel(item.tier)}</Tag>
                   {liquidityWarning ? <Tag color="orange">{liquidityWarning}</Tag> : null}
                 </div>
-                <div className="mt-1 line-clamp-2 text-xs leading-5 text-[#7b756d]">{item.action_note}</div>
+                <div className="mt-1 line-clamp-2 text-xs leading-5 text-[var(--app-muted)]">{item.action_note}</div>
               </div>
             );
           },
@@ -1417,15 +1417,15 @@ function AuctionTable({
 function RiskRow({ item }: { item: AuctionSnapshotItem }) {
   return (
     <Link
-      className="block rounded-lg border border-[#e3ddd3] bg-white p-3 no-underline transition hover:border-[#c9bca8]"
+      className="block rounded-lg border border-[var(--app-border)] bg-white p-3 no-underline transition hover:bg-[var(--app-raised)]"
       href={auctionStockHref(item)}
     >
       <div className="flex items-center justify-between gap-2">
-        <span className="min-w-0 truncate text-sm font-black text-[#11100e]">{item.name || item.symbol}</span>
-        <span className="text-xs font-black text-[#d92d20]">{formatPct(item.open_gap_pct)}</span>
+        <span className="min-w-0 truncate text-sm font-black text-[var(--app-ink)]">{item.name || item.symbol}</span>
+        <span className="text-xs font-black text-[var(--market-rise)]">{formatPct(item.open_gap_pct)}</span>
       </div>
-      <div className="mt-1 text-xs text-[#7b756d]">{item.symbol}</div>
-      <div className="mt-1 text-xs text-[#7b756d]">行业 {item.industry || "--"}</div>
+      <div className="mt-1 text-xs text-[var(--app-muted)]">{item.symbol}</div>
+      <div className="mt-1 text-xs text-[var(--app-muted)]">行业 {item.industry || "--"}</div>
       <div className="mt-2 flex flex-wrap gap-1">
         {item.risk_flags.map((flag) => (
           <Tag color="orange" key={flag}>
@@ -1452,13 +1452,13 @@ function MetricCard({
   tone?: "red" | "amber" | "ink";
   value: number | null;
 }) {
-  const toneClass = tone === "red" ? "text-[#d92d20]" : tone === "amber" ? "text-[#b45309]" : "text-[#11100e]";
+  const toneClass = tone === "red" ? "text-[var(--market-rise)]" : tone === "amber" ? "text-[var(--market-warning)]" : "text-[var(--app-ink)]";
   return (
-    <div className={`rounded-lg border border-[#e3ddd3] bg-white ${compact ? "px-3 py-2.5" : "px-4 py-3"}`}>
-      <div className="text-xs font-black text-[#7b756d]">{label}</div>
+    <div className={`rounded-lg border border-[var(--app-border)] bg-white ${compact ? "px-3 py-2.5" : "px-4 py-3"}`}>
+      <div className="text-xs font-black text-[var(--app-muted)]">{label}</div>
       <div className={`${compact ? "mt-1 text-xl" : "mt-2 text-2xl"} font-black ${toneClass}`}>
         {formatter ? formatter(value) : value === null ? "--" : value}
-        {!formatter && suffix ? <span className="ml-1 text-sm font-semibold text-[#7b756d]">{suffix}</span> : null}
+        {!formatter && suffix ? <span className="ml-1 text-sm font-semibold text-[var(--app-muted)]">{suffix}</span> : null}
       </div>
     </div>
   );
@@ -1468,9 +1468,9 @@ function SkeletonRows() {
   return (
     <>
       {[0, 1, 2, 3].map((item) => (
-        <div className="rounded-lg border border-[#e3ddd3] bg-white p-3" key={item}>
-          <div className="h-4 w-2/3 rounded bg-[#eee9df]" />
-          <div className="mt-2 h-3 w-1/2 rounded bg-[#eee9df]" />
+        <div className="rounded-lg border border-[var(--app-border)] bg-white p-3" key={item}>
+          <div className="h-4 w-2/3 rounded bg-[var(--app-border)]" />
+          <div className="mt-2 h-3 w-1/2 rounded bg-[var(--app-border)]" />
         </div>
       ))}
     </>
@@ -1517,7 +1517,7 @@ function appearanceTag(
 
 function PctValue({ value }: { value: number | null }) {
   return (
-    <span className={value !== null && value >= 0 ? "text-[#d92d20]" : "market-green-text"}>
+    <span className={value !== null && value >= 0 ? "text-[var(--market-rise)]" : "market-green-text"}>
       {formatPct(value)}
     </span>
   );

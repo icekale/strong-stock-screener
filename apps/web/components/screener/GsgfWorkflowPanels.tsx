@@ -56,11 +56,11 @@ export function GsgfReviewPanel({
   const buckets = reviewSummary?.buckets.slice(0, 4) ?? [];
 
   return (
-    <section className="mt-4 rounded-xl border border-[#ddd8d0] bg-[#f8f7f4] px-4 py-3">
+    <section className="mt-4 rounded-xl border border-[var(--app-border)] bg-[var(--app-raised)] px-4 py-3">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h2 className="text-base font-black text-[#11100e]">信号复盘</h2>
-          <p className="mt-1 text-xs font-medium text-[#7b756d]">
+          <h2 className="text-base font-black text-[var(--app-ink)]">信号复盘</h2>
+          <p className="mt-1 text-xs font-medium text-[var(--app-muted)]">
             样本 {reviewSummary?.record_count ?? 0} 条 · 窗口 {(reviewSummary?.windows ?? [1, 3, 5, 10]).join("/")} 日
           </p>
         </div>
@@ -77,11 +77,11 @@ export function GsgfReviewPanel({
       {buckets.length > 0 ? (
         <div className="mt-3 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
           {buckets.map((bucket) => (
-            <div className="rounded-lg border border-[#ddd8d0] bg-[#f5f3f0] p-3" key={`${bucket.signal_type}-${bucket.status}`}>
-              <p className="truncate text-xs font-black text-[#11100e]" title={bucket.signal_type}>
+            <div className="rounded-lg border border-[var(--app-border)] bg-[var(--app-raised)] p-3" key={`${bucket.signal_type}-${bucket.status}`}>
+              <p className="truncate text-xs font-black text-[var(--app-ink)]" title={bucket.signal_type}>
                 {bucket.signal_type}
               </p>
-              <p className="mt-1 text-[11px] font-semibold text-[#7b756d]">
+              <p className="mt-1 text-[11px] font-semibold text-[var(--app-muted)]">
                 {bucket.status} · 确认 {bucket.confirmed_count}/{bucket.sample_count}
               </p>
               <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
@@ -92,7 +92,7 @@ export function GsgfReviewPanel({
           ))}
         </div>
       ) : (
-        <p className="mt-3 rounded-lg bg-[#f5f3f0] px-3 py-2 text-sm text-[#7b756d]">
+        <p className="mt-3 rounded-lg bg-[var(--app-raised)] px-3 py-2 text-sm text-[var(--app-muted)]">
           暂无复盘样本。先运行筛选，再保存复盘快照。
         </p>
       )}
@@ -132,11 +132,11 @@ export function GsgfCalibrationPanel({
   }, [defaultTradeDate, tradeDatesText]);
 
   return (
-    <section className="mt-4 rounded-xl border border-[#ddd8d0] bg-[#f8f7f4] px-4 py-3">
+    <section className="mt-4 rounded-xl border border-[var(--app-border)] bg-[var(--app-raised)] px-4 py-3">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
         <div className="min-w-0">
-          <h2 className="text-base font-black text-[#11100e]">真实样本校准</h2>
-          <p className="mt-1 text-xs font-medium text-[#7b756d]">
+          <h2 className="text-base font-black text-[var(--app-ink)]">真实样本校准</h2>
+          <p className="mt-1 text-xs font-medium text-[var(--app-muted)]">
             用 TickFlow 历史日K复盘“确认买点 / 低吸观察 / B区A点 / 放量突破确认”的分桶命中率
           </p>
         </div>
@@ -177,20 +177,20 @@ export function GsgfCalibrationPanel({
       </div>
 
       {calibrationJob && (
-        <div className="mt-3 rounded-lg border border-[#ddd8d0] bg-white px-3 py-2">
+        <div className="mt-3 rounded-lg border border-[var(--app-border)] bg-white px-3 py-2">
           <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-black text-[#11100e]">校准任务</span>
+                <span className="text-sm font-black text-[var(--app-ink)]">校准任务</span>
                 <Tag className="m-0" color={jobStatusColor(calibrationJob.status)}>
                   {calibrationJob.status}
                 </Tag>
-                <span className="text-xs font-semibold text-[#7b756d]">
+                <span className="text-xs font-semibold text-[var(--app-muted)]">
                   {calibrationJob.progress_current}/{calibrationJob.progress_total || 1} · {calibrationJob.message || "等待执行"}
                 </span>
               </div>
               {calibrationJob.error && (
-                <p className="mt-1 text-xs font-semibold text-[#d93025]">{calibrationJob.error}</p>
+                <p className="mt-1 text-xs font-semibold text-[var(--market-rise)]">{calibrationJob.error}</p>
               )}
             </div>
             {(calibrationJob.status === "pending" || calibrationJob.status === "running") && (
@@ -215,7 +215,7 @@ export function GsgfCalibrationPanel({
           {calibrationSummary.diagnostic_groups.length > 0 && (
             <div className="xl:col-span-2">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <h3 className="text-sm font-black text-[#11100e]">诊断分桶</h3>
+                <h3 className="text-sm font-black text-[var(--app-ink)]">诊断分桶</h3>
                 <Tag className="m-0">确认信号 / 准备形态 / 结构区间 / 评分段</Tag>
               </div>
               <div className="grid gap-3 lg:grid-cols-2">
@@ -226,7 +226,7 @@ export function GsgfCalibrationPanel({
             </div>
           )}
           <div className="xl:col-span-2">
-            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-[#7b756d]">
+            <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-[var(--app-muted)]">
               <Tag className="m-0">样本日 {calibrationSummary.trade_dates.join(" / ")}</Tag>
               <Tag className="m-0">扫描 {calibrationSummary.scanned_count}</Tag>
               <Tag className="m-0">目标样本 {calibrationSummary.target_sample_count}</Tag>
@@ -235,9 +235,9 @@ export function GsgfCalibrationPanel({
               <span>生成 {formatDateTime(calibrationSummary.generated_at)}</span>
             </div>
             {calibrationSummary.samples.length > 0 && (
-              <div className="mt-3 overflow-x-auto rounded-lg border border-[#ddd8d0]">
-                <table className="min-w-full divide-y divide-[#ddd8d0] text-left text-xs">
-                  <thead className="bg-[#f5f3f0] text-[#7b756d]">
+              <div className="mt-3 overflow-x-auto rounded-lg border border-[var(--app-border)]">
+                <table className="min-w-full divide-y divide-[var(--app-border)] text-left text-xs">
+                  <thead className="bg-[var(--app-raised)] text-[var(--app-muted)]">
                     <tr>
                       <th className="px-3 py-2 font-black" colSpan={4 + calibrationSummary.windows.length}>
                         信号后T+演化
@@ -255,25 +255,25 @@ export function GsgfCalibrationPanel({
                       ))}
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-[#e5e0d8] bg-white">
+                  <tbody className="divide-y divide-[var(--app-border)] bg-white">
                     {calibrationSummary.samples.slice(0, 6).map((sample) => (
                       <tr key={`${sample.trade_date}-${sample.symbol}`}>
-                        <td className="px-3 py-2 font-bold text-[#11100e]">
+                        <td className="px-3 py-2 font-bold text-[var(--app-ink)]">
                           {sample.trade_date} · {sample.name} {sample.symbol}
                         </td>
-                        <td className="px-3 py-2 text-[#7b756d]">{sample.bucket_names.join(" / ")}</td>
-                        <td className="px-3 py-2 text-[#7b756d]">{sample.status}</td>
-                        <td className="px-3 py-2 tabular-nums text-[#7b756d]">
+                        <td className="px-3 py-2 text-[var(--app-muted)]">{sample.bucket_names.join(" / ")}</td>
+                        <td className="px-3 py-2 text-[var(--app-muted)]">{sample.status}</td>
+                        <td className="px-3 py-2 tabular-nums text-[var(--app-muted)]">
                           {sample.entry_close === null ? "--" : sample.entry_close.toFixed(2)}
                         </td>
                         {calibrationSummary.windows.map((window) => {
                           const sampleWindow = sample.windows.find((item) => item.window_days === window);
                           return (
                             <td className="px-3 py-2 tabular-nums" key={window}>
-                              <div className="font-black text-[#11100e]">
+                              <div className="font-black text-[var(--app-ink)]">
                                 {formatSignedPercent(sampleWindow?.realized_return_pct)}
                               </div>
-                              <div className="text-[11px] text-[#7b756d]">
+                              <div className="text-[11px] text-[var(--app-muted)]">
                                 最大回撤 {formatSignedPercent(sampleWindow?.max_drawdown_pct)}
                               </div>
                             </td>
@@ -288,7 +288,7 @@ export function GsgfCalibrationPanel({
           </div>
         </div>
       ) : (
-        <p className="mt-3 rounded-lg bg-[#f5f3f0] px-3 py-2 text-sm text-[#7b756d]">
+        <p className="mt-3 rounded-lg bg-[var(--app-raised)] px-3 py-2 text-sm text-[var(--app-muted)]">
           暂无真实样本校准结果。建议先跑 3-10 个历史交易日的小样本，再逐步扩大 scan limit。
         </p>
       )}
@@ -299,15 +299,15 @@ export function GsgfCalibrationPanel({
 function ModelHealthBar({ gsgfHealth }: { gsgfHealth: GsgfModelHealth | null }) {
   if (!gsgfHealth) {
     return (
-      <div className="mt-3 rounded-lg bg-[#f5f3f0] px-3 py-2 text-xs font-semibold text-[#7b756d]">
+      <div className="mt-3 rounded-lg bg-[var(--app-raised)] px-3 py-2 text-xs font-semibold text-[var(--app-muted)]">
         模型健康：暂无自动复盘摘要，保存快照并复查后生成。
       </div>
     );
   }
   return (
-    <div className="mt-3 rounded-lg border border-[#ddd8d0] bg-white px-3 py-2">
+    <div className="mt-3 rounded-lg border border-[var(--app-border)] bg-white px-3 py-2">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-black text-[#11100e]">模型健康</span>
+        <span className="text-xs font-black text-[var(--app-ink)]">模型健康</span>
         <Tag className="m-0" color="success">
           强信号 {gsgfHealth.best_signals.length}
         </Tag>
@@ -319,7 +319,7 @@ function ModelHealthBar({ gsgfHealth }: { gsgfHealth: GsgfModelHealth | null }) 
         </Tag>
         <Tag className="m-0">样本不足 {gsgfHealth.insufficient_sample_signals.length}</Tag>
       </div>
-      <p className="mt-1 text-xs font-semibold text-[#7b756d]">{gsgfHealth.summary_text}</p>
+      <p className="mt-1 text-xs font-semibold text-[var(--app-muted)]">{gsgfHealth.summary_text}</p>
     </div>
   );
 }
@@ -332,15 +332,15 @@ function CalibrationBucketTable({
   title: string;
 }) {
   return (
-    <div className="min-w-0 max-w-full overflow-hidden rounded-lg border border-[#ddd8d0] bg-[#f5f3f0] p-3">
+    <div className="min-w-0 max-w-full overflow-hidden rounded-lg border border-[var(--app-border)] bg-[var(--app-raised)] p-3">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <h3 className="text-sm font-black text-[#11100e]">{title}</h3>
+        <h3 className="text-sm font-black text-[var(--app-ink)]">{title}</h3>
         <Tag className="m-0">{buckets.length || "待数据"}</Tag>
       </div>
       {buckets.length > 0 ? (
         <div className="max-w-full overflow-x-auto">
           <table className="min-w-[520px] text-left text-xs">
-            <thead className="text-[#7b756d]">
+            <thead className="text-[var(--app-muted)]">
               <tr>
                 <th className="px-2 py-2 font-black">分桶</th>
                 <th className="px-2 py-2 font-black">样本</th>
@@ -351,14 +351,14 @@ function CalibrationBucketTable({
                 <th className="px-2 py-2 font-black">回撤</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[#ddd8d0]">
+            <tbody className="divide-y divide-[var(--app-border)]">
               {buckets.map((bucket) => {
                 const primaryWindow = bucket.windows[0] ?? null;
                 return (
                   <tr key={bucket.name}>
-                    <td className="px-2 py-2 font-black text-[#11100e]">{bucket.name}</td>
-                    <td className="px-2 py-2 tabular-nums text-[#7b756d]">{bucket.sample_count}</td>
-                    <td className="px-2 py-2 font-black tabular-nums text-[#11100e]">
+                    <td className="px-2 py-2 font-black text-[var(--app-ink)]">{bucket.name}</td>
+                    <td className="px-2 py-2 tabular-nums text-[var(--app-muted)]">{bucket.sample_count}</td>
+                    <td className="px-2 py-2 font-black tabular-nums text-[var(--app-ink)]">
                       {bucket.composite_score === null ? "--" : bucket.composite_score.toFixed(2)}
                     </td>
                     <td className="px-2 py-2">
@@ -366,13 +366,13 @@ function CalibrationBucketTable({
                         {bucket.calibration_rating}
                       </Tag>
                     </td>
-                    <td className="px-2 py-2 font-black tabular-nums text-[#11100e]">
+                    <td className="px-2 py-2 font-black tabular-nums text-[var(--app-ink)]">
                       {formatPlainPercent(primaryWindow?.hit_rate)}
                     </td>
-                    <td className="px-2 py-2 tabular-nums text-[#7b756d]">
+                    <td className="px-2 py-2 tabular-nums text-[var(--app-muted)]">
                       {formatSignedPercent(primaryWindow?.avg_return_pct)}
                     </td>
-                    <td className="px-2 py-2 tabular-nums text-[#7b756d]">
+                    <td className="px-2 py-2 tabular-nums text-[var(--app-muted)]">
                       {formatSignedPercent(primaryWindow?.avg_max_drawdown_pct)}
                     </td>
                   </tr>
@@ -382,7 +382,7 @@ function CalibrationBucketTable({
           </table>
         </div>
       ) : (
-        <p className="rounded-md bg-white px-3 py-2 text-sm text-[#7b756d]">当前样本没有命中目标分桶。</p>
+        <p className="rounded-md bg-white px-3 py-2 text-sm text-[var(--app-muted)]">当前样本没有命中目标分桶。</p>
       )}
     </div>
   );

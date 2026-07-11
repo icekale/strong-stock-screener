@@ -113,8 +113,8 @@ export function WatchlistManagerPanel({
             }}
             type="button"
           >
-            <span className="block font-black text-[#11100e]">{item.name ?? item.symbol}</span>
-            <span className="mt-1 block text-xs font-semibold text-[#7b756d]">{item.symbol}</span>
+            <span className="block font-black text-[var(--app-ink)]">{item.name ?? item.symbol}</span>
+            <span className="mt-1 block text-xs font-semibold text-[var(--app-muted)]">{item.symbol}</span>
           </button>
         ),
       },
@@ -206,7 +206,7 @@ export function WatchlistManagerPanel({
         </div>
 
         {selectedCount > 0 && (
-          <div className="workbench-panel-divider grid gap-2 border-b bg-[#eee9df] p-3 lg:grid-cols-[auto_minmax(120px,180px)_auto] lg:items-center">
+          <div className="workbench-panel-divider grid gap-2 border-b bg-[var(--app-raised)] p-3 lg:grid-cols-[auto_minmax(120px,180px)_auto] lg:items-center">
             <Tag className="m-0" color="blue">
               已选 {selectedCount}
             </Tag>
@@ -259,7 +259,7 @@ export function WatchlistManagerPanel({
 }
 
 function SectionTitle({ title }: { title: string }) {
-  return <h2 className="mb-3 text-xs font-black uppercase text-[#7b756d]">{title}</h2>;
+  return <h2 className="mb-3 text-xs font-black uppercase text-[var(--app-muted)]">{title}</h2>;
 }
 
 function GroupButton({
@@ -276,7 +276,7 @@ function GroupButton({
   return (
     <button
       className={`flex min-h-[34px] w-full items-center justify-between rounded-md px-3 text-xs font-black transition ${
-        active ? "bg-[#11100e] text-white" : "bg-[#f5f3f0] text-[#11100e] hover:bg-[#eee9df]"
+        active ? "bg-[var(--app-ink)] text-white" : "bg-[var(--app-raised)] text-[var(--app-ink)] hover:bg-[var(--app-border)]"
       }`}
       onClick={onClick}
       type="button"
@@ -299,7 +299,7 @@ function TagButton({ active, label, onClick }: { active: boolean; label: string;
 
 function TagList({ tags }: { tags: string[] }) {
   if (tags.length === 0) {
-    return <span className="text-sm text-[#7b756d]">--</span>;
+    return <span className="text-sm text-[var(--app-muted)]">--</span>;
   }
   return (
     <div className="flex flex-wrap gap-1">
@@ -328,7 +328,7 @@ function StructureTriggerBadge({ analysis }: { analysis: GsgfAnalysis | undefine
         </Tag>
         <Tag className="m-0">{gsgfLabel(analysis.zone)}</Tag>
       </div>
-      {tags.length > 0 && <p className="line-clamp-2 text-xs leading-5 text-[#7b756d]">{tags.join(" / ")}</p>}
+      {tags.length > 0 && <p className="line-clamp-2 text-xs leading-5 text-[var(--app-muted)]">{tags.join(" / ")}</p>}
     </div>
   );
 }

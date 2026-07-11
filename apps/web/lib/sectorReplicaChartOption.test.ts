@@ -33,3 +33,14 @@ test("sector replica chart option reduces key-time labels for compact charts", (
   assert.equal(interval?.(9, axis[9]), true);
   assert.equal(option.grid?.right, "4%");
 });
+
+test("sector replica chart option uses the product canvas palette", () => {
+  const option = buildSectorReplicaChartOption({
+    axis: ["09:15", "15:00"],
+    series: [{ name: "芯片", type: "line", data: [1, 2], smooth: true, showSymbol: false }],
+  });
+
+  assert.equal(option.backgroundColor, "#f7f9fc");
+  assert.equal(option.legend?.textStyle?.color, "#182336");
+  assert.equal(option.xAxis?.axisLine?.lineStyle?.color, "#d9e2ed");
+});

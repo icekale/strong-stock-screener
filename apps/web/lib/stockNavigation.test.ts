@@ -101,3 +101,18 @@ test("stock detail context returns heatmap details to the unified market view", 
     returnLabel: "返回市场热图",
   });
 });
+
+test("stock detail context returns screener details to the dedicated screener", () => {
+  assert.equal(
+    buildStockDetailHref("603823.SH", { from: "screener" }),
+    "/stock/603823.SH?from=screener",
+  );
+
+  assert.deepEqual(resolveStockDetailContext(new URLSearchParams("from=screener")), {
+    from: "screener",
+    industry: null,
+    name: null,
+    returnHref: "/screener",
+    returnLabel: "返回选股工作台",
+  });
+});

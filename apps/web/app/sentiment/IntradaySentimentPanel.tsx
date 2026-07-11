@@ -36,8 +36,8 @@ export function IntradaySentimentPanel({
     <section className="workbench-panel min-w-0 overflow-hidden rounded-xl border">
       <div className="workbench-panel-divider flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
         <div>
-          <div className="text-sm font-black text-[#11100e]">盘中情绪快照</div>
-          <div className="text-xs text-[#7b756d]">
+          <div className="text-sm font-black text-[var(--app-ink)]">盘中情绪快照</div>
+          <div className="text-xs text-[var(--app-muted)]">
             TickFlow 实时行情 + 1分钟线，先用于手动刷新观察，定时提醒放到任务流版本。
           </div>
         </div>
@@ -61,35 +61,35 @@ export function IntradaySentimentPanel({
           </Button>
         </Space>
       </div>
-      <div className="grid gap-3 border-b border-[#ddd8d0] p-4 md:grid-cols-2 xl:grid-cols-5">
+      <div className="grid gap-3 border-b border-[var(--app-border)] p-4 md:grid-cols-2 xl:grid-cols-5">
         <SmallMetric label="监控数" value={data?.metrics.watched_count ?? 0} />
         <SmallMetric label="预警数" value={data?.metrics.alert_count ?? 0} />
         <SmallMetric label="减仓确认" value={data?.metrics.reduce_count ?? 0} />
         <SmallMetric label="低吸观察" value={data?.metrics.low_buy_watch_count ?? 0} />
         <SmallMetric label="回避追高" value={data?.metrics.avoid_chase_count ?? 0} />
       </div>
-      <div className="grid gap-4 border-b border-[#ddd8d0] p-4 xl:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="rounded-lg border border-[#e3ddd3] bg-white p-3">
+      <div className="grid gap-4 border-b border-[var(--app-border)] p-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+        <div className="rounded-lg border border-[var(--app-border)] bg-white p-3">
           <div className="mb-2 flex items-center justify-between gap-3">
             <div>
-              <div className="text-sm font-black text-[#11100e]">提醒草稿</div>
-              <div className="text-xs text-[#7b756d]">可复制后发送到企业微信、飞书、Telegram 或邮件。</div>
+              <div className="text-sm font-black text-[var(--app-ink)]">提醒草稿</div>
+              <div className="text-xs text-[var(--app-muted)]">可复制后发送到企业微信、飞书、Telegram 或邮件。</div>
             </div>
             <Tag color={(digest?.alert_count ?? 0) > 0 ? "red" : "default"}>
               {digest?.alert_count ?? 0} 条提醒
             </Tag>
           </div>
-          <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded-lg bg-[#1d1b18] p-3 text-xs leading-5 text-[#f8f7f4]">
+          <pre className="max-h-52 overflow-auto whitespace-pre-wrap rounded-lg bg-[var(--app-ink)] p-3 text-xs leading-5 text-white">
             {digest?.message_text ?? "点击生成草稿，系统会把盘中动作整理成可发送的中文消息。"}
           </pre>
         </div>
-        <div className="rounded-lg border border-[#e3ddd3] bg-white p-3">
-          <div className="text-sm font-black text-[#11100e]">规则说明</div>
-          <div className="mt-2 space-y-2 text-xs leading-5 text-[#433f38]">
+        <div className="rounded-lg border border-[var(--app-border)] bg-white p-3">
+          <div className="text-sm font-black text-[var(--app-ink)]">规则说明</div>
+          <div className="mt-2 space-y-2 text-xs leading-5 text-[var(--app-muted)]">
             <div>减仓确认：高位强势、冲高回落或盘中风险信号。</div>
             <div>低吸观察：急跌后等待修复，必须结合趋势位置。</div>
             <div>回避追高：未站稳日内均线或风险信号未解除。</div>
-            <div className="text-[#8a4b12]">当前只生成草稿，不自动发送。</div>
+            <div className="text-[var(--market-warning)]">当前只生成草稿，不自动发送。</div>
           </div>
         </div>
       </div>
@@ -111,9 +111,9 @@ export function IntradaySentimentPanel({
 
 function SmallMetric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-lg border border-[#e3ddd3] bg-white px-3 py-2">
-      <div className="text-xs font-black text-[#7b756d]">{label}</div>
-      <div className="mt-1 text-xl font-black text-[#11100e]">{value}</div>
+    <div className="rounded-lg border border-[var(--app-border)] bg-white px-3 py-2">
+      <div className="text-xs font-black text-[var(--app-muted)]">{label}</div>
+      <div className="mt-1 text-xl font-black text-[var(--app-ink)]">{value}</div>
     </div>
   );
 }
@@ -124,9 +124,9 @@ const intradayColumns: ColumnsType<ShortTermIntradaySentimentItem> = [
     dataIndex: "name",
     fixed: "left",
     render: (value: string, item) => (
-      <Link className="font-black text-[#11100e] hover:text-[#d92d20]" href={`/stock/${item.symbol}`}>
+      <Link className="font-black text-[var(--app-ink)] hover:text-[var(--app-primary)]" href={`/stock/${item.symbol}`}>
         {value}
-        <span className="ml-2 text-xs font-semibold text-[#7b756d]">{item.symbol}</span>
+        <span className="ml-2 text-xs font-semibold text-[var(--app-muted)]">{item.symbol}</span>
       </Link>
     ),
   },
@@ -153,7 +153,7 @@ const intradayColumns: ColumnsType<ShortTermIntradaySentimentItem> = [
     dataIndex: "pct_change",
     sorter: (a, b) => (a.pct_change ?? 0) - (b.pct_change ?? 0),
     render: (value: number | null) => (
-      <span className={(value ?? 0) >= 0 ? "text-[#d92d20]" : "market-green-text"}>
+      <span className={(value ?? 0) >= 0 ? "text-[var(--market-rise)]" : "market-green-text"}>
         {formatPct(value)}
       </span>
     ),
@@ -172,7 +172,7 @@ const intradayColumns: ColumnsType<ShortTermIntradaySentimentItem> = [
     title: "信号",
     dataIndex: "signals",
     render: (value: string[]) => (
-      <span className="text-xs text-[#433f38]">{value.slice(0, 3).join(" / ") || "--"}</span>
+      <span className="text-xs text-[var(--app-muted)]">{value.slice(0, 3).join(" / ") || "--"}</span>
     ),
   },
 ];

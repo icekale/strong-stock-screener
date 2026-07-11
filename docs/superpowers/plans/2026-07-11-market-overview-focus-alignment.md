@@ -16,6 +16,7 @@
 | --- | --- |
 | `apps/web/lib/marketOverview.test.ts` | Source contracts for homepage requests and non-overlaid chart geometry. |
 | `apps/web/app/MarketOverviewWorkbench.tsx` | Homepage state, refresh requests, and visible composition. |
+| `apps/web/app/page.tsx` | Dynamic-loading placeholder matching the focused homepage composition. |
 | `apps/web/components/overview/SectorHeatmapPreview.tsx` | Desktop flow row semantic structure. |
 | `apps/web/app/globals.css` | Desktop heading, track, bar, and metadata geometry. |
 
@@ -24,10 +25,11 @@
 **Files:**
 - Modify: `apps/web/lib/marketOverview.test.ts`
 - Modify: `apps/web/app/MarketOverviewWorkbench.tsx`
+- Modify: `apps/web/app/page.tsx`
 
 - [ ] **Step 1: Write a failing homepage focus contract**
 
-Add a source test that verifies the homepage does not import or render `DecisionQueue`, does not call `getLatestScreenRun` or `getAuctionModelTop3`, and still requests market overview, sector radar, and sentiment summary.
+Add source tests that verify the homepage does not import or render `DecisionQueue`, does not call `getLatestScreenRun` or `getAuctionModelTop3`, still requests market overview, sector radar, and sentiment summary, and does not show a decision-queue loading placeholder.
 
 ```ts
 test("homepage only loads market direction data", () => {
@@ -39,6 +41,15 @@ test("homepage only loads market direction data", () => {
   assert.match(source, /getMarketOverview\(\)/);
   assert.match(source, /getSectorRadar\(12\)/);
   assert.match(source, /getSentimentSummary\(tradeDate, 80, false\)/);
+});
+
+test("homepage loading placeholder matches the focused composition", () => {
+  const source = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /板块资金流/);
+  assert.match(source, /市场状态/);
+  assert.match(source, /指数快照/);
+  assert.doesNotMatch(source, /决策队列/);
 });
 ```
 
@@ -63,6 +74,12 @@ In `MarketOverviewWorkbench.tsx`:
 - update the result destructuring and state application to those three results;
 - remove the `DecisionQueue` JSX and the now-unused `toAuctionPanelState` helper.
 
+In `page.tsx`, remove only this loading placeholder:
+
+```tsx
+<PlaceholderPanel rows={4} title="决策队列" />
+```
+
 - [ ] **Step 4: Run the focused test and verify GREEN**
 
 Run the command from Step 2. Expected: PASS.
@@ -70,7 +87,7 @@ Run the command from Step 2. Expected: PASS.
 - [ ] **Step 5: Commit the homepage scope change**
 
 ```bash
-git add apps/web/app/MarketOverviewWorkbench.tsx apps/web/lib/marketOverview.test.ts
+git add apps/web/app/MarketOverviewWorkbench.tsx apps/web/app/page.tsx apps/web/lib/marketOverview.test.ts
 git commit -m "refactor: focus market overview homepage"
 ```
 

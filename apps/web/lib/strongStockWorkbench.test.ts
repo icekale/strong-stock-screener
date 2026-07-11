@@ -1043,6 +1043,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
 
 test("app shell uses grouped navigation with responsive collapse and mobile access", () => {
   const source = readFileSync(new URL("../components/AppShell.tsx", import.meta.url), "utf8");
+  const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 
   assert.match(source, /navigationGroups/);
   assert.match(source, /getNavigationSelection/);
@@ -1055,6 +1056,11 @@ test("app shell uses grouped navigation with responsive collapse and mobile acce
   assert.match(source, /removeEventListener\("change", handleDesktopViewportChange\)/);
   assert.match(source, /width=\{216\}/);
   assert.match(source, /collapsedWidth=\{64\}/);
+  assert.match(source, /app-shell__desktop-sidebar--collapsed/);
+  assert.match(
+    styles,
+    /\.app-shell__desktop-sidebar--collapsed \.app-shell__sidebar-footer\s*\{[\s\S]*?margin-bottom:\s*48px;/,
+  );
   assert.match(source, /aria-label="打开导航"/);
   assert.match(source, /aria-label="主导航"/);
   assert.match(source, /StockMaster/);

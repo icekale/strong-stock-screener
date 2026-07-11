@@ -183,6 +183,10 @@ body {
   border-top: 1px solid #243854;
 }
 
+.app-shell__desktop-sidebar--collapsed .app-shell__sidebar-footer {
+  margin-bottom: 48px;
+}
+
 .app-shell__collapse-button {
   color: #b6c4d8 !important;
 }

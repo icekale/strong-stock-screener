@@ -71,7 +71,12 @@ export function AppShell({ children }: { children: ReactNode }) {
         trigger={null}
         width={216}
       >
-        <div className="app-shell__desktop-sidebar">
+        <div
+          className={joinClassNames(
+            "app-shell__desktop-sidebar",
+            collapsed && "app-shell__desktop-sidebar--collapsed",
+          )}
+        >
           <ProductMark collapsed={collapsed} />
           <ShellNavigation collapsed={collapsed} pathname={pathname} />
           <div className="app-shell__sidebar-footer">

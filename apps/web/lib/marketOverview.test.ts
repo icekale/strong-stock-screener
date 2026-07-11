@@ -47,6 +47,7 @@ test("market pulse exposes prominent breadth and compact index strip", () => {
 
   assert.match(source, /marketBreadthPercent/);
   assert.match(source, /market-state__value/);
+  assert.match(source, /export function MarketIndexStrip/);
   assert.match(source, /market-index-strip/);
 });
 
@@ -55,7 +56,17 @@ test("homepage renders market direction before the decision queue without the du
 
   assert.ok(source.indexOf("<SectorHeatmapPreview") < source.indexOf("<DecisionQueue"));
   assert.ok(source.indexOf("<MarketPulse") < source.indexOf("<DecisionQueue"));
+  assert.ok(source.indexOf("<MarketIndexStrip") < source.indexOf("<DecisionQueue"));
   assert.doesNotMatch(source, /<MarketFeed/);
+});
+
+test("homepage loading placeholder preserves the redesigned reading order", () => {
+  const source = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
+
+  assert.ok(source.indexOf("板块资金流") < source.indexOf("市场状态"));
+  assert.ok(source.indexOf("市场状态") < source.indexOf("指数快照"));
+  assert.ok(source.indexOf("指数快照") < source.indexOf("决策队列"));
+  assert.doesNotMatch(source, /市场动态/);
 });
 
 test("decision queue uses content-height blocks and compact empty states", () => {
@@ -67,6 +78,16 @@ test("decision queue uses content-height blocks and compact empty states", () =>
   assert.match(styles, /\.decision-queue \.ant-empty\s*\{[\s\S]*?margin-block:\s*0/);
   assert.match(styles, /\.decision-queue \.data-state--empty \.ant-empty-image\s*\{[\s\S]*?display:\s*none/);
   assert.doesNotMatch(styles, /\.sector-flow-cell--outflow \.sector-flow-bar__label\s*\{[\s\S]*?flex-direction:\s*row-reverse/);
+  assert.match(styles, /\.market-index-strip\s*\{[\s\S]*?grid-template-columns:\s*repeat\(4/);
+  assert.match(styles, /\.sector-flow-segment button\s*\{[\s\S]*?min-height:\s*44px/);
+  assert.doesNotMatch(styles, /\.sector-flow-bar\s*\{[\s\S]*?min-width:\s*3px/);
+});
+
+test("sector flow accessible labels state the direction explicitly", () => {
+  const source = readFileSync(new URL("../components/overview/SectorHeatmapPreview.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /flowAriaLabel\(direction, row\)/);
+  assert.match(source, /direction === "inflow" \? "净流入" : "净流出"/);
 });
 
 test("selectTop3 keeps only selected items in ascending rank order", () => {

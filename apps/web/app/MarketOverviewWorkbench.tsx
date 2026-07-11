@@ -4,7 +4,7 @@ import { ReloadOutlined } from "@ant-design/icons";
 import { Button, Tag } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DecisionQueue } from "../components/overview/DecisionQueue";
-import { MarketPulse } from "../components/overview/MarketPulse";
+import { MarketIndexStrip, MarketPulse } from "../components/overview/MarketPulse";
 import { SectorHeatmapPreview } from "../components/overview/SectorHeatmapPreview";
 import { PageFrame } from "../components/workbench/PageFrame";
 import {
@@ -93,6 +93,7 @@ export function MarketOverviewWorkbench() {
           <SectorHeatmapPreview onRefresh={() => void refresh()} sectorRadar={sectorRadar} />
           <MarketPulse market={market} onRefresh={() => void refresh()} sentiment={sentiment} />
         </div>
+        <MarketIndexStrip market={market} onRefresh={() => void refresh()} />
         <DecisionQueue auction={auction} onRefresh={() => void refresh()} screening={screening} />
       </div>
     </PageFrame>

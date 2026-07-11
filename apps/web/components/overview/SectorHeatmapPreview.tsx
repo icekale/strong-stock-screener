@@ -86,9 +86,9 @@ function DesktopFlowCell({ direction, row }: { direction: FlowDirection; row: Se
 
   return (
     <div
-      aria-label={flowAriaLabel(row)}
+      aria-label={flowAriaLabel(direction, row)}
       className={`sector-flow-cell sector-flow-cell--${direction}`}
-      title={flowAriaLabel(row)}
+      title={flowAriaLabel(direction, row)}
     >
       <div
         className={`sector-flow-bar sector-flow-bar--${direction}`}
@@ -107,7 +107,7 @@ function DesktopFlowCell({ direction, row }: { direction: FlowDirection; row: Se
 
 function MobileFlowRow({ direction, row }: { direction: FlowDirection; row: SectorFlowRow }) {
   return (
-    <div aria-label={flowAriaLabel(row)} className="sector-flow-mobile__row">
+    <div aria-label={flowAriaLabel(direction, row)} className="sector-flow-mobile__row">
       <div className="sector-flow-mobile__heading">
         <span>{row.item.name}</span>
         <strong className={direction === "inflow" ? "market-rise-text" : "market-fall-text"}>{formatCny(row.item.net_flow_cny)}</strong>
@@ -122,8 +122,9 @@ function MobileFlowRow({ direction, row }: { direction: FlowDirection; row: Sect
   );
 }
 
-function flowAriaLabel(row: SectorFlowRow) {
-  return `${row.item.name}，净流额 ${formatCny(row.item.net_flow_cny)}，领涨 ${row.item.leader ?? "暂无"}，涨跌幅 ${formatPercent(row.item.change_pct)}，强度 ${row.item.strength_score.toFixed(1)}`;
+function flowAriaLabel(direction: FlowDirection, row: SectorFlowRow) {
+  const directionLabel = direction === "inflow" ? "净流入" : "净流出";
+  return `${row.item.name}，${directionLabel} ${formatCny(row.item.net_flow_cny)}，领涨 ${row.item.leader ?? "暂无"}，涨跌幅 ${formatPercent(row.item.change_pct)}，强度 ${row.item.strength_score.toFixed(1)}`;
 }
 
 function flowStatusLabel(value: SectorRadarResponse["capital_flow_status"]) {

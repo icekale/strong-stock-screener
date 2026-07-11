@@ -17,18 +17,27 @@ export default function HomePage() {
 function MarketOverviewPlaceholder() {
   return (
     <PageFrame context="正在读取上海市场数据" title="市场总览">
-      <div className="grid gap-4 xl:grid-cols-2">
-        {["决策队列", "市场脉冲", "板块资金流", "市场动态"].map((title) => (
-          <section className="compact-panel" key={title}>
-            <div className="compact-panel__header">
-              <h2 className="m-0 text-sm font-semibold text-[var(--app-ink)]">{title}</h2>
-            </div>
-            <div className="p-4">
-              <Skeleton active paragraph={{ rows: title === "决策队列" ? 7 : 4 }} title={false} />
-            </div>
-          </section>
-        ))}
+      <div className="market-overview-layout">
+        <div className="market-overview-lead">
+          <PlaceholderPanel rows={5} title="板块资金流" />
+          <PlaceholderPanel rows={5} title="市场状态" />
+        </div>
+        <PlaceholderPanel rows={1} title="指数快照" />
+        <PlaceholderPanel rows={4} title="决策队列" />
       </div>
     </PageFrame>
+  );
+}
+
+function PlaceholderPanel({ rows, title }: { rows: number; title: string }) {
+  return (
+    <section className="compact-panel">
+      <div className="compact-panel__header">
+        <h2 className="m-0 text-sm font-semibold text-[var(--app-ink)]">{title}</h2>
+      </div>
+      <div className="p-4">
+        <Skeleton active paragraph={{ rows }} title={false} />
+      </div>
+    </section>
   );
 }

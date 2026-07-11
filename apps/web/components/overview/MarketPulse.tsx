@@ -80,22 +80,29 @@ export function MarketPulse({ market, onRefresh, sentiment }: MarketPulseProps) 
           {!marketData && market?.kind === "error" ? <DataState action={{ onClick: onRefresh }} kind="error" subject="市场概览" /> : null}
           {!sentimentData && sentiment?.kind === "error" ? <DataState action={{ onClick: onRefresh }} kind="error" subject="情绪摘要" /> : null}
 
-          {marketData ? (
-            marketData.indices.length > 0 ? (
-              <div className="market-index-strip">
-                {marketData.indices.map((item) => (
-                  <div className="market-index-strip__item" key={item.symbol}>
-                    <span>{item.name}</span>
-                    <strong>{formatNumber(item.last_price)}</strong>
-                    <b className={marketTone(item.change_pct)}>{formatPercent(item.change_pct)}</b>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <DataState action={{ onClick: onRefresh }} kind="empty" subject="指数快照" />
-            )
-          ) : null}
         </>
+      ) : null}
+    </section>
+  );
+}
+
+export function MarketIndexStrip({ market, onRefresh }: { market: PanelState<MarketOverviewResponse> | null; onRefresh: () => void }) {
+  const marketData = market && market.kind !== "error" ? market.value : null;
+
+  return (
+    <section aria-label="指数快照" className="compact-panel market-index-panel overflow-hidden">
+      {!marketData ? <DataState action={{ onClick: onRefresh }} kind={market?.kind === "error" ? "error" : "loading"} subject="指数快照" /> : null}
+      {marketData?.indices.length === 0 ? <DataState action={{ onClick: onRefresh }} kind="empty" subject="指数快照" /> : null}
+      {marketData && marketData.indices.length > 0 ? (
+        <div className="market-index-strip">
+          {marketData.indices.map((item) => (
+            <div className="market-index-strip__item" key={item.symbol}>
+              <span>{item.name}</span>
+              <strong>{formatNumber(item.last_price)}</strong>
+              <b className={marketTone(item.change_pct)}>{formatPercent(item.change_pct)}</b>
+            </div>
+          ))}
+        </div>
       ) : null}
     </section>
   );

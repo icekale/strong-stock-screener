@@ -16,7 +16,8 @@ RUN apt-get update \
 COPY pyproject.toml ./
 COPY app ./app
 RUN python -m pip install --no-cache-dir setuptools wheel pydantic-core==2.46.4
-RUN python -m pip install --no-cache-dir --no-build-isolation .
+RUN python -m pip install --no-cache-dir --no-build-isolation . \
+    && python -c "import czsc, mootdx"
 COPY artifacts ./artifacts
 
 EXPOSE 8010

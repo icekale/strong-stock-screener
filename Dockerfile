@@ -36,6 +36,7 @@ PY
 COPY apps/api/app ./app
 RUN --mount=type=cache,target=/root/.cache/pip \
     /opt/strong-stock-api-venv/bin/python -m pip install --no-deps --no-build-isolation . \
+    && /opt/strong-stock-api-venv/bin/python -c "import czsc, mootdx" \
     && find /opt/strong-stock-api-venv -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find /opt/strong-stock-api-venv -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 

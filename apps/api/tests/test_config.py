@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from app.config import Settings
 
 
@@ -78,3 +81,11 @@ def test_settings_accepts_chanlun_tdx_enabled(monkeypatch) -> None:
     settings = Settings(_env_file=None)
 
     assert settings.chanlun_tdx_enabled is False
+
+
+def test_settings_rejects_chanlun_tdx_timeout_outside_bounds() -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, chanlun_tdx_timeout_seconds=0.5)
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, chanlun_tdx_timeout_seconds=16)

@@ -1507,7 +1507,7 @@ export type ChanlunWorkspaceResponse = {
 };
 
 export type ChanlunBackfillRequest = {
-  history_days: number;
+  history_days?: number;
 };
 
 export type ChanlunSymbolMatch = {

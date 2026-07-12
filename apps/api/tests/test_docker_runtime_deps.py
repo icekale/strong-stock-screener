@@ -1,6 +1,36 @@
 from pathlib import Path
 
 
+def _docker_instructions(content: str) -> list[tuple[str, str]]:
+    instructions: list[tuple[str, str]] = []
+    current: list[str] = []
+    instruction = ""
+
+    for line in content.splitlines():
+        stripped = line.strip()
+        if current:
+            current.append(stripped.removesuffix("\\").strip())
+            if not stripped.endswith("\\"):
+                instructions.append((instruction, "\n".join(current)))
+                current = []
+            continue
+
+        if " " not in stripped:
+            continue
+
+        candidate, body = stripped.split(" ", maxsplit=1)
+        if candidate not in {"COPY", "RUN"}:
+            continue
+
+        instruction = candidate
+        current = [body.removesuffix("\\").strip()]
+        if not stripped.endswith("\\"):
+            instructions.append((instruction, "\n".join(current)))
+            current = []
+
+    return instructions
+
+
 def test_dockerfiles_install_lightgbm_openmp_runtime() -> None:
     repo_root = Path(__file__).parents[3]
     dockerfiles = [repo_root / "Dockerfile", repo_root / "apps/api/Dockerfile"]
@@ -25,27 +55,74 @@ def test_api_dependencies_pin_chanlun_runtime_packages() -> None:
 
 def test_dockerfiles_smoke_check_chanlun_runtime_versions() -> None:
     repo_root = Path(__file__).parents[3]
-    root_content = (repo_root / "Dockerfile").read_text(encoding="utf-8")
-    api_content = (repo_root / "apps/api/Dockerfile").read_text(encoding="utf-8")
+    root_instructions = _docker_instructions((repo_root / "Dockerfile").read_text(encoding="utf-8"))
+    api_instructions = _docker_instructions(
+        (repo_root / "apps/api/Dockerfile").read_text(encoding="utf-8")
+    )
+    root_runs = [body for kind, body in root_instructions if kind == "RUN"]
+    api_runs = [body for kind, body in api_instructions if kind == "RUN"]
     root_smoke_check = (
         '/opt/strong-stock-api-venv/bin/python -c '
         '"import czsc, mootdx; print(czsc.__version__, mootdx.__version__)"'
     )
     api_smoke_check = 'python -c "import czsc, mootdx; print(czsc.__version__, mootdx.__version__)"'
 
-    assert root_content.count(root_smoke_check) == 2
-    assert api_smoke_check in api_content
+    root_smoke_indices = [index for index, command in enumerate(root_runs) if root_smoke_check in command]
+    assert len(root_smoke_indices) == 2
+    assert any(api_smoke_check in command for command in api_runs)
 
-    runner_smoke_index = root_content.rindex(root_smoke_check)
-    assert runner_smoke_index > root_content.index("libgomp1")
-    assert runner_smoke_index > root_content.index("COPY --from=api-builder /opt/strong-stock-api-venv")
+    runner_smoke_index = root_smoke_indices[-1]
+    runner_libgomp_index = next(
+        index for index, command in enumerate(root_runs) if "libgomp1" in command
+    )
+    root_venv_copy_index = next(
+        index
+        for index, (kind, command) in enumerate(root_instructions)
+        if kind == "COPY" and "--from=api-builder /opt/strong-stock-api-venv" in command
+    )
+    runner_smoke_instruction_index = next(
+        index
+        for index, (kind, command) in enumerate(root_instructions)
+        if kind == "RUN" and command == root_runs[runner_smoke_index]
+    )
+
+    assert runner_smoke_index > runner_libgomp_index
+    assert runner_smoke_instruction_index > root_venv_copy_index
+
+
+def test_dockerfiles_install_dependencies_from_frozen_lock() -> None:
+    repo_root = Path(__file__).parents[3]
+    dockerfiles = {
+        repo_root / "Dockerfile": "apps/api/pyproject.toml apps/api/uv.lock ./",
+        repo_root / "apps/api/Dockerfile": "pyproject.toml uv.lock ./",
+    }
+    frozen_export = "uv export --frozen --no-dev --no-emit-project --format requirements-txt"
+
+    for path, lock_copy in dockerfiles.items():
+        instructions = _docker_instructions(path.read_text(encoding="utf-8"))
+        runs = [body for kind, body in instructions if kind == "RUN"]
+
+        assert any(kind == "COPY" and lock_copy in body for kind, body in instructions)
+        assert any(frozen_export in command and "-o requirements.txt" in command for command in runs)
+        assert any("pip install" in command and "-r requirements.txt" in command for command in runs)
+        assert any("pip install" in command and "--no-deps" in command for command in runs)
 
 
 def test_api_dockerfile_copies_artifacts_after_package_install() -> None:
     repo_root = Path(__file__).parents[3]
-    content = (repo_root / "apps/api/Dockerfile").read_text(encoding="utf-8")
+    instructions = _docker_instructions(
+        (repo_root / "apps/api/Dockerfile").read_text(encoding="utf-8")
+    )
 
-    install_index = content.index("RUN python -m pip install --no-cache-dir --no-build-isolation .")
-    artifacts_index = content.index("COPY artifacts ./artifacts")
+    install_index = next(
+        index
+        for index, (kind, command) in enumerate(instructions)
+        if kind == "RUN" and "pip install" in command and "--no-deps" in command
+    )
+    artifacts_index = next(
+        index
+        for index, (kind, command) in enumerate(instructions)
+        if kind == "COPY" and command == "artifacts ./artifacts"
+    )
 
     assert install_index < artifacts_index

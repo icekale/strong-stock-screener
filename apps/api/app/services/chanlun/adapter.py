@@ -91,6 +91,26 @@ class ChanlunAdapter:
 
         try:
             raw_bars = _to_raw_bars(symbol, period, bars)
+        except (ValueError, OverflowError) as exc:
+            return self._response(
+                symbol,
+                period,
+                bars,
+                "insufficient_bars",
+                f"invalid or insufficient CZSC bar data: {exc}",
+                last_closed_bar_at,
+            )
+        except (ImportError, OSError, AttributeError, IndexError, KeyError, RuntimeError, TypeError) as exc:
+            return self._response(
+                symbol,
+                period,
+                bars,
+                "unavailable",
+                f"native runtime unavailable: {exc}",
+                last_closed_bar_at,
+            )
+
+        try:
             _RawBar, _Freq, CZSC = _load_czsc()
             native = CZSC(raw_bars)
             return self._map_native(
@@ -100,22 +120,13 @@ class ChanlunAdapter:
                 native,
                 include_observing=include_observing,
             )
-        except (ImportError, OSError) as exc:
+        except (ImportError, OSError, AttributeError, IndexError, KeyError, OverflowError, RuntimeError, TypeError, ValueError) as exc:
             return self._response(
                 symbol,
                 period,
                 bars,
                 "unavailable",
-                f"native runtime unavailable: {exc}",
-                last_closed_bar_at,
-            )
-        except (AttributeError, IndexError, KeyError, OverflowError, RuntimeError, TypeError, ValueError) as exc:
-            return self._response(
-                symbol,
-                period,
-                bars,
-                "insufficient_bars",
-                f"invalid or insufficient CZSC bar data: {exc}",
+                f"native analysis or mapping unavailable: {exc}",
                 last_closed_bar_at,
             )
 
@@ -152,9 +163,7 @@ class ChanlunAdapter:
 
         zones = _confirmed_zones(native, completed_pairs, dates_by_id)
         virtual_zone = _virtual_zone(completed_strokes)
-        if virtual_zone and not any(
-            (zone.high, zone.low) == (virtual_zone.high, virtual_zone.low) for zone in zones
-        ):
+        if virtual_zone:
             zones.append(virtual_zone)
 
         strokes = list(completed_strokes)
@@ -324,11 +333,12 @@ def _observing_stroke(
         return None
     start_fx = ubi["fx_a"]
     start_at = _occurred_at(start_fx, dates_by_id)
-    end_at = bars[-1].date
+    direction = _direction(ubi.get("direction"))
+    end_bar = ubi["high_bar"] if direction == "up" else ubi["low_bar"]
+    end_at = _occurred_at(end_bar, dates_by_id)
+    end_price = float(ubi["high"] if direction == "up" else ubi["low"])
     if start_at >= end_at:
         return None
-    direction = _direction(ubi.get("direction"))
-    end_price = bars[-1].high if direction == "up" else bars[-1].low
     return ChanlunStroke(
         id=f"stroke:observing:{start_at}:{end_at}",
         start_at=start_at,

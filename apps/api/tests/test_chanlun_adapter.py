@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 
 from app.models import KlineBar
+from app.services.chanlun import adapter
 from app.services.chanlun.adapter import ChanlunAdapter
 
 
@@ -34,6 +36,24 @@ def fixture_bars() -> list[KlineBar]:
         )
         for index, price in enumerate(values)
     ]
+
+
+def fixture_bars_with_retracing_tail() -> list[KlineBar]:
+    bars = fixture_bars()
+    for price in (18, 19):
+        occurred_at = datetime.fromisoformat(bars[-1].date) + timedelta(days=1)
+        bars.append(
+            KlineBar(
+                date=occurred_at.isoformat(timespec="seconds"),
+                open=price,
+                close=price,
+                high=price + 0.4,
+                low=price - 0.4,
+                volume=100,
+                amount=1_000,
+            )
+        )
+    return bars
 
 
 def test_adapter_maps_czsc_fractals_strokes_and_confirmed_zone() -> None:
@@ -85,6 +105,47 @@ def test_adapter_does_not_confirm_the_observing_tail() -> None:
     )
 
 
+def test_adapter_maps_observing_stroke_to_ubi_extreme_before_retracing_tail() -> None:
+    bars = fixture_bars_with_retracing_tail()
+
+    analysis = ChanlunAdapter().analyze(
+        "600000.SH", period="5m", bars=bars, include_observing=True
+    )
+
+    observing = [stroke for stroke in analysis.strokes if stroke.status == "observing"]
+    assert len(observing) == 1
+    assert observing[0].direction == "down"
+    assert observing[0].end_at == bars[-2].date
+    assert observing[0].end_price == 17.6
+
+
+def test_adapter_keeps_provisional_zone_when_bounds_match_confirmed_fallback_zone() -> None:
+    bars = fixture_bars()
+
+    def fractal(index: int, price: float) -> SimpleNamespace:
+        return SimpleNamespace(id=index, dt=datetime.fromisoformat(bars[index].date), fx=price, mark="top")
+
+    native = SimpleNamespace(
+        finished_bis=[
+            SimpleNamespace(fx_a=fractal(0, 10), fx_b=fractal(1, 20), direction="up"),
+            SimpleNamespace(fx_a=fractal(2, 20), fx_b=fractal(3, 10), direction="down"),
+            SimpleNamespace(fx_a=fractal(4, 10), fx_b=fractal(5, 20), direction="up"),
+        ],
+        fx_list=[],
+        zs_list=None,
+        ubi=None,
+    )
+
+    analysis = ChanlunAdapter()._map_native(
+        "600000.SH", "1d", bars, native, include_observing=False
+    )
+
+    assert [(zone.virtual, zone.status, zone.high, zone.low) for zone in analysis.zones] == [
+        (False, "confirmed", 20.0, 10.0),
+        (True, "provisional", 20.0, 10.0),
+    ]
+
+
 def test_adapter_returns_unavailable_when_native_runtime_cannot_import(monkeypatch) -> None:
     monkeypatch.setattr(
         "app.services.chanlun.adapter._load_czsc",
@@ -108,3 +169,19 @@ def test_adapter_returns_insufficient_bars_for_invalid_values() -> None:
     assert analysis.source_status[0].source == "czsc"
     assert analysis.source_status[0].status == "failed"
     assert "invalid" in analysis.source_status[0].detail
+
+
+def test_adapter_returns_unavailable_for_native_mapping_failure(monkeypatch) -> None:
+    monkeypatch.setattr(adapter, "_to_raw_bars", lambda *_args: [object()])
+    monkeypatch.setattr(
+        adapter,
+        "_load_czsc",
+        lambda: (object, object, lambda _raw_bars: SimpleNamespace(finished_bis=[object()])),
+    )
+
+    analysis = ChanlunAdapter().analyze("600000.SH", period="1d", bars=fixture_bars())
+
+    assert analysis.availability == "unavailable"
+    assert analysis.source_status[0].source == "czsc"
+    assert analysis.source_status[0].status == "failed"
+    assert "native" in analysis.source_status[0].detail

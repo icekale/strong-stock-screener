@@ -8,9 +8,12 @@ from fastapi.testclient import TestClient
 
 from app.main import (
     AUCTION_SNAPSHOT_CACHE,
+    MARKET_OVERVIEW_CACHE,
     MARKET_RANKINGS_CACHE,
     SECTOR_INTRADAY_CACHE,
     SECTOR_RADAR_CACHE,
+    _cached_market_overview,
+    _cached_sector_radar,
     _market_overview_provider,
     app,
     _refresh_sector_theme_rows,
@@ -1695,6 +1698,31 @@ def test_market_overview_endpoint_reuses_cached_snapshot(tmp_path: Path) -> None
     assert first.status_code == 200
     assert second.status_code == 200
     assert provider.overview_calls == 1
+
+
+def test_homepage_slow_caches_use_stale_while_revalidate(monkeypatch) -> None:
+    market_refresh_keys: list[str] = []
+    sector_refresh_keys: list[str] = []
+    monkeypatch.setattr(app.state, "market_overview_provider", FakeMarketOverviewProvider(), raising=False)
+    MARKET_OVERVIEW_CACHE.clear()
+    SECTOR_RADAR_CACHE.clear()
+
+    def market_refresh(key: str, factory):
+        market_refresh_keys.append(key)
+        return factory()
+
+    def sector_refresh(key: str, factory):
+        sector_refresh_keys.append(key)
+        return factory()
+
+    monkeypatch.setattr(MARKET_OVERVIEW_CACHE, "get_or_refresh", market_refresh)
+    monkeypatch.setattr(SECTOR_RADAR_CACHE, "get_or_refresh", sector_refresh)
+
+    _cached_market_overview()
+    _cached_sector_radar(12)
+
+    assert market_refresh_keys and market_refresh_keys[0].startswith("market-overview:")
+    assert sector_refresh_keys and sector_refresh_keys[0].startswith("sector-radar:")
 
 
 def test_market_rankings_returns_tickflow_pct_and_turnover_rankings(tmp_path: Path) -> None:

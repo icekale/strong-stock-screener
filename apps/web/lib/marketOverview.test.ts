@@ -49,6 +49,14 @@ test("market pulse exposes prominent breadth and compact index strip", () => {
   assert.match(source, /market-index-strip/);
 });
 
+test("market pulse distinguishes pending panel data from failed data", () => {
+  const source = readFileSync(new URL("../components/overview/MarketPulse.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /marketUnavailableLabel/);
+  assert.match(source, /sentimentUnavailableLabel/);
+  assert.match(source, /kind === "error" \? "读取失败" : "加载中"/);
+});
+
 test("homepage trend panels expose sector rotation and intraday emotion views", () => {
   const panelsUrl = new URL("../components/overview/MarketTrendPanels.tsx", import.meta.url);
   const chartUrl = new URL("../components/overview/OverviewTrendChart.tsx", import.meta.url);
@@ -74,7 +82,7 @@ test("homepage only loads market direction data", () => {
   assert.doesNotMatch(source, /DecisionQueue/);
   assert.doesNotMatch(source, /getLatestScreenRun/);
   assert.doesNotMatch(source, /getAuctionModelTop3/);
-  assert.match(source, /getMarketOverview\(\)/);
+  assert.match(source, /getMarketOverview/);
   assert.match(source, /getSectorRadar\(12\)/);
   assert.match(source, /getSentimentSummary\(tradeDate, 80, false\)/);
   assert.match(source, /getSectorReplicaRadar/);
@@ -85,6 +93,16 @@ test("homepage only loads market direction data", () => {
   assert.doesNotMatch(source, /disabled=\{refreshing \|\| trendsRefreshing\}/);
   assert.doesNotMatch(source, /setTrendsRefreshing/);
   assert.doesNotMatch(source, /<MarketFeed/);
+});
+
+test("homepage applies core panels as each request settles", () => {
+  const source = readFileSync(new URL("../app/MarketOverviewWorkbench.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /runCorePanelRequest/);
+  assert.match(source, /runCorePanelRequest\(getMarketOverview/);
+  assert.match(source, /runCorePanelRequest\(\(\) => getSectorRadar\(12\)/);
+  assert.match(source, /runCorePanelRequest\(\(\) => getSentimentSummary/);
+  assert.doesNotMatch(source, /Promise\.allSettled\(\[[\s\S]*?getMarketOverview\(\)/);
 });
 
 test("homepage loading placeholder matches the focused composition", () => {

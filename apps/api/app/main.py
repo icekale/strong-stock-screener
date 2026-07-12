@@ -2067,7 +2067,7 @@ def _cached_short_term_sentiment(trade_date: str, limit: int) -> ShortTermSentim
 def _cached_market_overview() -> MarketOverviewResponse:
     provider = _market_overview_provider()
     cache_key = f"market-overview:{_provider_cache_key(provider)}"
-    return MARKET_OVERVIEW_CACHE.get_or_set(cache_key, provider.get_overview).model_copy(deep=True)
+    return MARKET_OVERVIEW_CACHE.get_or_refresh(cache_key, provider.get_overview).model_copy(deep=True)
 
 
 def _cached_market_rankings(limit: int) -> MarketRankingsResponse:
@@ -2310,7 +2310,7 @@ def _cached_sector_radar(limit: int) -> SectorRadarResponse:
         tdx_result.source_status = [*result.source_status, *tdx_result.source_status]
         return tdx_result
 
-    return SECTOR_RADAR_CACHE.get_or_set(cache_key, build).model_copy(deep=True)
+    return SECTOR_RADAR_CACHE.get_or_refresh(cache_key, build).model_copy(deep=True)
 
 
 def _cached_sector_intraday_series(

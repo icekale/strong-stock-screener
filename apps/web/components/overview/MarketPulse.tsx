@@ -11,6 +11,8 @@ type MarketPulseProps = {
 export function MarketPulse({ market, onRefresh, sentiment }: MarketPulseProps) {
   const marketData = market && market.kind !== "error" ? market.value : null;
   const sentimentData = sentiment && sentiment.kind !== "error" ? sentiment.value : null;
+  const marketUnavailableLabel = market?.kind === "error" ? "读取失败" : "加载中";
+  const sentimentUnavailableLabel = sentiment?.kind === "error" ? "读取失败" : "加载中";
   const breadth = marketData
     ? marketBreadthPercent(marketData.advance_decline.advance_count, marketData.advance_decline.decline_count)
     : 0;
@@ -39,14 +41,14 @@ export function MarketPulse({ market, onRefresh, sentiment }: MarketPulseProps) 
               detail={marketData ? formatTurnoverChange(marketData.turnover.change_pct) : undefined}
               label="总成交额"
               unavailable={!marketData}
-              value={marketData ? formatCny(marketData.turnover.total_cny) : "读取失败"}
+              value={marketData ? formatCny(marketData.turnover.total_cny) : marketUnavailableLabel}
             />
             <MarketMetric
               detail={sentimentData?.metrics.emotion_level}
               label="情绪分"
               tone="primary"
               unavailable={!sentimentData}
-              value={sentimentData ? formatNumber(sentimentData.metrics.emotion_score) : "读取失败"}
+              value={sentimentData ? formatNumber(sentimentData.metrics.emotion_score) : sentimentUnavailableLabel}
             />
             <div className="market-state__metric market-state__metric--wide">
               <div className="market-state__label">上涨 / 下跌</div>
@@ -66,14 +68,14 @@ export function MarketPulse({ market, onRefresh, sentiment }: MarketPulseProps) 
                   </div>
                 </>
               ) : (
-                <div className="market-state__unavailable">读取失败</div>
+                <div className="market-state__unavailable">{marketUnavailableLabel}</div>
               )}
             </div>
             <MarketMetric
               label="涨停 / 跌停"
               split
               unavailable={!marketData}
-              value={marketData ? `${formatCount(marketData.advance_decline.limit_up_count)} / ${formatCount(marketData.advance_decline.limit_down_count)}` : "读取失败"}
+              value={marketData ? `${formatCount(marketData.advance_decline.limit_up_count)} / ${formatCount(marketData.advance_decline.limit_down_count)}` : marketUnavailableLabel}
             />
           </div>
 

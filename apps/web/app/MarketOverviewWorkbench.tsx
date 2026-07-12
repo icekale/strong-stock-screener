@@ -48,21 +48,36 @@ export function MarketOverviewWorkbench() {
     setRefreshing(true);
     const tradeDate = getShanghaiTradeDate();
 
-    return executeLatestOnly({
-      generation,
-      currentGeneration: () => refreshGeneration.current,
-      execute: () =>
-        Promise.allSettled([
-          getMarketOverview(),
-          getSectorRadar(12),
-          getSentimentSummary(tradeDate, 80, false),
-        ]),
-      apply: ([marketResult, sectorRadarResult, sentimentResult]) => {
-        setMarket((previous) => toPanelState(marketResult, panelValue(previous)));
-        setSectorRadar((previous) => toPanelState(sectorRadarResult, panelValue(previous)));
-        setSentiment((previous) => toPanelState(sentimentResult, panelValue(previous)));
-      },
-      finishLoading: () => setRefreshing(false),
+    const runCorePanelRequest = <T,>(
+      request: () => Promise<T>,
+      apply: (result: PromiseSettledResult<T>) => void,
+    ) =>
+      executeLatestOnly({
+        generation,
+        currentGeneration: () => refreshGeneration.current,
+        execute: () => settleRequest(request),
+        apply,
+        finishLoading: () => undefined,
+      });
+
+    const pending = [
+      runCorePanelRequest(getMarketOverview, (result) => {
+        setMarket((previous) => toPanelState(result, panelValue(previous)));
+      }),
+      runCorePanelRequest(() => getSectorRadar(12), (result) => {
+        setSectorRadar((previous) => toPanelState(result, panelValue(previous)));
+      }),
+      runCorePanelRequest(() => getSentimentSummary(tradeDate, 80, false), (result) => {
+        setSentiment((previous) => toPanelState(result, panelValue(previous)));
+      }),
+    ];
+
+    return Promise.allSettled(pending).then(() => {
+      const isLatest = generation === refreshGeneration.current;
+      if (isLatest) {
+        setRefreshing(false);
+      }
+      return isLatest;
     });
   }, []);
 
@@ -164,4 +179,12 @@ export function MarketOverviewWorkbench() {
 
 function panelValue<T>(state: PanelState<T> | null): T | null {
   return state?.kind === "ready" || state?.kind === "stale" ? state.value : null;
+}
+
+async function settleRequest<T>(request: () => Promise<T>): Promise<PromiseSettledResult<T>> {
+  try {
+    return { status: "fulfilled", value: await request() };
+  } catch (reason) {
+    return { status: "rejected", reason };
+  }
 }

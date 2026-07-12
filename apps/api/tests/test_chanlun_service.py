@@ -4,8 +4,11 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+from app.config import Settings
+from app.main import _chanlun_analysis_service, app, update_runtime_settings
 from app.models import ChanlunAnalysisResponse, KlineBar, StrongStockDataUnavailable, StrongStockSourceStatus
-from app.providers.tickflow import TickFlowIntradayBar
+from app.providers.tickflow import TickFlowDailyKlineProvider, TickFlowIntradayBar, TickFlowQuoteProvider
+from app.services.runtime_settings import SettingsUpdate
 from app.services.chanlun.service import ChanlunAnalysisService
 from app.services.chanlun.store import ChanlunMinuteBarStore
 from app.services.chanlun.symbols import ChanlunSymbolSearchService
@@ -138,6 +141,56 @@ class FakeAdapter:
 
 def build_test_cache() -> TtlCache[ChanlunAnalysisResponse]:
     return TtlCache(ttl_seconds=600, name="chanlun-test")
+
+
+def test_settings_update_evicts_chanlun_service_and_rebuilds_tickflow_providers(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("app.main.get_settings", lambda: Settings(data_dir=tmp_path))
+    monkeypatch.setattr(app.state, "runtime_config_path", tmp_path / "runtime_config.json", raising=False)
+    for attribute in (
+        "chanlun_analysis_service",
+        "chanlun_minute_store",
+        "chanlun_adapter",
+        "chanlun_history_provider",
+        "quote_provider",
+        "kline_provider",
+    ):
+        monkeypatch.delattr(app.state, attribute, raising=False)
+
+    update_runtime_settings(
+        SettingsUpdate(
+            candidate_provider="recent_limit_up",
+            kline_provider="tickflow",
+            quote_provider="tickflow",
+            tickflow_api_key="old-key",
+            tickflow_base_url="https://old.tickflow.test",
+            provider_timeout_seconds=3,
+        )
+    )
+    stale_service = _chanlun_analysis_service()
+
+    update_runtime_settings(
+        SettingsUpdate(
+            candidate_provider="recent_limit_up",
+            kline_provider="tickflow",
+            quote_provider="tickflow",
+            tickflow_api_key="new-key",
+            tickflow_base_url="https://new.tickflow.test",
+            provider_timeout_seconds=3,
+        )
+    )
+
+    assert not hasattr(app.state, "chanlun_analysis_service")
+
+    rebuilt_service = _chanlun_analysis_service()
+
+    assert rebuilt_service is not stale_service
+    assert isinstance(rebuilt_service.intraday_provider, TickFlowQuoteProvider)
+    assert rebuilt_service.intraday_provider.base_url == "https://new.tickflow.test"
+    assert isinstance(rebuilt_service.daily_provider, TickFlowDailyKlineProvider)
+    assert rebuilt_service.daily_provider.base_url == "https://new.tickflow.test"
 
 
 def test_service_uses_closed_store_bars_before_observing_tail(tmp_path: Path) -> None:

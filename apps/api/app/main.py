@@ -2566,6 +2566,8 @@ def _quote_valuation_for_symbol(symbol: str) -> tuple[object | None, StrongStock
 
 def _clear_data_source_caches() -> None:
     CACHE_REGISTRY.clear()
+    if hasattr(app.state, "chanlun_analysis_service"):
+        delattr(app.state, "chanlun_analysis_service")
 
 
 def _system_jobs() -> list[dict[str, object]]:

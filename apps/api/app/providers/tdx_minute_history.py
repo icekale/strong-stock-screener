@@ -41,7 +41,7 @@ class TdxMinuteHistoryProvider:
                     symbol=_normalize_code(symbol),
                     frequency=_ONE_MINUTE_CATEGORY,
                     start=start,
-                    offset=_PAGE_SIZE,
+                    offset=min(_PAGE_SIZE, max_bars - start),
                 )
                 for start in range(0, max_bars, _PAGE_SIZE)
             ]
@@ -49,7 +49,7 @@ class TdxMinuteHistoryProvider:
             close = getattr(client, "close", None)
             if callable(close):
                 close()
-        return normalize_tdx_frames(frames)
+        return normalize_tdx_frames(frames)[:max_bars]
 
 
 def normalize_tdx_frames(frames: Iterable[object]) -> list[TickFlowIntradayBar]:

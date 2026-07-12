@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -87,6 +87,36 @@ def test_provider_requests_one_minute_category_in_pages_and_normalizes_bars() ->
     assert datetime.fromtimestamp(bars[0].timestamp / 1000, tz=SHANGHAI).isoformat() == (
         "2026-07-10T09:30:00+08:00"
     )
+
+
+def test_provider_sizes_final_page_and_caps_returned_bars() -> None:
+    start = datetime(2026, 7, 10, 9, 30)
+    client = FakeMootdxClient(
+        pages=[
+            frame_for(
+                *[
+                    tdx_row(start + timedelta(minutes=index))
+                    for index in range(800)
+                ]
+            ),
+            frame_for(
+                *[
+                    tdx_row(start + timedelta(minutes=index))
+                    for index in range(800, 1600)
+                ]
+            ),
+        ]
+    )
+    provider = TdxMinuteHistoryProvider(
+        client_factory=lambda: client,
+        enabled=True,
+        timeout_seconds=3,
+    )
+
+    bars = provider.get_minute_bars("600000.SH", max_bars=1000)
+
+    assert client.calls == [("600000", 7, 0, 800), ("600000", 7, 800, 200)]
+    assert len(bars) == 1000
 
 
 def test_disabled_provider_never_constructs_a_client() -> None:

@@ -17,7 +17,7 @@ import {
   type KlineSubIndicator,
 } from "../lib/klineIndicatorLayout";
 import { buildTickFlowOverlayOption } from "../lib/brickIndicator";
-import type { GsgfChartAnnotation, KlineBar } from "../lib/types";
+import type { ChanlunAnalysisResponse, ChanlunLayerKey, GsgfChartAnnotation, KlineBar } from "../lib/types";
 
 const ReactKLineChart = dynamic(
   () => import("kline-charts-react").then((module) => module.KLineChart),
@@ -56,6 +56,8 @@ const KLINE_THEME: ThemeConfig = {
 export function TickFlowKlineChart({
   annotations,
   bars,
+  chanlun,
+  chanlunLayers,
   dataSourceMode = "tickflow",
   height,
   movingAverages,
@@ -66,6 +68,8 @@ export function TickFlowKlineChart({
 }: {
   annotations: GsgfChartAnnotation[];
   bars: KlineBar[];
+  chanlun?: ChanlunAnalysisResponse | null;
+  chanlunLayers?: Record<ChanlunLayerKey, boolean>;
   dataSourceMode?: KlineChartDataSourceMode;
   height: number;
   movingAverages: KlineMovingAverage[];
@@ -96,11 +100,14 @@ export function TickFlowKlineChart({
     () =>
       buildTickFlowOverlayOption({
         annotations,
+        chanlun,
+        chanlunLayers,
         chartData,
         showGsgfAnnotations: dataSourceMode === "tickflow" && showGsgfAnnotations,
         subIndicators,
+        visibleBarCount: 120,
       }),
-    [annotations, chartData, dataSourceMode, showGsgfAnnotations, subIndicators],
+    [annotations, chanlun, chanlunLayers, chartData, dataSourceMode, showGsgfAnnotations, subIndicators],
   );
 
   useEffect(() => {

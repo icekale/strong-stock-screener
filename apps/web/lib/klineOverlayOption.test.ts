@@ -1,9 +1,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import type { ChanlunAnalysisResponse } from "./types";
 
 const {
   buildTickFlowOverlayOption,
 } = (await import(new URL("./brickIndicator.ts", import.meta.url).href)) as typeof import("./brickIndicator");
+
+const chanlun: ChanlunAnalysisResponse = {
+  adjustment_mode: "raw_unadjusted",
+  availability: "ready",
+  bars: [],
+  calculated_at: "2026-01-02T10:00:00+08:00",
+  fractals: [],
+  last_closed_bar_at: null,
+  period: "5m",
+  rule_version: "cl-v1",
+  segments: [],
+  source_status: [],
+  strokes: [],
+  symbol: "600000.SH",
+  zones: [
+    {
+      end_at: "2026-01-02T10:00:00+08:00",
+      high: 11,
+      id: "zone",
+      low: 10,
+      start_at: "2026-01-02T09:35:00+08:00",
+      status: "confirmed",
+      virtual: false,
+    },
+  ],
+};
 
 test("tickflow overlay option omits the annotation series when no annotation is visible", () => {
   const option = buildTickFlowOverlayOption({
@@ -73,4 +100,21 @@ test("tickflow overlay series use stable ids to avoid merging into the base K-li
     series.map((item) => item.id),
     ["custom-gsgf-annotations", "custom-brick-0"],
   );
+});
+
+test("combined overlay keeps unique GSGF Chanlun and brick ids", () => {
+  const option = buildTickFlowOverlayOption({
+    annotations: [],
+    chanlun,
+    chanlunLayers: { fractals: false, segments: false, strokes: false, zones: true },
+    chartData: [
+      { amount: null, close: 10, date: "2026-01-01", high: 11, low: 9, open: 9.5, volume: 1000 },
+    ],
+    showGsgfAnnotations: false,
+    subIndicators: ["brick"],
+    visibleBarCount: 20,
+  });
+  const ids = (Array.isArray(option.series) ? option.series : []).map((item) => item.id);
+  assert.equal(new Set(ids).size, ids.length);
+  assert.deepEqual(ids, ["chanlun-zones", "custom-brick-0"]);
 });

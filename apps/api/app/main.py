@@ -77,6 +77,7 @@ from app.providers.news_risk import EastmoneyNewsRiskProvider
 from app.providers.recent_limit_up_candidates import RecentLimitUpCandidateProvider
 from app.providers.thsdk_candidates import ThsdkCandidateProvider
 from app.providers.tdx_mcp import TdxMcpProvider
+from app.providers.tdx_minute_history import TdxMinuteHistoryProvider
 from app.providers.tickflow import TickFlowDailyKlineProvider, TickFlowQuoteProvider
 from app.providers.tencent_quote import TencentQuoteProvider
 from app.providers.watchlist import (
@@ -2865,6 +2866,17 @@ def _tdx_provider() -> TdxMcpProvider:
         base_url=settings.tdx_base_url,
         timeout_seconds=settings.provider_timeout_seconds,
         http_client=getattr(app.state, "tdx_http_client", None),
+    )
+
+
+def _chanlun_history_provider() -> TdxMinuteHistoryProvider:
+    injected = getattr(app.state, "chanlun_history_provider", None)
+    if injected is not None:
+        return injected
+    settings = _effective_settings()
+    return TdxMinuteHistoryProvider(
+        enabled=settings.chanlun_tdx_enabled,
+        timeout_seconds=settings.chanlun_tdx_timeout_seconds,
     )
 
 

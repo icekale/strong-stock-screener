@@ -89,6 +89,10 @@ from app.providers.watchlist import (
 from app.services.intraday import IntradayMonitor
 from app.services.background_jobs import BackgroundJobStore, CancelCheck, ProgressCallback
 from app.services.cache_registry import CacheRegistry
+from app.services.chanlun.adapter import ChanlunAdapter
+from app.services.chanlun.service import ChanlunAnalysisService
+from app.services.chanlun.store import ChanlunMinuteBarStore
+from app.services.chanlun.symbols import ChanlunSymbolSearchService
 from app.services.gsgf_backtest import summarize_gsgf_backtest
 from app.services.gsgf_auto_review import GsgfAutoReviewService
 from app.services.gsgf_model_health import build_gsgf_model_health
@@ -2878,6 +2882,57 @@ def _chanlun_history_provider() -> TdxMinuteHistoryProvider:
         enabled=settings.chanlun_tdx_enabled,
         timeout_seconds=settings.chanlun_tdx_timeout_seconds,
     )
+
+
+def _chanlun_minute_store() -> ChanlunMinuteBarStore:
+    injected = getattr(app.state, "chanlun_minute_store", None)
+    if injected is not None:
+        return injected
+    store = ChanlunMinuteBarStore(get_settings().data_dir / "chanlun" / "minute.sqlite3")
+    app.state.chanlun_minute_store = store
+    return store
+
+
+def _chanlun_adapter() -> ChanlunAdapter:
+    injected = getattr(app.state, "chanlun_adapter", None)
+    if injected is not None:
+        return injected
+    adapter = ChanlunAdapter()
+    app.state.chanlun_adapter = adapter
+    return adapter
+
+
+def _chanlun_analysis_service() -> ChanlunAnalysisService:
+    injected = getattr(app.state, "chanlun_analysis_service", None)
+    if injected is not None:
+        return injected
+    settings = get_settings()
+    service = ChanlunAnalysisService(
+        store=_chanlun_minute_store(),
+        intraday_provider=_quote_provider(),
+        history_provider=_chanlun_history_provider(),
+        adapter=_chanlun_adapter(),
+        daily_provider=_kline_provider(),
+        cache_seconds=settings.chanlun_cache_seconds,
+        minute_retention_days=settings.chanlun_minute_retention_days,
+        history_max_bars=settings.chanlun_backfill_max_bars,
+    )
+    app.state.chanlun_analysis_service = service
+    return service
+
+
+def _chanlun_symbol_search_service() -> ChanlunSymbolSearchService:
+    injected = getattr(app.state, "chanlun_symbol_search_service", None)
+    if injected is not None:
+        return injected
+    service = ChanlunSymbolSearchService(
+        watchlist_loader=lambda: (_watchlist_snapshot().items if _watchlist_snapshot() else []),
+        latest_screen_loader=lambda: (
+            _run_store().load_latest().items if _run_store().load_latest() is not None else []
+        ),
+    )
+    app.state.chanlun_symbol_search_service = service
+    return service
 
 
 def _ifind_provider() -> IfindMcpProvider:

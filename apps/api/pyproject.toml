@@ -25,6 +25,7 @@ thsdk = [
 
 [dependency-groups]
 dev = [
+  "httpx2>=2.0.0",
   "pytest>=8.3.0",
   "ruff>=0.9.0",
 ]

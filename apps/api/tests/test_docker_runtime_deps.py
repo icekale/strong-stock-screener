@@ -1,4 +1,10 @@
+import importlib
+import sys
+import tomllib
+import warnings
 from pathlib import Path
+
+from starlette.exceptions import StarletteDeprecationWarning
 
 
 def _docker_instructions(content: str) -> list[tuple[str, str]]:
@@ -51,6 +57,22 @@ def test_api_dependencies_pin_chanlun_runtime_packages() -> None:
     assert '"czsc==0.10.12"' in content
     assert '"mootdx==0.11.7"' in content
     assert '"httpx>=0.25.0,<0.26.0"' in content
+
+
+def test_dev_dependencies_use_httpx2_for_starlette_testclient() -> None:
+    repo_root = Path(__file__).parents[3]
+    with (repo_root / "apps/api/pyproject.toml").open("rb") as pyproject_file:
+        pyproject = tomllib.load(pyproject_file)
+
+    assert "httpx2>=2.0.0" in pyproject["dependency-groups"]["dev"]
+
+    sys.modules.pop("fastapi.testclient", None)
+    sys.modules.pop("starlette.testclient", None)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", StarletteDeprecationWarning)
+        importlib.import_module("fastapi.testclient")
+
+    assert importlib.import_module("httpx2")
 
 
 def test_dockerfiles_smoke_check_chanlun_runtime_versions() -> None:

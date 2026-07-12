@@ -65,6 +65,7 @@ test("chanlun overlay uses stable zone stroke and segment ids", () => {
     "chanlun-strokes",
     "chanlun-segments",
   ]);
+  assert.ok(series.every((item) => item.z === 20));
 });
 
 test("chanlun overlay omits fractals while zoomed out", () => {
@@ -77,6 +78,43 @@ test("chanlun overlay omits fractals while zoomed out", () => {
   assert.equal(series.some((item) => item.id === "chanlun-fractals"), false);
 });
 
+test("chanlun overlay aligns structure timestamps to daily K-line categories", () => {
+  const series = buildChanlunOverlaySeries(
+    analysis,
+    { fractals: false, segments: true, strokes: true, zones: true },
+    { chartDates: ["2026-07-10"], visibleBarCount: 20 },
+  );
+  const strokes = series.find((item) => item.id === "chanlun-strokes");
+  const zones = series.find((item) => item.id === "chanlun-zones");
+  const strokeData = strokes?.data as Array<{ value: [string | null, number | null] }>;
+  const zoneData = (zones?.markArea as { data: Array<Array<{ xAxis: string }>> }).data;
+
+  assert.deepEqual(
+    strokeData.map((item) => item.value[0]),
+    ["2026-07-10", "2026-07-10", null],
+  );
+  assert.deepEqual(zoneData[0].map((item) => item.xAxis), ["2026-07-10", "2026-07-10"]);
+});
+
+test("chanlun overlay preserves exact intraday K-line categories", () => {
+  const chartDates = ["2026-07-10T09:35:00+08:00", "2026-07-10T10:00:00+08:00"];
+  const series = buildChanlunOverlaySeries(
+    analysis,
+    { fractals: false, segments: true, strokes: true, zones: true },
+    { chartDates, visibleBarCount: 20 },
+  );
+  const strokes = series.find((item) => item.id === "chanlun-strokes");
+  const zones = series.find((item) => item.id === "chanlun-zones");
+  const strokeData = strokes?.data as Array<{ value: [string | null, number | null] }>;
+  const zoneData = (zones?.markArea as { data: Array<Array<{ xAxis: string }>> }).data;
+
+  assert.deepEqual(
+    strokeData.map((item) => item.value[0]),
+    [chartDates[0], chartDates[1], null],
+  );
+  assert.deepEqual(zoneData[0].map((item) => item.xAxis), chartDates);
+});
+
 test("chanlun clear series covers every stable overlay id", () => {
   assert.deepEqual(buildChanlunClearSeries().map((item) => item.id), [
     "chanlun-zones",
@@ -84,6 +122,13 @@ test("chanlun clear series covers every stable overlay id", () => {
     "chanlun-segments",
     "chanlun-fractals",
   ]);
+});
+
+test("chanlun clear series leaves currently enabled layers intact", () => {
+  assert.deepEqual(
+    buildChanlunClearSeries(["chanlun-zones", "chanlun-segments"]).map((item) => item.id),
+    ["chanlun-strokes", "chanlun-fractals"],
+  );
 });
 
 test("visible range percentage resolves to actual bar count", () => {

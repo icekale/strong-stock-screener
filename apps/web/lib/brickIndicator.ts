@@ -196,7 +196,7 @@ export function buildTickFlowOverlayOption({
     ? buildChanlunOverlaySeries(
         chanlun,
         chanlunLayers ?? { fractals: false, segments: true, strokes: false, zones: true },
-        { visibleBarCount },
+        { chartDates: chartData.map((bar) => bar.date), visibleBarCount },
       )
     : [];
   const series = [...annotationSeries, ...chanlunSeries, ...brickSeries];

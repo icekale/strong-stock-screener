@@ -1181,6 +1181,20 @@ body {
   width: 100% !important;
 }
 
+@media (max-width: 640px) {
+  .tickflow-kline-chart [role="toolbar"] {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+  }
+
+  .tickflow-kline-chart [role="toolbar"] > * {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+}
+
 .market-radar-page-content {
   gap: 0 !important;
   padding: 8px !important;

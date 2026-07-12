@@ -34,6 +34,7 @@ const ReactKLineChart = dynamic(
 ) as ForwardRefExoticComponent<KLineChartProps & RefAttributes<KLineChartRef>>;
 
 export type KlineChartDataSourceMode = "tickflow";
+export type KlineChartPeriod = NonNullable<KLineChartProps["period"]>;
 
 const KLINE_THEME: ThemeConfig = {
   activeColor: "#0f172a",
@@ -75,17 +76,13 @@ export function TickFlowKlineChart({
   dataSourceMode?: KlineChartDataSourceMode;
   height: number;
   movingAverages: KlineMovingAverage[];
-  period: "daily" | "weekly";
+  period: KlineChartPeriod;
   showGsgfAnnotations: boolean;
   subIndicators: KlineSubIndicator[];
   symbol: string;
 }) {
   const chartRef = useRef<KLineChartRef>(null);
-  const [chartDataVersion, setChartDataVersion] = useState(0);
   const [visibleBarCount, setVisibleBarCount] = useState(120);
-  const handleDataLoad = useCallback((data: KlineData[]) => {
-    setChartDataVersion((version) => version + 1);
-  }, []);
   const chartData = useMemo(() => convertBarsForKlineChart(bars, symbol), [bars, symbol]);
   const handleVisibleRangeChange = useCallback((range: VisibleRange) => {
     setVisibleBarCount(resolveVisibleBarCount(chartData.length, range));
@@ -124,15 +121,36 @@ export function TickFlowKlineChart({
       visibleBarCount,
     ],
   );
+  const overlayOptionRef = useRef(echartsOption);
+  overlayOptionRef.current = echartsOption;
 
-  useEffect(() => {
+  const applyOverlay = useCallback(() => {
     const instance = chartRef.current?.getEchartsInstance();
     if (!instance) {
       return;
     }
-    instance.setOption({ series: buildChanlunClearSeries() }, false);
-    instance.setOption(echartsOption, false);
-  }, [chartDataVersion, echartsOption, indicatorLayout]);
+    const overlayOption = overlayOptionRef.current;
+    const activeLayerIds = Array.isArray(overlayOption.series)
+      ? overlayOption.series.flatMap((series) => {
+          const id = typeof series === "object" && series !== null && "id" in series ? series.id : null;
+          return typeof id === "string" && id.startsWith("chanlun-") ? [id] : [];
+        })
+      : [];
+    const clearSeries = buildChanlunClearSeries(activeLayerIds);
+    if (clearSeries.length > 0) {
+      instance.setOption({ series: clearSeries }, false);
+    }
+    instance.setOption(overlayOption, false);
+  }, []);
+
+  const handleDataLoad = useCallback((_data: KlineData[]) => {
+    window.setTimeout(applyOverlay, 1000);
+  }, [applyOverlay]);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(applyOverlay, 1000);
+    return () => window.clearTimeout(timeout);
+  }, [applyOverlay, echartsOption, indicatorLayout]);
 
   if (dataSourceMode === "tickflow" && bars.length === 0) {
     return (

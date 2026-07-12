@@ -28,6 +28,7 @@ import {
   isChanlunSymbolCurrent,
   isChanlunWorkspaceCurrent,
   normalizeChanlunSymbol,
+  toChartPeriod,
   type ChanlunAvailabilityDescription,
 } from "./chanlunWorkspaceHelpers";
 
@@ -343,7 +344,7 @@ export function ChanlunWorkspace() {
                     chanlunLayers={layers}
                     height={520}
                     movingAverages={["ma5", "ma10", "ma20", "ma60"]}
-                    period="daily"
+                    period={toChartPeriod(period)}
                     showGsgfAnnotations={false}
                     subIndicators={[]}
                     symbol={activeAnalysis.symbol}

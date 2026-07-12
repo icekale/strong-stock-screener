@@ -3,6 +3,7 @@
 import { Skeleton } from "antd";
 import dynamic from "next/dynamic";
 import { type ComponentType } from "react";
+import "kline-charts-react/style.css";
 import { PageFrame } from "../../components/workbench/PageFrame";
 
 const ChanlunWorkspace = dynamic(

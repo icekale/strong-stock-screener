@@ -1,3 +1,4 @@
+import type { KlineChartPeriod } from "../../components/TickFlowKlineChart";
 import type { ChanlunAvailability, ChanlunPeriod } from "../../lib/types";
 
 export const CHANLUN_PERIODS = ["1d", "60m", "30m", "5m"] as const satisfies readonly ChanlunPeriod[];
@@ -10,6 +11,16 @@ export type ChanlunAvailabilityDescription = {
 
 export function resolveChanlunPeriod(value: string | null | undefined): ChanlunPeriod {
   return CHANLUN_PERIODS.includes(value as ChanlunPeriod) ? (value as ChanlunPeriod) : "1d";
+}
+
+export function toChartPeriod(period: ChanlunPeriod): KlineChartPeriod {
+  const periods: Record<ChanlunPeriod, KlineChartPeriod> = {
+    "1d": "daily",
+    "60m": "60",
+    "30m": "30",
+    "5m": "5",
+  };
+  return periods[period];
 }
 
 export function describeChanlunAvailability(availability: ChanlunAvailability): ChanlunAvailabilityDescription {

@@ -350,6 +350,7 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
                   chanlunUnavailable={chanlunIsUnavailable}
                   indicatorState={indicatorState}
                   isChartTab={isChartTab}
+                  isDailyChart={activeChartTab === "day"}
                   loading={loading}
                   movingAverageSummaryText={movingAverageSummary(visibleMovingAverages)}
                   onAnnotationToggle={() => setShowGsgfAnnotations((value) => !value)}
@@ -578,6 +579,7 @@ function ChartControlBar({
   dataSource,
   indicatorState,
   isChartTab,
+  isDailyChart,
   loading,
   movingAverageSummaryText,
   onAnnotationToggle,
@@ -602,6 +604,7 @@ function ChartControlBar({
   dataSource: string;
   indicatorState: KlineIndicatorState;
   isChartTab: boolean;
+  isDailyChart: boolean;
   loading: boolean;
   movingAverageSummaryText: string;
   onAnnotationToggle: () => void;
@@ -647,14 +650,16 @@ function ChartControlBar({
               onToggle={onAnnotationToggle}
             />
           )}
-          <ChanlunControl
-            available={canShowChanlunOverlay}
-            loading={chanlunLoading}
-            onToggle={onChanlunToggle}
-            symbol={symbol}
-            unavailable={chanlunUnavailable}
-            visible={showChanlunOverlay}
-          />
+          {isDailyChart ? (
+            <ChanlunControl
+              available={canShowChanlunOverlay}
+              loading={chanlunLoading}
+              onToggle={onChanlunToggle}
+              symbol={symbol}
+              unavailable={chanlunUnavailable}
+              visible={showChanlunOverlay}
+            />
+          ) : null}
           <SubIndicatorControl
             indicatorState={indicatorState}
             onPaneCountChange={onSubPaneCountChange}

@@ -57,6 +57,19 @@ export function buildChanlunOverlaySeries(
   return series;
 }
 
+export function buildChanlunClearSeries(): ChanlunOverlaySeries[] {
+  return [
+    { data: [], id: "chanlun-zones", markArea: { data: [] }, type: "line", xAxisIndex: 0, yAxisIndex: 0 },
+    { data: [], id: "chanlun-strokes", type: "line", xAxisIndex: 0, yAxisIndex: 0 },
+    { data: [], id: "chanlun-segments", type: "line", xAxisIndex: 0, yAxisIndex: 0 },
+    { data: [], id: "chanlun-fractals", type: "scatter", xAxisIndex: 0, yAxisIndex: 0 },
+  ];
+}
+
+export function resolveVisibleBarCount(totalBars: number, range: { start: number; end: number }): number {
+  return Math.max(0, Math.ceil(totalBars * (range.end - range.start) / 100));
+}
+
 function buildZoneSeries(analysis: ChanlunAnalysisResponse): ChanlunOverlaySeries {
   return {
     data: [],

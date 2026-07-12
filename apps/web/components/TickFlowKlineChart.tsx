@@ -9,6 +9,7 @@ import type {
   KlineData,
   KLineDataProvider,
   ThemeConfig,
+  VisibleRange,
 } from "kline-charts-react";
 import {
   buildKlineIndicatorOptions,
@@ -17,6 +18,7 @@ import {
   type KlineSubIndicator,
 } from "../lib/klineIndicatorLayout";
 import { buildTickFlowOverlayOption } from "../lib/brickIndicator";
+import { buildChanlunClearSeries, resolveVisibleBarCount } from "../lib/chanlunOverlay.ts";
 import type { ChanlunAnalysisResponse, ChanlunLayerKey, GsgfChartAnnotation, KlineBar } from "../lib/types";
 
 const ReactKLineChart = dynamic(
@@ -80,10 +82,14 @@ export function TickFlowKlineChart({
 }) {
   const chartRef = useRef<KLineChartRef>(null);
   const [chartDataVersion, setChartDataVersion] = useState(0);
+  const [visibleBarCount, setVisibleBarCount] = useState(120);
   const handleDataLoad = useCallback((data: KlineData[]) => {
     setChartDataVersion((version) => version + 1);
   }, []);
   const chartData = useMemo(() => convertBarsForKlineChart(bars, symbol), [bars, symbol]);
+  const handleVisibleRangeChange = useCallback((range: VisibleRange) => {
+    setVisibleBarCount(resolveVisibleBarCount(chartData.length, range));
+  }, [chartData.length]);
   const tickflowDataProvider = useMemo<KLineDataProvider>(
     () => ({
       getKline: async () => chartData,
@@ -105,9 +111,18 @@ export function TickFlowKlineChart({
         chartData,
         showGsgfAnnotations: dataSourceMode === "tickflow" && showGsgfAnnotations,
         subIndicators,
-        visibleBarCount: 120,
+        visibleBarCount,
       }),
-    [annotations, chanlun, chanlunLayers, chartData, dataSourceMode, showGsgfAnnotations, subIndicators],
+    [
+      annotations,
+      chanlun,
+      chanlunLayers,
+      chartData,
+      dataSourceMode,
+      showGsgfAnnotations,
+      subIndicators,
+      visibleBarCount,
+    ],
   );
 
   useEffect(() => {
@@ -115,6 +130,7 @@ export function TickFlowKlineChart({
     if (!instance) {
       return;
     }
+    instance.setOption({ series: buildChanlunClearSeries() }, false);
     instance.setOption(echartsOption, false);
   }, [chartDataVersion, echartsOption, indicatorLayout]);
 
@@ -139,6 +155,7 @@ export function TickFlowKlineChart({
         market="A"
         maxSubPanes={subIndicators.length}
         onDataLoad={handleDataLoad}
+        onVisibleRangeChange={handleVisibleRangeChange}
         panes={indicatorLayout.panes}
         period={period}
         requestOptions={requestOptions}

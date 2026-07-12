@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type { ChanlunAnalysisResponse } from "./types";
 
-const { buildChanlunOverlaySeries } = (await import(
+const { buildChanlunClearSeries, buildChanlunOverlaySeries, resolveVisibleBarCount } = (await import(
   new URL("./chanlunOverlay.ts", import.meta.url).href
 )) as typeof import("./chanlunOverlay");
 
@@ -75,4 +75,17 @@ test("chanlun overlay omits fractals while zoomed out", () => {
   );
 
   assert.equal(series.some((item) => item.id === "chanlun-fractals"), false);
+});
+
+test("chanlun clear series covers every stable overlay id", () => {
+  assert.deepEqual(buildChanlunClearSeries().map((item) => item.id), [
+    "chanlun-zones",
+    "chanlun-strokes",
+    "chanlun-segments",
+    "chanlun-fractals",
+  ]);
+});
+
+test("visible range percentage resolves to actual bar count", () => {
+  assert.equal(resolveVisibleBarCount(240, { end: 100, start: 25 }), 180);
 });

@@ -16,8 +16,9 @@ WORKDIR /build/api
 COPY apps/api/pyproject.toml apps/api/uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     python -m venv /opt/strong-stock-api-venv \
-    && /opt/strong-stock-api-venv/bin/python -m pip install setuptools wheel pydantic-core==2.46.4 uv \
-    && /opt/strong-stock-api-venv/bin/uv export --frozen --no-dev --no-emit-project --format requirements-txt -o requirements.txt \
+    && /opt/strong-stock-api-venv/bin/python -m pip install setuptools wheel pydantic-core==2.46.4 uv==0.11.6 \
+    && /opt/strong-stock-api-venv/bin/uv export --locked --no-dev --no-emit-project --format requirements-txt -o requirements.txt \
+    && /opt/strong-stock-api-venv/bin/python -m pip uninstall -y uv \
     && /opt/strong-stock-api-venv/bin/python -m pip install --no-build-isolation -r requirements.txt
 COPY apps/api/app ./app
 RUN --mount=type=cache,target=/root/.cache/pip \

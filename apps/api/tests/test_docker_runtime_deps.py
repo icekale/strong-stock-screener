@@ -90,22 +90,69 @@ def test_dockerfiles_smoke_check_chanlun_runtime_versions() -> None:
     assert runner_smoke_instruction_index > root_venv_copy_index
 
 
-def test_dockerfiles_install_dependencies_from_frozen_lock() -> None:
+def test_dockerfiles_install_dependencies_from_locked_export() -> None:
     repo_root = Path(__file__).parents[3]
     dockerfiles = {
         repo_root / "Dockerfile": "apps/api/pyproject.toml apps/api/uv.lock ./",
         repo_root / "apps/api/Dockerfile": "pyproject.toml uv.lock ./",
     }
-    frozen_export = "uv export --frozen --no-dev --no-emit-project --format requirements-txt"
+    locked_export = "uv export --locked --no-dev --no-emit-project --format requirements-txt"
 
     for path, lock_copy in dockerfiles.items():
         instructions = _docker_instructions(path.read_text(encoding="utf-8"))
         runs = [body for kind, body in instructions if kind == "RUN"]
 
         assert any(kind == "COPY" and lock_copy in body for kind, body in instructions)
-        assert any(frozen_export in command and "-o requirements.txt" in command for command in runs)
+        assert any(locked_export in command and "-o requirements.txt" in command for command in runs)
         assert any("pip install" in command and "-r requirements.txt" in command for command in runs)
         assert any("pip install" in command and "--no-deps" in command for command in runs)
+        assert any("pip install" in command and "uv==0.11.6" in command for command in runs)
+        assert any("pip uninstall -y uv" in command for command in runs)
+        assert all("uv export --frozen" not in command for command in runs)
+
+
+def test_root_exporter_is_removed_before_copying_the_runtime_venv() -> None:
+    repo_root = Path(__file__).parents[3]
+    instructions = _docker_instructions((repo_root / "Dockerfile").read_text(encoding="utf-8"))
+
+    exporter_index = next(
+        index
+        for index, (kind, command) in enumerate(instructions)
+        if kind == "RUN" and "uv export" in command
+    )
+    venv_copy_index = next(
+        index
+        for index, (kind, command) in enumerate(instructions)
+        if kind == "COPY" and "--from=api-builder /opt/strong-stock-api-venv" in command
+    )
+
+    assert "pip uninstall -y uv" in instructions[exporter_index][1]
+    assert exporter_index < venv_copy_index
+
+
+def test_api_dockerfile_copies_source_after_locked_dependencies() -> None:
+    repo_root = Path(__file__).parents[3]
+    instructions = _docker_instructions(
+        (repo_root / "apps/api/Dockerfile").read_text(encoding="utf-8")
+    )
+
+    dependencies_index = next(
+        index
+        for index, (kind, command) in enumerate(instructions)
+        if kind == "RUN" and "uv export --locked" in command and "-r requirements.txt" in command
+    )
+    source_copy_index = next(
+        index
+        for index, (kind, command) in enumerate(instructions)
+        if kind == "COPY" and command == "app ./app"
+    )
+    app_install_index = next(
+        index
+        for index, (kind, command) in enumerate(instructions)
+        if kind == "RUN" and "pip install" in command and "--no-deps" in command
+    )
+
+    assert dependencies_index < source_copy_index < app_install_index
 
 
 def test_api_dockerfile_copies_artifacts_after_package_install() -> None:

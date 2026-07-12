@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -119,10 +119,10 @@ class ChanlunMinuteBarStore:
         parameters: list[str] = [symbol, adjustment_mode]
         if start_at is not None:
             clauses.append("timestamp >= ?")
-            parameters.append(start_at)
+            parameters.append(_normalize_timestamp(start_at))
         if end_at is not None:
             clauses.append("timestamp <= ?")
-            parameters.append(end_at)
+            parameters.append(_normalize_timestamp(end_at))
 
         with self._connect() as connection:
             rows = connection.execute(
@@ -131,8 +131,11 @@ class ChanlunMinuteBarStore:
             ).fetchall()
         return [_stored_bar_from_row(row) for row in rows]
 
-    def prune(self, keep_days: int = 60) -> None:
-        cutoff = date.today() - timedelta(days=max(1, keep_days))
+    def prune(self, keep_days: int = 60, *, now: datetime | None = None) -> None:
+        current = now or datetime.now(tz=SHANGHAI)
+        if current.tzinfo is None:
+            current = current.replace(tzinfo=SHANGHAI)
+        cutoff = current.astimezone(SHANGHAI).date() - timedelta(days=max(1, keep_days))
         with self._connect() as connection:
             connection.execute("DELETE FROM minute_bars WHERE trade_date < ?", (cutoff.isoformat(),))
 
@@ -178,6 +181,10 @@ def _format_timestamp(timestamp: datetime) -> str:
     else:
         timestamp = timestamp.astimezone(SHANGHAI)
     return timestamp.isoformat(timespec="seconds")
+
+
+def _normalize_timestamp(timestamp: str) -> str:
+    return _format_timestamp(datetime.fromisoformat(timestamp))
 
 
 def _stored_bar_from_row(row: sqlite3.Row) -> StoredMinuteBar:

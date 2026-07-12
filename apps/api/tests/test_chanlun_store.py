@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -92,6 +92,26 @@ def test_store_reads_bars_in_timestamp_order(tmp_path: Path) -> None:
     ]
 
 
+def test_store_normalizes_offset_query_bounds_before_filtering(tmp_path: Path) -> None:
+    store = store_at(tmp_path)
+    store.upsert(
+        "600000.SH",
+        [
+            minute_bar("2026-07-10 09:30", close=10.0),
+            minute_bar("2026-07-10 09:31", close=10.1),
+        ],
+        source="TickFlow",
+        closed=True,
+    )
+
+    assert [bar.timestamp for bar in store.read("600000.SH", start_at="2026-07-10T01:31:00Z")] == [
+        "2026-07-10T09:31:00+08:00"
+    ]
+    assert [bar.timestamp for bar in store.read("600000.SH", end_at="2026-07-10T01:30:00Z")] == [
+        "2026-07-10T09:30:00+08:00"
+    ]
+
+
 def test_store_records_source_and_capture_metadata(tmp_path: Path) -> None:
     store = store_at(tmp_path)
     captured_at = datetime(2026, 7, 10, 9, 31, 15, tzinfo=SHANGHAI)
@@ -131,8 +151,9 @@ def test_store_idempotently_inserts_each_adjustment_mode_key(tmp_path: Path) -> 
 
 def test_store_prunes_trade_dates_older_than_keep_days(tmp_path: Path) -> None:
     store = store_at(tmp_path)
-    expired = date.today() - timedelta(days=31)
-    retained = date.today() - timedelta(days=30)
+    now = datetime(2026, 7, 1, 16, 30, tzinfo=UTC)
+    expired = date(2026, 6, 1)
+    retained = date(2026, 6, 2)
     store.upsert(
         "600000.SH",
         [minute_bar(f"{expired.isoformat()} 09:30")],
@@ -146,6 +167,6 @@ def test_store_prunes_trade_dates_older_than_keep_days(tmp_path: Path) -> None:
         closed=True,
     )
 
-    store.prune(keep_days=30)
+    store.prune(keep_days=30, now=now)
 
     assert [bar.trade_date for bar in store.read("600000.SH")] == [retained.isoformat()]

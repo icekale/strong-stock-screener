@@ -2873,7 +2873,7 @@ def _chanlun_history_provider() -> TdxMinuteHistoryProvider:
     injected = getattr(app.state, "chanlun_history_provider", None)
     if injected is not None:
         return injected
-    settings = _effective_settings()
+    settings = get_settings()
     return TdxMinuteHistoryProvider(
         enabled=settings.chanlun_tdx_enabled,
         timeout_seconds=settings.chanlun_tdx_timeout_seconds,

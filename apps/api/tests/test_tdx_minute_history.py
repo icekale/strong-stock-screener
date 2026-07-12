@@ -5,6 +5,8 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from app.config import Settings
+from app.main import _chanlun_history_provider, app
 from app.models import StrongStockDataUnavailable
 from app.providers.tdx_minute_history import TdxMinuteHistoryProvider
 
@@ -96,3 +98,23 @@ def test_disabled_provider_never_constructs_a_client() -> None:
 
     with pytest.raises(StrongStockDataUnavailable, match="通达信分钟历史未启用"):
         provider.get_minute_bars("600000.SH", max_bars=800)
+
+
+def test_chanlun_history_provider_uses_enabled_default_from_base_settings(monkeypatch) -> None:
+    monkeypatch.delenv("STRONG_STOCK_CHANLUN_TDX_ENABLED", raising=False)
+    monkeypatch.delattr(app.state, "chanlun_history_provider", raising=False)
+    monkeypatch.setattr("app.main.get_settings", lambda: Settings(_env_file=None))
+
+    provider = _chanlun_history_provider()
+
+    assert provider.enabled is True
+
+
+def test_chanlun_history_provider_reads_disabled_environment_setting(monkeypatch) -> None:
+    monkeypatch.setenv("STRONG_STOCK_CHANLUN_TDX_ENABLED", "false")
+    monkeypatch.delattr(app.state, "chanlun_history_provider", raising=False)
+    monkeypatch.setattr("app.main.get_settings", lambda: Settings(_env_file=None))
+
+    provider = _chanlun_history_provider()
+
+    assert provider.enabled is False

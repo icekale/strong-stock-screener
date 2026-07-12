@@ -7,7 +7,7 @@
     "build": "next build",
     "lint": "tsc --noEmit",
     "smoke:ui": "node ../../scripts/smoke-ui.mjs",
-    "test": "tsc --noEmit && node --experimental-strip-types --test lib/*.test.ts app/heatmap/heatmapWorkspaceHelpers.test.ts"
+    "test": "tsc --noEmit && node --experimental-strip-types --test lib/*.test.ts app/heatmap/heatmapWorkspaceHelpers.test.ts app/chanlun/chanlunWorkspace.test.ts"
   },
   "dependencies": {
     "@ant-design/icons": "6.3.1",

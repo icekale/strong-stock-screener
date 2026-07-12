@@ -36,7 +36,7 @@ PY
 COPY apps/api/app ./app
 RUN --mount=type=cache,target=/root/.cache/pip \
     /opt/strong-stock-api-venv/bin/python -m pip install --no-deps --no-build-isolation . \
-    && /opt/strong-stock-api-venv/bin/python -c "import czsc, mootdx" \
+    && /opt/strong-stock-api-venv/bin/python -c "import czsc, mootdx; print(czsc.__version__, mootdx.__version__)" \
     && find /opt/strong-stock-api-venv -type d -name __pycache__ -prune -exec rm -rf {} + \
     && find /opt/strong-stock-api-venv -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 
@@ -94,7 +94,8 @@ COPY --from=web-builder /build/web/.next/standalone ./web
 COPY --from=web-builder /build/web/.next/static ./web/.next/static
 COPY scripts/start-single-container.sh ./start-single-container.sh
 
-RUN chmod +x ./start-single-container.sh \
+RUN /opt/strong-stock-api-venv/bin/python -c "import czsc, mootdx; print(czsc.__version__, mootdx.__version__)" \
+    && chmod +x ./start-single-container.sh \
     && mkdir -p /app/data
 
 EXPOSE 3110

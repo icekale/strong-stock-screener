@@ -10,6 +10,11 @@ import type {
   AuctionTop3TrainingGenerateResponse,
   AuctionTop3TrainingSummary,
   BackgroundJobState,
+  ChanlunAnalysisResponse,
+  ChanlunBackfillRequest,
+  ChanlunPeriod,
+  ChanlunSymbolSearchResponse,
+  ChanlunWorkspaceResponse,
   DataSourceStatusResponse,
   GsgfAnalysis,
   GsgfAutoReviewConfig,
@@ -1118,4 +1123,83 @@ export async function getStockResearch(symbol: string): Promise<StockResearchRes
     throw new Error(`读取个股研究失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<StockResearchResponse>;
+}
+
+export async function getChanlunAnalysis(
+  symbol: string,
+  options: {
+    period?: ChanlunPeriod;
+    lookback?: number;
+    includeObserving?: boolean;
+  } = {},
+): Promise<ChanlunAnalysisResponse> {
+  const params = new URLSearchParams({
+    period: options.period ?? "1d",
+    lookback: String(options.lookback ?? 220),
+    include_observing: String(options.includeObserving ?? false),
+  });
+  const response = await fetch(
+    `${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/analysis?${params.toString()}`,
+  );
+  if (!response.ok) {
+    throw new Error(`读取缠论分析失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ChanlunAnalysisResponse>;
+}
+
+export async function getChanlunWorkspace(
+  symbol: string,
+  options: { lookback?: number } = {},
+): Promise<ChanlunWorkspaceResponse> {
+  const params = new URLSearchParams({ lookback: String(options.lookback ?? 220) });
+  const response = await fetch(
+    `${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/workspace?${params.toString()}`,
+  );
+  if (!response.ok) {
+    throw new Error(`读取缠论工作台失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ChanlunWorkspaceResponse>;
+}
+
+export async function searchChanlunSymbols(
+  query: string,
+  options: { limit?: number } = {},
+): Promise<ChanlunSymbolSearchResponse> {
+  const params = new URLSearchParams({
+    query,
+    limit: String(options.limit ?? 20),
+  });
+  const response = await fetch(`${API_BASE_URL}/api/chanlun/symbols/search?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`搜索缠论股票失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ChanlunSymbolSearchResponse>;
+}
+
+export async function createChanlunBackfillJob(
+  symbol: string,
+  request: ChanlunBackfillRequest = {},
+): Promise<BackgroundJobState> {
+  const response = await fetch(`${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/backfill`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    throw new Error(`启动缠论历史补齐失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<BackgroundJobState>;
+}
+
+export async function getChanlunBackfillJob(
+  symbol: string,
+  jobId: string,
+): Promise<BackgroundJobState> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/backfill/${encodeURIComponent(jobId)}`,
+  );
+  if (!response.ok) {
+    throw new Error(`读取缠论历史补齐任务失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<BackgroundJobState>;
 }

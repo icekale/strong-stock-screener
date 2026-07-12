@@ -1515,6 +1515,11 @@ export type ChanlunSymbolMatch = {
   name: string;
 };
 
+export type ChanlunSymbolSearchResponse = {
+  items: ChanlunSymbolMatch[];
+  source_status: StrongStockSourceStatus[];
+};
+
 export type StockKlineResponse = {
   symbol: string;
   source_status: StrongStockSourceStatus;

@@ -23,6 +23,10 @@ from app.models import (
     AuctionSnapshotResponse,
     AuctionTimelineResponse,
     AuctionTop3ManualTradeSample,
+    ChanlunAnalysisResponse,
+    ChanlunBackfillRequest,
+    ChanlunPeriod,
+    ChanlunWorkspaceResponse,
     GsgfAnalysis,
     GsgfBacktestSummary,
     GsgfModelHealth,
@@ -92,7 +96,7 @@ from app.services.cache_registry import CacheRegistry
 from app.services.chanlun.adapter import ChanlunAdapter
 from app.services.chanlun.service import ChanlunAnalysisService
 from app.services.chanlun.store import ChanlunMinuteBarStore
-from app.services.chanlun.symbols import ChanlunSymbolSearchService
+from app.services.chanlun.symbols import ChanlunSymbolSearchService, normalize_chanlun_symbol
 from app.services.gsgf_backtest import summarize_gsgf_backtest
 from app.services.gsgf_auto_review import GsgfAutoReviewService
 from app.services.gsgf_model_health import build_gsgf_model_health
@@ -1953,6 +1957,87 @@ def get_stock_research(symbol: str) -> dict[str, object]:
     return research.model_dump(mode="json")
 
 
+@app.get("/api/chanlun/stocks/{symbol}/analysis")
+def get_chanlun_analysis(
+    symbol: str,
+    period: ChanlunPeriod = "1d",
+    lookback: int = 220,
+    include_observing: bool = False,
+) -> ChanlunAnalysisResponse:
+    _validate_chanlun_lookback(period, lookback)
+    try:
+        return _chanlun_analysis_service().analysis(
+            symbol,
+            period=period,
+            lookback=lookback,
+            include_observing=include_observing,
+        )
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/chanlun/stocks/{symbol}/workspace")
+def get_chanlun_workspace(symbol: str, lookback: int = 220) -> ChanlunWorkspaceResponse:
+    _validate_chanlun_lookback("1d", lookback)
+    try:
+        return _chanlun_analysis_service().workspace(symbol, lookback=lookback)
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/chanlun/symbols/search")
+def search_chanlun_symbols(query: str = "", limit: int = 20) -> dict[str, object]:
+    try:
+        items, source_status = _chanlun_symbol_search_service().search(query, limit=limit)
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return {
+        "items": [item.model_dump(mode="json") for item in items],
+        "source_status": [status.model_dump(mode="json") for status in source_status],
+    }
+
+
+@app.post("/api/chanlun/stocks/{symbol}/backfill")
+def create_chanlun_backfill_job(
+    symbol: str,
+    request: ChanlunBackfillRequest,
+) -> dict[str, object]:
+    normalized_symbol = normalize_chanlun_symbol(symbol)
+    if not normalized_symbol:
+        raise HTTPException(status_code=422, detail="invalid Chanlun symbol")
+    job_type = f"chanlun_backfill:{normalized_symbol}"
+    store = _background_job_store()
+    active_job = store.get_active(job_type)
+    if active_job is not None:
+        return active_job.model_dump(mode="json")
+    job = store.create_transient_job(
+        job_type,
+        lambda progress, should_cancel: _chanlun_analysis_service().backfill(
+            normalized_symbol,
+            progress=progress,
+            should_cancel=should_cancel,
+        ),
+        running_message="缠论分钟历史补齐中",
+        success_message="缠论分钟历史补齐完成",
+        progress_total=3,
+    )
+    return job.model_dump(mode="json")
+
+
+@app.get("/api/chanlun/stocks/{symbol}/backfill/{job_id}")
+def get_chanlun_backfill_job(symbol: str, job_id: str) -> dict[str, object]:
+    normalized_symbol = normalize_chanlun_symbol(symbol)
+    if not normalized_symbol:
+        raise HTTPException(status_code=422, detail="invalid Chanlun symbol")
+    try:
+        job = _background_job_store().get(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="chanlun backfill job not found") from exc
+    if job.type != f"chanlun_backfill:{normalized_symbol}":
+        raise HTTPException(status_code=404, detail="chanlun backfill job not found")
+    return job.model_dump(mode="json")
+
+
 @app.post("/api/intraday/snapshot")
 def create_intraday_snapshot(request: IntradaySnapshotRequest) -> dict[str, object]:
     symbols = request.symbols
@@ -2935,6 +3020,15 @@ def _chanlun_symbol_search_service() -> ChanlunSymbolSearchService:
     )
     app.state.chanlun_symbol_search_service = service
     return service
+
+
+def _validate_chanlun_lookback(period: ChanlunPeriod, lookback: int) -> None:
+    maximum = 260 if period == "1d" else 2400
+    if lookback < 20 or lookback > maximum:
+        raise HTTPException(
+            status_code=422,
+            detail=f"lookback for {period} must be between 20 and {maximum}",
+        )
 
 
 def _ifind_provider() -> IfindMcpProvider:

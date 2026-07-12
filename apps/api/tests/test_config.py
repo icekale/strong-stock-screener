@@ -70,3 +70,11 @@ def test_settings_defaults_storage_retention_limits() -> None:
     assert settings.market_emotion_history_retention_days == 30
     assert settings.market_emotion_samples_per_day == 360
     assert settings.auction_review_retention_days == 120
+
+
+def test_settings_accepts_chanlun_tdx_enabled(monkeypatch) -> None:
+    monkeypatch.setenv("STRONG_STOCK_CHANLUN_TDX_ENABLED", "false")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.chanlun_tdx_enabled is False

@@ -71,8 +71,15 @@ def seed_closed_60m_history(store: ChanlunMinuteBarStore) -> None:
 class FakeQuoteProvider:
     source_name = "Fake TickFlow"
 
-    def __init__(self, bars: list[TickFlowIntradayBar] | None = None, *, fails: bool = False) -> None:
+    def __init__(
+        self,
+        bars: list[TickFlowIntradayBar] | None = None,
+        *,
+        payload: dict[str, list[TickFlowIntradayBar]] | None = None,
+        fails: bool = False,
+    ) -> None:
         self.bars = bars or []
+        self.payload = payload
         self.fails = fails
         self.calls: list[tuple[list[str], str, int]] = []
 
@@ -85,6 +92,8 @@ class FakeQuoteProvider:
         self.calls.append((symbols, period, count))
         if self.fails:
             raise StrongStockDataUnavailable("live minute source failed")
+        if self.payload is not None:
+            return self.payload
         return {symbol: list(self.bars) for symbol in symbols}
 
 
@@ -230,7 +239,7 @@ def test_service_returns_insufficient_60m_bars_without_calling_adapter(tmp_path:
     seed_closed_60m_history(store)
     service = ChanlunAnalysisService(
         store=store,
-        intraday_provider=FakeQuoteProvider(),
+        intraday_provider=FakeQuoteProvider([minute_bar("2026-07-10 10:30")]),
         history_provider=FakeHistoryProvider(),
         adapter=adapter,
         cache=build_test_cache(),
@@ -348,6 +357,57 @@ def test_live_failure_is_stale_only_when_closed_history_can_still_be_analyzed(tm
     assert stale.availability == "stale"
     assert unavailable.availability == "unavailable"
     assert len(adapter.calls) == 1
+
+
+def test_empty_live_intraday_payload_is_stale_with_closed_sqlite_history(tmp_path: Path) -> None:
+    for index, (payload, detail) in enumerate(
+        (({}, "响应缺少"), ({"600000.SH": []}, "分钟线为空"))
+    ):
+        store = store_at(tmp_path / str(index))
+        seed_closed_5m_history(store)
+        service = ChanlunAnalysisService(
+            store=store,
+            intraday_provider=FakeQuoteProvider(payload=payload),
+            history_provider=FakeHistoryProvider(),
+            adapter=FakeAdapter(),
+            cache=build_test_cache(),
+        )
+
+        result = service.analysis(
+            "600000.SH",
+            period="5m",
+            lookback=120,
+            include_observing=False,
+            now=shanghai("2026-07-10 10:02"),
+        )
+
+        assert result.availability == "stale"
+        live_status = next(status for status in result.source_status if status.source == "Fake TickFlow")
+        assert live_status.status == "failed"
+        assert detail in live_status.detail
+        assert next(status for status in result.source_status if status.source == "Chanlun SQLite分钟线").status == "stale"
+
+
+def test_empty_live_intraday_payload_is_unavailable_without_sqlite_history(tmp_path: Path) -> None:
+    result = ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider(payload={}),
+        history_provider=FakeHistoryProvider(),
+        adapter=FakeAdapter(),
+        cache=build_test_cache(),
+    ).analysis(
+        "600000.SH",
+        period="5m",
+        lookback=120,
+        include_observing=False,
+        now=shanghai("2026-07-10 10:02"),
+    )
+
+    assert result.availability == "unavailable"
+    live_status = next(status for status in result.source_status if status.source == "Fake TickFlow")
+    assert live_status.status == "failed"
+    assert "响应缺少" in live_status.detail
+    assert next(status for status in result.source_status if status.source == "Chanlun SQLite分钟线").status == "stale"
 
 
 def test_symbol_search_normalizes_local_results_and_fails_safely() -> None:

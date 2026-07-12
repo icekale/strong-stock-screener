@@ -28,6 +28,10 @@ _RAW_ADJUSTMENT = "raw_unadjusted"
 _INTRADAY_PERIOD_MINUTES = {"5m": 5, "30m": 30, "60m": 60}
 
 
+class _IncompleteIntradayPayloadError(Exception):
+    pass
+
+
 class ChanlunAnalysisService:
     def __init__(
         self,
@@ -209,7 +213,14 @@ class ChanlunAnalysisService:
                 period="1m",
                 count=_intraday_fetch_count(period, lookback),
             )
-            current_bars = normalize_intraday_bars(payload.get(symbol, []))
+            raw_bars = payload.get(symbol)
+            if raw_bars is None:
+                raise _IncompleteIntradayPayloadError(f"响应缺少 {symbol} 分钟线")
+            if not raw_bars:
+                raise _IncompleteIntradayPayloadError(f"响应中 {symbol} 分钟线为空")
+            current_bars = normalize_intraday_bars(raw_bars)
+            if not current_bars:
+                raise _IncompleteIntradayPayloadError(f"响应中 {symbol} 没有有效分钟线")
             self._upsert_live_minutes(symbol, current_bars, source=source_name, now=now)
             source_status.append(
                 StrongStockSourceStatus(

@@ -1,10 +1,7 @@
-import importlib
+import subprocess
 import sys
 import tomllib
-import warnings
 from pathlib import Path
-
-from starlette.exceptions import StarletteDeprecationWarning
 
 
 def _docker_instructions(content: str) -> list[tuple[str, str]]:
@@ -66,13 +63,19 @@ def test_dev_dependencies_use_httpx2_for_starlette_testclient() -> None:
 
     assert "httpx2>=2.0.0" in pyproject["dependency-groups"]["dev"]
 
-    sys.modules.pop("fastapi.testclient", None)
-    sys.modules.pop("starlette.testclient", None)
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", StarletteDeprecationWarning)
-        importlib.import_module("fastapi.testclient")
-
-    assert importlib.import_module("httpx2")
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import warnings; "
+            "from starlette.exceptions import StarletteDeprecationWarning; "
+            "warnings.simplefilter('error', StarletteDeprecationWarning); "
+            "import fastapi.testclient; import httpx2",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
 
 
 def test_dockerfiles_smoke_check_chanlun_runtime_versions() -> None:

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import selectors
 import sys
 import time
 from pathlib import Path
@@ -14,6 +16,8 @@ ENGINE_VERSION = "1.0.0rc8"
 PERIODS = ("1d", "60m", "30m", "5m")
 GATE_TIMEOUT_SECONDS = 5.0
 LARGE_STDERR_BYTES = 1_048_576
+WIRE_ID_SEPARATOR = "::rc8-wire:"
+WIRE_ID_PATTERN = re.compile(rf"^(?P<logical>.*){re.escape(WIRE_ID_SEPARATOR)}[0-9a-f]{{32}}$")
 
 
 def _write(payload: object) -> None:
@@ -24,6 +28,11 @@ def _write(payload: object) -> None:
 def _path_suffix(request_id: str) -> Path | None:
     _, separator, value = request_id.partition(":")
     return Path(value) if separator and value else None
+
+
+def _logical_request_id(wire_request_id: str) -> str:
+    match = WIRE_ID_PATTERN.fullmatch(wire_request_id)
+    return match.group("logical") if match is not None else wire_request_id
 
 
 def _record_attempt(request_id: str) -> None:
@@ -56,7 +65,8 @@ def _response(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _handle(payload: dict[str, Any]) -> None:
-    request_id = str(payload["request_id"])
+    wire_request_id = str(payload["request_id"])
+    request_id = _logical_request_id(wire_request_id)
 
     if request_id.startswith(("gate:", "gate-malformed:")):
         gate = _path_suffix(request_id)
@@ -108,6 +118,28 @@ def _handle(payload: dict[str, Any]) -> None:
         sys.stdout.flush()
         Path(f"{marker}.ready").write_text("ready\n", encoding="utf-8")
         return
+    if request_id.startswith("correlation-race:"):
+        marker = _path_suffix(request_id)
+        if marker is None:
+            raise SystemExit(23)
+        _record_attempt(request_id)
+        _write(_response(payload))
+        with selectors.DefaultSelector() as selector:
+            selector.register(sys.stdin, selectors.EVENT_READ)
+            if not selector.select(GATE_TIMEOUT_SECONDS):
+                raise SystemExit(23)
+        next_attempts = Path(f"{marker}.next.attempts")
+        predicted = _response(payload)
+        predicted["request_id"] = f"record-pid-correlated:{next_attempts}"
+        _write(predicted)
+        Path(f"{marker}.forged").write_text("forged\n", encoding="utf-8")
+        release = Path(f"{marker}.release")
+        deadline = time.monotonic() + GATE_TIMEOUT_SECONDS
+        while not release.exists():
+            if time.monotonic() >= deadline:
+                raise SystemExit(23)
+            time.sleep(0.005)
+        return
 
     if request_id.startswith("malformed-json"):
         _record_attempt(request_id)
@@ -141,6 +173,9 @@ def _handle(payload: dict[str, Any]) -> None:
         raise SystemExit(17)
     if request_id.startswith("fail-once:"):
         marker = _path_suffix(request_id)
+        if marker is not None:
+            with Path(f"{marker}.wire-ids").open("a", encoding="utf-8") as handle:
+                handle.write(wire_request_id + "\n")
         if marker is not None and not marker.exists():
             marker.write_text("failed\n", encoding="utf-8")
             raise SystemExit(18)
@@ -167,7 +202,7 @@ def main() -> None:
 
     for line in sys.stdin:
         payload = json.loads(line)
-        request_id = str(payload["request_id"])
+        request_id = _logical_request_id(str(payload["request_id"]))
         if request_id.startswith("capture-line:"):
             path = _path_suffix(request_id)
             if path is not None:

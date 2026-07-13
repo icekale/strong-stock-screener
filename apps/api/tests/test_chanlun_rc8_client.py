@@ -201,6 +201,10 @@ def test_failed_first_attempt_restarts_process_and_returns_retry_response(
 
         assert response.request_id == request_id
         assert marker.read_text(encoding="utf-8") == "failed\n"
+        wire_ids = Path(f"{marker}.wire-ids").read_text(encoding="utf-8").splitlines()
+        assert len(wire_ids) == 2
+        assert wire_ids[0] == wire_ids[1]
+        assert wire_ids[0].startswith(f"{request_id}::rc8-wire:")
         assert client.health()["consecutive_failures"] == 0
 
 
@@ -470,15 +474,6 @@ def test_circuit_expiry_allows_half_open_success(tmp_path: Path) -> None:
 def test_worker_starts_lazily_and_receives_one_compact_json_line(tmp_path: Path) -> None:
     captured = tmp_path / "request.jsonl"
     request = _request(f"capture-line:{captured}")
-    expected = (
-        json.dumps(
-            request.model_dump(mode="json"),
-            ensure_ascii=False,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
-        + "\n"
-    )
     with Rc8WorkerClient(
         python_path=sys.executable,
         worker_path=_fake_worker_path(),
@@ -487,8 +482,27 @@ def test_worker_starts_lazily_and_receives_one_compact_json_line(tmp_path: Path)
 
         response = client.submit(request, priority=0).result(timeout=3)
 
+        captured_line = captured.read_text(encoding="utf-8")
+        captured_payload = json.loads(captured_line)
+        wire_request_id = captured_payload["request_id"]
+        wire_prefix = f"{request.request_id}::rc8-wire:"
+        assert wire_request_id.startswith(wire_prefix)
+        nonce = wire_request_id.removeprefix(wire_prefix)
+        assert len(nonce) == 32
+        int(nonce, 16)
+        expected_payload = request.model_dump(mode="json")
+        expected_payload["request_id"] = wire_request_id
+        expected_line = (
+            json.dumps(
+                expected_payload,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                allow_nan=False,
+            )
+            + "\n"
+        )
         assert response.request_id == request.request_id
-        assert captured.read_text(encoding="utf-8") == expected
+        assert captured_line == expected_line
 
 
 def test_successive_requests_reuse_one_persistent_process(tmp_path: Path) -> None:
@@ -548,6 +562,36 @@ def test_delayed_split_stdout_is_rejected_before_next_request(tmp_path: Path) ->
         assert first.status == "ready"
         assert second.request_id == next_request_id
         assert client._process is not first_process
+        assert _attempt_count(first_attempts) == 1
+        assert _attempt_count(next_attempts) == 1
+        assert _attempt_pids(first_attempts).isdisjoint(_attempt_pids(next_attempts))
+
+
+def test_wire_correlation_rejects_immediate_predicted_stale_response(tmp_path: Path) -> None:
+    first_attempts = tmp_path / "correlation-race.attempts"
+    release = Path(f"{first_attempts}.release")
+    next_attempts = Path(f"{first_attempts}.next.attempts")
+    next_request_id = f"record-pid-correlated:{next_attempts}"
+    with Rc8WorkerClient(
+        python_path=sys.executable,
+        worker_path=_fake_worker_path(),
+    ) as client:
+        first = client.submit(
+            _request(f"correlation-race:{first_attempts}"),
+            priority=0,
+        ).result(timeout=3)
+        first_process = client._process
+        assert first_process is not None
+
+        second = client.submit(_request(next_request_id), priority=0).result(timeout=3)
+        second_process = client._process
+        release.touch()
+        third = client.submit(_request("after-correlation-race"), priority=0).result(timeout=3)
+
+        assert first.request_id == f"correlation-race:{first_attempts}"
+        assert second.request_id == next_request_id
+        assert third.request_id == "after-correlation-race"
+        assert second_process is not first_process
         assert _attempt_count(first_attempts) == 1
         assert _attempt_count(next_attempts) == 1
         assert _attempt_pids(first_attempts).isdisjoint(_attempt_pids(next_attempts))

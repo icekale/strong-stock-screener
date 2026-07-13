@@ -4,6 +4,7 @@ import json
 import os
 import queue
 import re
+import secrets
 import selectors
 import subprocess
 import threading
@@ -23,6 +24,7 @@ _PATH_PATTERN = re.compile(r"(?:[A-Za-z]:)?(?:[/\\][^\s/\\]+)+")
 _SHUTDOWN_WAIT_SECONDS = 2.0
 _CALLBACK_JOIN_SECONDS = 0.05
 _PROCESS_WAIT_SECONDS = 0.5
+_WIRE_ID_SEPARATOR = "::rc8-wire:"
 _T = TypeVar("_T")
 
 
@@ -252,19 +254,25 @@ class Rc8WorkerClient:
             self._half_open_in_flight = False
 
     def _exchange(self, request: CzscRc8Request) -> CzscRc8Response:
+        logical_request_id = request.request_id
+        wire_request = request.model_copy(
+            update={
+                "request_id": (f"{logical_request_id}{_WIRE_ID_SEPARATOR}{secrets.token_hex(16)}")
+            }
+        )
         last_error = "rc8 worker is unavailable"
         for attempt in range(2):
             if self._stop.is_set():
                 raise Rc8WorkerUnavailable("rc8 worker client is closed")
             try:
-                response = self._exchange_once(request)
+                response = self._exchange_once(wire_request)
             except _WorkerAttemptError as exc:
                 last_error = str(exc)
             except Exception:
                 last_error = "rc8 worker is unavailable"
             else:
                 self._record_success(response.engine_version)
-                return response
+                return response.model_copy(update={"request_id": logical_request_id})
             self._terminate_process()
             if attempt == 0 and not self._stop.is_set():
                 continue

@@ -339,10 +339,13 @@ class ChanlunAnalysisService:
         availability: ChanlunAvailability = (
             "ready" if len(bars) >= _MIN_COMPLETED_BARS else "insufficient_bars"
         )
+        freshness: ClosedInputFreshness = (
+            _closed_input_freshness("1d", bars, now) if availability == "ready" else "insufficient"
+        )
         return _ClosedPeriodData(
             bars=bars,
             availability=availability,
-            freshness="fresh" if availability == "ready" else "insufficient",
+            freshness=freshness,
             source_status=(
                 StrongStockSourceStatus(
                     source=source_name,
@@ -420,7 +423,7 @@ class ChanlunAnalysisService:
                 unavailable_detail = None
             else:
                 availability = "ready"
-                freshness = "fresh"
+                freshness = _closed_input_freshness(period, completed, now)
                 unavailable_detail = None
             result[period] = _ClosedPeriodData(
                 bars=completed,
@@ -855,6 +858,58 @@ def _closed_bar_boundary(period: ChanlunPeriod, value: str) -> str:
     if trade_date is None:
         return value
     return datetime.combine(trade_date, time(15), tzinfo=SHANGHAI).isoformat(timespec="seconds")
+
+
+def _closed_input_freshness(
+    period: ChanlunPeriod,
+    bars: tuple[KlineBar, ...],
+    now: datetime,
+) -> ClosedInputFreshness:
+    if not bars:
+        return "insufficient"
+    try:
+        last_closed = datetime.fromisoformat(
+            _closed_bar_boundary(period, bars[-1].date).replace("Z", "+00:00")
+        )
+    except ValueError:
+        return "stale"
+    if last_closed.tzinfo is None:
+        last_closed = last_closed.replace(tzinfo=SHANGHAI)
+    else:
+        last_closed = last_closed.astimezone(SHANGHAI)
+    return "fresh" if last_closed >= _expected_latest_close(period, now) else "stale"
+
+
+def _expected_latest_close(period: ChanlunPeriod, now: datetime) -> datetime:
+    current = _to_shanghai(now)
+    if period == "1d":
+        if current.weekday() < 5 and current.time() >= time(15):
+            return datetime.combine(current.date(), time(15), tzinfo=SHANGHAI)
+        return datetime.combine(_previous_weekday(current.date()), time(15), tzinfo=SHANGHAI)
+
+    if current.weekday() >= 5:
+        return datetime.combine(_previous_weekday(current.date()), time(15), tzinfo=SHANGHAI)
+
+    period_minutes = _INTRADAY_PERIOD_MINUTES[period]
+    latest: datetime | None = None
+    for session_start, session_end in ((time(9, 30), time(11, 30)), (time(13), time(15))):
+        boundary = datetime.combine(current.date(), session_start, tzinfo=SHANGHAI) + timedelta(
+            minutes=period_minutes
+        )
+        session_close = datetime.combine(current.date(), session_end, tzinfo=SHANGHAI)
+        while boundary <= session_close and boundary <= current:
+            latest = boundary
+            boundary += timedelta(minutes=period_minutes)
+    if latest is not None:
+        return latest
+    return datetime.combine(_previous_weekday(current.date()), time(15), tzinfo=SHANGHAI)
+
+
+def _previous_weekday(value: date) -> date:
+    previous = value - timedelta(days=1)
+    while previous.weekday() >= 5:
+        previous -= timedelta(days=1)
+    return previous
 
 
 def _bar_trade_date(value: str) -> date | None:

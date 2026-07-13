@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.models import KlineBar
+from app.services.chanlun import research_protocol
 from app.services.chanlun.research_protocol import (
     CZSC_CATALOG_VERSION,
     CZSC_RC8_PROTOCOL_VERSION,
@@ -130,6 +131,38 @@ def test_request_hash_is_order_stable_and_changes_with_any_bar_change() -> None:
     assert len(first.input_snapshot_id) == len("sha256:") + 64
     assert first.input_snapshot_id != changed.input_snapshot_id
     assert list(first.periods) == list(PERIODS)
+
+
+@pytest.mark.parametrize(
+    ("salt_name", "changed_value"),
+    [
+        ("CZSC_RC8_ENGINE_VERSION", "1.0.0rc8-simulated"),
+        ("CZSC_SCORE_RULE_VERSION", "czsc-score-v2-rule-simulated"),
+    ],
+)
+def test_request_hash_includes_runtime_version_salts_without_changing_wire_fields(
+    monkeypatch: pytest.MonkeyPatch,
+    salt_name: str,
+    changed_value: str,
+) -> None:
+    baseline = research_protocol.build_research_request(
+        "600000.SH",
+        _period_bars(),
+        request_id="version-salt",
+    )
+    wire_fields = set(baseline.model_dump(mode="json"))
+
+    monkeypatch.setattr(research_protocol, salt_name, changed_value, raising=False)
+    changed = research_protocol.build_research_request(
+        "600000.SH",
+        _period_bars(),
+        request_id="version-salt",
+    )
+
+    assert changed.input_snapshot_id != baseline.input_snapshot_id
+    assert set(changed.model_dump(mode="json")) == wire_fields
+    assert "engine_version" not in wire_fields
+    assert "rule_version" not in wire_fields
 
 
 @pytest.mark.parametrize(

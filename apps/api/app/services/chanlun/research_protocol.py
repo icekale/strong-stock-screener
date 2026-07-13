@@ -20,7 +20,7 @@ from pydantic import (
     model_validator,
 )
 
-from app.models import CZSC_CATALOG_VERSION, ChanlunPeriod, KlineBar
+from app.models import CZSC_CATALOG_VERSION, CZSC_SCORE_RULE_VERSION, ChanlunPeriod, KlineBar
 
 
 CZSC_RC8_PROTOCOL_VERSION = "czsc-rc8-jsonl-v1"
@@ -89,14 +89,10 @@ class CzscRc8RawSignal(BaseModel):
     @model_validator(mode="after")
     def _validate_scope(self) -> CzscRc8RawSignal:
         is_single = (
-            self.period is not None
-            and self.higher_period is None
-            and self.lower_period is None
+            self.period is not None and self.higher_period is None and self.lower_period is None
         )
         is_pair = (
-            self.period is None
-            and self.higher_period is not None
-            and self.lower_period is not None
+            self.period is None and self.higher_period is not None and self.lower_period is not None
         )
         if not (is_single or is_pair):
             raise ValueError("signal requires exactly one period or one period pair")
@@ -160,10 +156,7 @@ class CzscRc8Request(BaseModel):
         value: Mapping[ChanlunPeriod, str],
     ) -> Mapping[ChanlunPeriod, str]:
         return MappingProxyType(
-            {
-                period: _canonical_bar_timestamp(period, value[period])
-                for period in APPROVED_PERIODS
-            }
+            {period: _canonical_bar_timestamp(period, value[period]) for period in APPROVED_PERIODS}
         )
 
     @field_validator("periods")
@@ -175,9 +168,7 @@ class CzscRc8Request(BaseModel):
         return MappingProxyType(
             {
                 period: tuple(
-                    bar.model_copy(
-                        update={"date": _canonical_bar_timestamp(period, bar.date)}
-                    )
+                    bar.model_copy(update={"date": _canonical_bar_timestamp(period, bar.date)})
                     for bar in value[period]
                 )
                 for period in APPROVED_PERIODS
@@ -206,9 +197,7 @@ class CzscRc8Request(BaseModel):
         if set(self.periods) != _APPROVED_PERIOD_SET:
             raise ValueError("periods must contain exactly 1d, 60m, 30m, and 5m")
         if set(self.last_closed_by_period) != _APPROVED_PERIOD_SET:
-            raise ValueError(
-                "last_closed_by_period must contain exactly 1d, 60m, 30m, and 5m"
-            )
+            raise ValueError("last_closed_by_period must contain exactly 1d, 60m, 30m, and 5m")
 
         decision_at = _parse_timestamp(self.decision_at, field_name="decision_at")
         for period in APPROVED_PERIODS:
@@ -227,17 +216,13 @@ class CzscRc8Request(BaseModel):
                 if previous is not None and closed_at <= previous:
                     raise ValueError(f"{period} bar timestamps must be strictly increasing")
                 if closed_at > boundary:
-                    raise ValueError(
-                        f"{period} bar is later than last_closed_by_period[{period}]"
-                    )
+                    raise ValueError(f"{period} bar is later than last_closed_by_period[{period}]")
                 if closed_at > decision_at:
                     raise ValueError(f"{period} bar is later than decision_at")
                 previous = closed_at
 
             if previous != boundary:
-                raise ValueError(
-                    f"{period} last bar must equal last_closed_by_period[{period}]"
-                )
+                raise ValueError(f"{period} last bar must equal last_closed_by_period[{period}]")
             if boundary > decision_at:
                 raise ValueError(f"last_closed_by_period[{period}] exceeds decision_at")
         return self
@@ -337,6 +322,10 @@ def build_research_request(
         mode="json",
         exclude={"request_id", "input_snapshot_id"},
     )
+    canonical_input["runtime_versions"] = {
+        "engine_version": CZSC_RC8_ENGINE_VERSION,
+        "score_rule_version": CZSC_SCORE_RULE_VERSION,
+    }
     canonical_json = json.dumps(
         canonical_input,
         ensure_ascii=False,

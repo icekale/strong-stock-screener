@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from app.config import Settings, get_settings
 from app.models import (
     CZSC_CATALOG_VERSION,
+    CZSC_SCORE_RULE_VERSION,
     ChanlunPeriod,
     CzscResearchSnapshot,
     CzscResearchStatus,
@@ -70,6 +71,18 @@ class CzscResearchService:
         if not _MIN_LOOKBACK <= lookback <= _MAX_LOOKBACK:
             raise ValueError(f"lookback for 1d must be between {_MIN_LOOKBACK} and {_MAX_LOOKBACK}")
         normalized_symbol = normalize_chanlun_symbol(symbol) or symbol.strip().upper()
+        if not self.enabled:
+            return _unavailable_snapshot(
+                symbol=normalized_symbol,
+                input_snapshot_id=_fallback_input_id(normalized_symbol, lookback),
+                detail="CZSC rc8 研究引擎已禁用",
+            )
+        if self.client is None:
+            return _unavailable_snapshot(
+                symbol=normalized_symbol,
+                input_snapshot_id=_fallback_input_id(normalized_symbol, lookback),
+                detail="CZSC rc8 Python 或 worker 不可用",
+            )
         try:
             inputs = self.input_provider.closed_workspace_inputs(
                 normalized_symbol,
@@ -98,21 +111,6 @@ class CzscResearchService:
         )
         source_status = _flatten_source_status(inputs)
 
-        if request is not None:
-            try:
-                cached = self.store.load_snapshot(request.input_snapshot_id)
-            except Exception as exc:
-                return _snapshot_for_status(
-                    status="unavailable",
-                    inputs=inputs,
-                    input_snapshot_id=input_snapshot_id,
-                    boundaries=boundaries,
-                    source_status=source_status,
-                    detail=_sanitized_failure_detail("研究快照读取失败", exc),
-                )
-            if cached is not None:
-                return cached
-
         blocked_status = _blocked_input_status(inputs)
         if blocked_status is not None:
             return _snapshot_for_status(
@@ -132,38 +130,24 @@ class CzscResearchService:
                 source_status=source_status,
                 detail=_sanitized_failure_detail("研究请求校验失败", request_error),
             )
-        if not self.enabled:
+        try:
+            cached = self.store.load_snapshot(request.input_snapshot_id)
+        except Exception as exc:
             return _snapshot_for_status(
                 status="unavailable",
                 inputs=inputs,
                 input_snapshot_id=input_snapshot_id,
                 boundaries=boundaries,
                 source_status=source_status,
-                detail="CZSC rc8 研究引擎已禁用",
-                source_state="disabled",
+                detail=_sanitized_failure_detail("研究快照读取失败", exc),
             )
-        if self.client is None:
-            return _snapshot_for_status(
-                status="unavailable",
-                inputs=inputs,
-                input_snapshot_id=input_snapshot_id,
-                boundaries=boundaries,
-                source_status=source_status,
-                detail="CZSC rc8 Python 或 worker 不可用",
-            )
+        if _cached_snapshot_matches(cached, request):
+            return cached
 
         shared, created = self._shared_future(request.input_snapshot_id)
         if created:
             try:
-                worker_future = self.client.submit(request, priority)
-                worker_future.add_done_callback(
-                    lambda future: self._complete_worker_request(
-                        request=request,
-                        inputs=inputs,
-                        shared=shared,
-                        worker_future=future,
-                    )
-                )
+                cached = self.store.load_snapshot(request.input_snapshot_id)
             except Exception as exc:
                 unavailable = _snapshot_for_status(
                     status="unavailable",
@@ -171,9 +155,33 @@ class CzscResearchService:
                     input_snapshot_id=input_snapshot_id,
                     boundaries=boundaries,
                     source_status=source_status,
-                    detail=_sanitized_failure_detail("CZSC rc8 提交失败", exc),
+                    detail=_sanitized_failure_detail("研究快照读取失败", exc),
                 )
                 self._finish_shared(request.input_snapshot_id, shared, unavailable)
+            else:
+                if _cached_snapshot_matches(cached, request):
+                    self._finish_shared(request.input_snapshot_id, shared, cached)
+                else:
+                    try:
+                        worker_future = self.client.submit(request, priority)
+                        worker_future.add_done_callback(
+                            lambda future: self._complete_worker_request(
+                                request=request,
+                                inputs=inputs,
+                                shared=shared,
+                                worker_future=future,
+                            )
+                        )
+                    except Exception as exc:
+                        unavailable = _snapshot_for_status(
+                            status="unavailable",
+                            inputs=inputs,
+                            input_snapshot_id=input_snapshot_id,
+                            boundaries=boundaries,
+                            source_status=source_status,
+                            detail=_sanitized_failure_detail("CZSC rc8 提交失败", exc),
+                        )
+                        self._finish_shared(request.input_snapshot_id, shared, unavailable)
 
         timeout = self.interactive_wait_seconds if wait_seconds is None else max(0, wait_seconds)
         try:
@@ -232,16 +240,25 @@ class CzscResearchService:
             }
         circuit_state = str(client_health.get("circuit_state") or "unknown")
         last_error = client_health.get("last_error")
+        engine_version = client_health.get("engine_version")
+        version_error = None
+        if engine_version is None:
+            version_error = "rc8 worker engine version unverified"
+        elif engine_version != CZSC_RC8_ENGINE_VERSION:
+            version_error = "rc8 worker engine version mismatch"
         unavailable = (
-            bool(client_health.get("closed")) or circuit_state == "open" or bool(last_error)
+            bool(client_health.get("closed"))
+            or circuit_state == "open"
+            or bool(last_error)
+            or version_error is not None
         )
         return {
             "status": "unavailable" if unavailable else "ready",
             "queue_depth": int(client_health.get("queue_depth") or 0),
             "circuit_state": circuit_state,
-            "engine_version": client_health.get("engine_version"),
+            "engine_version": engine_version,
             "inflight_count": inflight_count,
-            "error": _sanitized_error(last_error) if last_error else None,
+            "error": _sanitized_error(last_error) if last_error else version_error,
         }
 
     def _shared_future(
@@ -405,6 +422,19 @@ def _blocked_input_status(inputs: ClosedWorkspaceInputs) -> CzscResearchStatus |
     ):
         return "insufficient_bars"
     return None
+
+
+def _cached_snapshot_matches(
+    snapshot: CzscResearchSnapshot | None,
+    request: CzscRc8Request,
+) -> bool:
+    return bool(
+        snapshot is not None
+        and snapshot.input_snapshot_id == request.input_snapshot_id
+        and snapshot.engine_version == CZSC_RC8_ENGINE_VERSION
+        and snapshot.catalog_version == request.catalog_version
+        and snapshot.rule_version == CZSC_SCORE_RULE_VERSION
+    )
 
 
 def _blocked_status_detail(status: CzscResearchStatus) -> str:

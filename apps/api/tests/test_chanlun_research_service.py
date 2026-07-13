@@ -11,6 +11,8 @@ import pytest
 from app.services.chanlun import service as chanlun_service_module
 from app.config import Settings
 from app.models import (
+    CZSC_CATALOG_VERSION,
+    CZSC_SCORE_RULE_VERSION,
     ChanlunAnalysisResponse,
     ChanlunPeriod,
     CzscResearchSnapshot,
@@ -90,6 +92,26 @@ def _closed_inputs(
             for period in APPROVED_PERIODS
         },
     )
+
+
+def _non_scoreable_inputs(input_kind: str) -> ClosedWorkspaceInputs:
+    if input_kind == "stale":
+        return _closed_inputs(
+            availability={"30m": "stale"},
+            freshness={"30m": "stale"},
+        )
+    if input_kind == "insufficient":
+        return _closed_inputs(
+            availability={"5m": "insufficient_bars"},
+            freshness={"5m": "insufficient"},
+            count=10,
+        )
+    if input_kind == "unavailable":
+        return _closed_inputs(
+            availability={"1d": "unavailable"},
+            freshness={"1d": "insufficient"},
+        )
+    return _closed_inputs(adjustment_mode="adjustment_mismatch")
 
 
 def _request(inputs: ClosedWorkspaceInputs) -> CzscRc8Request:
@@ -201,10 +223,28 @@ class FakeResearchStore:
             self.saved.append(snapshot)
 
 
+class CompletingBetweenChecksStore(FakeResearchStore):
+    def __init__(self, snapshot: CzscResearchSnapshot) -> None:
+        super().__init__(snapshot)
+        self.load_calls = 0
+
+    def load_snapshot(self, input_snapshot_id: str) -> CzscResearchSnapshot | None:
+        self.load_calls += 1
+        if self.load_calls == 1:
+            return None
+        return super().load_snapshot(input_snapshot_id)
+
+
 class RecordingRc8Client:
-    def __init__(self, futures: list[Future[CzscRc8Response]] | None = None) -> None:
+    def __init__(
+        self,
+        futures: list[Future[CzscRc8Response]] | None = None,
+        *,
+        engine_version: str | None = CZSC_RC8_ENGINE_VERSION,
+    ) -> None:
         self.futures = list(futures or [])
         self.requests: list[tuple[CzscRc8Request, int]] = []
+        self.engine_version = engine_version
 
     def submit(self, request: CzscRc8Request, priority: int) -> Future[CzscRc8Response]:
         self.requests.append((request, priority))
@@ -216,7 +256,7 @@ class RecordingRc8Client:
         return {
             "queue_depth": 0,
             "circuit_state": "closed",
-            "engine_version": CZSC_RC8_ENGINE_VERSION,
+            "engine_version": self.engine_version,
             "last_error": None,
             "closed": False,
         }
@@ -226,6 +266,18 @@ class ImmediateReadyRc8Client(RecordingRc8Client):
     def submit(self, request: CzscRc8Request, priority: int) -> Future[CzscRc8Response]:
         future: Future[CzscRc8Response] = Future()
         self.requests.append((request, priority))
+        future.set_result(_response(request))
+        return future
+
+
+class UnverifiedThenReadyRc8Client(RecordingRc8Client):
+    def __init__(self) -> None:
+        super().__init__(engine_version=None)
+
+    def submit(self, request: CzscRc8Request, priority: int) -> Future[CzscRc8Response]:
+        future: Future[CzscRc8Response] = Future()
+        self.requests.append((request, priority))
+        self.engine_version = CZSC_RC8_ENGINE_VERSION
         future.set_result(_response(request))
         return future
 
@@ -276,6 +328,33 @@ def test_service_returns_cached_snapshot_without_submitting_worker() -> None:
     assert result.status == "ready"
     assert result.input_snapshot_id == request.input_snapshot_id
     assert client.requests == []
+
+
+@pytest.mark.parametrize(
+    "version_update",
+    [
+        {"engine_version": "1.0.0rc7"},
+        {"catalog_version": "czsc-v2-catalog-old"},
+        {"rule_version": "czsc-score-v2-rule-old"},
+    ],
+)
+def test_service_recomputes_cached_snapshot_with_mismatched_versions(
+    version_update: dict[str, str],
+) -> None:
+    inputs = _closed_inputs()
+    request = _request(inputs)
+    cached = _snapshot(request).model_copy(update=version_update)
+    store = FakeResearchStore(cached)
+    client = ImmediateReadyRc8Client()
+
+    result = _service(inputs, store=store, client=client).get("600000.SH", lookback=220)
+
+    assert result.status == "ready"
+    assert result.engine_version == CZSC_RC8_ENGINE_VERSION
+    assert result.catalog_version == CZSC_CATALOG_VERSION
+    assert result.rule_version == CZSC_SCORE_RULE_VERSION
+    assert len(client.requests) == 1
+    assert store.saved == [result]
 
 
 def test_pending_call_reuses_submission_then_resolves_to_exact_store_hit() -> None:
@@ -347,6 +426,22 @@ def test_concurrent_callers_coalesce_one_worker_submission() -> None:
     assert len(client.requests) == 1
 
 
+def test_cache_is_rechecked_after_inflight_ownership_before_submitting() -> None:
+    inputs = _closed_inputs()
+    request = _request(inputs)
+    store = CompletingBetweenChecksStore(_snapshot(request))
+    client = RecordingRc8Client()
+    service = _service(inputs, store=store, client=client)
+
+    result = service.get("600000.SH", lookback=220, wait_seconds=0)
+
+    assert result.status == "ready"
+    assert result.input_snapshot_id == request.input_snapshot_id
+    assert store.load_calls == 2
+    assert client.requests == []
+    assert service._inflight == {}
+
+
 @pytest.mark.parametrize(
     ("input_kind", "expected_status"),
     [
@@ -360,25 +455,7 @@ def test_non_scoreable_inputs_never_submit(
     input_kind: str,
     expected_status: str,
 ) -> None:
-    inputs = (
-        _closed_inputs(
-            availability={"30m": "stale"},
-            freshness={"30m": "stale"},
-        )
-        if input_kind == "stale"
-        else _closed_inputs(
-            availability={"5m": "insufficient_bars"},
-            freshness={"5m": "insufficient"},
-            count=10,
-        )
-        if input_kind == "insufficient"
-        else _closed_inputs(
-            availability={"1d": "unavailable"},
-            freshness={"1d": "insufficient"},
-        )
-        if input_kind == "unavailable"
-        else _closed_inputs(adjustment_mode="adjustment_mismatch")
-    )
+    inputs = _non_scoreable_inputs(input_kind)
     client = RecordingRc8Client()
 
     result = _service(inputs, client=client).get("600000.SH", lookback=220)
@@ -386,6 +463,67 @@ def test_non_scoreable_inputs_never_submit(
     assert result.status == expected_status
     assert result.score is None
     assert client.requests == []
+
+
+@pytest.mark.parametrize(
+    ("input_kind", "expected_status"),
+    [
+        ("stale", "stale"),
+        ("insufficient", "insufficient_bars"),
+        ("adjustment", "adjustment_mismatch"),
+        ("unavailable", "unavailable"),
+    ],
+)
+def test_non_scoreable_inputs_override_cached_ready_snapshot(
+    input_kind: str,
+    expected_status: str,
+) -> None:
+    inputs = _non_scoreable_inputs(input_kind)
+    request = _request(inputs)
+    client = RecordingRc8Client()
+
+    result = _service(
+        inputs,
+        store=FakeResearchStore(_snapshot(request)),
+        client=client,
+    ).get("600000.SH", lookback=220)
+
+    assert result.status == expected_status
+    assert result.score is None
+    assert client.requests == []
+
+
+@pytest.mark.parametrize("worker_state", ["disabled", "missing"])
+@pytest.mark.parametrize("input_state", ["cached", "non-scoreable"])
+def test_disabled_or_missing_worker_precedes_cached_and_blocked_input_states(
+    worker_state: str,
+    input_state: str,
+) -> None:
+    inputs = _closed_inputs() if input_state == "cached" else _non_scoreable_inputs("stale")
+    store = (
+        FakeResearchStore(_snapshot(_request(inputs)))
+        if input_state == "cached"
+        else FakeResearchStore()
+    )
+    provider = StaticInputProvider(inputs)
+    client = RecordingRc8Client() if worker_state == "disabled" else None
+    service = CzscResearchService(
+        store=store,
+        client=client,
+        input_provider=provider,
+        settings=Settings(
+            chanlun_rc8_enabled=worker_state != "disabled",
+            chanlun_rc8_interactive_wait_seconds=0.1,
+        ),
+    )
+
+    result = service.get("600000.SH", lookback=220)
+
+    assert result.status == "unavailable"
+    assert result.score is None
+    assert provider.calls == []
+    if client is not None:
+        assert client.requests == []
 
 
 def test_disabled_or_missing_worker_returns_unavailable_without_raising() -> None:
@@ -473,6 +611,37 @@ def test_health_marks_client_errors_unavailable_and_sanitizes_details() -> None:
     assert health["queue_depth"] == 2
     assert "/private/" not in str(health["error"])
     assert "Traceback" not in str(health["error"])
+
+
+@pytest.mark.parametrize("engine_version", [None, "1.0.0rc7"])
+def test_health_requires_the_expected_verified_engine_version(
+    engine_version: str | None,
+) -> None:
+    health = _service(
+        _closed_inputs(),
+        client=RecordingRc8Client(engine_version=engine_version),
+    ).health()
+
+    assert health["status"] == "unavailable"
+    assert health["engine_version"] == engine_version
+    assert health["error"]
+    assert "/" not in str(health["error"])
+    assert "Traceback" not in str(health["error"])
+
+
+def test_health_becomes_ready_after_a_valid_worker_success() -> None:
+    client = UnverifiedThenReadyRc8Client()
+    service = _service(_closed_inputs(), client=client)
+
+    before = service.health()
+    result = service.get("600000.SH", lookback=220)
+    after = service.health()
+
+    assert before["status"] == "unavailable"
+    assert result.status == "ready"
+    assert after["status"] == "ready"
+    assert after["engine_version"] == CZSC_RC8_ENGINE_VERSION
+    assert after["error"] is None
 
 
 def test_service_enforces_workspace_lookback_bounds() -> None:

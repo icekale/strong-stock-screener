@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from app.config import Settings
-from app.main import _chanlun_analysis_service, app, update_runtime_settings
+from app.main import _chanlun_analysis_service, _kline_provider, app, update_runtime_settings
 from app.models import (
     ChanlunAnalysisResponse,
     ChanlunSignal,
@@ -15,9 +17,13 @@ from app.models import (
     StrongStockDataUnavailable,
     StrongStockSourceStatus,
 )
-from app.providers.tickflow import TickFlowDailyKlineProvider, TickFlowIntradayBar, TickFlowQuoteProvider
+from app.providers.tickflow import (
+    TickFlowDailyKlineProvider,
+    TickFlowIntradayBar,
+    TickFlowQuoteProvider,
+)
 from app.services.runtime_settings import SettingsUpdate
-from app.services.chanlun.service import ChanlunAnalysisService, _summary
+from app.services.chanlun.service import ChanlunAnalysisService, _daily_adjustment_mode, _summary
 from app.services.chanlun.store import ChanlunMinuteBarStore
 from app.services.chanlun.symbols import ChanlunSymbolSearchService
 from app.services.short_term_cache import TtlCache
@@ -50,6 +56,19 @@ def minute_range(start: str, count: int) -> list[TickFlowIntradayBar]:
         minute_bar((first + timedelta(minutes=index)).isoformat(), close=10.0 + index / 100)
         for index in range(count)
     ]
+
+
+def trading_day_minutes(value: str) -> list[TickFlowIntradayBar]:
+    day = datetime.fromisoformat(value).date()
+    timestamps = [
+        datetime.combine(day, time(9, 30), tzinfo=SHANGHAI) + timedelta(minutes=index)
+        for index in range(120)
+    ]
+    timestamps.extend(
+        datetime.combine(day, time(13), tzinfo=SHANGHAI) + timedelta(minutes=index)
+        for index in range(120)
+    )
+    return [minute_bar(timestamp.isoformat()) for timestamp in timestamps]
 
 
 def store_at(tmp_path: Path) -> ChanlunMinuteBarStore:
@@ -330,7 +349,9 @@ def test_replay_uses_only_bar_prefixes_and_emits_each_confirmed_signal_once() ->
         period="1d",
         availability="ready",
         bars=bars,
-        source_status=[StrongStockSourceStatus(source="fixture", status="success", detail="fixture")],
+        source_status=[
+            StrongStockSourceStatus(source="fixture", status="success", detail="fixture")
+        ],
     )
     service = object.__new__(ChanlunAnalysisService)
     service.adapter = adapter
@@ -392,7 +413,9 @@ def test_backtest_enters_at_next_bar_open_and_uses_only_confirmed_replay_events(
         period="1d",
         availability="ready",
         bars=bars,
-        source_status=[StrongStockSourceStatus(source="fixture", status="success", detail="fixture")],
+        source_status=[
+            StrongStockSourceStatus(source="fixture", status="success", detail="fixture")
+        ],
     )
     service = object.__new__(ChanlunAnalysisService)
     service.adapter = adapter
@@ -414,7 +437,9 @@ def test_settings_update_evicts_chanlun_service_and_rebuilds_tickflow_providers(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr("app.main.get_settings", lambda: Settings(data_dir=tmp_path))
-    monkeypatch.setattr(app.state, "runtime_config_path", tmp_path / "runtime_config.json", raising=False)
+    monkeypatch.setattr(
+        app.state, "runtime_config_path", tmp_path / "runtime_config.json", raising=False
+    )
     for attribute in (
         "chanlun_analysis_service",
         "chanlun_minute_store",
@@ -457,6 +482,102 @@ def test_settings_update_evicts_chanlun_service_and_rebuilds_tickflow_providers(
     assert rebuilt_service.intraday_provider.base_url == "https://new.tickflow.test"
     assert isinstance(rebuilt_service.daily_provider, TickFlowDailyKlineProvider)
     assert rebuilt_service.daily_provider.base_url == "https://new.tickflow.test"
+
+
+def test_default_chanlun_daily_provider_is_raw_without_changing_general_kline_provider(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("app.main.get_settings", lambda: Settings(data_dir=tmp_path))
+    for attribute in (
+        "chanlun_analysis_service",
+        "chanlun_minute_store",
+        "chanlun_adapter",
+        "chanlun_history_provider",
+        "quote_provider",
+        "kline_provider",
+    ):
+        monkeypatch.delattr(app.state, attribute, raising=False)
+
+    general_provider = _kline_provider()
+    chanlun_provider = _chanlun_analysis_service().daily_provider
+
+    assert isinstance(general_provider, TickFlowDailyKlineProvider)
+    assert isinstance(chanlun_provider, TickFlowDailyKlineProvider)
+    assert general_provider.adjust == "forward"
+    assert chanlun_provider.adjust == "none"
+    assert _daily_adjustment_mode(chanlun_provider) == "raw_unadjusted"
+
+
+def test_successful_daily_payload_is_stale_when_previous_day_is_missing_at_close(
+    tmp_path: Path,
+) -> None:
+    service = ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider(),
+        history_provider=FakeHistoryProvider(),
+        adapter=FakeAdapter(),
+        daily_provider=FakeDailyProvider(daily_bars(43)),
+        cache=build_test_cache(),
+    )
+
+    period_data = service._load_closed_daily_period(
+        "600000.SH",
+        lookback=20,
+        now=shanghai("2026-07-14 15:00"),
+    )
+
+    assert period_data.availability == "ready"
+    assert period_data.bars[-1].date == "2026-07-13T15:00:00+08:00"
+    assert period_data.freshness == "stale"
+
+
+@pytest.mark.parametrize(
+    ("period", "now", "current_minutes", "last_close"),
+    [
+        ("5m", "2026-07-14 10:02", 25, "2026-07-14T09:55:00+08:00"),
+        ("30m", "2026-07-14 12:15", 90, "2026-07-14T11:00:00+08:00"),
+        ("60m", "2026-07-14 14:30", 120, "2026-07-14T11:30:00+08:00"),
+    ],
+)
+def test_successful_intraday_payload_is_stale_when_latest_session_bucket_is_missing(
+    tmp_path: Path,
+    period: str,
+    now: str,
+    current_minutes: int,
+    last_close: str,
+) -> None:
+    history = [
+        bar
+        for day in (
+            "2026-07-06",
+            "2026-07-07",
+            "2026-07-08",
+            "2026-07-09",
+            "2026-07-10",
+            "2026-07-13",
+        )
+        for bar in trading_day_minutes(day)
+    ]
+    current = minute_range("2026-07-14 09:30", current_minutes)
+    service = ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider([*history, *current]),
+        history_provider=FakeHistoryProvider(),
+        adapter=FakeAdapter(),
+        cache=build_test_cache(),
+    )
+
+    period_data = service._load_closed_intraday_periods(
+        "600000.SH",
+        periods=(period,),
+        lookback=20,
+        now=shanghai(now),
+    )[period]
+
+    assert period_data.availability == "ready"
+    assert period_data.bars[-1].date == last_close
+    assert period_data.freshness == "stale"
 
 
 def test_service_uses_closed_store_bars_before_observing_tail(tmp_path: Path) -> None:
@@ -516,9 +637,7 @@ def test_service_returns_insufficient_60m_bars_without_calling_adapter(tmp_path:
 
 def test_backfill_writes_history_once_and_reports_progress(tmp_path: Path) -> None:
     progress: list[tuple[int, int, str]] = []
-    history = FakeHistoryProvider(
-        [minute_bar("2026-07-09 09:30"), minute_bar("2026-07-09 09:31")]
-    )
+    history = FakeHistoryProvider([minute_bar("2026-07-09 09:30"), minute_bar("2026-07-09 09:31")])
     store = store_at(tmp_path)
     service = ChanlunAnalysisService(
         store=store,
@@ -578,7 +697,9 @@ def test_analysis_cache_invalidates_when_last_closed_bar_changes(tmp_path: Path)
     assert len(adapter.calls) == 2
 
 
-def test_live_failure_is_stale_only_when_closed_history_can_still_be_analyzed(tmp_path: Path) -> None:
+def test_live_failure_is_stale_only_when_closed_history_can_still_be_analyzed(
+    tmp_path: Path,
+) -> None:
     adapter = FakeAdapter()
     store = store_at(tmp_path)
     seed_closed_5m_history(store)
@@ -639,10 +760,17 @@ def test_empty_live_intraday_payload_is_stale_with_closed_sqlite_history(tmp_pat
         )
 
         assert result.availability == "stale"
-        live_status = next(status for status in result.source_status if status.source == "Fake TickFlow")
+        live_status = next(
+            status for status in result.source_status if status.source == "Fake TickFlow"
+        )
         assert live_status.status == "failed"
         assert detail in live_status.detail
-        assert next(status for status in result.source_status if status.source == "Chanlun SQLite分钟线").status == "stale"
+        assert (
+            next(
+                status for status in result.source_status if status.source == "Chanlun SQLite分钟线"
+            ).status
+            == "stale"
+        )
 
 
 def test_empty_live_intraday_payload_is_unavailable_without_sqlite_history(tmp_path: Path) -> None:
@@ -661,10 +789,17 @@ def test_empty_live_intraday_payload_is_unavailable_without_sqlite_history(tmp_p
     )
 
     assert result.availability == "unavailable"
-    live_status = next(status for status in result.source_status if status.source == "Fake TickFlow")
+    live_status = next(
+        status for status in result.source_status if status.source == "Fake TickFlow"
+    )
     assert live_status.status == "failed"
     assert "响应缺少" in live_status.detail
-    assert next(status for status in result.source_status if status.source == "Chanlun SQLite分钟线").status == "stale"
+    assert (
+        next(
+            status for status in result.source_status if status.source == "Chanlun SQLite分钟线"
+        ).status
+        == "stale"
+    )
 
 
 def test_symbol_search_normalizes_local_results_and_fails_safely() -> None:
@@ -698,4 +833,7 @@ def daily_bar(value: str, *, close: float) -> KlineBar:
 
 def daily_bars(count: int) -> list[KlineBar]:
     start = datetime(2026, 6, 1, tzinfo=SHANGHAI)
-    return [daily_bar((start + timedelta(days=index)).date().isoformat(), close=10 + index) for index in range(count)]
+    return [
+        daily_bar((start + timedelta(days=index)).date().isoformat(), close=10 + index)
+        for index in range(count)
+    ]

@@ -3183,6 +3183,19 @@ def _kline_provider() -> object:
     )
 
 
+def _chanlun_daily_provider() -> object:
+    injected = getattr(app.state, "kline_provider", None)
+    if injected is not None:
+        return injected
+    settings = _effective_settings()
+    return TickFlowDailyKlineProvider(
+        api_key=settings.tickflow_api_key,
+        base_url=settings.tickflow_base_url,
+        timeout_seconds=settings.provider_timeout_seconds,
+        adjust="none",
+    )
+
+
 def _quote_provider() -> object:
     injected = getattr(app.state, "quote_provider", None)
     if injected is not None:
@@ -3285,7 +3298,7 @@ def _chanlun_analysis_service() -> ChanlunAnalysisService:
         intraday_provider=_quote_provider(),
         history_provider=_chanlun_history_provider(),
         adapter=_chanlun_adapter(),
-        daily_provider=_kline_provider(),
+        daily_provider=_chanlun_daily_provider(),
         cache_seconds=settings.chanlun_cache_seconds,
         minute_retention_days=settings.chanlun_minute_retention_days,
         history_max_bars=settings.chanlun_backfill_max_bars,

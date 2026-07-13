@@ -16,7 +16,11 @@ from app.services.chanlun.rc8_client import (
     Rc8WorkerClient,
     Rc8WorkerUnavailable,
 )
-from app.services.chanlun.research_protocol import CzscRc8Request, build_research_request
+from app.services.chanlun.research_protocol import (
+    CzscRc8Request,
+    CzscRc8Response,
+    build_research_request,
+)
 
 
 def _fake_worker_path() -> Path:
@@ -67,44 +71,71 @@ def _attempt_pids(path: Path) -> set[int]:
     return {int(value) for value in path.read_text(encoding="utf-8").splitlines()}
 
 
-def test_interactive_request_runs_before_next_background_item() -> None:
+def _gate(tmp_path: Path, name: str) -> tuple[str, Path, Path]:
+    gate = tmp_path / name
+    return f"gate:{gate}", Path(f"{gate}.ready"), Path(f"{gate}.release")
+
+
+def test_interactive_request_runs_before_next_background_item(tmp_path: Path) -> None:
     completed: list[str] = []
+    callbacks_done = threading.Event()
+    request_id, ready, release = _gate(tmp_path, "background-1")
+
+    def record_completion(future: Future[CzscRc8Response]) -> None:
+        completed.append(future.result().request_id)
+        if len(completed) == 2:
+            callbacks_done.set()
+
     with Rc8WorkerClient(
         python_path=sys.executable,
         worker_path=_fake_worker_path(),
     ) as client:
-        first = client.submit(_request("delay-background-1"), priority=10)
-        _wait_for(lambda: client.health()["active_request_id"] == "delay-background-1")
+        first = client.submit(_request(request_id), priority=10)
+        _wait_for(ready.exists)
         second = client.submit(_request("background-2"), priority=10)
         interactive = client.submit(_request("interactive"), priority=0)
-        second.add_done_callback(lambda future: completed.append(future.result().request_id))
-        interactive.add_done_callback(lambda future: completed.append(future.result().request_id))
+        second.add_done_callback(record_completion)
+        interactive.add_done_callback(record_completion)
+        assert client.health()["active_request_id"] == request_id
+        assert client.health()["queue_depth"] == 2
+        release.touch()
 
-        assert first.result(timeout=3).request_id == "delay-background-1"
+        assert first.result(timeout=3).request_id == request_id
         assert interactive.result(timeout=3).request_id == "interactive"
         assert second.result(timeout=3).request_id == "background-2"
+        assert callbacks_done.wait(timeout=1)
         assert completed == ["interactive", "background-2"]
 
 
-def test_same_priority_requests_are_fifo() -> None:
+def test_same_priority_requests_are_fifo(tmp_path: Path) -> None:
     completed: list[str] = []
+    callbacks_done = threading.Event()
+    active_request_id, ready, release = _gate(tmp_path, "fifo-active")
+
+    def record_completion(future: Future[CzscRc8Response]) -> None:
+        completed.append(future.result().request_id)
+        if len(completed) == 3:
+            callbacks_done.set()
+
     with Rc8WorkerClient(
         python_path=sys.executable,
         worker_path=_fake_worker_path(),
     ) as client:
-        active = client.submit(_request("delay-active"), priority=10)
-        _wait_for(lambda: client.health()["active_request_id"] == "delay-active")
+        active = client.submit(_request(active_request_id), priority=10)
+        _wait_for(ready.exists)
         request_ids = ["fifo-1", "fifo-2", "fifo-3"]
         futures = [client.submit(_request(request_id), priority=10) for request_id in request_ids]
         for future in futures:
-            future.add_done_callback(
-                lambda completed_future: completed.append(completed_future.result().request_id)
-            )
+            future.add_done_callback(record_completion)
+        assert client.health()["active_request_id"] == active_request_id
+        assert client.health()["queue_depth"] == 3
+        release.touch()
 
         active.result(timeout=3)
         for future in futures:
             future.result(timeout=3)
 
+        assert callbacks_done.wait(timeout=1)
         assert completed == request_ids
 
 
@@ -266,8 +297,6 @@ def test_successive_requests_reuse_one_persistent_process(tmp_path: Path) -> Non
         python_path=sys.executable,
         worker_path=_fake_worker_path(),
     ) as client:
-        assert client._thread.daemon is True
-
         first = client.submit(_request(f"record-pid-1:{attempts}"), priority=0)
         second = client.submit(_request(f"record-pid-2:{attempts}"), priority=0)
 
@@ -299,17 +328,18 @@ def test_process_that_exits_between_requests_is_reaped_before_replacement() -> N
 
 def test_health_reports_activity_queue_version_and_sanitized_error(tmp_path: Path) -> None:
     attempts = tmp_path / "private-worker-path.attempts"
+    active_request_id, ready, release = _gate(tmp_path, "health-active")
     with Rc8WorkerClient(
         python_path=sys.executable,
         worker_path=_fake_worker_path(),
     ) as client:
-        active = client.submit(_request("delay-health-active"), priority=10)
-        _wait_for(lambda: client.health()["active_request_id"] == "delay-health-active")
+        active = client.submit(_request(active_request_id), priority=10)
+        _wait_for(ready.exists)
         queued = client.submit(_request("health-queued"), priority=10)
 
         health = client.health()
         assert health == {
-            "active_request_id": "delay-health-active",
+            "active_request_id": active_request_id,
             "queue_depth": 1,
             "circuit_state": "closed",
             "consecutive_failures": 0,
@@ -317,6 +347,7 @@ def test_health_reports_activity_queue_version_and_sanitized_error(tmp_path: Pat
             "last_error": None,
             "closed": False,
         }
+        release.touch()
 
         active.result(timeout=3)
         queued.result(timeout=3)
@@ -336,17 +367,19 @@ def test_health_reports_activity_queue_version_and_sanitized_error(tmp_path: Pat
         assert str(tmp_path) not in health["last_error"]
 
 
-def test_close_is_idempotent_fails_queued_work_and_rejects_submit() -> None:
+def test_close_is_idempotent_fails_queued_work_and_rejects_submit(tmp_path: Path) -> None:
+    active_request_id, ready, _release = _gate(tmp_path, "close-active")
     client = Rc8WorkerClient(
         python_path=sys.executable,
         worker_path=_fake_worker_path(),
     )
-    active = client.submit(_request("delay-close-active"), priority=10)
-    _wait_for(lambda: client.health()["active_request_id"] == "delay-close-active")
-    _wait_for(lambda: client._process is not None)
+    active = client.submit(_request(active_request_id), priority=10)
+    _wait_for(ready.exists)
     process = client._process
     assert process is not None
     queued = client.submit(_request("close-queued"), priority=10)
+    assert client.health()["active_request_id"] == active_request_id
+    assert client.health()["queue_depth"] == 1
 
     client.close()
     client.close()

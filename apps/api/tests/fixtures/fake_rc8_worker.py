@@ -12,6 +12,7 @@ PROTOCOL_VERSION = "czsc-rc8-jsonl-v1"
 CATALOG_VERSION = "czsc-v2-catalog-1"
 ENGINE_VERSION = "1.0.0rc8"
 PERIODS = ("1d", "60m", "30m", "5m")
+GATE_TIMEOUT_SECONDS = 5.0
 
 
 def _write(payload: object) -> None:
@@ -56,6 +57,17 @@ def _response(payload: dict[str, Any]) -> dict[str, Any]:
 def _handle(payload: dict[str, Any]) -> None:
     request_id = str(payload["request_id"])
 
+    if request_id.startswith("gate:"):
+        gate = _path_suffix(request_id)
+        if gate is None:
+            raise SystemExit(20)
+        Path(f"{gate}.ready").write_text("ready\n", encoding="utf-8")
+        release = Path(f"{gate}.release")
+        deadline = time.monotonic() + GATE_TIMEOUT_SECONDS
+        while not release.exists():
+            if time.monotonic() >= deadline:
+                raise SystemExit(20)
+            time.sleep(0.005)
     if request_id.startswith("delay-"):
         time.sleep(0.2)
     if request_id.startswith("slow-"):

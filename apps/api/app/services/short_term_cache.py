@@ -6,13 +6,20 @@ from typing import Callable, Generic, TypeVar, cast
 
 T = TypeVar("T")
 _MISSING = object()
+_STALE_RETENTION_MULTIPLIER = 10
+_MAX_STALE_RETENTION_SECONDS = 3600
 
 
 class TtlCache(Generic[T]):
     def __init__(self, ttl_seconds: float = 90, *, name: str = "cache") -> None:
         self.name = name
         self.ttl_seconds = ttl_seconds
+        self._stale_retention_seconds = min(
+            ttl_seconds * _STALE_RETENTION_MULTIPLIER,
+            _MAX_STALE_RETENTION_SECONDS,
+        )
         self._items: dict[str, tuple[float, T]] = {}
+        self._stale_while_revalidate: set[str] = set()
         self._refreshing: dict[str, int] = {}
         self._filling: dict[str, Event] = {}
         self._lock = RLock()
@@ -39,8 +46,20 @@ class TtlCache(Generic[T]):
             if cached is not None:
                 expires_at, value = cached
                 if expires_at > now:
+                    self._stale_while_revalidate.add(key)
                     self._hits += 1
                     return value
+                if (
+                    key not in self._refreshing
+                    and expires_at + self._stale_retention_seconds <= now
+                ):
+                    del self._items[key]
+                    self._stale_while_revalidate.discard(key)
+                    cached = None
+                else:
+                    self._stale_while_revalidate.add(key)
+            if cached is not None:
+                _expires_at, value = cached
                 self._stale_hits += 1
                 if key not in self._refreshing:
                     refresh_generation = self._generation
@@ -60,7 +79,7 @@ class TtlCache(Generic[T]):
         if stale_value is not _MISSING:
             return cast(T, stale_value)
 
-        return self._get_fresh_or_fill(key, factory)
+        return self._get_fresh_or_fill(key, factory, stale_while_revalidate=True)
 
     def get_if_fresh(self, key: str) -> T | None:
         with self._lock:
@@ -78,6 +97,7 @@ class TtlCache(Generic[T]):
         with self._lock:
             self._generation += 1
             self._items.clear()
+            self._stale_while_revalidate.clear()
             self._refreshing.clear()
             self._filling.clear()
 
@@ -106,7 +126,13 @@ class TtlCache(Generic[T]):
                 "oldest_expires_in_seconds": oldest_expires_in,
             }
 
-    def _get_fresh_or_fill(self, key: str, factory: Callable[[], T]) -> T:
+    def _get_fresh_or_fill(
+        self,
+        key: str,
+        factory: Callable[[], T],
+        *,
+        stale_while_revalidate: bool = False,
+    ) -> T:
         while True:
             with self._lock:
                 now = monotonic()
@@ -115,6 +141,8 @@ class TtlCache(Generic[T]):
                 if cached is not None:
                     expires_at, value = cached
                     if expires_at > now:
+                        if stale_while_revalidate:
+                            self._stale_while_revalidate.add(key)
                         self._hits += 1
                         return value
 
@@ -148,6 +176,10 @@ class TtlCache(Generic[T]):
                         now = monotonic()
                         self._evict_expired_locked(now)
                         self._items[key] = (now + self.ttl_seconds, value)
+                        if stale_while_revalidate:
+                            self._stale_while_revalidate.add(key)
+                        else:
+                            self._stale_while_revalidate.discard(key)
                         self._last_error = None
                     self._refresh_count += 1
                     self._last_refresh_finished_at = monotonic()
@@ -166,6 +198,7 @@ class TtlCache(Generic[T]):
                     now = monotonic()
                     self._evict_expired_locked(now)
                     self._items[key] = (now + self.ttl_seconds, value)
+                    self._stale_while_revalidate.add(key)
                     self._last_error = None
                 self._refresh_count += 1
                 self._last_refresh_finished_at = monotonic()
@@ -185,7 +218,13 @@ class TtlCache(Generic[T]):
         expired_keys = [
             key
             for key, (expires_at, _value) in self._items.items()
-            if expires_at <= now and key not in protected_keys
+            if expires_at <= now
+            and key not in protected_keys
+            and (
+                key not in self._stale_while_revalidate
+                or expires_at + self._stale_retention_seconds <= now
+            )
         ]
         for key in expired_keys:
             del self._items[key]
+            self._stale_while_revalidate.discard(key)

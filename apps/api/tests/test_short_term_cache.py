@@ -120,6 +120,46 @@ def test_unrelated_fill_preserves_stale_value_during_background_refresh() -> Non
         release_refresh.set()
 
 
+def test_failed_refresh_stale_survives_unrelated_fill_and_async_retry_but_expires() -> None:
+    cache = TtlCache[str](ttl_seconds=0.01, name="failed-stale-cache")
+
+    assert cache.get_or_refresh("stale", lambda: "initial") == "initial"
+    sleep(0.02)
+
+    def first_failure() -> str:
+        raise RuntimeError("first refresh failed")
+
+    assert cache.get_or_refresh("stale", first_failure) == "initial"
+    for _ in range(100):
+        snapshot = cache.snapshot()
+        if snapshot["refresh_error_count"] == 1 and snapshot["refreshing_count"] == 0:
+            break
+        sleep(0.001)
+    assert snapshot["refresh_error_count"] == 1
+    assert snapshot["refreshing_count"] == 0
+
+    assert cache.get_or_set("unrelated", lambda: "other") == "other"
+    retry_started = Event()
+
+    def retry_failure() -> str:
+        retry_started.set()
+        raise RuntimeError("retry failed")
+
+    assert cache.get_or_refresh("stale", retry_failure) == "initial"
+    assert retry_started.wait(timeout=1) is True
+    for _ in range(100):
+        snapshot = cache.snapshot()
+        if snapshot["refresh_error_count"] == 2 and snapshot["refreshing_count"] == 0:
+            break
+        sleep(0.001)
+    assert snapshot["refresh_error_count"] == 2
+    assert snapshot["refreshing_count"] == 0
+
+    sleep(0.12)
+    assert cache.get_or_set("cleanup", lambda: "cleanup") == "cleanup"
+    assert cache.get_or_refresh("stale", lambda: "replacement") == "replacement"
+
+
 def test_cache_snapshot_records_hits_misses_and_refresh_error() -> None:
     cache = TtlCache[str](ttl_seconds=0.01, name="quotes")
 

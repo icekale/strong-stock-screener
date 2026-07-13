@@ -11,6 +11,7 @@ from pydantic import BaseModel
 
 from app.models import (
     CzscResearchSnapshot,
+    CzscSignalEvidence,
     CzscV2BatchResult,
     CzscV2BatchStatus,
     CzscV2CandidateScore,
@@ -86,51 +87,68 @@ class ChanlunResearchStore:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             _validate_snapshot_evidence(snapshot)
-            connection.execute(
-                """
-                INSERT INTO research_snapshots (
-                  input_snapshot_id, symbol, status, calculated_at,
-                  engine_version, catalog_version, rule_version, payload_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(input_snapshot_id) DO UPDATE SET
-                  symbol = excluded.symbol,
-                  status = excluded.status,
-                  calculated_at = excluded.calculated_at,
-                  engine_version = excluded.engine_version,
-                  catalog_version = excluded.catalog_version,
-                  rule_version = excluded.rule_version,
-                  payload_json = excluded.payload_json
-                """,
-                (
-                    snapshot.input_snapshot_id,
-                    snapshot.symbol,
-                    snapshot.status,
-                    _timestamp_key(snapshot.calculated_at),
-                    snapshot.engine_version,
-                    snapshot.catalog_version,
-                    snapshot.rule_version,
-                    _dump_json(snapshot),
-                ),
+            snapshot_values = (
+                snapshot.input_snapshot_id,
+                snapshot.symbol,
+                snapshot.status,
+                _timestamp_key(snapshot.calculated_at),
+                snapshot.engine_version,
+                snapshot.catalog_version,
+                snapshot.rule_version,
+                _dump_json(snapshot),
             )
-            for event in snapshot.events:
+            existing_snapshot = connection.execute(
+                "SELECT * FROM research_snapshots WHERE input_snapshot_id = ?",
+                (snapshot.input_snapshot_id,),
+            ).fetchone()
+            if existing_snapshot is not None:
+                existing_values = (
+                    existing_snapshot["input_snapshot_id"],
+                    existing_snapshot["symbol"],
+                    existing_snapshot["status"],
+                    existing_snapshot["calculated_at"],
+                    existing_snapshot["engine_version"],
+                    existing_snapshot["catalog_version"],
+                    existing_snapshot["rule_version"],
+                    existing_snapshot["payload_json"],
+                )
+                if existing_values != snapshot_values:
+                    raise ValueError("snapshot input ID is immutable once persisted")
+            else:
                 connection.execute(
                     """
-                    INSERT INTO signal_evidence (
-                      id, input_snapshot_id, occurred_at, engine_version,
-                      catalog_version, rule_version, payload_json
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id) DO NOTHING
+                    INSERT INTO research_snapshots (
+                      input_snapshot_id, symbol, status, calculated_at,
+                      engine_version, catalog_version, rule_version, payload_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (
-                        event.id,
-                        event.input_snapshot_id,
-                        _timestamp_key(event.occurred_at),
-                        event.engine_version,
-                        event.catalog_version,
-                        event.rule_version,
-                        _dump_json(event),
-                    ),
+                    snapshot_values,
                 )
+            for event in snapshot.events:
+                existing_event = connection.execute(
+                    "SELECT * FROM signal_evidence WHERE id = ?",
+                    (event.id,),
+                ).fetchone()
+                if existing_event is not None:
+                    _validate_evidence_collision(existing_event, event)
+                else:
+                    connection.execute(
+                        """
+                        INSERT INTO signal_evidence (
+                          id, input_snapshot_id, occurred_at, engine_version,
+                          catalog_version, rule_version, payload_json
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            event.id,
+                            event.input_snapshot_id,
+                            _timestamp_key(event.occurred_at),
+                            event.engine_version,
+                            event.catalog_version,
+                            event.rule_version,
+                            _dump_json(event),
+                        ),
+                    )
 
     def load_snapshot(self, input_snapshot_id: str) -> CzscResearchSnapshot | None:
         with self._connect() as connection:
@@ -151,11 +169,11 @@ class ChanlunResearchStore:
                 ORDER BY calculated_at DESC, input_snapshot_id DESC
                 """,
                 (symbol,),
-            ).fetchall()
-        for row in rows:
-            snapshot = _snapshot_from_row(row)
-            if snapshot is not None:
-                return snapshot
+            )
+            for row in rows:
+                snapshot = _snapshot_from_row(row)
+                if snapshot is not None:
+                    return snapshot
         return None
 
     def count_events(self) -> int:
@@ -316,40 +334,55 @@ class ChanlunResearchStore:
         shanghai_now = now.astimezone(SHANGHAI)
         snapshot_cutoff = shanghai_now - timedelta(days=snapshot_days)
         evidence_cutoff = shanghai_now - timedelta(days=evidence_days)
+        snapshot_cutoff_key = _timestamp_key(snapshot_cutoff)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            connection.execute(
+            latest_valid_versions: set[tuple[str, str, str, str]] = set()
+            deleted_snapshot_ids: list[str] = []
+            referenced_event_ids: set[str] = set()
+            snapshot_rows = connection.execute(
                 """
-                DELETE FROM research_snapshots
-                WHERE calculated_at < ?
-                  AND input_snapshot_id NOT IN (
-                    SELECT input_snapshot_id
-                    FROM (
-                      SELECT
-                        input_snapshot_id,
-                        ROW_NUMBER() OVER (
-                          PARTITION BY symbol, engine_version, catalog_version, rule_version
-                          ORDER BY calculated_at DESC, input_snapshot_id DESC
-                        ) AS version_rank
-                      FROM research_snapshots
-                    )
-                    WHERE version_rank = 1
-                  )
-                """,
-                (_timestamp_key(snapshot_cutoff),),
+                SELECT * FROM research_snapshots
+                ORDER BY calculated_at DESC, input_snapshot_id DESC
+                """
             )
-            connection.execute(
-                """
-                DELETE FROM signal_evidence
-                WHERE occurred_at < ?
-                  AND NOT EXISTS (
-                    SELECT 1
-                    FROM research_snapshots AS snapshot,
-                         json_each(snapshot.payload_json, '$.events') AS event
-                    WHERE json_extract(event.value, '$.id') = signal_evidence.id
-                  )
-                """,
-                (_timestamp_key(evidence_cutoff),),
+            for row in snapshot_rows:
+                snapshot = _snapshot_from_row(row)
+                if snapshot is None:
+                    deleted_snapshot_ids.append(row["input_snapshot_id"])
+                    continue
+                version_key = (
+                    snapshot.symbol,
+                    snapshot.engine_version,
+                    snapshot.catalog_version,
+                    snapshot.rule_version,
+                )
+                latest_valid = version_key not in latest_valid_versions
+                if latest_valid:
+                    latest_valid_versions.add(version_key)
+                if latest_valid or row["calculated_at"] >= snapshot_cutoff_key:
+                    referenced_event_ids.update(event.id for event in snapshot.events)
+                else:
+                    deleted_snapshot_ids.append(snapshot.input_snapshot_id)
+            connection.executemany(
+                "DELETE FROM research_snapshots WHERE input_snapshot_id = ?",
+                [(snapshot_id,) for snapshot_id in deleted_snapshot_ids],
+            )
+            expired_evidence_ids = [
+                row["id"]
+                for row in connection.execute(
+                    """
+                    SELECT id FROM signal_evidence
+                    WHERE occurred_at < ?
+                    ORDER BY id
+                    """,
+                    (_timestamp_key(evidence_cutoff),),
+                )
+                if row["id"] not in referenced_event_ids
+            ]
+            connection.executemany(
+                "DELETE FROM signal_evidence WHERE id = ?",
+                [(event_id,) for event_id in expired_evidence_ids],
             )
             connection.execute(
                 "DELETE FROM shadow_batches WHERE trade_date < ?",
@@ -411,7 +444,12 @@ def _validate_snapshot_evidence(snapshot: CzscResearchSnapshot) -> None:
 
 
 def _snapshot_from_row(row: sqlite3.Row) -> CzscResearchSnapshot | None:
-    snapshot = CzscResearchSnapshot.model_validate_json(row["payload_json"])
+    try:
+        snapshot = CzscResearchSnapshot.model_validate_json(row["payload_json"])
+        _validate_snapshot_evidence(snapshot)
+        calculated_at = _timestamp_key(snapshot.calculated_at)
+    except (OverflowError, TypeError, ValueError):
+        return None
     indexed_identity = (
         row["input_snapshot_id"],
         row["symbol"],
@@ -428,16 +466,55 @@ def _snapshot_from_row(row: sqlite3.Row) -> CzscResearchSnapshot | None:
         snapshot.engine_version,
         snapshot.catalog_version,
         snapshot.rule_version,
-        _timestamp_key(snapshot.calculated_at),
+        calculated_at,
     )
     if indexed_identity != payload_identity:
         return None
     return snapshot
 
 
+def _validate_evidence_collision(
+    row: sqlite3.Row,
+    candidate: CzscSignalEvidence,
+) -> None:
+    try:
+        stored = CzscSignalEvidence.model_validate_json(row["payload_json"])
+        stored_index = (
+            row["id"],
+            row["input_snapshot_id"],
+            row["occurred_at"],
+            row["engine_version"],
+            row["catalog_version"],
+            row["rule_version"],
+        )
+        payload_index = (
+            stored.id,
+            stored.input_snapshot_id,
+            _timestamp_key(stored.occurred_at),
+            stored.engine_version,
+            stored.catalog_version,
+            stored.rule_version,
+        )
+    except (TypeError, ValueError) as error:
+        raise ValueError("stored evidence payload is invalid") from error
+    if stored_index != payload_index:
+        raise ValueError("stored evidence provenance does not match its payload")
+    if _evidence_semantics(stored) != _evidence_semantics(candidate):
+        raise ValueError("event ID collision changes immutable semantic evidence")
+
+
+def _evidence_semantics(evidence: CzscSignalEvidence) -> dict[str, Any]:
+    payload = evidence.model_dump(mode="json")
+    del payload["input_snapshot_id"]
+    del payload["last_closed_bar_at"]
+    return payload
+
+
 def _validate_batch_identity(batch_id: str, baseline_symbols: list[str]) -> None:
     if not batch_id.strip():
         raise ValueError("batch ID cannot be empty")
+    if not baseline_symbols:
+        raise ValueError("batch baseline must contain at least one symbol")
     if any(not symbol.strip() for symbol in baseline_symbols):
         raise ValueError("baseline symbol cannot be empty")
     if len(baseline_symbols) != len(set(baseline_symbols)):

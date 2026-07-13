@@ -32,6 +32,7 @@ def _evidence(
     *,
     event_id: str = "buy3.structure.5m:2026-07-10T14:55:00+08:00:三买",
     occurred_at: str = "2026-07-10T14:55:00+08:00",
+    last_closed_bar_at: str | None = None,
     engine_version: str = "1.0.0rc8",
     catalog_version: str = "czsc-v2-catalog-1",
     rule_version: str = "czsc-score-v2-rule-1",
@@ -44,7 +45,7 @@ def _evidence(
         direction="bullish",
         period="5m",
         occurred_at=occurred_at,
-        last_closed_bar_at=occurred_at,
+        last_closed_bar_at=last_closed_bar_at or occurred_at,
         signal_name="cxt_third_buy_V230228",
         params={"di": 1},
         raw_key="5分钟_D1_三买辅助V230228",
@@ -124,7 +125,7 @@ def _candidate(
     )
 
 
-def test_store_upserts_snapshot_and_deduplicates_events(tmp_path: Path) -> None:
+def test_store_saves_snapshot_idempotently_and_deduplicates_events(tmp_path: Path) -> None:
     store = ChanlunResearchStore(tmp_path / "nested" / "research.sqlite3")
     snapshot = _snapshot("sha256:a")
 
@@ -133,6 +134,114 @@ def test_store_upserts_snapshot_and_deduplicates_events(tmp_path: Path) -> None:
 
     assert store.load_snapshot("sha256:a") == snapshot
     assert store.count_events() == len(snapshot.events)
+
+
+@pytest.mark.parametrize(
+    "changed_field",
+    [
+        "symbol",
+        "status",
+        "engine_version",
+        "catalog_version",
+        "rule_version",
+        "calculated_at",
+        "payload_only",
+    ],
+)
+def test_snapshot_id_rejects_any_conflicting_snapshot_and_rolls_back(
+    tmp_path: Path,
+    changed_field: str,
+) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    original = _snapshot("sha256:a")
+    store.save_snapshot(original)
+
+    if changed_field == "symbol":
+        conflicting = original.model_copy(update={"symbol": "600000.SH"})
+    elif changed_field == "status":
+        conflicting = CzscResearchSnapshot(
+            status="unavailable",
+            symbol=original.symbol,
+            input_snapshot_id=original.input_snapshot_id,
+            engine_version=original.engine_version,
+            calculated_at=original.calculated_at,
+        )
+    elif changed_field == "engine_version":
+        conflicting = _snapshot(
+            "sha256:a",
+            engine_version="1.0.1",
+            events=[_evidence("sha256:a", engine_version="1.0.1")],
+        )
+    elif changed_field == "catalog_version":
+        conflicting = _snapshot(
+            "sha256:a",
+            catalog_version="catalog-v2",
+            events=[_evidence("sha256:a", catalog_version="catalog-v2")],
+        )
+    elif changed_field == "rule_version":
+        conflicting = _snapshot(
+            "sha256:a",
+            rule_version="rule-v2",
+            events=[_evidence("sha256:a", rule_version="rule-v2")],
+        )
+    elif changed_field == "calculated_at":
+        conflicting = original.model_copy(update={"calculated_at": "2026-07-10T15:01:00+08:00"})
+    else:
+        conflicting = original.model_copy(update={"adjustment_mode": "qfq"})
+
+    with pytest.raises(ValueError, match="immutable"):
+        store.save_snapshot(conflicting)
+
+    assert store.load_snapshot("sha256:a") == original
+    assert store.count_events() == len(original.events)
+
+
+def test_snapshot_id_requires_byte_identical_canonical_json(tmp_path: Path) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    snapshot = _snapshot("sha256:a")
+    store.save_snapshot(snapshot)
+    noncanonical_json = json.dumps(
+        snapshot.model_dump(mode="json"),
+        ensure_ascii=False,
+        sort_keys=True,
+        indent=2,
+    )
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE research_snapshots SET payload_json = ? WHERE input_snapshot_id = ?",
+            (noncanonical_json, snapshot.input_snapshot_id),
+        )
+
+    with pytest.raises(ValueError, match="immutable"):
+        store.save_snapshot(snapshot)
+
+    with store._connect() as connection:
+        stored_json = connection.execute(
+            "SELECT payload_json FROM research_snapshots WHERE input_snapshot_id = ?",
+            (snapshot.input_snapshot_id,),
+        ).fetchone()[0]
+    assert stored_json == noncanonical_json
+
+
+def test_snapshot_id_rejects_indexed_identity_mismatch_without_repair(tmp_path: Path) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    snapshot = _snapshot("sha256:a")
+    store.save_snapshot(snapshot)
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE research_snapshots SET status = 'stale' WHERE input_snapshot_id = ?",
+            (snapshot.input_snapshot_id,),
+        )
+
+    with pytest.raises(ValueError, match="immutable"):
+        store.save_snapshot(snapshot)
+
+    with store._connect() as connection:
+        stored_status = connection.execute(
+            "SELECT status FROM research_snapshots WHERE input_snapshot_id = ?",
+            (snapshot.input_snapshot_id,),
+        ).fetchone()[0]
+    assert stored_status == "stale"
 
 
 def test_duplicate_event_id_preserves_first_observed_provenance_after_prune(
@@ -153,24 +262,18 @@ def test_duplicate_event_id_preserves_first_observed_provenance_after_prune(
         "sha256:later",
         event_id="stable-event",
         occurred_at="2024-01-01T14:55:00+08:00",
-        engine_version="1.0.1",
-        catalog_version="catalog-v2",
-        rule_version="rule-v2",
+        last_closed_bar_at="2024-01-01T15:00:00+08:00",
     )
     later_snapshot = _snapshot(
         "sha256:later",
+        symbol="600000.SH",
         calculated_at="2024-01-02T15:00:00+08:00",
-        engine_version="1.0.1",
-        catalog_version="catalog-v2",
-        rule_version="rule-v2",
         events=[later_event],
     )
     version_pointer = _snapshot(
         "sha256:pointer",
+        symbol="600000.SH",
         calculated_at="2024-01-03T15:00:00+08:00",
-        engine_version="1.0.1",
-        catalog_version="catalog-v2",
-        rule_version="rule-v2",
         events=[],
     )
     store.save_snapshot(first_snapshot)
@@ -197,6 +300,148 @@ def test_duplicate_event_id_preserves_first_observed_provenance_after_prune(
     assert row["catalog_version"] == "czsc-v2-catalog-1"
     assert row["rule_version"] == "czsc-score-v2-rule-1"
     assert json.loads(row["payload_json"]) == first_event.model_dump(mode="json")
+
+
+@pytest.mark.parametrize(
+    "semantic_change",
+    [
+        {"occurred_at": "2024-01-01T14:50:00+08:00"},
+        {"catalog_id": "buy2.overlap"},
+        {"family": "second_buy"},
+        {"role": "confirmation"},
+        {"direction": "bearish"},
+        {"period": "30m"},
+        {"higher_period": "60m"},
+        {"lower_period": "30m"},
+        {"signal_name": "cxt_second_bs_V240524"},
+        {"params": {"di": 2}},
+        {"raw_key": "changed-key"},
+        {"raw_value": "changed-value"},
+        {"reason": "changed reason"},
+        {"engine_version": "1.0.1"},
+        {"catalog_version": "catalog-v2"},
+        {"rule_version": "rule-v2"},
+    ],
+    ids=[
+        "occurred-at",
+        "catalog-id",
+        "family",
+        "role",
+        "direction",
+        "period",
+        "higher-period",
+        "lower-period",
+        "signal-name",
+        "params",
+        "raw-key",
+        "raw-value",
+        "reason",
+        "engine-version",
+        "catalog-version",
+        "rule-version",
+    ],
+)
+def test_duplicate_event_id_rejects_semantic_collisions_atomically(
+    tmp_path: Path,
+    semantic_change: dict[str, object],
+) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    first_event = _evidence(
+        "sha256:first",
+        event_id="stable-event",
+        occurred_at="2024-01-01T14:55:00+08:00",
+    )
+    store.save_snapshot(
+        _snapshot(
+            "sha256:first",
+            calculated_at="2024-01-01T15:00:00+08:00",
+            events=[first_event],
+        )
+    )
+    collision_payload = first_event.model_dump(mode="json")
+    collision_payload.update(semantic_change)
+    collision_payload["input_snapshot_id"] = "sha256:later"
+    collision_payload["last_closed_bar_at"] = "2024-01-01T15:00:00+08:00"
+    collision = CzscSignalEvidence.model_validate(collision_payload)
+    later_snapshot = _snapshot(
+        "sha256:later",
+        symbol="600000.SH",
+        calculated_at="2024-01-02T15:00:00+08:00",
+        engine_version=collision.engine_version,
+        catalog_version=collision.catalog_version,
+        rule_version=collision.rule_version,
+        events=[collision],
+    )
+
+    with pytest.raises(ValueError, match="event ID collision"):
+        store.save_snapshot(later_snapshot)
+
+    assert store.load_snapshot("sha256:later") is None
+    assert store.count_events() == 1
+    with store._connect() as connection:
+        payload_json = connection.execute(
+            "SELECT payload_json FROM signal_evidence WHERE id = 'stable-event'"
+        ).fetchone()[0]
+    assert json.loads(payload_json) == first_event.model_dump(mode="json")
+
+
+def test_duplicate_event_id_rejects_malformed_existing_evidence_atomically(
+    tmp_path: Path,
+) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    first_event = _evidence("sha256:first", event_id="stable-event")
+    store.save_snapshot(_snapshot("sha256:first", events=[first_event]))
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE signal_evidence SET payload_json = '{bad' WHERE id = 'stable-event'"
+        )
+    later_event = _evidence(
+        "sha256:later",
+        event_id="stable-event",
+        last_closed_bar_at="2026-07-10T15:00:00+08:00",
+    )
+
+    with pytest.raises(ValueError, match="stored evidence"):
+        store.save_snapshot(
+            _snapshot(
+                "sha256:later",
+                symbol="600000.SH",
+                events=[later_event],
+            )
+        )
+
+    assert store.load_snapshot("sha256:later") is None
+    assert store.count_events() == 1
+
+
+def test_duplicate_event_id_rejects_corrupt_existing_provenance_atomically(
+    tmp_path: Path,
+) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    first_event = _evidence("sha256:first", event_id="stable-event")
+    store.save_snapshot(_snapshot("sha256:first", events=[first_event]))
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE signal_evidence SET input_snapshot_id = 'sha256:tampered' "
+            "WHERE id = 'stable-event'"
+        )
+    later_event = _evidence(
+        "sha256:later",
+        event_id="stable-event",
+        last_closed_bar_at="2026-07-10T15:00:00+08:00",
+    )
+
+    with pytest.raises(ValueError, match="stored evidence"):
+        store.save_snapshot(
+            _snapshot(
+                "sha256:later",
+                symbol="600000.SH",
+                events=[later_event],
+            )
+        )
+
+    assert store.load_snapshot("sha256:later") is None
+    assert store.count_events() == 1
 
 
 def test_store_never_returns_snapshot_for_a_different_input_hash(tmp_path: Path) -> None:
@@ -259,6 +504,47 @@ def test_latest_snapshot_breaks_equal_time_ties_by_input_hash(tmp_path: Path) ->
 
     assert store.latest_snapshot("300308.SZ") == higher
     assert store.latest_snapshot("000001.SZ") is None
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    ["malformed-json", "pydantic-invalid", "index-payload-mismatch"],
+)
+def test_latest_snapshot_skips_corrupt_newer_rows(
+    tmp_path: Path,
+    corruption: str,
+) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    fallback = _snapshot(
+        "sha256:fallback",
+        calculated_at="2026-07-10T14:59:00+08:00",
+        events=[_evidence("sha256:fallback", event_id="event-fallback")],
+    )
+    newer = _snapshot(
+        "sha256:newer",
+        calculated_at="2026-07-10T15:00:00+08:00",
+        events=[_evidence("sha256:newer", event_id="event-newer")],
+    )
+    store.save_snapshot(fallback)
+    store.save_snapshot(newer)
+    if corruption == "malformed-json":
+        corrupt_json = "{bad"
+    elif corruption == "pydantic-invalid":
+        corrupt_json = "{}"
+    else:
+        corrupt_json = json.dumps(
+            fallback.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE research_snapshots SET payload_json = ? WHERE input_snapshot_id = ?",
+            (corrupt_json, newer.input_snapshot_id),
+        )
+
+    assert store.latest_snapshot("300308.SZ") == fallback
 
 
 def test_store_uses_wal_busy_timeout_row_factory_and_canonical_json(tmp_path: Path) -> None:
@@ -346,6 +632,7 @@ def test_store_schema_contains_exactly_the_four_research_tables(tmp_path: Path) 
     [
         ("", ["600000.SH"], "batch ID"),
         ("   ", ["600000.SH"], "batch ID"),
+        ("batch-1", [], "at least one"),
         ("batch-1", ["600000.SH", "600000.SH"], "duplicate"),
         ("batch-1", ["600000.SH", ""], "symbol"),
     ],
@@ -738,21 +1025,21 @@ def test_prune_removes_expired_evidence_no_longer_referenced_by_snapshot(
 ) -> None:
     store = ChanlunResearchStore(tmp_path / "research.sqlite3")
     event = _evidence(
-        "sha256:a",
+        "sha256:old",
         event_id="event-orphaned",
         occurred_at="2024-01-01T14:55:00+08:00",
     )
     store.save_snapshot(
         _snapshot(
-            "sha256:a",
+            "sha256:old",
             calculated_at="2024-01-01T15:00:00+08:00",
             events=[event],
         )
     )
     store.save_snapshot(
         _snapshot(
-            "sha256:a",
-            calculated_at="2024-01-01T15:00:00+08:00",
+            "sha256:pointer",
+            calculated_at="2024-01-02T15:00:00+08:00",
             events=[],
         )
     )
@@ -763,8 +1050,119 @@ def test_prune_removes_expired_evidence_no_longer_referenced_by_snapshot(
         evidence_days=180,
     )
 
-    assert store.load_snapshot("sha256:a") is not None
+    assert store.load_snapshot("sha256:old") is None
+    assert store.load_snapshot("sha256:pointer") is not None
     assert store.count_events() == 0
+
+
+@pytest.mark.parametrize(
+    "corruption",
+    ["malformed-json", "pydantic-invalid", "index-payload-mismatch"],
+)
+def test_prune_deletes_corrupt_newer_row_and_keeps_latest_valid_pointer(
+    tmp_path: Path,
+    corruption: str,
+) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    fallback_event = _evidence(
+        "sha256:fallback",
+        event_id="event-fallback",
+        occurred_at="2024-01-01T14:55:00+08:00",
+    )
+    fallback = _snapshot(
+        "sha256:fallback",
+        calculated_at="2024-01-01T15:00:00+08:00",
+        events=[fallback_event],
+    )
+    corrupt_event = _evidence(
+        "sha256:corrupt",
+        event_id="event-corrupt",
+        occurred_at="2024-01-02T14:55:00+08:00",
+    )
+    corrupt = _snapshot(
+        "sha256:corrupt",
+        calculated_at="2026-07-12T15:00:00+08:00",
+        events=[corrupt_event],
+    )
+    store.save_snapshot(fallback)
+    store.save_snapshot(corrupt)
+    if corruption == "malformed-json":
+        corrupt_json = "{bad"
+    elif corruption == "pydantic-invalid":
+        corrupt_json = "{}"
+    else:
+        corrupt_json = json.dumps(
+            fallback.model_dump(mode="json"),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE research_snapshots SET payload_json = ? WHERE input_snapshot_id = ?",
+            (corrupt_json, corrupt.input_snapshot_id),
+        )
+
+    store.prune(
+        now=datetime(2026, 7, 13, tzinfo=SHANGHAI),
+        snapshot_days=180,
+        evidence_days=180,
+    )
+
+    assert store.load_snapshot("sha256:fallback") == fallback
+    with store._connect() as connection:
+        snapshot_ids = {
+            row["input_snapshot_id"]
+            for row in connection.execute("SELECT input_snapshot_id FROM research_snapshots")
+        }
+        evidence_ids = {row["id"] for row in connection.execute("SELECT id FROM signal_evidence")}
+    assert snapshot_ids == {"sha256:fallback"}
+    assert evidence_ids == {"event-fallback"}
+
+
+def test_prune_preserves_expired_evidence_referenced_by_recent_valid_snapshot_without_json1(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    referenced_event = _evidence(
+        "sha256:recent",
+        event_id="event-referenced",
+        occurred_at="2024-01-01T14:55:00+08:00",
+    )
+    recent = _snapshot(
+        "sha256:recent",
+        calculated_at="2026-07-01T15:00:00+08:00",
+        events=[referenced_event],
+    )
+    pointer = _snapshot(
+        "sha256:pointer",
+        calculated_at="2026-07-02T15:00:00+08:00",
+        events=[],
+    )
+    store.save_snapshot(recent)
+    store.save_snapshot(pointer)
+    statements: list[str] = []
+    original_connect = sqlite3.connect
+
+    def traced_connect(*args, **kwargs):
+        connection = original_connect(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", traced_connect)
+
+    store.prune(
+        now=datetime(2026, 7, 13, tzinfo=SHANGHAI),
+        snapshot_days=30,
+        evidence_days=1,
+    )
+
+    assert store.load_snapshot("sha256:recent") == recent
+    assert store.load_snapshot("sha256:pointer") == pointer
+    assert store.count_events() == 1
+    assert all("json_each" not in statement.lower() for statement in statements)
+    assert all("json_extract" not in statement.lower() for statement in statements)
 
 
 def test_prune_uses_shanghai_cutoff_and_cascades_old_shadow_scores(tmp_path: Path) -> None:

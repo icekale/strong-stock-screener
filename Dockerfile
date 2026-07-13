@@ -28,6 +28,29 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     && find /opt/strong-stock-api-venv -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
 
 
+FROM python:3.12-slim AS rc8-builder
+
+ARG PIP_INDEX_URL=https://pypi.org/simple
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_INDEX_URL=$PIP_INDEX_URL \
+    PIP_DEFAULT_TIMEOUT=120 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_RETRIES=10
+
+WORKDIR /build/rc8
+
+COPY apps/api/rc8-worker/pyproject.toml apps/api/rc8-worker/uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m venv /opt/czsc-rc8-venv \
+    && /opt/czsc-rc8-venv/bin/python -m pip install setuptools wheel uv==0.11.6 \
+    && /opt/czsc-rc8-venv/bin/uv export --locked --no-dev --no-emit-project --format requirements-txt -o requirements.txt \
+    && /opt/czsc-rc8-venv/bin/python -m pip uninstall -y uv \
+    && /opt/czsc-rc8-venv/bin/python -m pip install --no-build-isolation -r requirements.txt \
+    && /opt/czsc-rc8-venv/bin/python -c "import importlib.metadata; assert importlib.metadata.version('czsc') == '1.0.0rc8'"
+
+
 FROM node:22-slim AS web-deps
 
 WORKDIR /build/web
@@ -75,6 +98,7 @@ RUN apt-get update \
 
 COPY --from=node:22-slim /usr/local/bin/node /usr/local/bin/node
 COPY --from=api-builder /opt/strong-stock-api-venv /opt/strong-stock-api-venv
+COPY --from=rc8-builder /opt/czsc-rc8-venv /opt/czsc-rc8-venv
 COPY apps/api/app ./api/app
 COPY apps/api/artifacts ./api/artifacts
 COPY --from=web-builder /build/web/.next/standalone ./web
@@ -82,6 +106,7 @@ COPY --from=web-builder /build/web/.next/static ./web/.next/static
 COPY scripts/start-single-container.sh ./start-single-container.sh
 
 RUN /opt/strong-stock-api-venv/bin/python -c "import czsc, mootdx; print(czsc.__version__, mootdx.__version__)" \
+    && /opt/czsc-rc8-venv/bin/python -c "import importlib.metadata; assert importlib.metadata.version('czsc') == '1.0.0rc8'" \
     && chmod +x ./start-single-container.sh \
     && mkdir -p /app/data
 

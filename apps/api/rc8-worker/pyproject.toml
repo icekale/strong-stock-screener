@@ -1,0 +1,5 @@
+[project]
+name = "strong-stock-czsc-rc8-worker"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["czsc==1.0.0rc8"]

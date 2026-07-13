@@ -56,6 +56,24 @@ def test_api_dependencies_pin_chanlun_runtime_packages() -> None:
     assert '"httpx>=0.25.0,<0.26.0"' in content
 
 
+def test_rc8_worker_has_an_independent_locked_project() -> None:
+    repo_root = Path(__file__).parents[3]
+    with (repo_root / "apps/api/rc8-worker/pyproject.toml").open("rb") as file:
+        project = tomllib.load(file)
+
+    assert project["project"]["dependencies"] == ["czsc==1.0.0rc8"]
+    assert (repo_root / "apps/api/rc8-worker/uv.lock").exists()
+
+
+def test_dockerfiles_build_and_copy_an_isolated_rc8_venv() -> None:
+    repo_root = Path(__file__).parents[3]
+    for path in [repo_root / "Dockerfile", repo_root / "apps/api/Dockerfile"]:
+        content = path.read_text(encoding="utf-8")
+        assert "/opt/czsc-rc8-venv" in content
+        assert "importlib.metadata.version('czsc')" in content
+        assert "1.0.0rc8" in content
+
+
 def test_dev_dependencies_use_httpx2_for_starlette_testclient() -> None:
     repo_root = Path(__file__).parents[3]
     with (repo_root / "apps/api/pyproject.toml").open("rb") as pyproject_file:

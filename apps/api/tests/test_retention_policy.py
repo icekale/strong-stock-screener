@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from app.models import (
     AuctionReviewRecord,
     AuctionReviewSnapshot,
+    CzscResearchSnapshot,
+    CzscV2CandidateScore,
     GsgfAnalysis,
     MarketEmotionSnapshotResponse,
     ShortTermSentimentResponse,
@@ -12,6 +16,7 @@ from app.models import (
     StrongStockScreeningResult,
 )
 from app.services.auction_review_store import AuctionReviewStore
+from app.services.chanlun.research_store import ChanlunResearchStore
 from app.services.gsgf_review import GsgfReviewStore
 from app.services.market_emotion_history import MarketEmotionHistoryStore
 from app.services.runs import RunStore
@@ -80,6 +85,55 @@ def test_auction_review_store_prunes_old_trade_dates(tmp_path: Path) -> None:
 
     remaining = sorted(path.stem for path in (tmp_path / "auction_reviews" / "records").glob("*.jsonl"))
     assert remaining == ["2026-06-30", "2026-07-01"]
+
+
+def test_chanlun_research_store_retains_version_pointer_and_prunes_batch_cascade(
+    tmp_path: Path,
+) -> None:
+    store = ChanlunResearchStore(tmp_path / "chanlun" / "research.sqlite3")
+    common = {
+        "status": "unavailable",
+        "symbol": "300308.SZ",
+        "engine_version": "1.0.0rc8",
+    }
+    store.save_snapshot(
+        CzscResearchSnapshot(
+            **common,
+            input_snapshot_id="sha256:old",
+            calculated_at="2024-01-01T15:00:00+08:00",
+        )
+    )
+    store.save_snapshot(
+        CzscResearchSnapshot(
+            **common,
+            input_snapshot_id="sha256:pointer",
+            calculated_at="2024-01-02T15:00:00+08:00",
+        )
+    )
+    store.create_batch("expired", "2025-01-01", ["300308.SZ"])
+    store.save_batch_score(
+        "expired",
+        CzscV2CandidateScore(
+            symbol="300308.SZ",
+            status="unavailable",
+            baseline_rank=1,
+            input_snapshot_id="sha256:old",
+        ),
+    )
+    store.create_batch("retained", "2026-07-10", ["300308.SZ"])
+
+    store.prune(
+        now=datetime(2026, 7, 13, tzinfo=ZoneInfo("Asia/Shanghai")),
+        snapshot_days=180,
+        evidence_days=730,
+    )
+
+    assert store.load_snapshot("sha256:old") is None
+    assert store.load_snapshot("sha256:pointer") is not None
+    assert store.load_batch("expired") is None
+    assert store.load_batch("retained") is not None
+    with store._connect() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM shadow_scores").fetchone()[0] == 0
 
 
 def _screen_result(trade_date: str, symbol: str) -> StrongStockScreeningResult:

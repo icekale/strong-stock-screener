@@ -23,7 +23,12 @@ from app.providers.tickflow import (
     TickFlowQuoteProvider,
 )
 from app.services.runtime_settings import SettingsUpdate
-from app.services.chanlun.service import ChanlunAnalysisService, _daily_adjustment_mode, _summary
+from app.services.chanlun.service import (
+    ChanlunAnalysisService,
+    _closed_input_freshness,
+    _daily_adjustment_mode,
+    _summary,
+)
 from app.services.chanlun.store import ChanlunMinuteBarStore
 from app.services.chanlun.symbols import ChanlunSymbolSearchService
 from app.services.short_term_cache import TtlCache
@@ -578,6 +583,21 @@ def test_successful_intraday_payload_is_stale_when_latest_session_bucket_is_miss
     assert period_data.availability == "ready"
     assert period_data.bars[-1].date == last_close
     assert period_data.freshness == "stale"
+
+
+@pytest.mark.parametrize("period", ["1d", "60m", "30m", "5m"])
+def test_previous_open_session_bar_is_fresh_on_bundled_exchange_holiday(
+    period: str,
+) -> None:
+    bars = (daily_bar("2026-02-13", close=10.0),)
+
+    freshness = _closed_input_freshness(
+        period,
+        bars,
+        shanghai("2026-02-17 15:00"),
+    )
+
+    assert freshness == "fresh"
 
 
 def test_service_uses_closed_store_bars_before_observing_tail(tmp_path: Path) -> None:

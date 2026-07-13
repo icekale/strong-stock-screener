@@ -689,6 +689,52 @@ def test_closed_workspace_cache_reuses_implicit_calls_across_a_minute(
     assert service.closed_input_cache.snapshot()["size"] == 1
 
 
+@pytest.mark.parametrize(
+    ("before", "after"),
+    [
+        (
+            datetime(2026, 7, 10, 10, 4, 59, tzinfo=SHANGHAI),
+            datetime(2026, 7, 10, 10, 5, 0, tzinfo=SHANGHAI),
+        ),
+        (
+            datetime(2026, 7, 10, 14, 59, 59, tzinfo=SHANGHAI),
+            datetime(2026, 7, 10, 15, 0, 0, tzinfo=SHANGHAI),
+        ),
+    ],
+    ids=["5m-close", "daily-close"],
+)
+def test_closed_workspace_cache_invalidates_at_expected_close_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+    before: datetime,
+    after: datetime,
+) -> None:
+    service = object.__new__(ChanlunAnalysisService)
+    service.closed_input_cache = TtlCache(ttl_seconds=60, name="closed-input-test")
+    build_calls: list[datetime] = []
+
+    def build(symbol: str, *, lookback: int, now: datetime) -> ClosedWorkspaceInputs:
+        build_calls.append(now)
+        return _closed_inputs()
+
+    service._build_closed_workspace_inputs = build  # type: ignore[method-assign]
+
+    class SequencedDatetime(datetime):
+        values = iter((before, after))
+
+        @classmethod
+        def now(cls, tz: ZoneInfo | None = None) -> datetime:
+            return next(cls.values)
+
+    monkeypatch.setattr(chanlun_service_module, "datetime", SequencedDatetime)
+
+    first = service.closed_workspace_inputs("600000.SH", lookback=220)
+    second = service.closed_workspace_inputs("600000.SH", lookback=220)
+
+    assert first is not second
+    assert build_calls == [before, after]
+    assert service.closed_input_cache.snapshot()["size"] == 2
+
+
 def test_backfill_clears_the_closed_workspace_cache() -> None:
     class EmptyHistoryProvider:
         source_name = "empty history"

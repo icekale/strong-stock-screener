@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+from functools import lru_cache
 from statistics import mean, median
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -230,11 +231,8 @@ class ChanlunAnalysisService:
         now: datetime | None = None,
     ) -> ClosedWorkspaceInputs:
         normalized_symbol = normalize_chanlun_symbol(symbol) or symbol.strip().upper()
-        explicit_now = now is not None
         current = _to_shanghai(now or datetime.now(tz=SHANGHAI))
-        cache_key = f"{normalized_symbol}:{lookback}"
-        if explicit_now:
-            cache_key = f"{cache_key}:{current.isoformat(timespec='minutes')}"
+        cache_key = f"{normalized_symbol}:{lookback}:{_expected_close_fingerprint(current)}"
         return self.closed_input_cache.get_or_set(
             cache_key,
             lambda: self._build_closed_workspace_inputs(
@@ -883,12 +881,20 @@ def _closed_input_freshness(
 def _expected_latest_close(period: ChanlunPeriod, now: datetime) -> datetime:
     current = _to_shanghai(now)
     if period == "1d":
-        if current.weekday() < 5 and current.time() >= time(15):
+        if _is_open_session(current.date()) and current.time() >= time(15):
             return datetime.combine(current.date(), time(15), tzinfo=SHANGHAI)
-        return datetime.combine(_previous_weekday(current.date()), time(15), tzinfo=SHANGHAI)
+        return datetime.combine(
+            _previous_open_session(current.date()),
+            time(15),
+            tzinfo=SHANGHAI,
+        )
 
-    if current.weekday() >= 5:
-        return datetime.combine(_previous_weekday(current.date()), time(15), tzinfo=SHANGHAI)
+    if not _is_open_session(current.date()):
+        return datetime.combine(
+            _previous_open_session(current.date()),
+            time(15),
+            tzinfo=SHANGHAI,
+        )
 
     period_minutes = _INTRADAY_PERIOD_MINUTES[period]
     latest: datetime | None = None
@@ -902,7 +908,65 @@ def _expected_latest_close(period: ChanlunPeriod, now: datetime) -> datetime:
             boundary += timedelta(minutes=period_minutes)
     if latest is not None:
         return latest
-    return datetime.combine(_previous_weekday(current.date()), time(15), tzinfo=SHANGHAI)
+    return datetime.combine(
+        _previous_open_session(current.date()),
+        time(15),
+        tzinfo=SHANGHAI,
+    )
+
+
+def _expected_close_fingerprint(now: datetime) -> str:
+    return ",".join(
+        f"{period}={_expected_latest_close(period, now).isoformat(timespec='seconds')}"
+        for period in _WORKSPACE_PERIODS
+    )
+
+
+@lru_cache(maxsize=1)
+def _bundled_exchange_calendar() -> tuple[date, date, frozenset[date]] | None:
+    try:
+        from czsc.py.calendar import calendar as calendar_frame
+
+        calendar_dates: list[date] = []
+        open_sessions: set[date] = set()
+        for raw_date, is_open in calendar_frame.loc[:, ["cal_date", "is_open"]].itertuples(
+            index=False, name=None
+        ):
+            session_date = (
+                raw_date.date()
+                if isinstance(raw_date, datetime)
+                else date.fromisoformat(str(raw_date)[:10])
+            )
+            calendar_dates.append(session_date)
+            if int(is_open) == 1:
+                open_sessions.add(session_date)
+    except Exception:
+        return None
+    if not calendar_dates or not open_sessions:
+        return None
+    return min(calendar_dates), max(calendar_dates), frozenset(open_sessions)
+
+
+def _is_open_session(value: date) -> bool:
+    calendar_data = _bundled_exchange_calendar()
+    if calendar_data is not None:
+        first_date, last_date, open_sessions = calendar_data
+        if first_date <= value <= last_date:
+            return value in open_sessions
+    return value.weekday() < 5
+
+
+def _previous_open_session(value: date) -> date:
+    calendar_data = _bundled_exchange_calendar()
+    if calendar_data is not None:
+        first_date, last_date, open_sessions = calendar_data
+        if first_date <= value <= last_date:
+            previous = value - timedelta(days=1)
+            while previous >= first_date:
+                if previous in open_sessions:
+                    return previous
+                previous -= timedelta(days=1)
+    return _previous_weekday(value)
 
 
 def _previous_weekday(value: date) -> date:

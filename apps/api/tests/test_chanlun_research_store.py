@@ -318,9 +318,7 @@ def test_duplicate_event_id_preserves_first_observed_provenance_after_prune(
         {"raw_key": "changed-key"},
         {"raw_value": "changed-value"},
         {"reason": "changed reason"},
-        {"engine_version": "1.0.1"},
         {"catalog_version": "catalog-v2"},
-        {"rule_version": "rule-v2"},
     ],
     ids=[
         "occurred-at",
@@ -336,9 +334,7 @@ def test_duplicate_event_id_preserves_first_observed_provenance_after_prune(
         "raw-key",
         "raw-value",
         "reason",
-        "engine-version",
         "catalog-version",
-        "rule-version",
     ],
 )
 def test_duplicate_event_id_rejects_semantic_collisions_atomically(
@@ -383,6 +379,49 @@ def test_duplicate_event_id_rejects_semantic_collisions_atomically(
             "SELECT payload_json FROM signal_evidence WHERE id = 'stable-event'"
         ).fetchone()[0]
     assert json.loads(payload_json) == first_event.model_dump(mode="json")
+
+
+@pytest.mark.parametrize(
+    "context_change",
+    [
+        {"engine_version": "1.0.1"},
+        {"rule_version": "rule-v2"},
+        {"engine_version": "1.0.1", "rule_version": "rule-v2"},
+    ],
+    ids=["engine-version", "rule-version", "engine-and-rule"],
+)
+def test_duplicate_event_id_allows_engine_rule_context_changes_and_preserves_first_row(
+    tmp_path: Path,
+    context_change: dict[str, str],
+) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    first_event = _evidence("sha256:first", event_id="stable-event")
+    store.save_snapshot(_snapshot("sha256:first", events=[first_event]))
+    later_payload = first_event.model_dump(mode="json")
+    later_payload.update(context_change)
+    later_payload["input_snapshot_id"] = "sha256:later"
+    later_payload["last_closed_bar_at"] = "2026-07-10T15:00:00+08:00"
+    later_event = CzscSignalEvidence.model_validate(later_payload)
+    later_snapshot = _snapshot(
+        "sha256:later",
+        symbol="600000.SH",
+        engine_version=later_event.engine_version,
+        rule_version=later_event.rule_version,
+        events=[later_event],
+    )
+
+    store.save_snapshot(later_snapshot)
+
+    assert store.load_snapshot("sha256:later") == later_snapshot
+    assert store.count_events() == 1
+    with store._connect() as connection:
+        row = connection.execute(
+            "SELECT * FROM signal_evidence WHERE id = 'stable-event'"
+        ).fetchone()
+    assert row is not None
+    assert row["engine_version"] == first_event.engine_version
+    assert row["rule_version"] == first_event.rule_version
+    assert json.loads(row["payload_json"]) == first_event.model_dump(mode="json")
 
 
 def test_duplicate_event_id_rejects_malformed_existing_evidence_atomically(
@@ -1163,6 +1202,65 @@ def test_prune_preserves_expired_evidence_referenced_by_recent_valid_snapshot_wi
     assert store.count_events() == 1
     assert all("json_each" not in statement.lower() for statement in statements)
     assert all("json_extract" not in statement.lower() for statement in statements)
+
+
+def test_prune_scans_use_retention_indexes_without_snapshot_temp_sort(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    event = _evidence(
+        "sha256:a",
+        event_id="event-a",
+        occurred_at="2024-01-01T14:55:00+08:00",
+    )
+    store.save_snapshot(
+        _snapshot(
+            "sha256:a",
+            calculated_at="2024-01-01T15:00:00+08:00",
+            events=[event],
+        )
+    )
+    statements: list[str] = []
+    original_connect = sqlite3.connect
+
+    def traced_connect(*args, **kwargs):
+        connection = original_connect(*args, **kwargs)
+        connection.set_trace_callback(statements.append)
+        return connection
+
+    monkeypatch.setattr(sqlite3, "connect", traced_connect)
+
+    store.prune(
+        now=datetime(2026, 7, 13, tzinfo=SHANGHAI),
+        snapshot_days=180,
+        evidence_days=180,
+    )
+
+    normalized = [" ".join(statement.split()) for statement in statements]
+    snapshot_sql = next(
+        statement
+        for statement in normalized
+        if statement.startswith("SELECT * FROM research_snapshots")
+    )
+    evidence_sql = next(
+        statement
+        for statement in normalized
+        if statement.startswith("SELECT id FROM signal_evidence")
+    )
+    assert normalized.index("BEGIN IMMEDIATE") < normalized.index(snapshot_sql)
+    assert snapshot_sql.endswith(
+        "ORDER BY symbol, engine_version, catalog_version, rule_version, "
+        "calculated_at DESC, input_snapshot_id DESC"
+    )
+    assert "ORDER BY" not in evidence_sql
+
+    with original_connect(store.path) as connection:
+        snapshot_plan = [row[3] for row in connection.execute(f"EXPLAIN QUERY PLAN {snapshot_sql}")]
+        evidence_plan = [row[3] for row in connection.execute(f"EXPLAIN QUERY PLAN {evidence_sql}")]
+    assert any("research_snapshots_retention_idx" in detail for detail in snapshot_plan)
+    assert all("TEMP B-TREE" not in detail.upper() for detail in snapshot_plan)
+    assert any("signal_evidence_retention_idx" in detail for detail in evidence_plan)
 
 
 def test_prune_uses_shanghai_cutoff_and_cascades_old_shadow_scores(tmp_path: Path) -> None:

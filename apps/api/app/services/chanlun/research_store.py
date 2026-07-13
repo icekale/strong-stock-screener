@@ -337,29 +337,34 @@ class ChanlunResearchStore:
         snapshot_cutoff_key = _timestamp_key(snapshot_cutoff)
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            latest_valid_versions: set[tuple[str, str, str, str]] = set()
+            current_version_key: tuple[str, str, str, str] | None = None
+            latest_valid_found = False
             deleted_snapshot_ids: list[str] = []
             referenced_event_ids: set[str] = set()
             snapshot_rows = connection.execute(
                 """
                 SELECT * FROM research_snapshots
-                ORDER BY calculated_at DESC, input_snapshot_id DESC
+                ORDER BY symbol, engine_version, catalog_version, rule_version,
+                         calculated_at DESC, input_snapshot_id DESC
                 """
             )
             for row in snapshot_rows:
+                row_version_key = (
+                    row["symbol"],
+                    row["engine_version"],
+                    row["catalog_version"],
+                    row["rule_version"],
+                )
+                if row_version_key != current_version_key:
+                    current_version_key = row_version_key
+                    latest_valid_found = False
                 snapshot = _snapshot_from_row(row)
                 if snapshot is None:
                     deleted_snapshot_ids.append(row["input_snapshot_id"])
                     continue
-                version_key = (
-                    snapshot.symbol,
-                    snapshot.engine_version,
-                    snapshot.catalog_version,
-                    snapshot.rule_version,
-                )
-                latest_valid = version_key not in latest_valid_versions
+                latest_valid = not latest_valid_found
                 if latest_valid:
-                    latest_valid_versions.add(version_key)
+                    latest_valid_found = True
                 if latest_valid or row["calculated_at"] >= snapshot_cutoff_key:
                     referenced_event_ids.update(event.id for event in snapshot.events)
                 else:
@@ -374,7 +379,6 @@ class ChanlunResearchStore:
                     """
                     SELECT id FROM signal_evidence
                     WHERE occurred_at < ?
-                    ORDER BY id
                     """,
                     (_timestamp_key(evidence_cutoff),),
                 )
@@ -507,6 +511,8 @@ def _evidence_semantics(evidence: CzscSignalEvidence) -> dict[str, Any]:
     payload = evidence.model_dump(mode="json")
     del payload["input_snapshot_id"]
     del payload["last_closed_bar_at"]
+    del payload["engine_version"]
+    del payload["rule_version"]
     return payload
 
 

@@ -85,7 +85,35 @@ ChanlunPeriod = Literal["1d", "60m", "30m", "5m"]
 ChanlunStatus = Literal["observing", "provisional", "confirmed", "final"]
 ChanlunDirection = Literal["up", "down", "unknown"]
 ChanlunAvailability = Literal["ready", "backfilling", "insufficient_bars", "stale", "unavailable"]
-ChanlunLayerKey = Literal["fractals", "strokes", "segments", "zones"]
+ChanlunDivergenceType = Literal["top", "bottom", "consolidation"]
+ChanlunSignalType = Literal[
+    "one_buy",
+    "one_sell",
+    "two_buy",
+    "two_sell",
+    "three_buy",
+    "three_sell",
+]
+ChanlunConfluenceType = Literal[
+    "class_two_buy",
+    "class_two_sell",
+    "class_three_buy",
+    "class_three_sell",
+    "sub_two_buy",
+    "sub_two_sell",
+    "sub_three_buy",
+    "sub_three_sell",
+]
+ChanlunPaperOrderStatus = Literal[
+    "draft",
+    "awaiting_confirmation",
+    "simulated_open",
+    "filled",
+    "rejected",
+    "expired",
+    "cancelled",
+]
+ChanlunLayerKey = Literal["fractals", "strokes", "segments", "zones", "divergences", "signals"]
 
 
 class GsgfScoreBreakdown(BaseModel):
@@ -254,6 +282,49 @@ class ChanlunZone(BaseModel):
     status: ChanlunStatus
 
 
+class ChanlunDivergence(BaseModel):
+    id: str
+    type: ChanlunDivergenceType
+    occurred_at: str
+    reference_occurred_at: str
+    direction: ChanlunDirection
+    reference_stroke_id: str
+    current_stroke_id: str
+    reference_price: float
+    current_price: float
+    reference_macd_strength: float
+    current_macd_strength: float
+    coefficient: float
+    zone_count: int = Field(ge=0)
+    status: ChanlunStatus
+    rule_version: str = "cl-v1"
+
+
+class ChanlunSignal(BaseModel):
+    id: str
+    type: ChanlunSignalType
+    occurred_at: str
+    price: float
+    divergence_id: str | None = None
+    stroke_id: str
+    status: ChanlunStatus
+    rule_version: str = "cl-v1"
+
+
+class ChanlunConfluenceSignal(BaseModel):
+    id: str
+    type: ChanlunConfluenceType
+    higher_period: ChanlunPeriod
+    lower_period: ChanlunPeriod
+    occurred_at: str
+    price: float
+    source_signal_id: str | None = None
+    higher_zone_id: str | None = None
+    status: ChanlunStatus
+    reason: str
+    rule_version: str = "cl-v1"
+
+
 class ChanlunAnalysisResponse(BaseModel):
     symbol: str
     period: ChanlunPeriod
@@ -263,6 +334,8 @@ class ChanlunAnalysisResponse(BaseModel):
     strokes: list[ChanlunStroke] = Field(default_factory=list)
     segments: list[ChanlunStroke] = Field(default_factory=list)
     zones: list[ChanlunZone] = Field(default_factory=list)
+    divergences: list[ChanlunDivergence] = Field(default_factory=list)
+    signals: list[ChanlunSignal] = Field(default_factory=list)
     source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
     calculated_at: str = Field(
         default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
@@ -277,6 +350,8 @@ class ChanlunPeriodSummary(BaseModel):
     availability: ChanlunAvailability
     direction: ChanlunDirection = "unknown"
     latest_zone: ChanlunZone | None = None
+    latest_divergence: ChanlunDivergence | None = None
+    latest_signal: ChanlunSignal | None = None
     last_closed_bar_at: str | None = None
 
 
@@ -284,6 +359,134 @@ class ChanlunWorkspaceResponse(BaseModel):
     symbol: str
     periods: list[ChanlunPeriodSummary] = Field(default_factory=list)
     analysis: ChanlunAnalysisResponse
+    confluence_signals: list[ChanlunConfluenceSignal] = Field(default_factory=list)
+
+
+class ChanlunReplayFrame(BaseModel):
+    closed_at: str
+    direction: ChanlunDirection = "unknown"
+    latest_zone: ChanlunZone | None = None
+    new_divergences: list[ChanlunDivergence] = Field(default_factory=list)
+    new_signals: list[ChanlunSignal] = Field(default_factory=list)
+
+
+class ChanlunReplayResponse(BaseModel):
+    symbol: str
+    period: ChanlunPeriod
+    availability: ChanlunAvailability
+    frames: list[ChanlunReplayFrame] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    adjustment_mode: str = "raw_unadjusted"
+    rule_version: str = "cl-v1"
+
+
+class ChanlunBacktestWindowStat(BaseModel):
+    horizon_bars: int = Field(ge=1)
+    sample_count: int = 0
+    win_rate_pct: float | None = None
+    avg_return_pct: float | None = None
+    median_return_pct: float | None = None
+    avg_max_drawdown_pct: float | None = None
+    profit_loss_ratio: float | None = None
+
+
+class ChanlunBacktestBucket(BaseModel):
+    signal_type: ChanlunSignalType
+    sample_count: int = 0
+    windows: list[ChanlunBacktestWindowStat] = Field(default_factory=list)
+
+
+class ChanlunBacktestResponse(BaseModel):
+    symbol: str
+    period: ChanlunPeriod
+    availability: ChanlunAvailability
+    horizons: list[int] = Field(default_factory=list)
+    entry_rule: Literal["next_bar_open"] = "next_bar_open"
+    sample_count: int = 0
+    buckets: list[ChanlunBacktestBucket] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    adjustment_mode: str = "raw_unadjusted"
+    rule_version: str = "cl-v1"
+
+
+class ChanlunAlertItem(BaseModel):
+    key: str
+    symbol: str
+    period: ChanlunPeriod
+    signal_type: ChanlunSignalType
+    occurred_at: str
+    price: float
+    rule_version: str = "cl-v1"
+    first_seen_at: str
+
+
+class ChanlunAlertListResponse(BaseModel):
+    items: list[ChanlunAlertItem] = Field(default_factory=list)
+
+
+class ChanlunAlertRefreshResponse(BaseModel):
+    symbol: str
+    period: ChanlunPeriod
+    baselined: bool = False
+    created: list[ChanlunAlertItem] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+
+
+class ChanlunPaperOrder(BaseModel):
+    id: str
+    symbol: str
+    side: Literal["buy"] = "buy"
+    quantity: int = Field(ge=100)
+    reference_price: float = Field(gt=0)
+    notional: float = Field(gt=0)
+    status: ChanlunPaperOrderStatus = "awaiting_confirmation"
+    reasons: list[str] = Field(default_factory=list)
+    signal_snapshot: dict[str, Any] = Field(default_factory=dict)
+    rule_version: str = "cl-v1"
+    created_at: str
+    approved_at: str | None = None
+    fill_price: float | None = None
+    fill_notional: float | None = None
+    slippage_bps: int | None = None
+    quote_time: str | None = None
+    filled_at: str | None = None
+    cancelled_at: str | None = None
+    rejection_reason: str | None = None
+
+
+class ChanlunPaperPosition(BaseModel):
+    symbol: str
+    quantity: int = Field(gt=0)
+    average_price: float = Field(gt=0)
+    latest_price: float | None = Field(default=None, gt=0)
+    quote_time: str | None = None
+    valuation_status: Literal["live", "unavailable"] = "unavailable"
+    cost_basis: float = Field(gt=0)
+    market_value: float = Field(gt=0)
+    unrealized_pnl: float | None = None
+    unrealized_pnl_pct: float | None = None
+
+
+class ChanlunPaperAuditRecord(BaseModel):
+    id: int
+    order_id: str
+    event: Literal["created", "approved", "rejected", "cancelled", "filled"]
+    occurred_at: str
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChanlunPaperAccount(BaseModel):
+    initial_cash: float = Field(gt=0)
+    reserved_cash: float = Field(ge=0)
+    available_cash: float
+    total_equity: float = 0
+    unrealized_pnl: float | None = None
+    realized_pnl: float = 0
+    valuation_complete: bool = True
+    valuation_time: str | None = None
+    positions: list[ChanlunPaperPosition] = Field(default_factory=list)
+    orders: list[ChanlunPaperOrder] = Field(default_factory=list)
+    audit_records: list[ChanlunPaperAuditRecord] = Field(default_factory=list)
 
 
 class ChanlunBackfillRequest(BaseModel):

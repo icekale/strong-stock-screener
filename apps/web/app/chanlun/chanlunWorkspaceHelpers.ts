@@ -3,6 +3,15 @@ import type { ChanlunAvailability, ChanlunPeriod } from "../../lib/types";
 
 export const CHANLUN_PERIODS = ["1d", "60m", "30m", "5m"] as const satisfies readonly ChanlunPeriod[];
 
+export const DEFAULT_CHANLUN_LAYERS = {
+  divergences: true,
+  fractals: true,
+  segments: true,
+  signals: true,
+  strokes: true,
+  zones: true,
+} as const;
+
 export type ChanlunAvailabilityDescription = {
   actionable: boolean;
   text: string;

@@ -24,6 +24,11 @@ from app.main import (
 )
 from app.models import (
     ChanlunAnalysisResponse,
+    ChanlunAlertListResponse,
+    ChanlunAlertRefreshResponse,
+    ChanlunPaperAccount,
+    ChanlunPaperOrder,
+    ChanlunReplayResponse,
     ChanlunPeriodSummary,
     ChanlunSymbolMatch,
     ChanlunWorkspaceResponse,
@@ -391,6 +396,21 @@ class FakeChanlunService:
             analysis=analysis,
         )
 
+    def replay(self, symbol: str, *, period: str, lookback: int) -> ChanlunReplayResponse:
+        return ChanlunReplayResponse(
+            symbol=symbol,
+            period=period,  # type: ignore[arg-type]
+            availability="ready",
+        )
+
+    def backtest(self, symbol: str, *, period: str, lookback: int, horizons: list[int]) -> dict[str, object]:
+        return {
+            "symbol": symbol,
+            "period": period,
+            "availability": "ready",
+            "horizons": horizons,
+        }
+
     def backfill(self, symbol: str, *, progress, should_cancel) -> dict[str, object]:
         if should_cancel():
             raise RuntimeError("backfill canceled")
@@ -408,6 +428,72 @@ class BlockingChanlunService(FakeChanlunService):
         self.started.set()
         assert self.release.wait(timeout=2) is True
         return super().backfill(symbol, progress=progress, should_cancel=should_cancel)
+
+
+class FakeChanlunAlertService:
+    def __init__(self) -> None:
+        self.refresh_calls: list[tuple[str, str, int]] = []
+
+    def refresh(self, symbol: str, *, period: str, lookback: int) -> ChanlunAlertRefreshResponse:
+        self.refresh_calls.append((symbol, period, lookback))
+        return ChanlunAlertRefreshResponse(symbol=symbol, period=period, baselined=True)
+
+    def list(self, *, symbol: str | None = None, limit: int = 100) -> ChanlunAlertListResponse:
+        return ChanlunAlertListResponse()
+
+
+class FakeChanlunPaperOrderService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+        self.order = ChanlunPaperOrder(
+            id="paper-test",
+            symbol="600000.SH",
+            quantity=100,
+            reference_price=10.0,
+            notional=1_000.0,
+            created_at="2026-07-10T10:00:00+08:00",
+        )
+
+    def create_draft(self, symbol: str, *, quantity: int, lookback: int) -> ChanlunPaperOrder:
+        assert symbol == "600000.SH"
+        assert quantity == 100
+        assert lookback == 120
+        return self.order
+
+    def approve(self, order_id: str) -> ChanlunPaperOrder:
+        assert order_id == self.order.id
+        self.calls.append(("approve", order_id))
+        self.order = self.order.model_copy(update={"status": "simulated_open"})
+        return self.order
+
+    def fill(self, order_id: str) -> ChanlunPaperOrder:
+        assert order_id == self.order.id
+        self.calls.append(("fill", order_id))
+        self.order = self.order.model_copy(
+            update={
+                "status": "filled",
+                "fill_price": 10.01,
+                "fill_notional": 1_001,
+                "slippage_bps": 5,
+                "quote_time": "2026-07-10T10:02:00+08:00",
+                "filled_at": "2026-07-10T10:02:01+08:00",
+            }
+        )
+        return self.order
+
+    def cancel(self, order_id: str) -> ChanlunPaperOrder:
+        assert order_id == self.order.id
+        self.calls.append(("cancel", order_id))
+        self.order = self.order.model_copy(update={"status": "cancelled"})
+        return self.order
+
+    def account(self) -> ChanlunPaperAccount:
+        return ChanlunPaperAccount(
+            initial_cash=100_000,
+            reserved_cash=1_000,
+            available_cash=99_000,
+            orders=[self.order],
+        )
 
 
 class FakeChanlunSymbolSearchService:
@@ -1257,6 +1343,8 @@ def _client(
     market_overview_provider: object | None = None,
     concept_provider: object | None = None,
     chanlun_analysis_service: object | None = None,
+    chanlun_alert_service: object | None = None,
+    chanlun_paper_order_service: object | None = None,
     chanlun_symbol_search_service: object | None = None,
 ) -> TestClient:
     app.state.candidate_provider = candidate_provider or FakeCandidateProvider()
@@ -1276,6 +1364,14 @@ def _client(
         app.state.chanlun_analysis_service = chanlun_analysis_service
     elif hasattr(app.state, "chanlun_analysis_service"):
         delattr(app.state, "chanlun_analysis_service")
+    if chanlun_alert_service is not None:
+        app.state.chanlun_alert_service = chanlun_alert_service
+    elif hasattr(app.state, "chanlun_alert_service"):
+        delattr(app.state, "chanlun_alert_service")
+    if chanlun_paper_order_service is not None:
+        app.state.chanlun_paper_order_service = chanlun_paper_order_service
+    elif hasattr(app.state, "chanlun_paper_order_service"):
+        delattr(app.state, "chanlun_paper_order_service")
     if chanlun_symbol_search_service is not None:
         app.state.chanlun_symbol_search_service = chanlun_symbol_search_service
     elif hasattr(app.state, "chanlun_symbol_search_service"):
@@ -1408,6 +1504,24 @@ def test_settings_can_be_saved_and_read_without_exposing_full_key(tmp_path: Path
     assert get_response.status_code == 200
     assert get_response.json()["config"]["provider_timeout_seconds"] == 3.5
     assert "tk_saved_secret" not in get_response.text
+
+
+def test_settings_update_clears_cached_chanlun_paper_quote_service(tmp_path: Path) -> None:
+    client = _client(tmp_path, chanlun_paper_order_service=FakeChanlunPaperOrderService())
+
+    response = client.put(
+        "/api/settings",
+        json={
+            "candidate_provider": "recent_limit_up",
+            "kline_provider": "tickflow",
+            "quote_provider": "tickflow",
+            "tickflow_base_url": "https://api.example.test",
+            "provider_timeout_seconds": 3.5,
+        },
+    )
+
+    assert response.status_code == 200
+    assert not hasattr(app.state, "chanlun_paper_order_service")
 
 
 def test_settings_exposes_gsgf_auto_review_config(tmp_path: Path) -> None:
@@ -1631,7 +1745,81 @@ def test_chanlun_analysis_endpoint_returns_project_owned_layers(tmp_path: Path) 
     assert response.status_code == 200
     assert response.json()["period"] == "5m"
     assert response.json()["rule_version"] == "cl-v1"
+    assert response.json()["divergences"] == []
+    assert response.json()["signals"] == []
     assert service.analysis_calls == [("600000.SH", "5m", 120, False)]
+
+
+def test_chanlun_replay_endpoint_returns_confirmed_event_frames(tmp_path: Path) -> None:
+    client = _client(tmp_path, chanlun_analysis_service=FakeChanlunService())
+
+    response = client.get("/api/chanlun/stocks/600000.SH/replays?period=1d&lookback=120")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "600000.SH"
+    assert payload["period"] == "1d"
+    assert payload["frames"] == []
+
+
+def test_chanlun_backtest_endpoint_accepts_fixed_horizons(tmp_path: Path) -> None:
+    client = _client(tmp_path, chanlun_analysis_service=FakeChanlunService())
+
+    response = client.get("/api/chanlun/stocks/600000.SH/backtests?period=1d&lookback=120&horizons=1,3")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["symbol"] == "600000.SH"
+    assert payload["period"] == "1d"
+    assert payload["horizons"] == [1, 3]
+
+
+def test_chanlun_alert_endpoints_refresh_and_list_persisted_events(tmp_path: Path) -> None:
+    service = FakeChanlunAlertService()
+    client = _client(tmp_path, chanlun_alert_service=service)
+
+    refresh = client.post("/api/chanlun/stocks/600000.SH/alerts/refresh?period=5m&lookback=120")
+    listed = client.get("/api/chanlun/alerts?symbol=600000.SH")
+
+    assert refresh.status_code == 200
+    assert refresh.json()["baselined"] is True
+    assert service.refresh_calls == [("600000.SH", "5m", 120)]
+    assert listed.status_code == 200
+    assert listed.json()["items"] == []
+
+
+def test_chanlun_paper_order_endpoints_require_a_draft_before_manual_approval(tmp_path: Path) -> None:
+    service = FakeChanlunPaperOrderService()
+    client = _client(tmp_path, chanlun_paper_order_service=service)
+
+    draft = client.post("/api/chanlun/stocks/600000.SH/paper-orders/drafts?lookback=120", json={"quantity": 100})
+    approved = client.post("/api/chanlun/paper-orders/paper-test/approve")
+    account = client.get("/api/chanlun/paper-account")
+
+    assert draft.status_code == 200
+    assert draft.json()["status"] == "awaiting_confirmation"
+    assert approved.status_code == 200
+    assert approved.json()["status"] == "simulated_open"
+    assert account.status_code == 200
+    assert account.json()["available_cash"] == 99_000
+
+
+def test_chanlun_paper_order_endpoints_fill_and_cancel_manually(tmp_path: Path) -> None:
+    fill_service = FakeChanlunPaperOrderService()
+    fill_client = _client(tmp_path, chanlun_paper_order_service=fill_service)
+    filled = fill_client.post("/api/chanlun/paper-orders/paper-test/fill")
+
+    cancel_service = FakeChanlunPaperOrderService()
+    cancel_client = _client(tmp_path, chanlun_paper_order_service=cancel_service)
+    cancelled = cancel_client.post("/api/chanlun/paper-orders/paper-test/cancel")
+
+    assert filled.status_code == 200
+    assert filled.json()["status"] == "filled"
+    assert filled.json()["slippage_bps"] == 5
+    assert fill_service.calls == [("fill", "paper-test")]
+    assert cancelled.status_code == 200
+    assert cancelled.json()["status"] == "cancelled"
+    assert cancel_service.calls == [("cancel", "paper-test")]
 
 
 def test_chanlun_analysis_validates_lookback_for_each_period(tmp_path: Path) -> None:

@@ -4,7 +4,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.config import Settings
-from app.models import ChanlunAnalysisResponse, ChanlunBackfillRequest
+from app.models import ChanlunAnalysisResponse, ChanlunBackfillRequest, ChanlunSignal, ChanlunWorkspaceResponse
 
 
 def test_chanlun_analysis_response_has_project_owned_layers() -> None:
@@ -32,6 +32,50 @@ def test_chanlun_analysis_response_serializes_contract_defaults() -> None:
 
     assert payload["adjustment_mode"] == "raw_unadjusted"
     assert payload["rule_version"] == "cl-v1"
+
+
+def test_chanlun_analysis_response_serializes_empty_confirmed_event_layers() -> None:
+    response = ChanlunAnalysisResponse(
+        symbol="600000.SH",
+        period="5m",
+        availability="ready",
+    )
+
+    payload = response.model_dump(mode="json")
+
+    assert payload["divergences"] == []
+    assert payload["signals"] == []
+
+
+def test_chanlun_workspace_serializes_empty_multiperiod_confluence_layer() -> None:
+    response = ChanlunWorkspaceResponse(
+        symbol="600000.SH",
+        analysis=ChanlunAnalysisResponse(
+            symbol="600000.SH",
+            period="1d",
+            availability="ready",
+        ),
+    )
+
+    assert response.model_dump(mode="json")["confluence_signals"] == []
+
+
+@pytest.mark.parametrize("signal_type", ["two_buy", "two_sell", "three_buy", "three_sell"])
+def test_chanlun_signal_contract_supports_confirmed_second_and_third_points(
+    signal_type: str,
+) -> None:
+    signal = ChanlunSignal(
+        id=f"signal:{signal_type}",
+        type=signal_type,
+        occurred_at="2026-07-10T10:00:00+08:00",
+        price=10.0,
+        divergence_id=None,
+        stroke_id="stroke:test",
+        status="confirmed",
+    )
+
+    assert signal.type == signal_type
+    assert signal.divergence_id is None
 
 
 def test_chanlun_backfill_rejects_invalid_period() -> None:

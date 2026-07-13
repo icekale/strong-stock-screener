@@ -11,8 +11,14 @@ import type {
   AuctionTop3TrainingSummary,
   BackgroundJobState,
   ChanlunAnalysisResponse,
+  ChanlunAlertListResponse,
+  ChanlunAlertRefreshResponse,
   ChanlunBackfillRequest,
+  ChanlunBacktestResponse,
+  ChanlunPaperAccount,
+  ChanlunPaperOrder,
   ChanlunPeriod,
+  ChanlunReplayResponse,
   ChanlunSymbolSearchResponse,
   ChanlunWorkspaceResponse,
   DataSourceStatusResponse,
@@ -1159,6 +1165,132 @@ export async function getChanlunWorkspace(
     throw new Error(`读取缠论工作台失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<ChanlunWorkspaceResponse>;
+}
+
+export async function getChanlunReplay(
+  symbol: string,
+  options: { period?: ChanlunPeriod; lookback?: number } = {},
+): Promise<ChanlunReplayResponse> {
+  const params = new URLSearchParams({
+    period: options.period ?? "1d",
+    lookback: String(options.lookback ?? 220),
+  });
+  const response = await fetch(
+    `${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/replays?${params.toString()}`,
+  );
+  if (!response.ok) {
+    throw new Error(`读取缠论历史回放失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ChanlunReplayResponse>;
+}
+
+export async function getChanlunBacktest(
+  symbol: string,
+  options: { period?: ChanlunPeriod; lookback?: number; horizons?: number[] } = {},
+): Promise<ChanlunBacktestResponse> {
+  const params = new URLSearchParams({
+    period: options.period ?? "1d",
+    lookback: String(options.lookback ?? 220),
+  });
+  if (options.horizons?.length) {
+    params.set("horizons", options.horizons.join(","));
+  }
+  const response = await fetch(
+    `${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/backtests?${params.toString()}`,
+  );
+  if (!response.ok) {
+    throw new Error(`读取缠论绩效回测失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ChanlunBacktestResponse>;
+}
+
+export async function getChanlunAlerts(
+  options: { symbol?: string; limit?: number } = {},
+): Promise<ChanlunAlertListResponse> {
+  const params = new URLSearchParams({ limit: String(options.limit ?? 100) });
+  if (options.symbol) {
+    params.set("symbol", options.symbol);
+  }
+  const response = await fetch(`${API_BASE_URL}/api/chanlun/alerts?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取缠论预警失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ChanlunAlertListResponse>;
+}
+
+export async function refreshChanlunAlerts(
+  symbol: string,
+  options: { period?: ChanlunPeriod; lookback?: number } = {},
+): Promise<ChanlunAlertRefreshResponse> {
+  const params = new URLSearchParams({
+    period: options.period ?? "1d",
+    lookback: String(options.lookback ?? 220),
+  });
+  const response = await fetch(
+    `${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/alerts/refresh?${params.toString()}`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    throw new Error(`刷新缠论预警失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ChanlunAlertRefreshResponse>;
+}
+
+export async function createChanlunPaperOrderDraft(
+  symbol: string,
+  options: { quantity?: number; lookback?: number } = {},
+): Promise<ChanlunPaperOrder> {
+  const params = new URLSearchParams({ lookback: String(options.lookback ?? 220) });
+  const response = await fetch(
+    `${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/paper-orders/drafts?${params.toString()}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quantity: options.quantity ?? 100 }),
+    },
+  );
+  if (!response.ok) {
+    throw new Error(`创建缠论模拟订单草案失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ChanlunPaperOrder>;
+}
+
+export async function approveChanlunPaperOrder(orderId: string): Promise<ChanlunPaperOrder> {
+  const response = await fetch(`${API_BASE_URL}/api/chanlun/paper-orders/${encodeURIComponent(orderId)}/approve`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`确认缠论模拟订单失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ChanlunPaperOrder>;
+}
+
+export async function cancelChanlunPaperOrder(orderId: string): Promise<ChanlunPaperOrder> {
+  const response = await fetch(`${API_BASE_URL}/api/chanlun/paper-orders/${encodeURIComponent(orderId)}/cancel`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`撤销缠论模拟订单失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ChanlunPaperOrder>;
+}
+
+export async function fillChanlunPaperOrder(orderId: string): Promise<ChanlunPaperOrder> {
+  const response = await fetch(`${API_BASE_URL}/api/chanlun/paper-orders/${encodeURIComponent(orderId)}/fill`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`更新缠论模拟成交失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ChanlunPaperOrder>;
+}
+
+export async function getChanlunPaperAccount(): Promise<ChanlunPaperAccount> {
+  const response = await fetch(`${API_BASE_URL}/api/chanlun/paper-account`);
+  if (!response.ok) {
+    throw new Error(`读取缠论模拟账户失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<ChanlunPaperAccount>;
 }
 
 export async function searchChanlunSymbols(

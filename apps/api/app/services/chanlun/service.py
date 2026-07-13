@@ -1,14 +1,21 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import date, datetime, time, timedelta
+from statistics import mean, median
 from typing import Literal
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 from app.models import (
     ChanlunAnalysisResponse,
+    ChanlunBacktestBucket,
+    ChanlunBacktestResponse,
+    ChanlunBacktestWindowStat,
     ChanlunPeriod,
     ChanlunPeriodSummary,
+    ChanlunReplayFrame,
+    ChanlunReplayResponse,
     ChanlunWorkspaceResponse,
     KlineBar,
     StrongStockSourceStatus,
@@ -16,6 +23,7 @@ from app.models import (
 from app.providers.tickflow import TickFlowIntradayBar
 from app.services.background_jobs import CancelCheck, ProgressCallback
 from app.services.chanlun.bars import aggregate_closed_intraday_bars, normalize_intraday_bars
+from app.services.chanlun.confluence import derive_confluence_signals
 from app.services.chanlun.store import ChanlunMinuteBarStore, StoredMinuteBar
 from app.services.chanlun.symbols import normalize_chanlun_symbol
 from app.services.short_term_cache import TtlCache
@@ -26,10 +34,72 @@ _MIN_COMPLETED_BARS = 20
 _RULE_VERSION = "cl-v1"
 _RAW_ADJUSTMENT = "raw_unadjusted"
 _INTRADAY_PERIOD_MINUTES = {"5m": 5, "30m": 30, "60m": 60}
+_DEFAULT_BACKTEST_HORIZONS = [1, 3, 5, 10]
+_BUY_SIGNAL_TYPES = {"one_buy", "two_buy", "three_buy"}
 
 
 class _IncompleteIntradayPayloadError(Exception):
     pass
+
+
+class _ChanlunBacktestSample:
+    def __init__(self, *, entry_open: float, future_bars: list[KlineBar]) -> None:
+        self.entry_open = entry_open
+        self.future_bars = future_bars
+
+
+def _backtest_bucket(
+    signal_type: str,
+    samples: list[_ChanlunBacktestSample],
+    horizons: list[int],
+) -> ChanlunBacktestBucket:
+    return ChanlunBacktestBucket(
+        signal_type=signal_type,  # type: ignore[arg-type]
+        sample_count=len(samples),
+        windows=[_backtest_window_stat(samples, horizon) for horizon in horizons],
+    )
+
+
+def _backtest_window_stat(
+    samples: list[_ChanlunBacktestSample],
+    horizon: int,
+) -> ChanlunBacktestWindowStat:
+    returns: list[float] = []
+    drawdowns: list[float] = []
+    for sample in samples:
+        bars = sample.future_bars[:horizon]
+        if len(bars) < horizon or sample.entry_open <= 0:
+            continue
+        returns.append((bars[-1].close / sample.entry_open - 1) * 100)
+        drawdowns.append((min(bar.low for bar in bars) / sample.entry_open - 1) * 100)
+
+    wins = [value for value in returns if value > 0]
+    losses = [-value for value in returns if value < 0]
+    return ChanlunBacktestWindowStat(
+        horizon_bars=horizon,
+        sample_count=len(returns),
+        win_rate_pct=round(len(wins) / len(returns) * 100, 2) if returns else None,
+        avg_return_pct=_rounded_mean(returns),
+        median_return_pct=round(median(returns), 2) if returns else None,
+        avg_max_drawdown_pct=_rounded_mean(drawdowns),
+        profit_loss_ratio=round(mean(wins) / mean(losses), 2) if wins and losses else None,
+    )
+
+
+def _clean_backtest_horizons(horizons: list[int] | None) -> list[int]:
+    values = horizons or _DEFAULT_BACKTEST_HORIZONS
+    output: list[int] = []
+    seen: set[int] = set()
+    for value in values:
+        normalized = max(1, min(int(value), 60))
+        if normalized not in seen:
+            seen.add(normalized)
+            output.append(normalized)
+    return output or _DEFAULT_BACKTEST_HORIZONS
+
+
+def _rounded_mean(values: list[float]) -> float | None:
+    return round(mean(values), 2) if values else None
 
 
 class ChanlunAnalysisService:
@@ -99,6 +169,157 @@ class ChanlunAnalysisService:
             symbol=normalize_chanlun_symbol(symbol) or symbol.strip().upper(),
             periods=[_summary(analyses[period]) for period in ("1d", "60m", "30m", "5m")],
             analysis=analyses["1d"],
+            confluence_signals=derive_confluence_signals(analyses),
+        )
+
+    def replay(
+        self,
+        symbol: str,
+        *,
+        period: ChanlunPeriod,
+        lookback: int,
+    ) -> ChanlunReplayResponse:
+        base = self.analysis(
+            symbol,
+            period=period,
+            lookback=lookback,
+            include_observing=False,
+        )
+        if base.availability not in {"ready", "stale"}:
+            return ChanlunReplayResponse(
+                symbol=base.symbol,
+                period=period,
+                availability=base.availability,
+                source_status=base.source_status,
+                adjustment_mode=base.adjustment_mode,
+                rule_version=base.rule_version,
+            )
+
+        seen_divergence_ids: set[str] = set()
+        seen_signal_ids: set[str] = set()
+        frames: list[ChanlunReplayFrame] = []
+        for prefix_size in range(_MIN_COMPLETED_BARS, len(base.bars) + 1):
+            prefix = base.bars[:prefix_size]
+            snapshot = self.adapter.analyze(
+                base.symbol,
+                period=period,
+                bars=prefix,
+                include_observing=False,
+            )
+            if snapshot.availability != "ready":
+                continue
+            new_divergences = [
+                item
+                for item in snapshot.divergences
+                if item.status in {"confirmed", "final"} and item.id not in seen_divergence_ids
+            ]
+            new_signals = [
+                item
+                for item in snapshot.signals
+                if item.status in {"confirmed", "final"} and item.id not in seen_signal_ids
+            ]
+            seen_divergence_ids.update(item.id for item in new_divergences)
+            seen_signal_ids.update(item.id for item in new_signals)
+            if not new_divergences and not new_signals:
+                continue
+
+            structures = snapshot.segments or snapshot.strokes
+            latest_zone = next(
+                (
+                    zone
+                    for zone in reversed(snapshot.zones)
+                    if not zone.virtual and zone.status in {"confirmed", "final"}
+                ),
+                None,
+            )
+            frames.append(
+                ChanlunReplayFrame(
+                    closed_at=prefix[-1].date,
+                    direction=structures[-1].direction if structures else "unknown",
+                    latest_zone=latest_zone,
+                    new_divergences=new_divergences,
+                    new_signals=new_signals,
+                )
+            )
+
+        return ChanlunReplayResponse(
+            symbol=base.symbol,
+            period=period,
+            availability=base.availability,
+            frames=frames,
+            source_status=base.source_status,
+            adjustment_mode=base.adjustment_mode,
+            rule_version=base.rule_version,
+        )
+
+    def backtest(
+        self,
+        symbol: str,
+        *,
+        period: ChanlunPeriod,
+        lookback: int,
+        horizons: list[int] | None = None,
+    ) -> ChanlunBacktestResponse:
+        clean_horizons = _clean_backtest_horizons(horizons)
+        base = self.analysis(
+            symbol,
+            period=period,
+            lookback=lookback,
+            include_observing=False,
+        )
+        if base.availability not in {"ready", "stale"}:
+            return ChanlunBacktestResponse(
+                symbol=base.symbol,
+                period=period,
+                availability=base.availability,
+                horizons=clean_horizons,
+                source_status=base.source_status,
+                adjustment_mode=base.adjustment_mode,
+                rule_version=base.rule_version,
+            )
+
+        replay = self.replay(symbol, period=period, lookback=lookback)
+        index_by_date = {bar.date: index for index, bar in enumerate(base.bars)}
+        max_horizon = max(clean_horizons)
+        samples_by_signal: dict[str, list[_ChanlunBacktestSample]] = defaultdict(list)
+        skipped = 0
+        for frame in replay.frames:
+            signal_index = index_by_date.get(frame.closed_at)
+            if signal_index is None:
+                continue
+            future_bars = base.bars[signal_index + 1 : signal_index + 1 + max_horizon]
+            for signal in frame.new_signals:
+                if signal.type not in _BUY_SIGNAL_TYPES:
+                    continue
+                if len(future_bars) < max_horizon or not future_bars or future_bars[0].open <= 0:
+                    skipped += 1
+                    continue
+                samples_by_signal[signal.type].append(
+                    _ChanlunBacktestSample(entry_open=future_bars[0].open, future_bars=future_bars)
+                )
+
+        buckets = [
+            _backtest_bucket(signal_type, samples, clean_horizons)
+            for signal_type, samples in sorted(samples_by_signal.items())
+        ]
+        sample_count = sum(bucket.sample_count for bucket in buckets)
+        return ChanlunBacktestResponse(
+            symbol=base.symbol,
+            period=period,
+            availability=base.availability,
+            horizons=clean_horizons,
+            sample_count=sample_count,
+            buckets=buckets,
+            source_status=[
+                *base.source_status,
+                StrongStockSourceStatus(
+                    source="Chanlun回测",
+                    status="success",
+                    detail=f"确认买类事件 {sample_count} 条，因后续K线不足跳过 {skipped} 条",
+                ),
+            ],
+            adjustment_mode=base.adjustment_mode,
+            rule_version=base.rule_version,
         )
 
     def backfill(
@@ -361,6 +582,8 @@ def _summary(analysis: ChanlunAnalysisResponse) -> ChanlunPeriodSummary:
         availability=analysis.availability,
         direction=structures[-1].direction if structures else "unknown",
         latest_zone=analysis.zones[-1] if analysis.zones else None,
+        latest_divergence=analysis.divergences[-1] if analysis.divergences else None,
+        latest_signal=analysis.signals[-1] if analysis.signals else None,
         last_closed_bar_at=analysis.last_closed_bar_at,
     )
 

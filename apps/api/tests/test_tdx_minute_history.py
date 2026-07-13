@@ -67,8 +67,8 @@ def test_provider_requests_one_minute_category_in_pages_and_normalizes_bars() ->
                 tdx_row("2026-07-10 09:32", close=0),
             ),
             frame_for(
-                tdx_row("2026-07-10 09:30"),
                 tdx_row("2026-07-10 09:31", close=10.5, high=10.7),
+                tdx_row("2026-07-10 09:32", close=11.0, high=11.2),
             ),
         ]
     )
@@ -83,7 +83,7 @@ def test_provider_requests_one_minute_category_in_pages_and_normalizes_bars() ->
     assert client.calls == [("600000", 7, 0, 800), ("600000", 7, 800, 800)]
     assert client.closed is True
     assert [bar.timestamp for bar in bars] == sorted(bar.timestamp for bar in bars)
-    assert [bar.close for bar in bars] == [10.0, 10.5]
+    assert [bar.close for bar in bars] == [10.5, 11.0]
     assert datetime.fromtimestamp(bars[0].timestamp / 1000, tz=SHANGHAI).isoformat() == (
         "2026-07-10T09:30:00+08:00"
     )

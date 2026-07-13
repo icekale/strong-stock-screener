@@ -126,7 +126,7 @@ export function buildTickFlowOverlayOption({
 }: {
   annotations: GsgfChartAnnotation[];
   chanlun?: ChanlunAnalysisResponse | null;
-  chanlunLayers?: Record<ChanlunLayerKey, boolean>;
+  chanlunLayers?: Partial<Record<ChanlunLayerKey, boolean>>;
   chartData: KlineData[];
   showGsgfAnnotations: boolean;
   subIndicators: KlineSubIndicator[];

@@ -75,6 +75,7 @@ class Settings(BaseSettings):
     chanlun_backfill_max_bars: int = Field(default=4800, ge=240, le=24000)
     chanlun_tdx_enabled: bool = True
     chanlun_tdx_timeout_seconds: float = Field(default=4, ge=1, le=15)
+    chanlun_paper_initial_cash: float = Field(default=100000, gt=0)
 
     model_config = SettingsConfigDict(
         env_prefix="STRONG_STOCK_",

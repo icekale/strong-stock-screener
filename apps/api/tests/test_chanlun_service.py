@@ -6,10 +6,18 @@ from zoneinfo import ZoneInfo
 
 from app.config import Settings
 from app.main import _chanlun_analysis_service, app, update_runtime_settings
-from app.models import ChanlunAnalysisResponse, KlineBar, StrongStockDataUnavailable, StrongStockSourceStatus
+from app.models import (
+    ChanlunAnalysisResponse,
+    ChanlunSignal,
+    ChanlunStroke,
+    ChanlunZone,
+    KlineBar,
+    StrongStockDataUnavailable,
+    StrongStockSourceStatus,
+)
 from app.providers.tickflow import TickFlowDailyKlineProvider, TickFlowIntradayBar, TickFlowQuoteProvider
 from app.services.runtime_settings import SettingsUpdate
-from app.services.chanlun.service import ChanlunAnalysisService
+from app.services.chanlun.service import ChanlunAnalysisService, _summary
 from app.services.chanlun.store import ChanlunMinuteBarStore
 from app.services.chanlun.symbols import ChanlunSymbolSearchService
 from app.services.short_term_cache import TtlCache
@@ -150,6 +158,255 @@ class FakeAdapter:
 
 def build_test_cache() -> TtlCache[ChanlunAnalysisResponse]:
     return TtlCache(ttl_seconds=600, name="chanlun-test")
+
+
+def test_period_summary_exposes_the_latest_confirmed_signal() -> None:
+    signal = ChanlunSignal(
+        id="signal:two-buy",
+        type="two_buy",
+        occurred_at="2026-07-10T10:00:00+08:00",
+        price=10.0,
+        stroke_id="stroke:test",
+        status="confirmed",
+    )
+    summary = _summary(
+        ChanlunAnalysisResponse(
+            symbol="600000.SH",
+            period="5m",
+            availability="ready",
+            signals=[signal],
+        )
+    )
+
+    assert summary.latest_signal == signal
+
+
+def test_workspace_derives_confirmed_class_and_secondary_signals_from_multiperiod_context() -> None:
+    def structure(
+        period: str,
+        *,
+        direction: str,
+        zone: ChanlunZone | None,
+        signal: ChanlunSignal | None = None,
+        last_stroke_direction: str | None = None,
+    ) -> ChanlunAnalysisResponse:
+        stroke = ChanlunStroke(
+            id=f"stroke:{period}",
+            start_at="2026-07-10T09:30:00+08:00",
+            start_price=12.0,
+            end_at="2026-07-10T10:00:00+08:00",
+            end_price=13.0,
+            direction=last_stroke_direction or direction,
+            status="confirmed",
+        )
+        segment = stroke.model_copy(update={"direction": direction, "id": f"segment:{period}"})
+        return ChanlunAnalysisResponse(
+            symbol="600000.SH",
+            period=period,  # type: ignore[arg-type]
+            availability="ready",
+            strokes=[stroke],
+            segments=[segment],
+            zones=[zone] if zone else [],
+            signals=[signal] if signal else [],
+        )
+
+    daily_zone = ChanlunZone(
+        id="zone:daily",
+        start_at="2026-07-01T00:00:00+08:00",
+        end_at="2026-07-09T00:00:00+08:00",
+        high=10.0,
+        low=8.0,
+        status="confirmed",
+    )
+    sixty_zone = ChanlunZone(
+        id="zone:60m",
+        start_at="2026-07-10T09:30:00+08:00",
+        end_at="2026-07-10T09:55:00+08:00",
+        high=14.0,
+        low=11.0,
+        status="confirmed",
+    )
+    two_buy = ChanlunSignal(
+        id="signal:two-buy",
+        type="two_buy",
+        occurred_at="2026-07-10T10:00:00+08:00",
+        price=13.0,
+        stroke_id="stroke:60m",
+        status="confirmed",
+    )
+    three_buy = ChanlunSignal(
+        id="signal:three-buy",
+        type="three_buy",
+        occurred_at="2026-07-10T10:00:00+08:00",
+        price=15.0,
+        stroke_id="stroke:30m",
+        status="confirmed",
+    )
+    analyses = {
+        "1d": structure("1d", direction="up", zone=daily_zone),
+        "60m": structure(
+            "60m",
+            direction="up",
+            zone=sixty_zone,
+            signal=two_buy,
+            last_stroke_direction="down",
+        ),
+        "30m": structure("30m", direction="up", zone=None, signal=three_buy),
+        "5m": structure("5m", direction="up", zone=None),
+    }
+    service = object.__new__(ChanlunAnalysisService)
+    service.analysis = lambda _symbol, *, period, lookback, include_observing: analyses[period]  # type: ignore[method-assign]
+
+    workspace = service.workspace("600000.SH", lookback=220)
+
+    assert {item.type for item in workspace.confluence_signals} == {
+        "class_two_buy",
+        "class_three_buy",
+        "sub_two_buy",
+        "sub_three_buy",
+    }
+    assert all(item.status == "confirmed" for item in workspace.confluence_signals)
+
+
+def test_workspace_does_not_emit_confluence_when_any_period_is_not_ready() -> None:
+    analyses = {
+        period: ChanlunAnalysisResponse(
+            symbol="600000.SH",
+            period=period,  # type: ignore[arg-type]
+            availability="stale" if period == "60m" else "ready",
+        )
+        for period in ("1d", "60m", "30m", "5m")
+    }
+    service = object.__new__(ChanlunAnalysisService)
+    service.analysis = lambda _symbol, *, period, lookback, include_observing: analyses[period]  # type: ignore[method-assign]
+
+    workspace = service.workspace("600000.SH", lookback=220)
+
+    assert workspace.confluence_signals == []
+
+
+def test_replay_uses_only_bar_prefixes_and_emits_each_confirmed_signal_once() -> None:
+    start_at = datetime.fromisoformat("2026-06-01T00:00:00+08:00")
+    bars = [
+        KlineBar(
+            date=(start_at + timedelta(days=index)).isoformat(timespec="seconds"),
+            open=10.0,
+            close=10.0 + index / 10,
+            high=10.2 + index / 10,
+            low=9.8 + index / 10,
+            volume=100,
+        )
+        for index in range(24)
+    ]
+
+    class ReplayAdapter:
+        calls: list[int] = []
+
+        def analyze(self, symbol, *, period, bars, include_observing=False):
+            self.calls.append(len(bars))
+            signals = []
+            if len(bars) >= 22:
+                signals = [
+                    ChanlunSignal(
+                        id="signal:one-buy",
+                        type="one_buy",
+                        occurred_at=bars[-1].date,
+                        price=bars[-1].close,
+                        stroke_id="stroke:test",
+                        status="confirmed",
+                    )
+                ]
+            return ChanlunAnalysisResponse(
+                symbol=symbol,
+                period=period,
+                availability="ready",
+                bars=bars,
+                signals=signals,
+            )
+
+    adapter = ReplayAdapter()
+    base = ChanlunAnalysisResponse(
+        symbol="600000.SH",
+        period="1d",
+        availability="ready",
+        bars=bars,
+        source_status=[StrongStockSourceStatus(source="fixture", status="success", detail="fixture")],
+    )
+    service = object.__new__(ChanlunAnalysisService)
+    service.adapter = adapter
+    service.analysis = lambda _symbol, *, period, lookback, include_observing: base  # type: ignore[method-assign]
+
+    assert hasattr(service, "replay")
+    replay = service.replay("600000.SH", period="1d", lookback=24)
+
+    assert adapter.calls == [20, 21, 22, 23, 24]
+    assert len(replay.frames) == 1
+    assert replay.frames[0].closed_at == bars[21].date
+    assert [signal.id for signal in replay.frames[0].new_signals] == ["signal:one-buy"]
+
+
+def test_backtest_enters_at_next_bar_open_and_uses_only_confirmed_replay_events() -> None:
+    start_at = datetime.fromisoformat("2026-06-01T00:00:00+08:00")
+    bars = [
+        KlineBar(
+            date=(start_at + timedelta(days=index)).isoformat(timespec="seconds"),
+            open=10.0,
+            close=10.0,
+            high=10.2,
+            low=9.8,
+            volume=100,
+        )
+        for index in range(25)
+    ]
+    bars[22] = bars[22].model_copy(update={"open": 10.0, "close": 11.0, "high": 11.2, "low": 9.0})
+    bars[23] = bars[23].model_copy(update={"open": 11.0, "close": 12.0, "high": 12.2, "low": 10.5})
+
+    class BacktestAdapter:
+        calls: list[int] = []
+
+        def analyze(self, symbol, *, period, bars, include_observing=False):
+            self.calls.append(len(bars))
+            signals = []
+            if len(bars) >= 22:
+                signals = [
+                    ChanlunSignal(
+                        id="signal:one-buy",
+                        type="one_buy",
+                        occurred_at=bars[21].date,
+                        price=bars[21].close,
+                        stroke_id="stroke:test",
+                        status="confirmed",
+                    )
+                ]
+            return ChanlunAnalysisResponse(
+                symbol=symbol,
+                period=period,
+                availability="ready",
+                bars=bars,
+                signals=signals,
+            )
+
+    adapter = BacktestAdapter()
+    base = ChanlunAnalysisResponse(
+        symbol="600000.SH",
+        period="1d",
+        availability="ready",
+        bars=bars,
+        source_status=[StrongStockSourceStatus(source="fixture", status="success", detail="fixture")],
+    )
+    service = object.__new__(ChanlunAnalysisService)
+    service.adapter = adapter
+    service.analysis = lambda _symbol, *, period, lookback, include_observing: base  # type: ignore[method-assign]
+
+    result = service.backtest("600000.SH", period="1d", lookback=25, horizons=[1, 2])
+
+    assert adapter.calls == [20, 21, 22, 23, 24, 25]
+    assert result.entry_rule == "next_bar_open"
+    assert result.sample_count == 1
+    assert result.buckets[0].signal_type == "one_buy"
+    assert result.buckets[0].windows[0].avg_return_pct == 10.0
+    assert result.buckets[0].windows[0].avg_max_drawdown_pct == -10.0
+    assert result.buckets[0].windows[1].avg_return_pct == 20.0
 
 
 def test_settings_update_evicts_chanlun_service_and_rebuilds_tickflow_providers(

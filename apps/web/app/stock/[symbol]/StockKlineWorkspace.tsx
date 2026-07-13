@@ -72,9 +72,11 @@ const CHART_TABS: Array<{ key: ChartTab; label: string }> = [
 const KLINE_CHART_HEIGHT = 680;
 const KLINE_INDICATOR_STORAGE_KEY = "strong-stock-screener:kline-indicator-layout";
 const STOCK_DETAIL_CHANLUN_LAYERS: Record<ChanlunLayerKey, boolean> = {
+  divergences: false,
   fractals: false,
-  strokes: false,
   segments: true,
+  signals: false,
+  strokes: false,
   zones: true,
 };
 

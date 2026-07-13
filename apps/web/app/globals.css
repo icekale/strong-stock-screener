@@ -349,7 +349,7 @@ body {
 }
 
 .chanlun-status-rail__chart {
-  height: 520px;
+  height: 720px;
 }
 
 @media (max-width: 640px) {
@@ -365,9 +365,6 @@ body {
     border-bottom: 1px solid var(--app-border);
   }
 
-  .chanlun-status-rail__chart {
-    height: 420px;
-  }
 }
 
 .app-muted {

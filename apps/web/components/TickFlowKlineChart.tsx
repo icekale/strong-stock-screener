@@ -1,15 +1,16 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ForwardRefExoticComponent, RefAttributes } from "react";
-import type {
-  KLineChartProps,
-  KLineChartRef,
-  KlineData,
-  KLineDataProvider,
-  ThemeConfig,
-  VisibleRange,
+import { useCallback, useMemo, useRef, useState } from "react";
+import { MarkAreaComponent } from "echarts/components";
+import { use as useEcharts } from "echarts/core";
+import {
+  KLineChart,
+  type KLineChartProps,
+  type KLineChartRef,
+  type KlineData,
+  type KLineDataProvider,
+  type ThemeConfig,
+  type VisibleRange,
 } from "kline-charts-react";
 import {
   buildKlineIndicatorOptions,
@@ -18,20 +19,10 @@ import {
   type KlineSubIndicator,
 } from "../lib/klineIndicatorLayout";
 import { buildTickFlowOverlayOption } from "../lib/brickIndicator";
-import { buildChanlunClearSeries, resolveVisibleBarCount } from "../lib/chanlunOverlay.ts";
+import { resolveKlineOverlaySeries, resolveVisibleBarCount, type KlineSeriesSnapshot } from "../lib/chanlunOverlay.ts";
 import type { ChanlunAnalysisResponse, ChanlunLayerKey, GsgfChartAnnotation, KlineBar } from "../lib/types";
 
-const ReactKLineChart = dynamic(
-  () => import("kline-charts-react").then((module) => module.KLineChart),
-  {
-    loading: () => (
-      <div className="flex h-full min-h-[460px] items-center justify-center bg-white text-sm font-bold text-slate-500">
-        正在加载 K 线图...
-      </div>
-    ),
-    ssr: false,
-  },
-) as ForwardRefExoticComponent<KLineChartProps & RefAttributes<KLineChartRef>>;
+useEcharts([MarkAreaComponent]);
 
 export type KlineChartDataSourceMode = "tickflow";
 export type KlineChartPeriod = NonNullable<KLineChartProps["period"]>;
@@ -72,7 +63,7 @@ export function TickFlowKlineChart({
   annotations: GsgfChartAnnotation[];
   bars: KlineBar[];
   chanlun?: ChanlunAnalysisResponse | null;
-  chanlunLayers?: Record<ChanlunLayerKey, boolean>;
+  chanlunLayers?: Partial<Record<ChanlunLayerKey, boolean>>;
   dataSourceMode?: KlineChartDataSourceMode;
   height: number;
   movingAverages: KlineMovingAverage[];
@@ -83,7 +74,9 @@ export function TickFlowKlineChart({
 }) {
   const chartRef = useRef<KLineChartRef>(null);
   const [visibleBarCount, setVisibleBarCount] = useState(120);
+  const [baseSnapshot, setBaseSnapshot] = useState<KlineSeriesSnapshot | null>(null);
   const chartData = useMemo(() => convertBarsForKlineChart(bars, symbol), [bars, symbol]);
+  const chartKey = useMemo(() => buildChartKey(symbol, period, chartData), [chartData, period, symbol]);
   const handleVisibleRangeChange = useCallback((range: VisibleRange) => {
     setVisibleBarCount(resolveVisibleBarCount(chartData.length, range));
   }, [chartData.length]);
@@ -99,7 +92,7 @@ export function TickFlowKlineChart({
     () => buildKlinePanes(movingAverages, subIndicators),
     [movingAverages, subIndicators],
   );
-  const echartsOption = useMemo(
+  const chanlunOption = useMemo(
     () =>
       buildTickFlowOverlayOption({
         annotations,
@@ -121,36 +114,24 @@ export function TickFlowKlineChart({
       visibleBarCount,
     ],
   );
-  const overlayOptionRef = useRef(echartsOption);
-  overlayOptionRef.current = echartsOption;
-
-  const applyOverlay = useCallback(() => {
-    const instance = chartRef.current?.getEchartsInstance();
-    if (!instance) {
-      return;
-    }
-    const overlayOption = overlayOptionRef.current;
-    const activeLayerIds = Array.isArray(overlayOption.series)
-      ? overlayOption.series.flatMap((series) => {
-          const id = typeof series === "object" && series !== null && "id" in series ? series.id : null;
-          return typeof id === "string" && id.startsWith("chanlun-") ? [id] : [];
-        })
-      : [];
-    const clearSeries = buildChanlunClearSeries(activeLayerIds);
-    if (clearSeries.length > 0) {
-      instance.setOption({ series: clearSeries }, false);
-    }
-    instance.setOption(overlayOption, false);
-  }, []);
-
+  const echartsOption = useMemo(
+    () => {
+      const series = resolveKlineOverlaySeries(
+        baseSnapshot,
+        chartKey,
+        Array.isArray(chanlunOption.series) ? chanlunOption.series as Record<string, unknown>[] : [],
+      );
+      return series ? { ...chanlunOption, series } : undefined;
+    },
+    [baseSnapshot, chanlunOption, chartKey],
+  );
   const handleDataLoad = useCallback((_data: KlineData[]) => {
-    window.setTimeout(applyOverlay, 1000);
-  }, [applyOverlay]);
-
-  useEffect(() => {
-    const timeout = window.setTimeout(applyOverlay, 1000);
-    return () => window.clearTimeout(timeout);
-  }, [applyOverlay, echartsOption, indicatorLayout]);
+    const baseOption = chartRef.current?.getEchartsInstance()?.getOption();
+    const series = Array.isArray(baseOption?.series) ? baseOption.series as Record<string, unknown>[] : [];
+    if (series.length > 0) {
+      setBaseSnapshot({ key: chartKey, series });
+    }
+  }, [chartKey]);
 
   if (dataSourceMode === "tickflow" && bars.length === 0) {
     return (
@@ -162,11 +143,12 @@ export function TickFlowKlineChart({
 
   return (
     <div className="tickflow-kline-chart h-full min-h-[460px] bg-white">
-      <ReactKLineChart
+      <KLineChart
         key={`${dataSourceMode}-${symbol}-${period}`}
         ref={chartRef}
         adjust="qfq"
         dataProvider={tickflowDataProvider}
+        echartsOption={echartsOption}
         height={height}
         indicatorOptions={indicatorOptions}
         indicators={indicatorLayout.chartIndicators}
@@ -214,4 +196,9 @@ function normalizeKlineDate(value: string): string {
     return `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6, 8)}`;
   }
   return value;
+}
+
+function buildChartKey(symbol: string, period: KlineChartPeriod, bars: readonly KlineData[]): string {
+  const latest = bars.at(-1);
+  return [symbol, period, bars.length, latest?.date ?? "", latest?.open ?? "", latest?.close ?? "", latest?.high ?? "", latest?.low ?? ""].join("|");
 }

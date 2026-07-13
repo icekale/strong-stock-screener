@@ -12,6 +12,7 @@ from app.providers.tickflow import TickFlowIntradayBar
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 _PAGE_SIZE = 800
 _ONE_MINUTE_CATEGORY = 7
+_ONE_MINUTE_MILLISECONDS = 60_000
 
 
 class TdxMinuteHistoryProvider:
@@ -95,7 +96,7 @@ def _bar_from_row(row: Mapping[str, object]) -> TickFlowIntradayBar | None:
         close = float(row["close"])
         volume = float(row["vol"])
         amount = float(row["amount"])
-        timestamp = _timestamp_ms(row["datetime"])
+        timestamp = _timestamp_ms(row["datetime"]) - _ONE_MINUTE_MILLISECONDS
     except (KeyError, TypeError, ValueError, OverflowError, OSError):
         return None
     if not _valid_bar(open_price, high, low, close, volume, amount):

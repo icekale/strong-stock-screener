@@ -24,6 +24,12 @@ from app.models import (
     AuctionTimelineResponse,
     AuctionTop3ManualTradeSample,
     ChanlunAnalysisResponse,
+    ChanlunAlertListResponse,
+    ChanlunAlertRefreshResponse,
+    ChanlunBacktestResponse,
+    ChanlunPaperAccount,
+    ChanlunPaperOrder,
+    ChanlunReplayResponse,
     ChanlunBackfillRequest,
     ChanlunPeriod,
     ChanlunWorkspaceResponse,
@@ -94,6 +100,10 @@ from app.services.intraday import IntradayMonitor
 from app.services.background_jobs import BackgroundJobStore, CancelCheck, ProgressCallback
 from app.services.cache_registry import CacheRegistry
 from app.services.chanlun.adapter import ChanlunAdapter
+from app.services.chanlun.alert_service import ChanlunAlertService
+from app.services.chanlun.alerts import ChanlunAlertStore
+from app.services.chanlun.paper import ChanlunPaperOrderStore
+from app.services.chanlun.paper_service import ChanlunPaperOrderService
 from app.services.chanlun.service import ChanlunAnalysisService
 from app.services.chanlun.store import ChanlunMinuteBarStore
 from app.services.chanlun.symbols import ChanlunSymbolSearchService, normalize_chanlun_symbol
@@ -206,6 +216,10 @@ class GsgfBacktestRequest(BaseModel):
     windows: list[int] = Field(default_factory=lambda: [1, 3, 5, 10], max_length=8)
     min_history: int = Field(default=60, ge=60, le=220)
     count: int = Field(default=180, ge=70, le=260)
+
+
+class ChanlunPaperOrderDraftRequest(BaseModel):
+    quantity: int = Field(default=100, ge=100, le=100000, multiple_of=100)
 
 
 class GsgfCalibrationRequest(BaseModel):
@@ -1985,6 +1999,112 @@ def get_chanlun_workspace(symbol: str, lookback: int = 220) -> ChanlunWorkspaceR
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
+@app.get("/api/chanlun/stocks/{symbol}/replays")
+def get_chanlun_replay(
+    symbol: str,
+    period: ChanlunPeriod = "1d",
+    lookback: int = 220,
+) -> ChanlunReplayResponse:
+    _validate_chanlun_lookback(period, lookback)
+    try:
+        return _chanlun_analysis_service().replay(symbol, period=period, lookback=lookback)
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/chanlun/stocks/{symbol}/backtests")
+def get_chanlun_backtest(
+    symbol: str,
+    period: ChanlunPeriod = "1d",
+    lookback: int = 220,
+    horizons: str = "1,3,5,10",
+) -> ChanlunBacktestResponse:
+    _validate_chanlun_lookback(period, lookback)
+    try:
+        return _chanlun_analysis_service().backtest(
+            symbol,
+            period=period,
+            lookback=lookback,
+            horizons=_parse_chanlun_backtest_horizons(horizons),
+        )
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/api/chanlun/alerts")
+def list_chanlun_alerts(symbol: str | None = None, limit: int = 100) -> ChanlunAlertListResponse:
+    return _chanlun_alert_service().list(symbol=symbol, limit=limit)
+
+
+@app.post("/api/chanlun/stocks/{symbol}/alerts/refresh")
+def refresh_chanlun_alerts(
+    symbol: str,
+    period: ChanlunPeriod = "1d",
+    lookback: int = 220,
+) -> ChanlunAlertRefreshResponse:
+    _validate_chanlun_lookback(period, lookback)
+    try:
+        return _chanlun_alert_service().refresh(symbol, period=period, lookback=lookback)
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/chanlun/stocks/{symbol}/paper-orders/drafts")
+def create_chanlun_paper_order_draft(
+    symbol: str,
+    request: ChanlunPaperOrderDraftRequest,
+    lookback: int = 220,
+) -> ChanlunPaperOrder:
+    _validate_chanlun_lookback("1d", lookback)
+    try:
+        return _chanlun_paper_order_service().create_draft(
+            symbol,
+            quantity=request.quantity,
+            lookback=lookback,
+        )
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.post("/api/chanlun/paper-orders/{order_id}/approve")
+def approve_chanlun_paper_order(order_id: str) -> ChanlunPaperOrder:
+    try:
+        return _chanlun_paper_order_service().approve(order_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="模拟订单不存在") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/api/chanlun/paper-orders/{order_id}/fill")
+def fill_chanlun_paper_order(order_id: str) -> ChanlunPaperOrder:
+    try:
+        return _chanlun_paper_order_service().fill(order_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="模拟订单不存在") from exc
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"更新模拟成交失败: {exc.__class__.__name__}") from exc
+
+
+@app.post("/api/chanlun/paper-orders/{order_id}/cancel")
+def cancel_chanlun_paper_order(order_id: str) -> ChanlunPaperOrder:
+    try:
+        return _chanlun_paper_order_service().cancel(order_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="模拟订单不存在") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/chanlun/paper-account")
+def get_chanlun_paper_account() -> ChanlunPaperAccount:
+    return _chanlun_paper_order_service().account()
+
+
 @app.get("/api/chanlun/symbols/search")
 def search_chanlun_symbols(query: str = "", limit: int = 20) -> dict[str, object]:
     try:
@@ -2653,6 +2773,8 @@ def _clear_data_source_caches() -> None:
     CACHE_REGISTRY.clear()
     if hasattr(app.state, "chanlun_analysis_service"):
         delattr(app.state, "chanlun_analysis_service")
+    if hasattr(app.state, "chanlun_paper_order_service"):
+        delattr(app.state, "chanlun_paper_order_service")
 
 
 def _system_jobs() -> list[dict[str, object]]:
@@ -3008,6 +3130,50 @@ def _chanlun_analysis_service() -> ChanlunAnalysisService:
     return service
 
 
+def _chanlun_alert_store() -> ChanlunAlertStore:
+    injected = getattr(app.state, "chanlun_alert_store", None)
+    if injected is not None:
+        return injected
+    store = ChanlunAlertStore(get_settings().data_dir / "chanlun" / "alerts.sqlite3")
+    app.state.chanlun_alert_store = store
+    return store
+
+
+def _chanlun_alert_service() -> ChanlunAlertService:
+    injected = getattr(app.state, "chanlun_alert_service", None)
+    if injected is not None:
+        return injected
+    service = ChanlunAlertService(
+        analysis_service=_chanlun_analysis_service(),
+        store=_chanlun_alert_store(),
+    )
+    app.state.chanlun_alert_service = service
+    return service
+
+
+def _chanlun_paper_order_store() -> ChanlunPaperOrderStore:
+    injected = getattr(app.state, "chanlun_paper_order_store", None)
+    if injected is not None:
+        return injected
+    store = ChanlunPaperOrderStore(get_settings().data_dir / "chanlun" / "paper.sqlite3")
+    app.state.chanlun_paper_order_store = store
+    return store
+
+
+def _chanlun_paper_order_service() -> ChanlunPaperOrderService:
+    injected = getattr(app.state, "chanlun_paper_order_service", None)
+    if injected is not None:
+        return injected
+    service = ChanlunPaperOrderService(
+        analysis_service=_chanlun_analysis_service(),
+        quote_provider=_quote_provider(),
+        store=_chanlun_paper_order_store(),
+        initial_cash=get_settings().chanlun_paper_initial_cash,
+    )
+    app.state.chanlun_paper_order_service = service
+    return service
+
+
 def _chanlun_symbol_search_service() -> ChanlunSymbolSearchService:
     injected = getattr(app.state, "chanlun_symbol_search_service", None)
     if injected is not None:
@@ -3029,6 +3195,16 @@ def _validate_chanlun_lookback(period: ChanlunPeriod, lookback: int) -> None:
             status_code=422,
             detail=f"lookback for {period} must be between 20 and {maximum}",
         )
+
+
+def _parse_chanlun_backtest_horizons(value: str) -> list[int]:
+    try:
+        horizons = [int(item.strip()) for item in value.split(",") if item.strip()]
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail="horizons must be comma-separated integers") from exc
+    if not horizons or len(horizons) > 8 or any(horizon < 1 or horizon > 60 for horizon in horizons):
+        raise HTTPException(status_code=422, detail="horizons must contain up to 8 integers from 1 to 60")
+    return horizons
 
 
 def _ifind_provider() -> IfindMcpProvider:

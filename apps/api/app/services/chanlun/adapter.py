@@ -13,6 +13,7 @@ from app.models import (
     KlineBar,
     StrongStockSourceStatus,
 )
+from app.services.chanlun.signals import derive_confirmed_events
 
 
 def _load_czsc() -> tuple[object, object, object]:
@@ -165,6 +166,7 @@ class ChanlunAdapter:
         virtual_zone = _virtual_zone(completed_strokes)
         if virtual_zone:
             zones.append(virtual_zone)
+        divergences, signals = derive_confirmed_events(bars, completed_strokes, zones)
 
         strokes = list(completed_strokes)
         if include_observing:
@@ -181,6 +183,8 @@ class ChanlunAdapter:
             strokes=strokes,
             segments=_segments(completed_strokes),
             zones=zones,
+            divergences=divergences,
+            signals=signals,
             source_status=[
                 StrongStockSourceStatus(
                     source=self.source_name,

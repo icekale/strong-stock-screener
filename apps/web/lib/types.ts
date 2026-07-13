@@ -1446,7 +1446,18 @@ export type ChanlunPeriod = "1d" | "60m" | "30m" | "5m";
 export type ChanlunStatus = "observing" | "provisional" | "confirmed" | "final";
 export type ChanlunDirection = "up" | "down" | "unknown";
 export type ChanlunAvailability = "ready" | "backfilling" | "insufficient_bars" | "stale" | "unavailable";
-export type ChanlunLayerKey = "fractals" | "strokes" | "segments" | "zones";
+export type ChanlunDivergenceType = "top" | "bottom" | "consolidation";
+export type ChanlunSignalType = "one_buy" | "one_sell" | "two_buy" | "two_sell" | "three_buy" | "three_sell";
+export type ChanlunConfluenceType =
+  | "class_two_buy"
+  | "class_two_sell"
+  | "class_three_buy"
+  | "class_three_sell"
+  | "sub_two_buy"
+  | "sub_two_sell"
+  | "sub_three_buy"
+  | "sub_three_sell";
+export type ChanlunLayerKey = "fractals" | "strokes" | "segments" | "zones" | "divergences" | "signals";
 
 export type ChanlunFractal = {
   id: string;
@@ -1476,6 +1487,49 @@ export type ChanlunZone = {
   status: ChanlunStatus;
 };
 
+export type ChanlunDivergence = {
+  id: string;
+  type: ChanlunDivergenceType;
+  occurred_at: string;
+  reference_occurred_at: string;
+  direction: ChanlunDirection;
+  reference_stroke_id: string;
+  current_stroke_id: string;
+  reference_price: number;
+  current_price: number;
+  reference_macd_strength: number;
+  current_macd_strength: number;
+  coefficient: number;
+  zone_count: number;
+  status: ChanlunStatus;
+  rule_version: string;
+};
+
+export type ChanlunSignal = {
+  id: string;
+  type: ChanlunSignalType;
+  occurred_at: string;
+  price: number;
+  divergence_id: string | null;
+  stroke_id: string;
+  status: ChanlunStatus;
+  rule_version: string;
+};
+
+export type ChanlunConfluenceSignal = {
+  id: string;
+  type: ChanlunConfluenceType;
+  higher_period: ChanlunPeriod;
+  lower_period: ChanlunPeriod;
+  occurred_at: string;
+  price: number;
+  source_signal_id: string | null;
+  higher_zone_id: string | null;
+  status: ChanlunStatus;
+  reason: string;
+  rule_version: string;
+};
+
 export type ChanlunAnalysisResponse = {
   symbol: string;
   period: ChanlunPeriod;
@@ -1485,6 +1539,8 @@ export type ChanlunAnalysisResponse = {
   strokes: ChanlunStroke[];
   segments: ChanlunStroke[];
   zones: ChanlunZone[];
+  divergences: ChanlunDivergence[];
+  signals: ChanlunSignal[];
   source_status: StrongStockSourceStatus[];
   calculated_at: string;
   last_closed_bar_at: string | null;
@@ -1497,6 +1553,8 @@ export type ChanlunPeriodSummary = {
   availability: ChanlunAvailability;
   direction: ChanlunDirection;
   latest_zone: ChanlunZone | null;
+  latest_divergence: ChanlunDivergence | null;
+  latest_signal: ChanlunSignal | null;
   last_closed_bar_at: string | null;
 };
 
@@ -1504,6 +1562,143 @@ export type ChanlunWorkspaceResponse = {
   symbol: string;
   periods: ChanlunPeriodSummary[];
   analysis: ChanlunAnalysisResponse;
+  confluence_signals: ChanlunConfluenceSignal[];
+};
+
+export type ChanlunReplayFrame = {
+  closed_at: string;
+  direction: ChanlunDirection;
+  latest_zone: ChanlunZone | null;
+  new_divergences: ChanlunDivergence[];
+  new_signals: ChanlunSignal[];
+};
+
+export type ChanlunReplayResponse = {
+  symbol: string;
+  period: ChanlunPeriod;
+  availability: ChanlunAvailability;
+  frames: ChanlunReplayFrame[];
+  source_status: StrongStockSourceStatus[];
+  adjustment_mode: string;
+  rule_version: string;
+};
+
+export type ChanlunBacktestWindowStat = {
+  horizon_bars: number;
+  sample_count: number;
+  win_rate_pct: number | null;
+  avg_return_pct: number | null;
+  median_return_pct: number | null;
+  avg_max_drawdown_pct: number | null;
+  profit_loss_ratio: number | null;
+};
+
+export type ChanlunBacktestBucket = {
+  signal_type: ChanlunSignalType;
+  sample_count: number;
+  windows: ChanlunBacktestWindowStat[];
+};
+
+export type ChanlunBacktestResponse = {
+  symbol: string;
+  period: ChanlunPeriod;
+  availability: ChanlunAvailability;
+  horizons: number[];
+  entry_rule: "next_bar_open";
+  sample_count: number;
+  buckets: ChanlunBacktestBucket[];
+  source_status: StrongStockSourceStatus[];
+  adjustment_mode: string;
+  rule_version: string;
+};
+
+export type ChanlunAlertItem = {
+  key: string;
+  symbol: string;
+  period: ChanlunPeriod;
+  signal_type: ChanlunSignalType;
+  occurred_at: string;
+  price: number;
+  rule_version: string;
+  first_seen_at: string;
+};
+
+export type ChanlunAlertListResponse = {
+  items: ChanlunAlertItem[];
+};
+
+export type ChanlunAlertRefreshResponse = {
+  symbol: string;
+  period: ChanlunPeriod;
+  baselined: boolean;
+  created: ChanlunAlertItem[];
+  source_status: StrongStockSourceStatus[];
+};
+
+export type ChanlunPaperOrderStatus =
+  | "draft"
+  | "awaiting_confirmation"
+  | "simulated_open"
+  | "filled"
+  | "rejected"
+  | "expired"
+  | "cancelled";
+
+export type ChanlunPaperOrder = {
+  id: string;
+  symbol: string;
+  side: "buy";
+  quantity: number;
+  reference_price: number;
+  notional: number;
+  status: ChanlunPaperOrderStatus;
+  reasons: string[];
+  signal_snapshot: Record<string, unknown>;
+  rule_version: string;
+  created_at: string;
+  approved_at: string | null;
+  fill_price: number | null;
+  fill_notional: number | null;
+  slippage_bps: number | null;
+  quote_time: string | null;
+  filled_at: string | null;
+  cancelled_at: string | null;
+  rejection_reason: string | null;
+};
+
+export type ChanlunPaperPosition = {
+  symbol: string;
+  quantity: number;
+  average_price: number;
+  latest_price: number | null;
+  quote_time: string | null;
+  valuation_status: "live" | "unavailable";
+  cost_basis: number;
+  market_value: number;
+  unrealized_pnl: number | null;
+  unrealized_pnl_pct: number | null;
+};
+
+export type ChanlunPaperAuditRecord = {
+  id: number;
+  order_id: string;
+  event: "created" | "approved" | "rejected" | "cancelled" | "filled";
+  occurred_at: string;
+  details: Record<string, unknown>;
+};
+
+export type ChanlunPaperAccount = {
+  initial_cash: number;
+  reserved_cash: number;
+  available_cash: number;
+  total_equity: number;
+  unrealized_pnl: number | null;
+  realized_pnl: number;
+  valuation_complete: boolean;
+  valuation_time: string | null;
+  positions: ChanlunPaperPosition[];
+  orders: ChanlunPaperOrder[];
+  audit_records: ChanlunPaperAuditRecord[];
 };
 
 export type ChanlunBackfillRequest = {

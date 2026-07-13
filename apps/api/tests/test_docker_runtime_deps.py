@@ -98,16 +98,23 @@ def test_rc8_builders_use_independent_locked_projects_and_pinned_bootstrap() -> 
 
     for path, project_copy in dockerfiles.items():
         rc8_builder = _docker_stages(path.read_text(encoding="utf-8"))["rc8-builder"]
-        build_runs = [
-            body
-            for instruction, body in rc8_builder
+        project_copy_indices = [
+            index
+            for index, (instruction, body) in enumerate(rc8_builder)
+            if instruction == "COPY" and body == project_copy
+        ]
+        build_run_indices = [
+            index
+            for index, (instruction, body) in enumerate(rc8_builder)
             if instruction == "RUN" and "python -m venv /opt/czsc-rc8-venv" in body
         ]
 
-        assert ("COPY", project_copy) in rc8_builder
-        assert len(build_runs) == 1
-        assert "setuptools==83.0.0 wheel==0.47.0 uv==0.11.6" in build_runs[0]
-        assert rc8_import_smoke in build_runs[0]
+        assert len(project_copy_indices) == 1
+        assert len(build_run_indices) == 1
+        assert project_copy_indices[0] < build_run_indices[0]
+        build_run = rc8_builder[build_run_indices[0]][1]
+        assert "setuptools==83.0.0 wheel==0.47.0 uv==0.11.6" in build_run
+        assert rc8_import_smoke in build_run
 
 
 def test_rc8_runners_copy_and_import_the_venv_after_runtime_dependencies() -> None:

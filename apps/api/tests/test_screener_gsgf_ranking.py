@@ -1,4 +1,10 @@
-from app.models import GsgfAnalysis, KlineBar, StrongStockCandidate, StrongStockScreeningItem
+from app.models import (
+    ChanlunScreeningSummary,
+    GsgfAnalysis,
+    KlineBar,
+    StrongStockCandidate,
+    StrongStockScreeningItem,
+)
 from app.services import screener as screener_module
 from app.services.screener import StrongStockScreener, _screening_rank_key
 
@@ -121,6 +127,61 @@ def test_gsgf_screening_reports_funnel_and_keeps_b_zone_in_observation_pool(monk
     assert "603003.SH 风险股份" in result.source_status[-1].detail
 
 
+def test_chanlun_enrichment_filters_complete_summaries_and_isolates_symbol_failures(monkeypatch) -> None:
+    monkeypatch.setattr(screener_module, "analyze_screening_item", simple_analyze_screening_item)
+    summarizer = RecordingChanlunSummarizer(
+        summaries={
+            "603100.SH": _chanlun_summary(score=10, confirmed_buy=False),
+            "603102.SH": _chanlun_summary(score=90, confirmed_buy=True),
+        },
+        failing_symbols={"603101.SH"},
+    )
+    screener = StrongStockScreener(
+        candidate_provider=ManyStaticCandidateProvider(count=3),
+        kline_provider=StaticKlineProvider(),
+        chanlun_summarizer=summarizer,
+    )
+
+    result = screener.screen(
+        trade_date="2026-06-11",
+        limit=2,
+        scan_limit=3,
+        filters=ChanlunFilter(min_score=50, require_buy=True),
+    )
+
+    assert [item.symbol for item in result.items] == ["603102.SH", "603101.SH"]
+    assert result.items[0].chanlun_summary.confluence_score == 90
+    assert result.items[1].chanlun_summary is None
+    assert summarizer.calls == ["603100.SH", "603101.SH", "603102.SH"]
+
+
+def test_chanlun_enrichment_is_bounded_before_final_ranking(monkeypatch) -> None:
+    monkeypatch.setattr(screener_module, "analyze_screening_item", simple_analyze_screening_item)
+    summarizer = RecordingChanlunSummarizer()
+    screener = StrongStockScreener(
+        candidate_provider=ManyStaticCandidateProvider(count=25),
+        kline_provider=StaticKlineProvider(),
+        chanlun_summarizer=summarizer,
+    )
+
+    screener.screen(trade_date="2026-06-11", limit=1, scan_limit=25)
+
+    assert len(summarizer.calls) == 20
+
+
+def test_chanlun_stale_summary_does_not_break_core_score_ties() -> None:
+    stale = _item("603110.SH", GsgfAnalysis(total_score=50)).model_copy(
+        update={"chanlun_summary": _chanlun_summary(score=100, confirmed_buy=True).model_copy(update={"freshness": "stale"})}
+    )
+    fresh = _item("603111.SH", GsgfAnalysis(total_score=50)).model_copy(
+        update={"chanlun_summary": _chanlun_summary(score=50, confirmed_buy=True)}
+    )
+
+    ranked = sorted([stale, fresh], key=lambda item: _screening_rank_key(item, "strong_stock"))
+
+    assert [item.symbol for item in ranked] == ["603111.SH", "603110.SH"]
+
+
 def _item(symbol: str, gsgf: GsgfAnalysis) -> StrongStockScreeningItem:
     return StrongStockScreeningItem(
         symbol=symbol,
@@ -168,6 +229,85 @@ class KdjFilter:
 
     def __init__(self, kdj_j_max: float) -> None:
         self.kdj_j_max = kdj_j_max
+
+
+class ChanlunFilter:
+    min_market_cap_billion = None
+    max_market_cap_billion = None
+    kdj_j_max = None
+    industries: list[str] = []
+    market_types: list[str] = []
+
+    def __init__(self, *, min_score: int | None, require_buy: bool) -> None:
+        self.chanlun_min_confluence_score = min_score
+        self.chanlun_require_confirmed_buy = require_buy
+
+
+class ManyStaticCandidateProvider:
+    source_name = "fake候选池"
+    preserve_candidate_order = True
+
+    def __init__(self, *, count: int) -> None:
+        self.count = count
+
+    def get_candidates(self, trade_date: str) -> list[StrongStockCandidate]:
+        return [
+            StrongStockCandidate(
+                symbol=f"603{100 + index:03d}.SH",
+                name=f"候选{index}",
+                industry="AI",
+                total_market_cap_cny=12_000_000_000,
+            )
+            for index in range(self.count)
+        ]
+
+
+class RecordingChanlunSummarizer:
+    def __init__(
+        self,
+        *,
+        summaries: dict[str, ChanlunScreeningSummary] | None = None,
+        failing_symbols: set[str] | None = None,
+    ) -> None:
+        self.summaries = summaries or {}
+        self.failing_symbols = failing_symbols or set()
+        self.calls: list[str] = []
+
+    def summarize(
+        self,
+        symbol: str,
+        *,
+        daily_bars: list[KlineBar],
+        trade_date: str,
+    ) -> ChanlunScreeningSummary:
+        self.calls.append(symbol)
+        if symbol in self.failing_symbols:
+            raise RuntimeError("broken local cache")
+        return self.summaries.get(symbol, _chanlun_summary(score=50, confirmed_buy=True))
+
+
+def _chanlun_summary(*, score: int, confirmed_buy: bool) -> ChanlunScreeningSummary:
+    return ChanlunScreeningSummary(
+        availability="ready",
+        freshness="fresh",
+        confluence_score=score,
+        has_confirmed_buy=confirmed_buy,
+    )
+
+
+def simple_analyze_screening_item(
+    candidate: StrongStockCandidate,
+    bars: list[KlineBar],
+    trade_date: str,
+) -> StrongStockScreeningItem:
+    return StrongStockScreeningItem(
+        symbol=candidate.symbol,
+        name=candidate.name,
+        industry=candidate.industry,
+        status="focus",
+        score=80,
+        metrics={"kdj_j": 20},
+    )
 
 
 def fake_analyze_screening_item(

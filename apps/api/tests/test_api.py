@@ -30,6 +30,7 @@ from app.models import (
     ChanlunPaperOrder,
     ChanlunReplayResponse,
     ChanlunPeriodSummary,
+    ChanlunScreeningSummary,
     ChanlunSymbolMatch,
     ChanlunWorkspaceResponse,
     KlineBar,
@@ -95,6 +96,29 @@ class FakeCandidateProvider:
                 limit_up_evidence=["20日内涨停"],
             ),
         ]
+
+
+class FakeChanlunScreeningSummarizer:
+    def summarize(
+        self,
+        symbol: str,
+        *,
+        daily_bars: list[KlineBar],
+        trade_date: str,
+    ) -> ChanlunScreeningSummary:
+        if symbol == "603890.SH":
+            return ChanlunScreeningSummary(
+                availability="ready",
+                freshness="fresh",
+                confluence_score=20,
+                has_confirmed_buy=False,
+            )
+        return ChanlunScreeningSummary(
+            availability="ready",
+            freshness="fresh",
+            confluence_score=80,
+            has_confirmed_buy=True,
+        )
 
 
 class IndustryClusterCandidateProvider:
@@ -1346,6 +1370,7 @@ def _client(
     chanlun_alert_service: object | None = None,
     chanlun_paper_order_service: object | None = None,
     chanlun_symbol_search_service: object | None = None,
+    chanlun_screening_summarizer: object | None = None,
 ) -> TestClient:
     app.state.candidate_provider = candidate_provider or FakeCandidateProvider()
     app.state.kline_provider = kline_provider or FakeKlineProvider()
@@ -1376,6 +1401,7 @@ def _client(
         app.state.chanlun_symbol_search_service = chanlun_symbol_search_service
     elif hasattr(app.state, "chanlun_symbol_search_service"):
         delattr(app.state, "chanlun_symbol_search_service")
+    app.state.chanlun_screening_summarizer = chanlun_screening_summarizer
     app.state.auction_sampler_disabled = True
     app.state.sector_workbench_sampler_disabled = True
     AUCTION_SNAPSHOT_CACHE.clear()
@@ -3153,6 +3179,30 @@ def test_screen_run_filters_by_kdj_j_max_after_kline_analysis(tmp_path: Path) ->
     payload = response.json()
     assert payload["items"] == []
     assert "KDJ-J<0" in payload["source_status"][0]["detail"]
+
+
+def test_screen_run_applies_chanlun_filters_and_returns_summary(tmp_path: Path) -> None:
+    client = _client(
+        tmp_path,
+        chanlun_screening_summarizer=FakeChanlunScreeningSummarizer(),
+    )
+
+    response = client.post(
+        "/api/screen/runs",
+        json={
+            "trade_date": "2026-06-11",
+            "limit": 10,
+            "filters": {
+                "chanlun_min_confluence_score": 50,
+                "chanlun_require_confirmed_buy": True,
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["symbol"] for item in payload["items"]] == ["002000.SZ"]
+    assert payload["items"][0]["chanlun_summary"]["confluence_score"] == 80
 
 
 def test_screen_run_scores_industry_strength_without_overriding_trend_risk(tmp_path: Path) -> None:

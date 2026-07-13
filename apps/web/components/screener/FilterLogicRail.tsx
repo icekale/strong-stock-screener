@@ -162,6 +162,11 @@ function currentFilterSummary(filters: ScreenRunFilters, scanLimit: number, stra
     marketCapFilterLabel(filters),
     ...(filters.market_types ?? []).map(marketTypeLabel),
     ...(filters.industries ?? []),
+    ...(filters.chanlun_min_confluence_score !== null &&
+    filters.chanlun_min_confluence_score !== undefined
+      ? [`缠论共振 ≥ ${filters.chanlun_min_confluence_score}`]
+      : []),
+    ...(filters.chanlun_require_confirmed_buy ? ["缠论确认买点"] : []),
   ];
 }
 
@@ -351,7 +356,25 @@ function AdvancedScreenFilters({
                   placeholder="不限请留空"
                   value={filters.kdj_j_max}
                 />
+                <FilterNumberInput
+                  label="最低缠论共振分"
+                  max={100}
+                  min={0}
+                  onChange={(value) => update({ chanlun_min_confluence_score: normalizeOptionalNumber(value, 0) })}
+                  placeholder="0-100，不限请留空"
+                  value={filters.chanlun_min_confluence_score}
+                />
               </div>
+
+              <Form.Item className="mb-0" label="缠论确认条件">
+                <Checkbox
+                  checked={Boolean(filters.chanlun_require_confirmed_buy)}
+                  onChange={(event) => update({ chanlun_require_confirmed_buy: event.target.checked })}
+                >
+                  仅保留确认买点
+                </Checkbox>
+                <p className="mt-1 text-xs leading-5 text-[var(--app-muted)]">结构数据不足的候选仍会保留。</p>
+              </Form.Item>
 
               <DisabledFilterInput label="概念板块（多选）" placeholder="待接入概念成分数据" />
               <DisabledFilterInput label="概念叠加（多选）" placeholder="待接入概念叠加数据" />
@@ -403,12 +426,14 @@ function AdvancedScreenFilters({
 
 function FilterNumberInput({
   label,
+  max,
   min,
   onChange,
   placeholder,
   value,
 }: {
   label: string;
+  max?: number;
   min?: number;
   onChange: (value: number | string | null) => void;
   placeholder: string;
@@ -418,6 +443,7 @@ function FilterNumberInput({
     <Form.Item className="mb-0" label={label}>
       <InputNumber
         className="w-full"
+        max={max}
         min={min}
         onChange={onChange}
         placeholder={placeholder}

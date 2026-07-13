@@ -18,6 +18,7 @@ import {
   type MarketDashboardStats,
   type MarketType,
 } from "./types";
+import { activeChanlunFilterCount, chanlunFilterFields } from "../../lib/chanlunScreener";
 
 export function gsgfLabel(value: string | null | undefined): string {
   const labels: Record<string, string> = {
@@ -315,6 +316,7 @@ export function cleanScreenFilters(filters: ScreenRunFilters): ScreenRunFilters 
     ...(filters.kdj_j_max !== null && filters.kdj_j_max !== undefined && { kdj_j_max: filters.kdj_j_max }),
     ...((filters.industries ?? []).length > 0 && { industries: filters.industries }),
     ...((filters.market_types ?? []).length > 0 && { market_types: filters.market_types }),
+    ...chanlunFilterFields(filters),
   };
 }
 
@@ -335,7 +337,7 @@ export function activeScreenFilterCount(filters: ScreenRunFilters) {
   if ((filters.market_types ?? []).length > 0) {
     count += 1;
   }
-  return count;
+  return count + activeChanlunFilterCount(filters);
 }
 
 export function normalizeScanLimit(value: number | string | null) {

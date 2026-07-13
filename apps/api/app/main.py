@@ -105,6 +105,7 @@ from app.services.chanlun.alerts import ChanlunAlertStore
 from app.services.chanlun.paper import ChanlunPaperOrderStore
 from app.services.chanlun.paper_service import ChanlunPaperOrderService
 from app.services.chanlun.service import ChanlunAnalysisService
+from app.services.chanlun.screening import CachedChanlunScreeningSummarizer
 from app.services.chanlun.store import ChanlunMinuteBarStore
 from app.services.chanlun.symbols import ChanlunSymbolSearchService, normalize_chanlun_symbol
 from app.services.gsgf_backtest import summarize_gsgf_backtest
@@ -199,6 +200,8 @@ class ScreenFiltersRequest(BaseModel):
     kdj_j_max: float | None = None
     industries: list[str] = Field(default_factory=list, max_length=20)
     market_types: list[str] = Field(default_factory=list, max_length=4)
+    chanlun_min_confluence_score: int | None = Field(default=None, ge=0, le=100)
+    chanlun_require_confirmed_buy: bool = False
 
 
 class ScreenRunRequest(BaseModel):
@@ -665,6 +668,7 @@ def _execute_screen_run(
         candidate_provider=_candidate_provider(),
         kline_provider=_kline_provider(),
         news_risk_provider=_news_risk_provider(),
+        chanlun_summarizer=_chanlun_screening_summarizer(),
     )
     if progress is not None:
         progress(2, 4, f"扫描 {request.scan_limit} 只候选并计算K线结构")
@@ -3128,6 +3132,18 @@ def _chanlun_analysis_service() -> ChanlunAnalysisService:
     )
     app.state.chanlun_analysis_service = service
     return service
+
+
+def _chanlun_screening_summarizer() -> CachedChanlunScreeningSummarizer | None:
+    if hasattr(app.state, "chanlun_screening_summarizer"):
+        return app.state.chanlun_screening_summarizer
+    summarizer = CachedChanlunScreeningSummarizer(
+        store=_chanlun_minute_store(),
+        adapter=_chanlun_adapter(),
+        cache_seconds=get_settings().chanlun_cache_seconds,
+    )
+    app.state.chanlun_screening_summarizer = summarizer
+    return summarizer
 
 
 def _chanlun_alert_store() -> ChanlunAlertStore:

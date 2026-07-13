@@ -1404,6 +1404,33 @@ export type ScreenRunFilters = {
   kdj_j_max?: number | null;
   industries?: string[];
   market_types?: Array<"main" | "gem" | "star" | "bj">;
+  chanlun_min_confluence_score?: number | null;
+  chanlun_require_confirmed_buy?: boolean;
+};
+
+export type ChanlunScreeningPeriodSummary = {
+  period: ChanlunPeriod;
+  availability: ChanlunAvailability;
+  direction: ChanlunDirection;
+  latest_signal_type: ChanlunSignalType | null;
+  latest_signal_at: string | null;
+  latest_divergence_type: ChanlunDivergenceType | null;
+  latest_divergence_at: string | null;
+  signal_age_seconds: number | null;
+  last_closed_bar_at: string | null;
+};
+
+export type ChanlunScreeningSummary = {
+  availability: "ready" | "partial" | "unavailable";
+  freshness: "fresh" | "stale" | "insufficient";
+  periods: ChanlunScreeningPeriodSummary[];
+  confluence_score: number;
+  bullish_periods: number;
+  bearish_periods: number;
+  has_confirmed_buy: boolean;
+  has_confirmed_sell: boolean;
+  latest_confirmed_at: string | null;
+  rule_version: string;
 };
 
 export type StrongStockScreeningItem = {
@@ -1426,6 +1453,7 @@ export type StrongStockScreeningItem = {
   data_status: "complete" | "incomplete";
   source_trace: string[];
   gsgf: GsgfAnalysis | null;
+  chanlun_summary?: ChanlunScreeningSummary | null;
 };
 
 export type KlineBar = {

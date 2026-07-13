@@ -300,6 +300,12 @@ function sanitizeScreenFilters(value: unknown): ScreenRunFilters {
   if (typeof source.kdj_j_max === "number") {
     filters.kdj_j_max = source.kdj_j_max;
   }
+  if (typeof source.chanlun_min_confluence_score === "number") {
+    filters.chanlun_min_confluence_score = Math.max(0, Math.min(100, source.chanlun_min_confluence_score));
+  }
+  if (source.chanlun_require_confirmed_buy === true) {
+    filters.chanlun_require_confirmed_buy = true;
+  }
   if (Array.isArray(source.industries)) {
     filters.industries = source.industries.filter((item): item is string => typeof item === "string");
   }

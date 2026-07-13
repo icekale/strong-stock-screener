@@ -192,6 +192,31 @@ class KlineBar(BaseModel):
     ma60: float | None = None
 
 
+class ChanlunScreeningPeriodSummary(BaseModel):
+    period: ChanlunPeriod
+    availability: ChanlunAvailability
+    direction: ChanlunDirection = "unknown"
+    latest_signal_type: ChanlunSignalType | None = None
+    latest_signal_at: str | None = None
+    latest_divergence_type: ChanlunDivergenceType | None = None
+    latest_divergence_at: str | None = None
+    signal_age_seconds: int | None = Field(default=None, ge=0)
+    last_closed_bar_at: str | None = None
+
+
+class ChanlunScreeningSummary(BaseModel):
+    availability: Literal["ready", "partial", "unavailable"]
+    freshness: Literal["fresh", "stale", "insufficient"]
+    periods: list[ChanlunScreeningPeriodSummary] = Field(default_factory=list)
+    confluence_score: int = Field(default=0, ge=0, le=100)
+    bullish_periods: int = Field(default=0, ge=0, le=4)
+    bearish_periods: int = Field(default=0, ge=0, le=4)
+    has_confirmed_buy: bool = False
+    has_confirmed_sell: bool = False
+    latest_confirmed_at: str | None = None
+    rule_version: str = "cl-v1"
+
+
 class StrongStockScreeningItem(BaseModel):
     symbol: str
     name: str
@@ -212,6 +237,7 @@ class StrongStockScreeningItem(BaseModel):
     data_status: Literal["complete", "incomplete"] = "complete"
     source_trace: list[str] = Field(default_factory=list)
     gsgf: GsgfAnalysis | None = None
+    chanlun_summary: ChanlunScreeningSummary | None = None
 
 
 class StrongStockRiskItem(BaseModel):

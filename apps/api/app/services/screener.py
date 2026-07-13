@@ -4,6 +4,7 @@ from collections import Counter
 from typing import Protocol
 
 from app.models import (
+    ChanlunScreeningSummary,
     GsgfFunnelDiagnostics,
     KlineBar,
     RiskCheckStatus,
@@ -19,6 +20,7 @@ from app.providers.watchlist import WatchlistSnapshot
 from app.rules import analyze_screening_item, analyze_watchlist_risk
 from app.providers.news_risk import NegativeNewsRisk
 from app.services.gsgf_trade_plan import build_gsgf_trade_plan
+from app.services.chanlun.screening import passes_chanlun_screening_filters
 
 
 class ScreeningFilters(Protocol):
@@ -27,6 +29,18 @@ class ScreeningFilters(Protocol):
     kdj_j_max: float | None
     industries: list[str]
     market_types: list[str]
+    chanlun_min_confluence_score: int | None
+    chanlun_require_confirmed_buy: bool
+
+
+class ChanlunScreeningSummarizer(Protocol):
+    def summarize(
+        self,
+        symbol: str,
+        *,
+        daily_bars: list[KlineBar],
+        trade_date: str,
+    ) -> ChanlunScreeningSummary: ...
 
 
 class CandidateProvider(Protocol):
@@ -56,10 +70,12 @@ class StrongStockScreener:
         candidate_provider: CandidateProvider,
         kline_provider: KlineProvider,
         news_risk_provider: NewsRiskProvider | None = None,
+        chanlun_summarizer: ChanlunScreeningSummarizer | None = None,
     ) -> None:
         self.candidate_provider = candidate_provider
         self.kline_provider = kline_provider
         self.news_risk_provider = news_risk_provider
+        self.chanlun_summarizer = chanlun_summarizer
 
     def screen(
         self,
@@ -99,6 +115,7 @@ class StrongStockScreener:
             ]
         items: list[StrongStockScreeningItem] = []
         observation_items: list[StrongStockScreeningItem] = []
+        bars_by_symbol: dict[str, list[KlineBar]] = {}
         failures = 0
         failed_candidates: list[str] = []
         kdj_filtered = 0
@@ -127,6 +144,7 @@ class StrongStockScreener:
             if _is_gsgf_observation_item(enriched_item):
                 observation_items.append(enriched_item)
             items.append(enriched_item)
+            bars_by_symbol[enriched_item.symbol] = bars
 
         if kdj_filtered:
             source_status[0] = source_status[0].model_copy(
@@ -160,6 +178,24 @@ class StrongStockScreener:
             before_hard_risk = len(items)
             items = [item for item in items if not _has_gsgf_hard_risk(item)]
             funnel.hard_risk_filtered_count = before_hard_risk - len(items)
+        items = _enrich_chanlun_candidates(
+            items,
+            bars_by_symbol=bars_by_symbol,
+            summarizer=self.chanlun_summarizer,
+            trade_date=trade_date,
+            limit=limit,
+            strategy=strategy,
+        )
+        enriched_by_symbol = {item.symbol: item for item in items}
+        observation_items = [
+            enriched_by_symbol.get(item.symbol, item)
+            for item in observation_items
+            if item.symbol in enriched_by_symbol
+        ]
+        items = [item for item in items if _passes_chanlun_filters(item, filters)]
+        observation_items = [
+            item for item in observation_items if _passes_chanlun_filters(item, filters)
+        ]
         ranked = sorted(items, key=lambda item: _screening_rank_key(item, strategy))[:limit]
         ranked_observations = sorted(observation_items, key=lambda item: _gsgf_observation_rank_key(item))[:limit]
         funnel.final_displayed_count = len(ranked)
@@ -309,31 +345,91 @@ def _screening_rank_key(item: StrongStockScreeningItem, strategy: ScreenStrategy
     return _strong_rank_key(item)
 
 
-def _strong_rank_key(item: StrongStockScreeningItem) -> tuple[int, int, str]:
+def _strong_rank_key(item: StrongStockScreeningItem) -> tuple[int, int, int, str]:
     focus_rank = 0 if item.status == "focus" else 1
-    return (focus_rank, -item.score, item.symbol)
+    return (focus_rank, -item.score, -_chanlun_rank_score(item), item.symbol)
 
 
-def _gsgf_rank_key(item: StrongStockScreeningItem) -> tuple[int, int, int, int, int, int, str]:
+def _gsgf_rank_key(item: StrongStockScreeningItem) -> tuple[int, int, int, int, int, int, int, str]:
     gsgf = item.gsgf
     if gsgf is None:
-        return (1, 99, 99, 99, 99, 0, item.symbol)
+        return (1, 99, 99, 99, 99, 0, -_chanlun_rank_score(item), item.symbol)
     hard_risk = 1 if _has_gsgf_hard_risk(item) or _has_screening_hard_risk(item) else 0
     status_rank = _gsgf_status_rank(gsgf.final_status)
     confirm_rank = 0 if gsgf.confirm_type == "放量突破确认" else 1 if gsgf.confirm_type else 2
     zone_rank = 0 if gsgf.zone == "a_zone" else 1 if gsgf.zone == "b_zone_a_point" else 2
     volume_rank = 0 if gsgf.volume_structure == "three_yang_controls_three_yin" else 1
-    return (hard_risk, status_rank, confirm_rank, zone_rank, volume_rank, -gsgf.total_score, item.symbol)
+    return (
+        hard_risk,
+        status_rank,
+        confirm_rank,
+        zone_rank,
+        volume_rank,
+        -gsgf.total_score,
+        -_chanlun_rank_score(item),
+        item.symbol,
+    )
 
 
-def _combined_rank_key(item: StrongStockScreeningItem) -> tuple[int, float, str]:
+def _combined_rank_key(item: StrongStockScreeningItem) -> tuple[int, int, float, int, str]:
     gsgf_score = item.gsgf.total_score if item.gsgf is not None else 0
     hard_risk = 1 if _has_gsgf_hard_risk(item) else 0
     combined = item.score * 0.45 + gsgf_score * 0.45 + item.industry_score * 0.10
     if hard_risk:
         combined -= 30
     focus_rank = 0 if item.status == "focus" else 1
-    return (hard_risk, focus_rank, -combined, item.symbol)
+    return (hard_risk, focus_rank, -combined, -_chanlun_rank_score(item), item.symbol)
+
+
+def _chanlun_rank_score(item: StrongStockScreeningItem) -> int:
+    summary = item.chanlun_summary
+    if summary is None or summary.availability != "ready" or summary.freshness != "fresh":
+        return 0
+    return summary.confluence_score
+
+
+def _enrich_chanlun_candidates(
+    items: list[StrongStockScreeningItem],
+    *,
+    bars_by_symbol: dict[str, list[KlineBar]],
+    summarizer: ChanlunScreeningSummarizer | None,
+    trade_date: str,
+    limit: int,
+    strategy: ScreenStrategy,
+) -> list[StrongStockScreeningItem]:
+    if summarizer is None or not items:
+        return items
+    pool_size = min(max(limit * 2, 20), 60)
+    pool = sorted(items, key=lambda item: _screening_rank_key(item, strategy))[:pool_size]
+    enriched: dict[str, StrongStockScreeningItem] = {}
+    for item in pool:
+        try:
+            summary = summarizer.summarize(
+                item.symbol,
+                daily_bars=bars_by_symbol[item.symbol],
+                trade_date=trade_date,
+            )
+        except Exception:
+            continue
+        enriched[item.symbol] = item.model_copy(update={"chanlun_summary": summary})
+    return [enriched.get(item.symbol, item) for item in items]
+
+
+def _passes_chanlun_filters(
+    item: StrongStockScreeningItem,
+    filters: ScreeningFilters | None,
+) -> bool:
+    return passes_chanlun_screening_filters(
+        item.chanlun_summary,
+        min_confluence_score=(
+            getattr(filters, "chanlun_min_confluence_score", None) if filters is not None else None
+        ),
+        require_confirmed_buy=(
+            bool(getattr(filters, "chanlun_require_confirmed_buy", False))
+            if filters is not None
+            else False
+        ),
+    )
 
 
 def _gsgf_status_rank(status: str) -> int:

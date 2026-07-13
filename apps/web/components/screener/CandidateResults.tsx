@@ -5,10 +5,12 @@ import { Alert, Button, Card, Checkbox, Empty, Input, Segmented, Space, Table, T
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type {
+  ChanlunScreeningSummary,
   GsgfAnalysis,
   StrongStockScreeningItem,
   WatchlistPoolItem,
 } from "../../lib/types";
+import { chanlunScreeningView } from "../../lib/chanlunScreener";
 import { buildStockDetailHref } from "../../lib/stockNavigation";
 import {
   filterStockListByGsgf,
@@ -167,6 +169,7 @@ function CandidateTable({
                 <span className="text-xs font-semibold tabular-nums text-[var(--app-ink)]">得分 {item.score}</span>
               </div>
               <GsgfSummaryText gsgf={item.gsgf} />
+              <ChanlunSummaryText summary={item.chanlun_summary} symbol={item.symbol} />
             </div>
           );
         },
@@ -372,6 +375,7 @@ function CandidateCardList({
             <div className="candidate-decision mt-3">
               <span className="text-xs font-semibold tabular-nums text-[var(--app-ink)]">得分 {item.score}</span>
               <GsgfSummaryText gsgf={item.gsgf} />
+              <ChanlunSummaryText summary={item.chanlun_summary} symbol={item.symbol} />
             </div>
             <div className="mt-3"><IndustrySummary item={item} /></div>
             <p className={`mt-3 line-clamp-2 text-xs leading-5 ${riskSummary.tone}`}>{riskSummary.text}</p>
@@ -587,6 +591,31 @@ function GsgfSummaryText({ gsgf }: { gsgf: GsgfAnalysis | null }) {
     <div className={`candidate-decision-meta ${tone}`}>
       <div>股是股非 {gsgf.total_score} · {gsgf.final_status} · {gsgfLabel(gsgf.zone)} · {gsgfLabel(gsgf.action)}</div>
       {detail ? <div className="candidate-decision-meta__detail" title={detail}>{detail}</div> : null}
+    </div>
+  );
+}
+
+function ChanlunSummaryText({
+  summary,
+  symbol,
+}: {
+  summary: ChanlunScreeningSummary | null | undefined;
+  symbol: string;
+}) {
+  const view = chanlunScreeningView(summary);
+  return (
+    <div className={`candidate-decision-meta ${view.insufficient ? "text-[var(--app-muted)]" : "text-[var(--app-ink)]"}`}>
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <span>{view.title}</span>
+        <Link
+          className="font-semibold text-[var(--app-primary)] hover:underline"
+          href={`/chanlun?symbol=${encodeURIComponent(symbol)}`}
+          onClick={(event) => event.stopPropagation()}
+        >
+          查看结构
+        </Link>
+      </div>
+      <div className="candidate-decision-meta__detail" title={view.detail}>{view.detail}</div>
     </div>
   );
 }

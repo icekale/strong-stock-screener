@@ -42,15 +42,11 @@ SESSION_CLOSES = {
     "5m": tuple(
         [time(9, 35)]
         + [
-            (
-                datetime.combine(END_DATE, time(9, 35)) + timedelta(minutes=5 * index)
-            ).time()
+            (datetime.combine(END_DATE, time(9, 35)) + timedelta(minutes=5 * index)).time()
             for index in range(1, 24)
         ]
         + [
-            (
-                datetime.combine(END_DATE, time(13, 5)) + timedelta(minutes=5 * index)
-            ).time()
+            (datetime.combine(END_DATE, time(13, 5)) + timedelta(minutes=5 * index)).time()
             for index in range(24)
         ]
     ),
@@ -93,9 +89,7 @@ def _bars(period: str, bar_count: int, symbol_index: int) -> list[dict[str, obje
     for index, bar_date in enumerate(_period_dates(period, bar_count)):
         phase = index % 32
         triangle = phase if phase < 16 else 31 - phase
-        close = round(
-            10 + symbol_index * 0.05 + triangle * 0.06 + (index // 64) * 0.02, 4
-        )
+        close = round(10 + symbol_index * 0.05 + triangle * 0.06 + (index // 64) * 0.02, 4)
         open_price = round(close + (0.03 if index % 2 == 0 else -0.03), 4)
         high = round(max(open_price, close) + 0.08, 4)
         low = round(min(open_price, close) - 0.08, 4)
@@ -121,9 +115,7 @@ def _bars(period: str, bar_count: int, symbol_index: int) -> list[dict[str, obje
 def _requests(symbol_count: int, bar_count: int) -> list[CzscRc8Request]:
     requests = []
     for index in range(symbol_count):
-        periods = {
-            period: _bars(period, bar_count, index) for period in APPROVED_PERIODS
-        }
+        periods = {period: _bars(period, bar_count, index) for period in APPROVED_PERIODS}
         requests.append(
             build_research_request(
                 f"{600_000 + index:06d}.SH",
@@ -223,9 +215,7 @@ def run_benchmark(
                     raise RuntimeError("worker exited before returning a response")
                 response = CzscRc8Response.model_validate_json(response_line)
                 if response.status != "ready":
-                    raise ValueError(
-                        response.error or "worker returned an error response"
-                    )
+                    raise ValueError(response.error or "worker returned an error response")
                 if response.request_id != request.request_id:
                     raise ValueError("worker response request ID mismatch")
                 if response.input_snapshot_id != request.input_snapshot_id:
@@ -237,9 +227,7 @@ def run_benchmark(
                     remaining = len(wire_requests) - index - 1
                     failures += remaining
                     if remaining:
-                        errors.append(
-                            f"worker exited with {remaining} requests unprocessed"
-                        )
+                        errors.append(f"worker exited with {remaining} requests unprocessed")
                     break
             else:
                 successes += 1
@@ -278,9 +266,7 @@ def run_benchmark(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Benchmark the standalone CZSC rc8 JSONL worker."
-    )
+    parser = argparse.ArgumentParser(description="Benchmark the standalone CZSC rc8 JSONL worker.")
     parser.add_argument("--symbols", type=_positive_int, required=True)
     parser.add_argument("--bars", type=_positive_int, required=True)
     parser.add_argument("--worker-python", required=True)

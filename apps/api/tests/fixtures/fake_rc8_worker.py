@@ -13,6 +13,7 @@ CATALOG_VERSION = "czsc-v2-catalog-1"
 ENGINE_VERSION = "1.0.0rc8"
 PERIODS = ("1d", "60m", "30m", "5m")
 GATE_TIMEOUT_SECONDS = 5.0
+LARGE_STDERR_BYTES = 1_048_576
 
 
 def _write(payload: object) -> None:
@@ -57,7 +58,7 @@ def _response(payload: dict[str, Any]) -> dict[str, Any]:
 def _handle(payload: dict[str, Any]) -> None:
     request_id = str(payload["request_id"])
 
-    if request_id.startswith("gate:"):
+    if request_id.startswith(("gate:", "gate-malformed:")):
         gate = _path_suffix(request_id)
         if gate is None:
             raise SystemExit(20)
@@ -68,6 +69,11 @@ def _handle(payload: dict[str, Any]) -> None:
             if time.monotonic() >= deadline:
                 raise SystemExit(20)
             time.sleep(0.005)
+        if request_id.startswith("gate-malformed:"):
+            _record_attempt(request_id)
+            sys.stdout.write("{not-json\n")
+            sys.stdout.flush()
+            return
     if request_id.startswith("delay-"):
         time.sleep(0.2)
     if request_id.startswith("slow-"):
@@ -75,6 +81,33 @@ def _handle(payload: dict[str, Any]) -> None:
         time.sleep(1)
     if request_id.startswith("record-pid"):
         _record_attempt(request_id)
+    if request_id.startswith("stderr-large"):
+        _record_attempt(request_id)
+        prefix = f"Traceback /private/worker/secret.py {request_id}\n"
+        body_size = max(0, LARGE_STDERR_BYTES - (2 * len(prefix)))
+        sys.stderr.write(prefix + ("x" * body_size) + prefix)
+        sys.stderr.flush()
+        _write(_response(payload))
+        return
+    if request_id.startswith("delayed-extra:"):
+        marker = _path_suffix(request_id)
+        if marker is None:
+            raise SystemExit(22)
+        _record_attempt(request_id)
+        _write(_response(payload))
+        time.sleep(0.05)
+        next_attempts = Path(f"{marker}.next.attempts")
+        extra = _response(payload)
+        extra["request_id"] = f"record-pid-next:{next_attempts}"
+        encoded = json.dumps(extra, ensure_ascii=False, separators=(",", ":")) + "\n"
+        split = len(encoded) // 2
+        sys.stdout.write(encoded[:split])
+        sys.stdout.flush()
+        time.sleep(0.02)
+        sys.stdout.write(encoded[split:])
+        sys.stdout.flush()
+        Path(f"{marker}.ready").write_text("ready\n", encoding="utf-8")
+        return
 
     if request_id.startswith("malformed-json"):
         _record_attempt(request_id)
@@ -119,6 +152,19 @@ def _handle(payload: dict[str, Any]) -> None:
 
 
 def main() -> None:
+    startup_mode = os.environ.get("FAKE_RC8_STARTUP_MODE", "")
+    if startup_mode.startswith("stop-reading:"):
+        gate = _path_suffix(startup_mode)
+        if gate is None:
+            raise SystemExit(21)
+        with Path(f"{gate}.attempts").open("a", encoding="utf-8") as handle:
+            handle.write(f"{os.getpid()}\n")
+        Path(f"{gate}.ready").write_text("ready\n", encoding="utf-8")
+        deadline = time.monotonic() + GATE_TIMEOUT_SECONDS
+        while time.monotonic() < deadline:
+            time.sleep(0.005)
+        raise SystemExit(21)
+
     for line in sys.stdin:
         payload = json.loads(line)
         request_id = str(payload["request_id"])

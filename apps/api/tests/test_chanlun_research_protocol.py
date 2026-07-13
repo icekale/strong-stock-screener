@@ -1,4 +1,6 @@
 import copy
+from datetime import datetime, timezone
+from typing import Callable
 
 import pytest
 from pydantic import ValidationError
@@ -91,6 +93,30 @@ def _response_payload() -> dict[str, object]:
     }
 
 
+def _add_period(request: CzscRc8Request) -> None:
+    request.periods["15m"] = ()
+
+
+def _replace_period_bars(request: CzscRc8Request) -> None:
+    request.periods["5m"] = request.periods["5m"]
+
+
+def _append_bar(request: CzscRc8Request) -> None:
+    request.periods["5m"].append(request.periods["5m"][-1])
+
+
+def _replace_bar(request: CzscRc8Request) -> None:
+    request.periods["5m"][0] = request.periods["5m"][1]
+
+
+def _mutate_bar(request: CzscRc8Request) -> None:
+    request.periods["5m"][0].close = 99.0
+
+
+def _mutate_boundary(request: CzscRc8Request) -> None:
+    request.last_closed_by_period["5m"] = "2020-01-01T00:00:00+08:00"
+
+
 def test_request_hash_is_order_stable_and_changes_with_any_bar_change() -> None:
     bars = _period_bars(close=10.1)
     reordered = dict(reversed(list(_period_bars(close=10.1).items())))
@@ -106,6 +132,76 @@ def test_request_hash_is_order_stable_and_changes_with_any_bar_change() -> None:
     assert list(first.periods) == list(PERIODS)
 
 
+@pytest.mark.parametrize(
+    ("mutate", "error_type"),
+    [
+        (_add_period, TypeError),
+        (_replace_period_bars, TypeError),
+        (_append_bar, AttributeError),
+        (_replace_bar, TypeError),
+        (_mutate_bar, ValidationError),
+        (_mutate_boundary, TypeError),
+    ],
+    ids=[
+        "add-period",
+        "replace-period-bars",
+        "append-bar",
+        "replace-bar",
+        "mutate-bar",
+        "mutate-boundary",
+    ],
+)
+def test_request_graph_is_deeply_immutable_after_hashing(
+    mutate: Callable[[CzscRc8Request], None],
+    error_type: type[Exception],
+) -> None:
+    request = build_research_request(
+        "600000.SH",
+        _period_bars(),
+        request_id="immutable",
+    )
+    serialized = request.model_dump_json().encode("utf-8")
+    snapshot_id = request.input_snapshot_id
+
+    with pytest.raises(error_type):
+        mutate(request)
+
+    assert request.model_dump_json().encode("utf-8") == serialized
+    assert request.input_snapshot_id == snapshot_id
+
+
+def test_equivalent_minute_instants_have_identical_hash_and_worker_dates() -> None:
+    shanghai_bars = _period_bars()
+    utc_bars = _period_bars()
+    for period, bars in utc_bars.items():
+        if period == "1d":
+            continue
+        for bar in bars:
+            bar.date = (
+                datetime.fromisoformat(bar.date)
+                .astimezone(timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
+
+    shanghai = build_research_request(
+        "600000.SH",
+        shanghai_bars,
+        request_id="canonical",
+    )
+    utc = build_research_request(
+        "600000.SH",
+        utc_bars,
+        request_id="canonical",
+    )
+
+    assert shanghai.input_snapshot_id == utc.input_snapshot_id
+    assert shanghai.model_dump_json() == utc.model_dump_json()
+    assert shanghai.periods["5m"][-1].date == "2026-07-10T11:00:00+08:00"
+    assert utc.periods["5m"][-1].date == "2026-07-10T11:00:00+08:00"
+    assert shanghai.periods["1d"][-1].date == "2026-07-10T15:00:00+08:00"
+
+
 @pytest.mark.parametrize("periods", [{"15m": []}, {"1d": []}])
 def test_request_requires_exactly_the_approved_periods(
     periods: dict[str, list[object]],
@@ -114,6 +210,18 @@ def test_request_requires_exactly_the_approved_periods(
     payload["periods"] = periods
 
     with pytest.raises(ValidationError, match="period"):
+        CzscRc8Request.model_validate(payload)
+
+
+@pytest.mark.parametrize("field", ["periods", "last_closed_by_period"])
+def test_request_rejects_required_period_keys_plus_unknown_extra(field: str) -> None:
+    payload = _request_payload()
+    if field == "periods":
+        payload[field]["15m"] = copy.deepcopy(payload[field]["5m"])
+    else:
+        payload[field]["15m"] = payload[field]["5m"]
+
+    with pytest.raises(ValidationError):
         CzscRc8Request.model_validate(payload)
 
 
@@ -174,6 +282,7 @@ def test_daily_source_date_is_available_at_shanghai_close() -> None:
 
     assert request.last_closed_by_period["1d"] == "2026-07-10T15:00:00+08:00"
     assert request.last_closed_by_period["5m"] == "2026-07-10T11:00:00+08:00"
+    assert request.periods["1d"][-1].date == "2026-07-10T15:00:00+08:00"
 
     with pytest.raises(ValidationError, match="decision_at"):
         build_research_request(

@@ -61,7 +61,8 @@ COPY --from=rc8-builder /opt/czsc-rc8-venv /opt/czsc-rc8-venv
 COPY app ./app
 COPY artifacts ./artifacts
 
-RUN python -c "import czsc, mootdx; print(czsc.__version__, mootdx.__version__)" \
+RUN test -f /app/app/services/chanlun/rc8_worker.py \
+    && python -c "import czsc, mootdx; print(czsc.__version__, mootdx.__version__)" \
     && python -c "import importlib.metadata; assert importlib.metadata.version('czsc') == '0.10.12'" \
     && /opt/czsc-rc8-venv/bin/python -c "import czsc; import importlib.metadata; assert importlib.metadata.version('czsc') == '1.0.0rc8'"
 

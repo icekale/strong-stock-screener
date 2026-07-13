@@ -5,6 +5,7 @@ import json
 import math
 import re
 from datetime import date, datetime, time
+from types import MappingProxyType
 from typing import Literal, Mapping, cast
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -14,6 +15,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictInt,
+    field_serializer,
     field_validator,
     model_validator,
 )
@@ -45,7 +47,7 @@ _BAR_FIELD_SET = frozenset(
 
 
 class CzscRc8Bar(KlineBar):
-    model_config = ConfigDict(extra="forbid", strict=True)
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
     @model_validator(mode="before")
     @classmethod
@@ -119,9 +121,9 @@ class CzscRc8Request(BaseModel):
     catalog_version: Literal["czsc-v2-catalog-1"] = CZSC_CATALOG_VERSION
     adjustment_mode: str
     decision_at: str
-    last_closed_by_period: dict[ChanlunPeriod, str]
+    last_closed_by_period: Mapping[ChanlunPeriod, str]
     input_snapshot_id: str
-    periods: dict[ChanlunPeriod, list[CzscRc8Bar]]
+    periods: Mapping[ChanlunPeriod, tuple[CzscRc8Bar, ...]]
 
     @field_validator("request_id", "adjustment_mode", "input_snapshot_id")
     @classmethod
@@ -144,25 +146,60 @@ class CzscRc8Request(BaseModel):
     def _normalize_decision_at(cls, value: str) -> str:
         return _canonical_timestamp(value, field_name="decision_at")
 
+    @field_validator("last_closed_by_period", "periods", mode="before")
+    @classmethod
+    def _require_exact_period_keys(cls, value: object) -> object:
+        if not isinstance(value, Mapping) or set(value) != _APPROVED_PERIOD_SET:
+            raise ValueError("period map must contain exactly 1d, 60m, 30m, and 5m")
+        return value
+
     @field_validator("last_closed_by_period")
     @classmethod
     def _normalize_boundaries(
         cls,
-        value: dict[ChanlunPeriod, str],
-    ) -> dict[ChanlunPeriod, str]:
-        return {
-            period: _canonical_bar_timestamp(period, value[period])
-            for period in APPROVED_PERIODS
-            if period in value
-        }
+        value: Mapping[ChanlunPeriod, str],
+    ) -> Mapping[ChanlunPeriod, str]:
+        return MappingProxyType(
+            {
+                period: _canonical_bar_timestamp(period, value[period])
+                for period in APPROVED_PERIODS
+            }
+        )
 
     @field_validator("periods")
     @classmethod
-    def _order_periods(
+    def _normalize_periods(
         cls,
-        value: dict[ChanlunPeriod, list[CzscRc8Bar]],
-    ) -> dict[ChanlunPeriod, list[CzscRc8Bar]]:
-        return {period: value[period] for period in APPROVED_PERIODS if period in value}
+        value: Mapping[ChanlunPeriod, tuple[CzscRc8Bar, ...]],
+    ) -> Mapping[ChanlunPeriod, tuple[CzscRc8Bar, ...]]:
+        return MappingProxyType(
+            {
+                period: tuple(
+                    bar.model_copy(
+                        update={"date": _canonical_bar_timestamp(period, bar.date)}
+                    )
+                    for bar in value[period]
+                )
+                for period in APPROVED_PERIODS
+            }
+        )
+
+    @field_serializer("last_closed_by_period")
+    def _serialize_boundaries(
+        self,
+        value: Mapping[ChanlunPeriod, str],
+    ) -> dict[ChanlunPeriod, str]:
+        return {period: value[period] for period in APPROVED_PERIODS}
+
+    @field_serializer("periods")
+    def _serialize_periods(
+        self,
+        value: Mapping[ChanlunPeriod, tuple[CzscRc8Bar, ...]],
+    ) -> dict[ChanlunPeriod, list[dict[str, object]]]:
+        return {
+            period: [bar.model_dump(mode="json") for bar in value[period]]
+            for period in APPROVED_PERIODS
+        }
 
     @model_validator(mode="after")
     def _validate_closed_periods(self) -> CzscRc8Request:

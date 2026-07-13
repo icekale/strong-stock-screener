@@ -155,18 +155,34 @@ def test_runtime_app_copies_include_the_executable_rc8_worker() -> None:
     repo_root = Path(__file__).parents[3]
     worker = repo_root / "apps/api/app/services/chanlun/rc8_worker.py"
     dockerfiles = {
-        repo_root / "Dockerfile": ("apps/api/app ./api/app", "/app/api/app"),
-        repo_root / "apps/api/Dockerfile": ("app ./app", "/app/app"),
+        repo_root / "Dockerfile": (
+            "apps/api/app ./api/app",
+            "test -f /app/api/app/services/chanlun/rc8_worker.py",
+        ),
+        repo_root / "apps/api/Dockerfile": (
+            "app ./app",
+            "test -f /app/app/services/chanlun/rc8_worker.py",
+        ),
     }
 
     assert worker.is_file()
     assert "if __name__ == \"__main__\":" in worker.read_text(encoding="utf-8")
-    for dockerfile, (app_copy, destination) in dockerfiles.items():
+    for dockerfile, (app_copy, worker_check) in dockerfiles.items():
         runner = _docker_stages(dockerfile.read_text(encoding="utf-8"))["runner"]
-        assert any(
-            instruction == "COPY" and body == app_copy
-            for instruction, body in runner
-        ), f"{dockerfile} must place the worker under {destination}"
+        copy_indices = [
+            index
+            for index, (instruction, body) in enumerate(runner)
+            if instruction == "COPY" and body == app_copy
+        ]
+        check_indices = [
+            index
+            for index, (instruction, body) in enumerate(runner)
+            if instruction == "RUN" and worker_check in body
+        ]
+
+        assert len(copy_indices) == 1
+        assert len(check_indices) == 1
+        assert check_indices[0] > copy_indices[0]
 
 
 def test_root_runner_asserts_the_formal_czsc_metadata_version() -> None:

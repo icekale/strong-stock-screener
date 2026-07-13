@@ -3,14 +3,16 @@ import importlib.metadata
 import importlib.util
 import json
 import math
+import random
 import subprocess
 import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from unittest import mock
 from zoneinfo import ZoneInfo
 
-from czsc import CZSC, Direction, Freq, RawBar, ZS
+from czsc import CZSC, Direction, Freq, RawBar, Signal, ZS
 
 
 WORKER_PATH = Path(__file__).parents[1] / "app/services/chanlun/rc8_worker.py"
@@ -106,6 +108,117 @@ def _raw_wave(prices: list[float], freq: Freq) -> list[RawBar]:
         )
         for index, price in enumerate(prices)
     ]
+
+
+def _triangle_prices(base: float, count: int = 120) -> list[float]:
+    return [
+        base + (index % 10 if (index // 10) % 2 == 0 else 9 - index % 10) * 0.2
+        for index in range(count)
+    ]
+
+
+def _sine_prices(base: float, count: int = 120) -> list[float]:
+    return [base + math.sin(index * math.pi / 6) for index in range(count)]
+
+
+def _random_walk_prices(seed: int, count: int = 180) -> list[float]:
+    randomizer = random.Random(seed)
+    price = 10.0
+    prices = []
+    for _ in range(count):
+        price += randomizer.choice((-0.3, -0.2, 0.2, 0.3))
+        prices.append(price)
+    return prices
+
+
+def _reference_zone_value(big: CZSC | None, small: CZSC | None) -> str:
+    if big is None or small is None or len(big.bi_list) < 5 or len(small.bi_list) < 5:
+        return "其他"
+    big_zone = ZS(big.bi_list[-3:])
+    small_zone = ZS(small.bi_list[-3:])
+    if not (big_zone.zg > big_zone.zd and small_zone.zg > small_zone.zd):
+        return "其他"
+    if small_zone.dd > big_zone.zz and small.bi_list[-1].direction == Direction.Down:
+        return "看多"
+    if small_zone.gg < big_zone.zz and small.bi_list[-1].direction == Direction.Up:
+        return "看空"
+    return "其他"
+
+
+def _wire_bars(
+    prices: list[float],
+    *,
+    start: datetime,
+    step: timedelta,
+) -> list[dict[str, object]]:
+    return [
+        {
+            "date": (start + step * index).isoformat(),
+            "open": price,
+            "close": price,
+            "high": price + 0.08,
+            "low": price - 0.08,
+            "volume": 1_000,
+            "amount": 1_000 * price,
+            "ma5": None,
+            "ma10": None,
+            "ma20": None,
+            "ma60": None,
+        }
+        for index, price in enumerate(prices)
+    ]
+
+
+def _zone_item() -> dict[str, object]:
+    return {
+        "catalog_id": "zone.resonance",
+        "period": None,
+        "higher_period": "60m",
+        "lower_period": "30m",
+        "raw_key": "60分钟_30分钟_中枢共振V221221",
+    }
+
+
+def _reference_reduce(
+    *,
+    item: dict[str, object],
+    values: list[str],
+    times: list[str],
+    last_closed_at: str,
+) -> tuple[dict[str, object], list[dict[str, object]]]:
+    signals = [
+        Signal(key=item["raw_key"], value=f"{value}_任意_任意_0")
+        for value in values
+    ]
+    previous = None
+    run_started_at = times[0]
+    events = []
+
+    def payload(signal: Signal, occurred_at: str) -> dict[str, object]:
+        return {
+            "catalog_id": item["catalog_id"],
+            "period": item["period"],
+            "higher_period": item["higher_period"],
+            "lower_period": item["lower_period"],
+            "occurred_at": occurred_at,
+            "last_closed_bar_at": last_closed_at,
+            "raw_key": signal.key,
+            "raw_value": signal.value,
+            "value_fields": {
+                "v1": signal.v1,
+                "v2": signal.v2,
+                "v3": signal.v3,
+                "score": int(signal.score),
+            },
+        }
+
+    for signal, occurred_at in zip(signals, times, strict=True):
+        if previous is None or signal.value != previous.value:
+            run_started_at = occurred_at
+        if signal.v1 != "其他" and (previous is None or previous.v1 == "其他"):
+            events.append(payload(signal, occurred_at))
+        previous = signal
+    return payload(signals[-1], run_started_at), events
 
 
 class WorkerTests(unittest.TestCase):
@@ -219,25 +332,116 @@ class WorkerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             WORKER.handle_request(payload)
 
-    def test_zone_adapter_exact_fixture_without_public_independent_priming(self) -> None:
-        # rc8 cannot publicly prime a trader from two independently closed period arrays.
-        big_prices = [
-            10 + (index % 10 if (index // 10) % 2 == 0 else 9 - index % 10) * 0.2
-            for index in range(120)
+    def test_reduce_signals_emits_only_inactive_to_active_transitions(self) -> None:
+        item = {
+            "catalog_id": "test.transition",
+            "period": "5m",
+            "higher_period": None,
+            "lower_period": None,
+            "raw_key": "5分钟_D1_测试V000001",
+        }
+        values = ["其他", "看多", "看多", "其他", "看多"]
+        times = [f"2026-01-01T10:{index:02d}:00+08:00" for index in range(5)]
+        signals = [
+            Signal(key=item["raw_key"], value=f"{value}_任意_任意_0")
+            for value in values
         ]
-        small_prices = [15 + math.sin(index * math.pi / 6) for index in range(120)]
-        big = CZSC(_raw_wave(big_prices, Freq.F60))
-        small = CZSC(_raw_wave(small_prices, Freq.F30))
-        big_zone = ZS(big.bi_list[-3:])
-        small_zone = ZS(small.bi_list[-3:])
 
-        self.assertGreaterEqual(len(big.bi_list), 5)
-        self.assertGreaterEqual(len(small.bi_list), 5)
-        self.assertGreater(big_zone.zg, big_zone.zd)
-        self.assertGreater(small_zone.zg, small_zone.zd)
-        self.assertGreater(small_zone.dd, big_zone.zz)
-        self.assertEqual(small.bi_list[-1].direction, Direction.Down)
-        self.assertEqual(WORKER._zone_resonance_value(big, small), "看多")
+        current, events = WORKER._reduce_signals(
+            item=item,
+            signals=signals,
+            times=times,
+            last_closed_at=times[-1],
+        )
+
+        self.assertEqual(len(events), 2)
+        self.assertEqual([event["occurred_at"] for event in events], [times[1], times[4]])
+        self.assertEqual(current["occurred_at"], times[4])
+        self.assertEqual(current["raw_value"], "看多_任意_任意_0")
+
+    def test_zone_adapter_matches_independent_registered_algorithm_fixture(self) -> None:
+        # rc8 cannot publicly prime a trader from two independently closed period arrays.
+        cases = [
+            ("bullish", _triangle_prices(10), _sine_prices(15), "看多"),
+            ("bearish", _sine_prices(10), _triangle_prices(5), "看空"),
+            ("insufficient", _triangle_prices(10, 10), _sine_prices(15), "其他"),
+            ("no-overlap", _random_walk_prices(2), _sine_prices(15), "其他"),
+        ]
+        for name, big_prices, small_prices, expected in cases:
+            with self.subTest(name=name):
+                big = CZSC(_raw_wave(big_prices, Freq.F60))
+                small = CZSC(_raw_wave(small_prices, Freq.F30))
+
+                if name == "insufficient":
+                    self.assertLess(len(big.bi_list), 5)
+                if name == "no-overlap":
+                    big_zone = ZS(big.bi_list[-3:])
+                    self.assertLessEqual(big_zone.zg, big_zone.zd)
+                self.assertEqual(_reference_zone_value(big, small), expected)
+                self.assertEqual(WORKER._zone_resonance_value(big, small), expected)
+
+    def test_run_zone_pair_matches_reference_at_synchronized_checkpoints(self) -> None:
+        start = datetime(2026, 1, 1, 9, 30, tzinfo=SHANGHAI)
+        higher = _wire_bars(
+            _triangle_prices(10),
+            start=start,
+            step=timedelta(hours=1),
+        )
+        lower = _wire_bars(
+            _sine_prices(15, 240),
+            start=start,
+            step=timedelta(minutes=30),
+        )
+        raw_bars = {
+            "60m": WORKER._to_raw_bars("fixture", "60m", higher),
+            "30m": WORKER._to_raw_bars("fixture", "30m", lower),
+        }
+        item = _zone_item()
+        request = {
+            "periods": {"60m": higher, "30m": lower},
+            "last_closed_by_period": {"30m": lower[-1]["date"]},
+        }
+        higher_times = [datetime.fromisoformat(bar["date"]) for bar in higher]
+        lower_times = [datetime.fromisoformat(bar["date"]) for bar in lower]
+        visible_counts = [
+            sum(higher_time <= checkpoint for higher_time in higher_times)
+            for checkpoint in lower_times
+        ]
+        reference_values = []
+        for lower_index, visible_count in enumerate(visible_counts):
+            big = CZSC(raw_bars["60m"][:visible_count]) if visible_count else None
+            small = CZSC(raw_bars["30m"][: lower_index + 1])
+            reference_values.append(_reference_zone_value(big, small))
+
+        actual_values = []
+        production_adapter = WORKER._zone_resonance_value
+
+        def record_value(big: CZSC | None, small: CZSC | None) -> str:
+            value = production_adapter(big, small)
+            actual_values.append(value)
+            return value
+
+        with mock.patch.object(WORKER, "_zone_resonance_value", side_effect=record_value):
+            current, events = WORKER._run_zone_pair(
+                item=item,
+                request=request,
+                raw_bars=raw_bars,
+            )
+
+        times = [timestamp.isoformat(timespec="seconds") for timestamp in lower_times]
+        expected_current, expected_events = _reference_reduce(
+            item=item,
+            values=reference_values,
+            times=times,
+            last_closed_at=lower[-1]["date"],
+        )
+
+        self.assertEqual(visible_counts[:4], [1, 1, 2, 2])
+        self.assertEqual(visible_counts[-1], len(higher))
+        self.assertIn("看多", reference_values)
+        self.assertEqual(actual_values, reference_values)
+        self.assertEqual(current, expected_current)
+        self.assertEqual(events, expected_events)
 
     def test_main_emits_one_compact_sanitized_error_per_malformed_line(self) -> None:
         process = subprocess.run(

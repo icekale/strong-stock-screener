@@ -105,7 +105,8 @@ COPY --from=web-builder /build/web/.next/standalone ./web
 COPY --from=web-builder /build/web/.next/static ./web/.next/static
 COPY scripts/start-single-container.sh ./start-single-container.sh
 
-RUN /opt/strong-stock-api-venv/bin/python -c "import czsc, mootdx; print(czsc.__version__, mootdx.__version__)" \
+RUN test -f /app/api/app/services/chanlun/rc8_worker.py \
+    && /opt/strong-stock-api-venv/bin/python -c "import czsc, mootdx; print(czsc.__version__, mootdx.__version__)" \
     && /opt/strong-stock-api-venv/bin/python -c "import importlib.metadata; assert importlib.metadata.version('czsc') == '0.10.12'" \
     && /opt/czsc-rc8-venv/bin/python -c "import czsc; import importlib.metadata; assert importlib.metadata.version('czsc') == '1.0.0rc8'" \
     && chmod +x ./start-single-container.sh \

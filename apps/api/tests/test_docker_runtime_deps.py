@@ -151,6 +151,24 @@ def test_rc8_runners_copy_and_import_the_venv_after_runtime_dependencies() -> No
         assert smoke_indices[0] > libgomp_indices[0]
 
 
+def test_runtime_app_copies_include_the_executable_rc8_worker() -> None:
+    repo_root = Path(__file__).parents[3]
+    worker = repo_root / "apps/api/app/services/chanlun/rc8_worker.py"
+    dockerfiles = {
+        repo_root / "Dockerfile": ("apps/api/app ./api/app", "/app/api/app"),
+        repo_root / "apps/api/Dockerfile": ("app ./app", "/app/app"),
+    }
+
+    assert worker.is_file()
+    assert "if __name__ == \"__main__\":" in worker.read_text(encoding="utf-8")
+    for dockerfile, (app_copy, destination) in dockerfiles.items():
+        runner = _docker_stages(dockerfile.read_text(encoding="utf-8"))["runner"]
+        assert any(
+            instruction == "COPY" and body == app_copy
+            for instruction, body in runner
+        ), f"{dockerfile} must place the worker under {destination}"
+
+
 def test_root_runner_asserts_the_formal_czsc_metadata_version() -> None:
     repo_root = Path(__file__).parents[3]
     runner = _docker_stages((repo_root / "Dockerfile").read_text(encoding="utf-8"))["runner"]

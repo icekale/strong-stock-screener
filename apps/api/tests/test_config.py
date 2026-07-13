@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -89,3 +91,32 @@ def test_settings_rejects_chanlun_tdx_timeout_outside_bounds() -> None:
 
     with pytest.raises(ValidationError):
         Settings(_env_file=None, chanlun_tdx_timeout_seconds=16)
+
+
+def test_research_settings_have_safe_defaults() -> None:
+    settings = Settings(_env_file=None)
+
+    assert settings.chanlun_rc8_enabled is True
+    assert settings.chanlun_rc8_python == Path("./rc8-worker/.venv/bin/python")
+    assert settings.chanlun_rc8_interactive_wait_seconds == 3
+    assert settings.chanlun_rc8_hard_timeout_seconds == 10
+    assert settings.chanlun_research_retention_days == 180
+    assert settings.chanlun_research_evidence_retention_days == 730
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("chanlun_rc8_interactive_wait_seconds", 0),
+        ("chanlun_rc8_interactive_wait_seconds", 11),
+        ("chanlun_rc8_hard_timeout_seconds", 0.5),
+        ("chanlun_rc8_hard_timeout_seconds", 31),
+        ("chanlun_research_retention_days", 29),
+        ("chanlun_research_retention_days", 731),
+        ("chanlun_research_evidence_retention_days", 179),
+        ("chanlun_research_evidence_retention_days", 1826),
+    ],
+)
+def test_research_settings_reject_values_outside_bounds(field: str, value: float) -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **{field: value})

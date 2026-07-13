@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
 
 
 ScreenStatus = Literal["focus", "wait_pullback", "reduce_risk", "data_incomplete"]
@@ -114,6 +114,78 @@ ChanlunPaperOrderStatus = Literal[
     "cancelled",
 ]
 ChanlunLayerKey = Literal["fractals", "strokes", "segments", "zones", "divergences", "signals"]
+CzscResearchStatus = Literal[
+    "ready",
+    "pending",
+    "stale",
+    "unavailable",
+    "insufficient_bars",
+    "adjustment_mismatch",
+]
+CzscEvidenceFamily = Literal[
+    "trend_context",
+    "second_buy",
+    "third_buy",
+    "zone_confluence",
+    "divergence",
+    "sell_risk",
+]
+CzscEvidenceRole = Literal["primary", "confirmation", "risk", "observation"]
+CzscEvidenceDirection = Literal["bullish", "bearish", "neutral"]
+CzscV2BatchStatus = Literal["pending", "ready", "partial", "unavailable"]
+CZSC_CATALOG_VERSION = "czsc-v2-catalog-1"
+CZSC_SCORE_RULE_VERSION = "czsc-score-v2-rule-1"
+_CZSC_REQUIRED_PERIODS = frozenset({"1d", "60m", "30m", "5m"})
+
+
+def _freeze_param_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return FrozenDict(value)
+    if isinstance(value, (list, tuple)):
+        return tuple(_freeze_param_value(item) for item in value)
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    raise TypeError(f"unsupported parameter type: {type(value).__name__}")
+
+
+def _thaw_param_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {key: _thaw_param_value(item) for key, item in value.items()}
+    if isinstance(value, tuple):
+        return [_thaw_param_value(item) for item in value]
+    return value
+
+
+class FrozenDict(dict[str, Any]):
+    def __init__(self, value: Mapping[str, Any] | None = None) -> None:
+        dict.__init__(
+            self,
+            {
+                str(key): _freeze_param_value(item)
+                for key, item in (value or {}).items()
+            },
+        )
+
+    def _immutable(self, *_args: Any, **_kwargs: Any) -> None:
+        raise TypeError("FrozenDict is immutable")
+
+    __setitem__ = _immutable
+    __delitem__ = _immutable
+    clear = _immutable
+    pop = _immutable
+    popitem = _immutable
+    setdefault = _immutable
+    update = _immutable
+    __ior__ = _immutable
+
+    def __copy__(self) -> FrozenDict:
+        return self
+
+    def __deepcopy__(self, _memo: dict[int, Any]) -> FrozenDict:
+        return self
+
+    def to_dict(self) -> dict[str, Any]:
+        return _thaw_param_value(self)
 
 
 class GsgfScoreBreakdown(BaseModel):
@@ -217,6 +289,50 @@ class ChanlunScreeningSummary(BaseModel):
     rule_version: str = "cl-v1"
 
 
+class CzscSignalEvidence(BaseModel):
+    id: str
+    catalog_id: str
+    family: CzscEvidenceFamily
+    role: CzscEvidenceRole
+    direction: CzscEvidenceDirection
+    period: ChanlunPeriod | None = None
+    higher_period: ChanlunPeriod | None = None
+    lower_period: ChanlunPeriod | None = None
+    occurred_at: str
+    last_closed_bar_at: str
+    signal_name: str
+    params: Mapping[str, Any] = Field(default_factory=dict, frozen=True)
+    raw_key: str
+    raw_value: str
+    reason: str
+    input_snapshot_id: str
+    engine_version: str
+    catalog_version: str = CZSC_CATALOG_VERSION
+    rule_version: str = CZSC_SCORE_RULE_VERSION
+
+    @field_validator("params", mode="after")
+    @classmethod
+    def _freeze_params(cls, value: Mapping[str, Any]) -> Mapping[str, Any]:
+        return FrozenDict(value)
+
+    @field_serializer("params")
+    def _serialize_params(self, value: Mapping[str, Any]) -> dict[str, Any]:
+        return FrozenDict(value).to_dict()
+
+
+class CzscSignalEvidenceSummary(BaseModel):
+    id: str
+    catalog_id: str
+    family: CzscEvidenceFamily
+    role: CzscEvidenceRole
+    direction: CzscEvidenceDirection
+    period: ChanlunPeriod | None = None
+    higher_period: ChanlunPeriod | None = None
+    lower_period: ChanlunPeriod | None = None
+    occurred_at: str
+    reason: str
+
+
 class StrongStockScreeningItem(BaseModel):
     symbol: str
     name: str
@@ -238,6 +354,12 @@ class StrongStockScreeningItem(BaseModel):
     source_trace: list[str] = Field(default_factory=list)
     gsgf: GsgfAnalysis | None = None
     chanlun_summary: ChanlunScreeningSummary | None = None
+    czsc_score_v2: int | None = Field(default=None, ge=0, le=100)
+    czsc_v2_eligible: bool | None = None
+    czsc_v2_shadow_rank: int | None = Field(default=None, ge=1)
+    czsc_v2_evidence: list[CzscSignalEvidenceSummary] | None = None
+    czsc_v2_status: CzscResearchStatus | None = None
+    czsc_v2_rule_version: str | None = None
 
 
 class StrongStockRiskItem(BaseModel):
@@ -278,6 +400,80 @@ class StrongStockSourceStatus(BaseModel):
     source: str
     status: SourceStatusValue
     detail: str
+
+
+class CzscResearchSnapshot(BaseModel):
+    status: CzscResearchStatus
+    symbol: str
+    current_states: list[CzscSignalEvidence] = Field(default_factory=list)
+    events: list[CzscSignalEvidence] = Field(default_factory=list)
+    last_closed_by_period: dict[ChanlunPeriod, str] = Field(default_factory=dict)
+    input_snapshot_id: str
+    score: int | None = Field(default=None, ge=0, le=100)
+    eligible: bool = False
+    engine_version: str
+    catalog_version: str = CZSC_CATALOG_VERSION
+    rule_version: str = CZSC_SCORE_RULE_VERSION
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    adjustment_mode: str = "unknown"
+    calculated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+
+    @model_validator(mode="after")
+    def _validate_scoreable_status(self) -> CzscResearchSnapshot:
+        if self.status == "ready":
+            if self.score is None:
+                raise ValueError("ready research snapshot requires a score")
+            if set(self.last_closed_by_period) != _CZSC_REQUIRED_PERIODS:
+                raise ValueError("ready research snapshot requires all four period boundaries")
+        elif self.score is not None:
+            raise ValueError("non-ready research snapshot cannot contain a score")
+        if self.eligible and (self.status != "ready" or self.score is None):
+            raise ValueError("eligible research snapshot must be ready and scored")
+        return self
+
+
+class CzscV2CandidateScore(BaseModel):
+    symbol: str
+    status: CzscResearchStatus
+    score: int | None = Field(default=None, ge=0, le=100)
+    shadow_rank: int | None = Field(default=None, ge=1)
+    eligible: bool = False
+    baseline_rank: int = Field(ge=1)
+    evidence: list[CzscSignalEvidenceSummary] = Field(default_factory=list)
+    input_snapshot_id: str
+    rule_version: str = CZSC_SCORE_RULE_VERSION
+
+    @model_validator(mode="after")
+    def _validate_scoreable_status(self) -> CzscV2CandidateScore:
+        if self.status == "ready" and self.score is None:
+            raise ValueError("ready candidate requires a score")
+        if self.status != "ready" and self.score is not None:
+            raise ValueError("non-ready candidate cannot contain a score")
+        if self.eligible and (self.status != "ready" or self.score is None):
+            raise ValueError("eligible candidate must be ready and scored")
+        return self
+
+
+class CzscV2BatchResult(BaseModel):
+    batch_id: str
+    job_id: str
+    status: CzscV2BatchStatus
+    trade_date: str
+    pool_size: int = Field(ge=0)
+    completed_count: int = Field(ge=0)
+    items: list[CzscV2CandidateScore] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_progress(self) -> CzscV2BatchResult:
+        if self.completed_count > self.pool_size:
+            raise ValueError("completed count cannot exceed pool size")
+        if len(self.items) != self.completed_count:
+            raise ValueError("completed count must match the number of result items")
+        if self.status == "ready" and self.completed_count != self.pool_size:
+            raise ValueError("ready batch must complete the full pool")
+        return self
 
 
 class ChanlunFractal(BaseModel):
@@ -1791,6 +1987,8 @@ class StrongStockScreeningResult(BaseModel):
     gsgf_funnel: GsgfFunnelDiagnostics = Field(default_factory=GsgfFunnelDiagnostics)
     gsgf_observation_items: list[StrongStockScreeningItem] = Field(default_factory=list)
     watchlist_risk_items: list[StrongStockRiskItem] = Field(default_factory=list)
+    czsc_v2_job_id: str | None = None
+    czsc_v2_status: CzscV2BatchStatus | None = None
     generated_at: str = Field(
         default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
     )

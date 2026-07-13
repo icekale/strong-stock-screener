@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     chanlun_tdx_enabled: bool = True
     chanlun_tdx_timeout_seconds: float = Field(default=4, ge=1, le=15)
     chanlun_paper_initial_cash: float = Field(default=100000, gt=0)
+    chanlun_rc8_enabled: bool = True
+    chanlun_rc8_python: Path = Path("./rc8-worker/.venv/bin/python")
+    chanlun_rc8_interactive_wait_seconds: float = Field(default=3, ge=0.1, le=10)
+    chanlun_rc8_hard_timeout_seconds: float = Field(default=10, ge=1, le=30)
+    chanlun_research_retention_days: int = Field(default=180, ge=30, le=730)
+    chanlun_research_evidence_retention_days: int = Field(default=730, ge=180, le=1825)
 
     model_config = SettingsConfigDict(
         env_prefix="STRONG_STOCK_",

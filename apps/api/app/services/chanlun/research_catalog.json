@@ -1,0 +1,69 @@
+{
+  "catalog_version": "czsc-v2-catalog-1",
+  "entries": [
+    {
+      "catalog_id": "trend.bi-status",
+      "name": "cxt_bi_status_V230101",
+      "periods": ["1d", "60m", "30m"],
+      "params": {},
+      "key_template": "{freq}_D1_表里关系V230101",
+      "role": "primary"
+    },
+    {
+      "catalog_id": "trend.bi-base",
+      "name": "cxt_bi_base_V230228",
+      "periods": ["1d", "60m", "30m"],
+      "params": {"bi_init_length": 9},
+      "key_template": "{freq}_D0BL9_V230228",
+      "role": "primary"
+    },
+    {
+      "catalog_id": "buy2.overlap",
+      "name": "cxt_second_bs_V240524",
+      "periods": ["5m"],
+      "params": {"di": 1, "w": 9, "t": 2},
+      "key_template": "{freq}_D1W9T2_第二买卖点V240524",
+      "role": "primary"
+    },
+    {
+      "catalog_id": "buy2.ma-confirm",
+      "name": "cxt_second_bs_V230320",
+      "periods": ["5m"],
+      "params": {"di": 1, "ma_type": "SMA", "timeperiod": 21},
+      "key_template": "{freq}_D1#SMA#21_BS2辅助V230320",
+      "role": "confirmation"
+    },
+    {
+      "catalog_id": "buy3.structure",
+      "name": "cxt_third_buy_V230228",
+      "periods": ["5m"],
+      "params": {"di": 1},
+      "key_template": "{freq}_D1_三买辅助V230228",
+      "role": "primary"
+    },
+    {
+      "catalog_id": "buy3.ma-confirm",
+      "name": "cxt_third_bs_V230319",
+      "periods": ["5m"],
+      "params": {"di": 1, "ma_type": "SMA", "timeperiod": 34},
+      "key_template": "{freq}_D1#SMA#34_BS3辅助V230319",
+      "role": "confirmation"
+    },
+    {
+      "catalog_id": "zone.resonance",
+      "name": "cxt_zhong_shu_gong_zhen_V221221",
+      "pairs": [["1d", "60m"], ["60m", "30m"]],
+      "params": {},
+      "key_template": "{freq1}_{freq2}_中枢共振V221221",
+      "role": "primary"
+    },
+    {
+      "catalog_id": "risk.macd-divergence",
+      "name": "tas_macd_bc_V240307",
+      "periods": ["1d", "60m", "30m", "5m"],
+      "params": {"di": 1, "n": 20},
+      "key_template": "{freq}_D1N20柱子背驰_BS辅助V240307",
+      "role": "risk"
+    }
+  ]
+}

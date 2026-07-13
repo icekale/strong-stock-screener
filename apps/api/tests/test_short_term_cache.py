@@ -78,6 +78,48 @@ def test_get_or_set_does_not_hold_lock_while_factory_runs() -> None:
     assert not thread_errors
 
 
+def test_get_or_set_evicts_expired_unrelated_entries() -> None:
+    cache = TtlCache[str](ttl_seconds=0.01, name="bounded-cache")
+
+    assert cache.get_or_set("old-a", lambda: "a") == "a"
+    assert cache.get_or_set("old-b", lambda: "b") == "b"
+    sleep(0.02)
+
+    assert cache.get_or_set("current", lambda: "current") == "current"
+
+    snapshot = cache.snapshot()
+    assert snapshot["size"] == 1
+    assert snapshot["fresh_count"] == 1
+    assert cache.get_if_fresh("old-a") is None
+    assert cache.get_if_fresh("old-b") is None
+
+
+def test_unrelated_fill_preserves_stale_value_during_background_refresh() -> None:
+    cache = TtlCache[str](ttl_seconds=0.01, name="stale-cache")
+    refresh_started = Event()
+    release_refresh = Event()
+
+    assert cache.get_or_refresh("stale", lambda: "initial") == "initial"
+    sleep(0.02)
+
+    def slow_refresh() -> str:
+        refresh_started.set()
+        release_refresh.wait(timeout=1)
+        return "refreshed"
+
+    assert cache.get_or_refresh("stale", slow_refresh) == "initial"
+    assert refresh_started.wait(timeout=1) is True
+
+    def unexpected_refresh() -> str:
+        raise AssertionError("stale value should remain available during refresh")
+
+    try:
+        assert cache.get_or_set("current", lambda: "current") == "current"
+        assert cache.get_or_refresh("stale", unexpected_refresh) == "initial"
+    finally:
+        release_refresh.set()
+
+
 def test_cache_snapshot_records_hits_misses_and_refresh_error() -> None:
     cache = TtlCache[str](ttl_seconds=0.01, name="quotes")
 

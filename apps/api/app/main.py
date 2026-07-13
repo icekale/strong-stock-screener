@@ -4,7 +4,7 @@ import json
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import datetime
-from threading import Thread
+from threading import RLock, Thread
 from time import perf_counter
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -307,6 +307,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="强势股选股 API", version="0.1.0", lifespan=lifespan)
+_CHANLUN_RESEARCH_LOCK = RLock()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_allow_origins(),
@@ -427,15 +428,16 @@ def shutdown_gsgf_auto_review() -> None:
 
 
 def shutdown_chanlun_research() -> None:
-    client = getattr(app.state, "chanlun_rc8_client", None)
-    if client is not None:
-        try:
-            client.close()
-        except Exception:
-            pass
-    for attribute in ("chanlun_research_service", "chanlun_rc8_client"):
-        if hasattr(app.state, attribute):
-            delattr(app.state, attribute)
+    with _CHANLUN_RESEARCH_LOCK:
+        client = getattr(app.state, "chanlun_rc8_client", None)
+        if client is not None:
+            try:
+                client.close()
+            except Exception:
+                pass
+        for attribute in ("chanlun_research_service", "chanlun_rc8_client"):
+            if hasattr(app.state, attribute):
+                delattr(app.state, attribute)
 
 
 def _chanlun_research_health() -> dict[str, object]:
@@ -2931,12 +2933,13 @@ def _quote_valuation_for_symbol(
 
 
 def _clear_data_source_caches() -> None:
-    shutdown_chanlun_research()
     CACHE_REGISTRY.clear()
-    if hasattr(app.state, "chanlun_analysis_service"):
-        delattr(app.state, "chanlun_analysis_service")
-    if hasattr(app.state, "chanlun_paper_order_service"):
-        delattr(app.state, "chanlun_paper_order_service")
+    with _CHANLUN_RESEARCH_LOCK:
+        shutdown_chanlun_research()
+        if hasattr(app.state, "chanlun_analysis_service"):
+            delattr(app.state, "chanlun_analysis_service")
+        if hasattr(app.state, "chanlun_paper_order_service"):
+            delattr(app.state, "chanlun_paper_order_service")
 
 
 def _system_jobs() -> list[dict[str, object]]:
@@ -3289,76 +3292,81 @@ def _chanlun_adapter() -> ChanlunAdapter:
 
 
 def _chanlun_analysis_service() -> ChanlunAnalysisService:
-    injected = getattr(app.state, "chanlun_analysis_service", None)
-    if injected is not None:
-        return injected
-    settings = get_settings()
-    service = ChanlunAnalysisService(
-        store=_chanlun_minute_store(),
-        intraday_provider=_quote_provider(),
-        history_provider=_chanlun_history_provider(),
-        adapter=_chanlun_adapter(),
-        daily_provider=_chanlun_daily_provider(),
-        cache_seconds=settings.chanlun_cache_seconds,
-        minute_retention_days=settings.chanlun_minute_retention_days,
-        history_max_bars=settings.chanlun_backfill_max_bars,
-    )
-    app.state.chanlun_analysis_service = service
-    return service
+    with _CHANLUN_RESEARCH_LOCK:
+        injected = getattr(app.state, "chanlun_analysis_service", None)
+        if injected is not None:
+            return injected
+        settings = get_settings()
+        service = ChanlunAnalysisService(
+            store=_chanlun_minute_store(),
+            intraday_provider=_quote_provider(),
+            history_provider=_chanlun_history_provider(),
+            adapter=_chanlun_adapter(),
+            daily_provider=_chanlun_daily_provider(),
+            cache_seconds=settings.chanlun_cache_seconds,
+            minute_retention_days=settings.chanlun_minute_retention_days,
+            history_max_bars=settings.chanlun_backfill_max_bars,
+        )
+        app.state.chanlun_analysis_service = service
+        return service
 
 
 def _chanlun_research_catalog() -> ResearchCatalog:
-    injected = getattr(app.state, "chanlun_research_catalog", None)
-    if injected is not None:
-        return injected
-    catalog = load_research_catalog()
-    app.state.chanlun_research_catalog = catalog
-    return catalog
+    with _CHANLUN_RESEARCH_LOCK:
+        injected = getattr(app.state, "chanlun_research_catalog", None)
+        if injected is not None:
+            return injected
+        catalog = load_research_catalog()
+        app.state.chanlun_research_catalog = catalog
+        return catalog
 
 
 def _chanlun_rc8_client() -> Rc8WorkerClient | None:
-    if hasattr(app.state, "chanlun_rc8_client"):
-        return app.state.chanlun_rc8_client
-    settings = get_settings()
-    if not settings.chanlun_rc8_enabled:
-        app.state.chanlun_rc8_client = None
-        return None
-    python_path = Path(settings.chanlun_rc8_python)
-    worker_path = Path(__file__).resolve().parent / "services" / "chanlun" / "rc8_worker.py"
-    if not python_path.is_file() or not worker_path.is_file():
-        app.state.chanlun_rc8_client = None
-        return None
-    client = Rc8WorkerClient(
-        python_path=python_path,
-        worker_path=worker_path,
-        hard_timeout_seconds=settings.chanlun_rc8_hard_timeout_seconds,
-    )
-    app.state.chanlun_rc8_client = client
-    return client
+    with _CHANLUN_RESEARCH_LOCK:
+        if hasattr(app.state, "chanlun_rc8_client"):
+            return app.state.chanlun_rc8_client
+        settings = get_settings()
+        if not settings.chanlun_rc8_enabled:
+            app.state.chanlun_rc8_client = None
+            return None
+        python_path = Path(settings.chanlun_rc8_python)
+        worker_path = Path(__file__).resolve().parent / "services" / "chanlun" / "rc8_worker.py"
+        if not python_path.is_file() or not worker_path.is_file():
+            app.state.chanlun_rc8_client = None
+            return None
+        client = Rc8WorkerClient(
+            python_path=python_path,
+            worker_path=worker_path,
+            hard_timeout_seconds=settings.chanlun_rc8_hard_timeout_seconds,
+        )
+        app.state.chanlun_rc8_client = client
+        return client
 
 
 def _chanlun_research_store() -> ChanlunResearchStore:
-    injected = getattr(app.state, "chanlun_research_store", None)
-    if injected is not None:
-        return injected
-    store = ChanlunResearchStore(get_settings().data_dir / "chanlun" / "research.sqlite3")
-    app.state.chanlun_research_store = store
-    return store
+    with _CHANLUN_RESEARCH_LOCK:
+        injected = getattr(app.state, "chanlun_research_store", None)
+        if injected is not None:
+            return injected
+        store = ChanlunResearchStore(get_settings().data_dir / "chanlun" / "research.sqlite3")
+        app.state.chanlun_research_store = store
+        return store
 
 
 def _chanlun_research_service() -> CzscResearchService:
-    injected = getattr(app.state, "chanlun_research_service", None)
-    if injected is not None:
-        return injected
-    service = CzscResearchService(
-        store=_chanlun_research_store(),
-        client=_chanlun_rc8_client(),
-        input_provider=_chanlun_analysis_service(),
-        catalog=_chanlun_research_catalog(),
-        settings=get_settings(),
-    )
-    app.state.chanlun_research_service = service
-    return service
+    with _CHANLUN_RESEARCH_LOCK:
+        injected = getattr(app.state, "chanlun_research_service", None)
+        if injected is not None:
+            return injected
+        service = CzscResearchService(
+            store=_chanlun_research_store(),
+            client=_chanlun_rc8_client(),
+            input_provider=_chanlun_analysis_service(),
+            catalog=_chanlun_research_catalog(),
+            settings=get_settings(),
+        )
+        app.state.chanlun_research_service = service
+        return service
 
 
 def _chanlun_screening_summarizer() -> CachedChanlunScreeningSummarizer | None:

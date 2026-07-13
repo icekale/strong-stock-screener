@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from datetime import datetime, timedelta
 from threading import Event
@@ -7,6 +8,7 @@ from zoneinfo import ZoneInfo
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+from app.config import Settings
 from app.main import (
     AUCTION_SNAPSHOT_CACHE,
     MARKET_OVERVIEW_CACHE,
@@ -1651,6 +1653,80 @@ def test_data_source_cache_reset_closes_the_rc8_client() -> None:
         assert not hasattr(app.state, "chanlun_research_service")
         assert not hasattr(app.state, "chanlun_rc8_client")
     finally:
+        main_module.shutdown_chanlun_research()
+
+
+def test_concurrent_chanlun_research_factory_retains_one_client_and_service(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    main_module.shutdown_chanlun_research()
+    python_path = tmp_path / "python"
+    python_path.touch()
+    settings = Settings(
+        data_dir=tmp_path,
+        chanlun_rc8_enabled=True,
+        chanlun_rc8_python=python_path,
+    )
+    clients: list[object] = []
+    services: list[object] = []
+    first_client_started = Event()
+    duplicate_client_started = Event()
+    release_first_client = Event()
+    second_call_started = Event()
+
+    class RecordingClient:
+        def __init__(self, **_kwargs: object) -> None:
+            self.close_calls = 0
+            clients.append(self)
+            if len(clients) == 1:
+                first_client_started.set()
+                assert release_first_client.wait(timeout=2) is True
+            else:
+                duplicate_client_started.set()
+
+        def close(self) -> None:
+            self.close_calls += 1
+
+    class RecordingService:
+        def __init__(self, *, client: object, **_kwargs: object) -> None:
+            self.client = client
+            services.append(self)
+
+    monkeypatch.setattr(main_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(main_module, "Rc8WorkerClient", RecordingClient)
+    monkeypatch.setattr(main_module, "CzscResearchService", RecordingService)
+    monkeypatch.setattr(main_module, "_chanlun_research_store", lambda: object())
+    monkeypatch.setattr(main_module, "_chanlun_analysis_service", lambda: object())
+    monkeypatch.setattr(main_module, "_chanlun_research_catalog", lambda: object())
+
+    def second_call() -> object:
+        second_call_started.set()
+        return main_module._chanlun_research_service()
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(main_module._chanlun_research_service)
+            assert first_client_started.wait(timeout=1) is True
+            second = executor.submit(second_call)
+            assert second_call_started.wait(timeout=1) is True
+            duplicate_started = duplicate_client_started.wait(timeout=0.2)
+            release_first_client.set()
+            first_service = first.result(timeout=2)
+            second_service = second.result(timeout=2)
+
+        assert duplicate_started is False
+        assert clients == [first_service.client]
+        assert services == [first_service]
+        assert second_service is first_service
+
+        main_module.shutdown_chanlun_research()
+
+        assert first_service.client.close_calls == 1
+        assert not hasattr(app.state, "chanlun_research_service")
+        assert not hasattr(app.state, "chanlun_rc8_client")
+    finally:
+        release_first_client.set()
         main_module.shutdown_chanlun_research()
 
 

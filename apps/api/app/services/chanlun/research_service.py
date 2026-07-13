@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from concurrent.futures import Future, TimeoutError as FutureTimeoutError
-from datetime import datetime, time
+from datetime import date, datetime, time
 from threading import RLock
 from typing import Literal
 from zoneinfo import ZoneInfo
@@ -58,8 +58,12 @@ class CzscResearchService:
         self.catalog = catalog or load_research_catalog()
         self.enabled = configured.chanlun_rc8_enabled
         self.interactive_wait_seconds = configured.chanlun_rc8_interactive_wait_seconds
+        self.snapshot_retention_days = configured.chanlun_research_retention_days
+        self.evidence_retention_days = configured.chanlun_research_evidence_retention_days
         self._inflight: dict[str, Future[CzscResearchSnapshot]] = {}
         self._lock = RLock()
+        self._last_prune_attempt_on: date | None = None
+        self._maybe_prune_store()
 
     def get(
         self,
@@ -327,6 +331,7 @@ class CzscResearchService:
                 adjustment_mode=request.adjustment_mode,
             )
             self.store.save_snapshot(snapshot)
+            self._maybe_prune_store()
         except Exception as exc:
             snapshot = _snapshot_for_status(
                 status="unavailable",
@@ -377,6 +382,25 @@ class CzscResearchService:
                 del self._inflight[input_snapshot_id]
         if not shared.done():
             shared.set_result(snapshot)
+
+    def _maybe_prune_store(self) -> None:
+        prune = getattr(self.store, "prune", None)
+        if not callable(prune):
+            return
+        now = datetime.now(tz=SHANGHAI)
+        prune_date = now.date()
+        with self._lock:
+            if self._last_prune_attempt_on == prune_date:
+                return
+            self._last_prune_attempt_on = prune_date
+        try:
+            prune(
+                now=now,
+                snapshot_days=self.snapshot_retention_days,
+                evidence_days=self.evidence_retention_days,
+            )
+        except Exception:
+            pass
 
 
 def _build_request(inputs: ClosedWorkspaceInputs) -> CzscRc8Request:

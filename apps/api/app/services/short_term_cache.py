@@ -110,6 +110,7 @@ class TtlCache(Generic[T]):
         while True:
             with self._lock:
                 now = monotonic()
+                self._evict_expired_locked(now)
                 cached = self._items.get(key)
                 if cached is not None:
                     expires_at, value = cached
@@ -144,7 +145,9 @@ class TtlCache(Generic[T]):
             else:
                 with self._lock:
                     if self._generation == fill_generation:
-                        self._items[key] = (monotonic() + self.ttl_seconds, value)
+                        now = monotonic()
+                        self._evict_expired_locked(now)
+                        self._items[key] = (now + self.ttl_seconds, value)
                         self._last_error = None
                     self._refresh_count += 1
                     self._last_refresh_finished_at = monotonic()
@@ -160,7 +163,9 @@ class TtlCache(Generic[T]):
             value = factory()
             with self._lock:
                 if self._generation == generation:
-                    self._items[key] = (monotonic() + self.ttl_seconds, value)
+                    now = monotonic()
+                    self._evict_expired_locked(now)
+                    self._items[key] = (now + self.ttl_seconds, value)
                     self._last_error = None
                 self._refresh_count += 1
                 self._last_refresh_finished_at = monotonic()
@@ -174,3 +179,13 @@ class TtlCache(Generic[T]):
             with self._lock:
                 if self._refreshing.get(key) == generation:
                     del self._refreshing[key]
+
+    def _evict_expired_locked(self, now: float) -> None:
+        protected_keys = self._refreshing.keys() | self._filling.keys()
+        expired_keys = [
+            key
+            for key, (expires_at, _value) in self._items.items()
+            if expires_at <= now and key not in protected_keys
+        ]
+        for key in expired_keys:
+            del self._items[key]

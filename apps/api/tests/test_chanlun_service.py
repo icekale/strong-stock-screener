@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from app.services.chanlun import service as chanlun_service_module
 from app.config import Settings
 from app.main import _chanlun_analysis_service, _kline_provider, app, update_runtime_settings
 from app.models import (
@@ -74,6 +75,32 @@ def trading_day_minutes(value: str) -> list[TickFlowIntradayBar]:
         for index in range(120)
     )
     return [minute_bar(timestamp.isoformat()) for timestamp in timestamps]
+
+
+def service_with_current_closed_bars(
+    tmp_path: Path, current_day: datetime
+) -> ChanlunAnalysisService:
+    daily = [
+        daily_bar(
+            (current_day.date() - timedelta(days=24 - index)).isoformat(),
+            close=10 + index / 100,
+        )
+        for index in range(25)
+    ]
+    minutes = [
+        bar
+        for offset in range(5, -1, -1)
+        for bar in trading_day_minutes((current_day.date() - timedelta(days=offset)).isoformat())
+    ]
+    return ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider(minutes),
+        history_provider=FakeHistoryProvider(),
+        adapter=FakeAdapter(),
+        daily_provider=FakeDailyProvider(daily),
+        cache=build_test_cache(),
+        cache_seconds=60,
+    )
 
 
 def store_at(tmp_path: Path) -> ChanlunMinuteBarStore:
@@ -598,6 +625,49 @@ def test_previous_open_session_bar_is_fresh_on_bundled_exchange_holiday(
     )
 
     assert freshness == "fresh"
+
+
+@pytest.mark.parametrize(
+    ("decision_at", "calendar_load_fails"),
+    [
+        (shanghai("2027-01-04 15:00"), False),
+        (shanghai("2026-07-14 15:00"), True),
+    ],
+    ids=["after-coverage", "calendar-load-failure"],
+)
+def test_calendar_coverage_unavailable_fails_closed_with_source_status(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    decision_at: datetime,
+    calendar_load_fails: bool,
+) -> None:
+    if calendar_load_fails:
+        monkeypatch.setattr(
+            chanlun_service_module,
+            "_bundled_exchange_calendar",
+            lambda: None,
+        )
+    service = service_with_current_closed_bars(tmp_path, decision_at)
+
+    first = service.closed_workspace_inputs("600000.SH", lookback=20, now=decision_at)
+    second = service.closed_workspace_inputs("600000.SH", lookback=20, now=decision_at)
+
+    assert first is second
+    assert set(first.availability.values()) == {"ready"}
+    assert set(first.freshness.values()) == {"stale"}
+    calendar_statuses = [
+        status
+        for period in ("1d", "60m", "30m", "5m")
+        for status in first.source_status[period]
+        if status.source == "CZSC内置交易日历"
+    ]
+    assert len(calendar_statuses) == 4
+    assert {status.status for status in calendar_statuses} == {"failed"}
+    assert all("覆盖不可用" in status.detail for status in calendar_statuses)
+    assert all(
+        "/" not in status.detail and "\\" not in status.detail and "Traceback" not in status.detail
+        for status in calendar_statuses
+    )
 
 
 def test_service_uses_closed_store_bars_before_observing_tail(tmp_path: Path) -> None:

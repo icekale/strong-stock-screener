@@ -4,6 +4,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from threading import Lock
+from time import sleep
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -20,6 +21,7 @@ from app.models import (
     StrongStockSourceStatus,
 )
 from app.providers.tickflow import TickFlowIntradayBar
+from app.services.chanlun import research_service as research_service_module
 from app.services.chanlun.research_protocol import (
     APPROVED_PERIODS,
     CZSC_RC8_ENGINE_VERSION,
@@ -202,11 +204,14 @@ class FakeResearchStore:
         *,
         fail_load: bool = False,
         fail_save: bool = False,
+        fail_prune: bool = False,
     ) -> None:
         self.snapshots = {snapshot.input_snapshot_id: snapshot} if snapshot is not None else {}
         self.saved: list[CzscResearchSnapshot] = []
         self.fail_load = fail_load
         self.fail_save = fail_save
+        self.fail_prune = fail_prune
+        self.prune_calls: list[tuple[datetime, int, int]] = []
         self._lock = Lock()
 
     def load_snapshot(self, input_snapshot_id: str) -> CzscResearchSnapshot | None:
@@ -221,6 +226,11 @@ class FakeResearchStore:
         with self._lock:
             self.snapshots[snapshot.input_snapshot_id] = snapshot
             self.saved.append(snapshot)
+
+    def prune(self, *, now: datetime, snapshot_days: int, evidence_days: int) -> None:
+        self.prune_calls.append((now, snapshot_days, evidence_days))
+        if self.fail_prune:
+            raise RuntimeError("/private/store/prune failed\nTraceback hidden")
 
 
 class CompletingBetweenChecksStore(FakeResearchStore):
@@ -579,6 +589,84 @@ def test_mapping_scoring_and_save_ready_path_handles_already_completed_future() 
     assert len(client.requests) == 1
 
 
+def test_service_prunes_on_construction_and_once_on_next_day_after_saves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    day_one = datetime(2026, 7, 10, 9, 0, tzinfo=SHANGHAI)
+    day_two = datetime(2026, 7, 11, 9, 0, tzinfo=SHANGHAI)
+
+    class SequencedDatetime(datetime):
+        values = iter((day_one, day_two, day_two))
+
+        @classmethod
+        def now(cls, tz: ZoneInfo | None = None) -> datetime:
+            return next(cls.values)
+
+    monkeypatch.setattr(research_service_module, "datetime", SequencedDatetime)
+    first_inputs = _closed_inputs()
+    second_inputs = _closed_inputs()
+    second_inputs.periods["5m"][-1].close += 0.01
+    provider = StaticInputProvider(first_inputs)
+    store = FakeResearchStore()
+    service = CzscResearchService(
+        store=store,
+        client=ImmediateReadyRc8Client(),
+        input_provider=provider,
+        settings=Settings(
+            chanlun_rc8_enabled=True,
+            chanlun_rc8_interactive_wait_seconds=0.1,
+            chanlun_research_retention_days=45,
+            chanlun_research_evidence_retention_days=365,
+        ),
+    )
+
+    first = service.get("600000.SH", lookback=220)
+    provider.inputs = second_inputs
+    second = service.get("600000.SH", lookback=220)
+
+    assert first.status == second.status == "ready"
+    assert len(store.saved) == 2
+    assert store.prune_calls == [
+        (day_one, 45, 365),
+        (day_two, 45, 365),
+    ]
+
+
+def test_prune_failure_does_not_block_ready_results_or_repeat_same_day(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    current = datetime(2026, 7, 10, 9, 0, tzinfo=SHANGHAI)
+
+    class FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz: ZoneInfo | None = None) -> datetime:
+            return current
+
+    monkeypatch.setattr(research_service_module, "datetime", FixedDatetime)
+    first_inputs = _closed_inputs()
+    second_inputs = _closed_inputs()
+    second_inputs.periods["5m"][-1].close += 0.01
+    provider = StaticInputProvider(first_inputs)
+    store = FakeResearchStore(fail_prune=True)
+    service = CzscResearchService(
+        store=store,
+        client=ImmediateReadyRc8Client(),
+        input_provider=provider,
+        settings=Settings(
+            chanlun_rc8_enabled=True,
+            chanlun_rc8_interactive_wait_seconds=0.1,
+        ),
+    )
+
+    first = service.get("600000.SH", lookback=220)
+    provider.inputs = second_inputs
+    second = service.get("600000.SH", lookback=220)
+
+    assert first.status == second.status == "ready"
+    assert len(store.saved) == 2
+    assert len(store.prune_calls) == 1
+
+
 def test_store_failure_returns_unavailable_and_cleans_inflight_for_retry() -> None:
     inputs = _closed_inputs()
     store = FakeResearchStore(fail_save=True)
@@ -733,6 +821,38 @@ def test_closed_workspace_cache_invalidates_at_expected_close_boundary(
     assert first is not second
     assert build_calls == [before, after]
     assert service.closed_input_cache.snapshot()["size"] == 2
+
+
+def test_closed_workspace_cache_evicts_expired_fingerprint_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = object.__new__(ChanlunAnalysisService)
+    service.closed_input_cache = TtlCache(ttl_seconds=0.01, name="closed-input-test")
+    build_calls: list[datetime] = []
+    before = datetime(2026, 7, 10, 10, 4, 59, tzinfo=SHANGHAI)
+    after = datetime(2026, 7, 10, 10, 5, 0, tzinfo=SHANGHAI)
+
+    def build(symbol: str, *, lookback: int, now: datetime) -> ClosedWorkspaceInputs:
+        build_calls.append(now)
+        return _closed_inputs()
+
+    service._build_closed_workspace_inputs = build  # type: ignore[method-assign]
+
+    class SequencedDatetime(datetime):
+        values = iter((before, after))
+
+        @classmethod
+        def now(cls, tz: ZoneInfo | None = None) -> datetime:
+            return next(cls.values)
+
+    monkeypatch.setattr(chanlun_service_module, "datetime", SequencedDatetime)
+
+    service.closed_workspace_inputs("600000.SH", lookback=220)
+    sleep(0.02)
+    service.closed_workspace_inputs("600000.SH", lookback=220)
+
+    assert build_calls == [before, after]
+    assert service.closed_input_cache.snapshot()["size"] == 1
 
 
 def test_backfill_clears_the_closed_workspace_cache() -> None:

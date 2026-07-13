@@ -40,6 +40,8 @@ _INTRADAY_PERIOD_MINUTES = {"5m": 5, "30m": 30, "60m": 60}
 _DEFAULT_BACKTEST_HORIZONS = [1, 3, 5, 10]
 _BUY_SIGNAL_TYPES = {"one_buy", "two_buy", "three_buy"}
 _WORKSPACE_PERIODS: tuple[ChanlunPeriod, ...] = ("1d", "60m", "30m", "5m")
+_CALENDAR_SOURCE = "CZSC内置交易日历"
+_CALENDAR_UNAVAILABLE_DETAIL = "CZSC内置交易日历覆盖不可用，研究新鲜度按过期处理"
 
 ClosedInputFreshness = Literal["fresh", "stale", "insufficient"]
 
@@ -265,6 +267,8 @@ class ChanlunAnalysisService:
         adjustment_mode = (
             next(iter(adjustment_modes)) if len(adjustment_modes) == 1 else "adjustment_mismatch"
         )
+        calendar_status = _calendar_source_status(now.date())
+        calendar_statuses = (calendar_status,) if calendar_status is not None else ()
         return ClosedWorkspaceInputs(
             symbol=symbol,
             periods={period: period_data[period].bars for period in _WORKSPACE_PERIODS},
@@ -279,7 +283,8 @@ class ChanlunAnalysisService:
             },
             adjustment_mode=adjustment_mode,
             source_status={
-                period: period_data[period].source_status for period in _WORKSPACE_PERIODS
+                period: (*period_data[period].source_status, *calendar_statuses)
+                for period in _WORKSPACE_PERIODS
             },
             adjustment_by_period=adjustment_by_period,
             unavailable_detail_by_period={
@@ -865,6 +870,8 @@ def _closed_input_freshness(
 ) -> ClosedInputFreshness:
     if not bars:
         return "insufficient"
+    if not _calendar_coverage_available(now.date()):
+        return "stale"
     try:
         last_closed = datetime.fromisoformat(
             _closed_bar_boundary(period, bars[-1].date).replace("Z", "+00:00")
@@ -954,6 +961,24 @@ def _is_open_session(value: date) -> bool:
         if first_date <= value <= last_date:
             return value in open_sessions
     return value.weekday() < 5
+
+
+def _calendar_coverage_available(value: date) -> bool:
+    calendar_data = _bundled_exchange_calendar()
+    if calendar_data is None:
+        return False
+    first_date, last_date, _open_sessions = calendar_data
+    return first_date <= value <= last_date
+
+
+def _calendar_source_status(value: date) -> StrongStockSourceStatus | None:
+    if _calendar_coverage_available(value):
+        return None
+    return StrongStockSourceStatus(
+        source=_CALENDAR_SOURCE,
+        status="failed",
+        detail=_CALENDAR_UNAVAILABLE_DETAIL,
+    )
 
 
 def _previous_open_session(value: date) -> date:

@@ -97,8 +97,8 @@
 - 使用独立 Python 解释器，仅安装固定的 `czsc==1.0.0rc8` 及其运行依赖。
 - 通过版本化 JSON Lines 协议从标准输入读取请求、向标准输出写响应。
 - 接收服务端生成的标准 bar 和固定目录 ID，不接受任意 Python 模块、函数名或代码。
-- 使用 `CZSC.update`、`CzscSignals.update_signals` 或对应公开增量接口逐根处理闭合 K 线；大小级别中枢共振通过固定配置的 `CzscTrader` 计算。
-- 输出项目定义的研究结构、信号证据和诊断数据，不序列化上游内部对象。
+- 使用 `CZSC.update`、`CzscSignals.update_signals` 或对应公开增量接口逐根处理闭合 K 线。`1.0.0rc8` 没有公开的 Python 方法可在独立初始化多周期数组后直接 prime trader 信号，因此大小级别中枢共振由窄适配器在 rc8 `CZSC`/`ZS` 对象上复现上游注册函数的同一算法，并用同步收盘 fixture 做逐值对照。
+- 输出项目定义的研究结构、信号证据和诊断数据，不序列化上游内部对象。原始 key/value 同时携带 rc8 `Signal` 提取的结构化 `v1`、`v2`、`v3` 和 `score`，主 API 业务规则不解析审计字符串。
 - 日志只写标准错误，避免污染协议流。
 
 ### `CzscRc8WorkerClient`

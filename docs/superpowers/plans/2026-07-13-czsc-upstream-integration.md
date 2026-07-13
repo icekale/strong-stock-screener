@@ -116,7 +116,7 @@ CZSC_CATALOG_VERSION = "czsc-v2-catalog-1"
 CZSC_SCORE_RULE_VERSION = "czsc-score-v2-rule-1"
 ```
 
-The worker returns raw, versioned signal states/events. Only the main API creates `CzscSignalEvidence`, applies Chinese explanations, computes scores, or persists data.
+The worker returns versioned signal states/events with both audit-only raw key/value strings and structured `v1`/`v2`/`v3`/`score` fields. Only the main API creates `CzscSignalEvidence`, applies Chinese explanations, computes scores, or persists data; business rules never parse the audit strings.
 
 ## Task 1: Prove and Package the Isolated rc8 Runtime
 
@@ -316,7 +316,7 @@ chanlun_research_retention_days: int = Field(default=180, ge=30, le=730)
 chanlun_research_evidence_retention_days: int = Field(default=730, ge=180, le=1825)
 ```
 
-Add Pydantic models matching the shared contracts. `CzscSignalEvidence` must include all fields from the test plus optional `higher_period`, `lower_period`, and immutable `params`. `CzscResearchSnapshot` must contain `status`, `symbol`, `current_states`, `events`, `last_closed_by_period`, `input_snapshot_id`, `score`, `eligible`, versions, and source status. Define `CzscV2CandidateScore` with symbol, status, nullable score/rank, eligible, baseline rank, evidence summary, and input snapshot ID. Define `CzscV2BatchResult` with batch/job IDs, status, trade date, pool size, completed count, and an item list. Add nullable v2 fields to `StrongStockScreeningItem`, and `czsc_v2_job_id`/`czsc_v2_status` to `StrongStockScreeningResult`. Do not add a new screening status.
+Add Pydantic models matching the shared contracts. `CzscSignalEvidence` must include all fields from the test plus optional `higher_period`, `lower_period`, and immutable `params`. Define a compact `CzscSignalEvidenceSummary` containing evidence ID, catalog ID, family, role, direction, period(s), occurrence time, and reason. `CzscResearchSnapshot` must contain `status`, `symbol`, `current_states`, `events`, `last_closed_by_period`, `input_snapshot_id`, `score`, `eligible`, versions, and source status. Define `CzscV2CandidateScore` with symbol, status, nullable score/rank, eligible, baseline rank, `list[CzscSignalEvidenceSummary]`, and input snapshot ID. Define `CzscV2BatchResult` with batch/job IDs, status, trade date, pool size, completed count, and an item list. Add nullable v2 fields to `StrongStockScreeningItem`, and `czsc_v2_job_id`/`czsc_v2_status` to `StrongStockScreeningResult`. Do not add a new screening status.
 
 - [ ] **Step 5: Add and validate the JSON catalog**
 
@@ -364,6 +364,7 @@ def test_map_raw_state_uses_catalog_identity_not_string_business_rules() -> None
     evidence = map_raw_state(
         catalog_id="buy3.structure",
         period="5m",
+        value_fields={"v1": "三买", "v2": "6笔", "v3": "任意", "score": 0},
         raw_key="5分钟_D1_三买辅助V230228",
         raw_value="三买_6笔_任意_0",
         occurred_at="2026-07-10T10:00:00+08:00",
@@ -383,6 +384,7 @@ def test_map_raw_state_discards_inactive_other_value() -> None:
     assert map_raw_state(
         catalog_id="buy3.structure",
         period="5m",
+        value_fields={"v1": "其他", "v2": "其他", "v3": "任意", "score": 0},
         raw_key="5分钟_D1_三买辅助V230228",
         raw_value="其他_其他_任意_0",
         occurred_at="2026-07-10T10:00:00+08:00",
@@ -392,7 +394,7 @@ def test_map_raw_state_discards_inactive_other_value() -> None:
     ) is None
 ```
 
-In the second test, pass the same explicit keyword arguments as the first test; only change `raw_value`.
+In the second test, pass the same explicit keyword arguments as the first test; change both the audit `raw_value` and structured `value_fields`. Add a third assertion that changing only `raw_value` while keeping `value_fields.v1 == "三买"` does not change the mapped family/direction/role. This proves business mapping does not parse audit strings.
 
 - [ ] **Step 2: Write failing score tests**
 
@@ -454,7 +456,7 @@ VALUE_MAP = {
 }
 ```
 
-For trend entries, map `v1` and `v2` separately into structured attributes retained in `params` or evidence details. Do not use suffix checks outside this module.
+For trend entries, map structured `v1` and `v2` separately into attributes retained in `params` or evidence details. Do not split or inspect `raw_value`, and do not use suffix checks outside this module.
 
 Implement scoring as five capped buckets plus per-period maximum risk penalties:
 
@@ -504,6 +506,8 @@ def test_protocol_rejects_unclosed_or_unknown_period_payload() -> None:
         CzscRc8Request.model_validate({**_request_payload(), "periods": {"15m": []}})
 ```
 
+Add a deterministic cutoff case where a period contains a bar later than its declared `last_closed_by_period`; validation must reject it before serialization.
+
 - [ ] **Step 2: Write worker tests in the isolated project**
 
 `test_worker.py` must load `apps/api/app/services/chanlun/rc8_worker.py` with `importlib.util.spec_from_file_location`, so the isolated environment does not import the main API package. Invoke `handle_request` with deterministic zig-zag bars and assert:
@@ -541,9 +545,9 @@ Expected: FAIL because request schemas and worker do not exist.
 
 - [ ] **Step 4: Implement deterministic request schemas**
 
-`CzscRc8Request` must contain only protocol version, request ID, symbol, catalog version, adjustment mode, input snapshot ID, and `dict[ChanlunPeriod, list[KlineBar]]`. Validate strict time order and closed-bar ownership before serialization. Hash canonical JSON with sorted period keys and compact separators.
+`CzscRc8Request` must contain protocol version, request ID, symbol, catalog version, adjustment mode, decision time, `last_closed_by_period`, input snapshot ID, and `dict[ChanlunPeriod, list[KlineBar]]`. Validate strict time order and require every last bar to correspond to its declared boundary under period-aware close normalization and not exceed the decision time before serialization. In particular, a daily source date such as `2026-07-10` is available at that session's 15:00 close, not midnight. Hash canonical JSON with sorted period keys and compact separators.
 
-`CzscRc8Response` must contain protocol/catalog/engine versions, request and snapshot IDs, status, current states, transition events, period diagnostics, and a sanitized error.
+`CzscRc8Response` must contain protocol/catalog/engine versions, request and snapshot IDs, status, current states, transition events, period diagnostics, and a sanitized error. Every raw state/event contains `raw_key`, `raw_value`, and structured `value_fields = {v1, v2, v3, score}`; schema validation rejects missing fields or non-integer scores.
 
 - [ ] **Step 5: Implement the stdlib plus rc8 worker**
 
@@ -563,9 +567,9 @@ def main() -> None:
         sys.stdout.flush()
 ```
 
-For each single-period catalog entry, convert bars to rc8 `RawBar`, call `generate_czsc_signals(raw_bars, signals_config=configs, df=False, sdt=start_at)` with only that period's fixed configs, locate exact keys expanded from the catalog, and reduce consecutive rows into current states plus inactive-to-active transition events.
+For each single-period catalog entry, convert bars to rc8 `RawBar`, call `generate_czsc_signals(raw_bars, signals_config=configs, df=False, sdt=start_at, init_n=0)` with only that period's fixed configs, locate exact keys expanded from the catalog, and reduce consecutive rows into current states plus inactive-to-active transition events. Convert each returned audit value through rc8 `Signal(key=raw_key, value=raw_value)` and emit its `v1`, `v2`, `v3`, and integer `score`; the main API must not parse the string.
 
-For `zone.resonance`, do not derive long-period history from the request's limited 5m lookback. Create a `BarGenerator(base_freq="5分钟", freqs=["30分钟", "60分钟", "日线"], max_count=2000)`, initialize each frequency from the request's explicit closed bars through `init_freq_bars`, and construct `CzscSignals` with the two fixed trader-level configs. Evaluate synchronized prefixes only from bars visible at each decision time; never initialize a higher period with a bar whose close is later than that prefix. If either side of a configured period pair lacks enough direct history, return an inactive state rather than fabricate confluence.
+For `zone.resonance`, do not derive long-period history from the request's limited 5m lookback and do not let `BarGenerator` expose a provisional higher-period bar. rc8 has no public Python method that primes a trader-level signal against independently initialized frequency arrays, so implement a narrow compatibility adapter using only rc8 `CZSC`, `ZS`, and `Direction`: build each side from the explicit closed bars visible at each lower-period close and reproduce the registered `cxt_zhong_shu_gong_zhen_V221221` algorithm exactly. Require at least five strokes on both sides, construct `ZS` from the latest three strokes, test `zg > zd` directly (do not use `ZS.is_valid()`, whose semantics differ), then compare `small.dd`/`small.gg` to `big.zz` and the lower-period last-stroke direction. Closed availability comes from the request's declared period boundaries, not a daily bar's midnight timestamp. Keep this adapter in `rc8_worker.py`, identify its output as the same fixed catalog signal, and add a parity fixture comparing it with rc8's registered trader signal at synchronized market-close checkpoints. If either side lacks enough strokes or an overlapping zone, return `其他` rather than fabricate confluence.
 
 Build diagnostics from `CZSC(raw_bars)` for each explicit period:
 

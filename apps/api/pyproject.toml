@@ -5,9 +5,11 @@ description = "Standalone A-share strong-stock screener backend"
 requires-python = ">=3.12"
 dependencies = [
   "akshare>=1.16.0",
+  "czsc==0.10.12",
   "fastapi>=0.115.0",
-  "httpx>=0.27.0",
+  "httpx>=0.25.0,<0.26.0",
   "lightgbm>=4.6.0",
+  "mootdx==0.11.7",
   "pyaes>=1.6.1",
   "pydantic>=2.10.0",
   "pydantic-settings>=2.7.0",
@@ -23,6 +25,7 @@ thsdk = [
 
 [dependency-groups]
 dev = [
+  "httpx2>=2.0.0",
   "pytest>=8.3.0",
   "ruff>=0.9.0",
 ]

@@ -13,10 +13,14 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libgomp1 libstdc++6 \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml ./
+COPY pyproject.toml uv.lock ./
+RUN python -m pip install --no-cache-dir setuptools wheel pydantic-core==2.46.4 uv==0.11.6
+RUN uv export --locked --no-dev --no-emit-project --format requirements-txt -o requirements.txt \
+    && python -m pip uninstall -y uv \
+    && python -m pip install --no-cache-dir --no-build-isolation -r requirements.txt
 COPY app ./app
-RUN python -m pip install --no-cache-dir setuptools wheel pydantic-core==2.46.4
-RUN python -m pip install --no-cache-dir --no-build-isolation .
+RUN python -m pip install --no-cache-dir --no-deps --no-build-isolation . \
+    && python -c "import czsc, mootdx; print(czsc.__version__, mootdx.__version__)"
 COPY artifacts ./artifacts
 
 EXPOSE 8010

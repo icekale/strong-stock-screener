@@ -1442,6 +1442,84 @@ export type KlineBar = {
   ma60: number | null;
 };
 
+export type ChanlunPeriod = "1d" | "60m" | "30m" | "5m";
+export type ChanlunStatus = "observing" | "provisional" | "confirmed" | "final";
+export type ChanlunDirection = "up" | "down" | "unknown";
+export type ChanlunAvailability = "ready" | "backfilling" | "insufficient_bars" | "stale" | "unavailable";
+export type ChanlunLayerKey = "fractals" | "strokes" | "segments" | "zones";
+
+export type ChanlunFractal = {
+  id: string;
+  occurred_at: string;
+  price: number;
+  mark: "top" | "bottom";
+  status: ChanlunStatus;
+};
+
+export type ChanlunStroke = {
+  id: string;
+  start_at: string;
+  start_price: number;
+  end_at: string;
+  end_price: number;
+  direction: ChanlunDirection;
+  status: ChanlunStatus;
+};
+
+export type ChanlunZone = {
+  id: string;
+  start_at: string;
+  end_at: string;
+  high: number;
+  low: number;
+  virtual: boolean;
+  status: ChanlunStatus;
+};
+
+export type ChanlunAnalysisResponse = {
+  symbol: string;
+  period: ChanlunPeriod;
+  availability: ChanlunAvailability;
+  bars: KlineBar[];
+  fractals: ChanlunFractal[];
+  strokes: ChanlunStroke[];
+  segments: ChanlunStroke[];
+  zones: ChanlunZone[];
+  source_status: StrongStockSourceStatus[];
+  calculated_at: string;
+  last_closed_bar_at: string | null;
+  adjustment_mode: string;
+  rule_version: string;
+};
+
+export type ChanlunPeriodSummary = {
+  period: ChanlunPeriod;
+  availability: ChanlunAvailability;
+  direction: ChanlunDirection;
+  latest_zone: ChanlunZone | null;
+  last_closed_bar_at: string | null;
+};
+
+export type ChanlunWorkspaceResponse = {
+  symbol: string;
+  periods: ChanlunPeriodSummary[];
+  analysis: ChanlunAnalysisResponse;
+};
+
+export type ChanlunBackfillRequest = {
+  history_days?: number;
+};
+
+export type ChanlunSymbolMatch = {
+  symbol: string;
+  name: string;
+};
+
+export type ChanlunSymbolSearchResponse = {
+  items: ChanlunSymbolMatch[];
+  source_status: StrongStockSourceStatus[];
+};
+
 export type StockKlineResponse = {
   symbol: string;
   source_status: StrongStockSourceStatus;

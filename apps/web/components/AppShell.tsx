@@ -4,6 +4,7 @@ import {
   AppstoreOutlined,
   BarChartOutlined,
   FolderOpenOutlined,
+  FundOutlined,
   LineChartOutlined,
   MenuFoldOutlined,
   MenuOutlined,
@@ -35,6 +36,7 @@ const navigationIcons: Record<NavigationItemKey, ReactNode> = {
   market: <LineChartOutlined />,
   watchlist: <FolderOpenOutlined />,
   sentiment: <ThunderboltOutlined />,
+  chanlun: <FundOutlined />,
   system: <SettingOutlined />,
 };
 

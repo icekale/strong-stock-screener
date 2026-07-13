@@ -11,6 +11,7 @@ import {
   Space,
   Spin,
   Statistic,
+  Switch,
   Tag,
   Typography,
 } from "antd";
@@ -18,7 +19,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { TickFlowKlineChart, type KlineChartDataSourceMode } from "../../../components/TickFlowKlineChart";
 import { PageFrame } from "../../../components/workbench/PageFrame";
-import { getLatestScreenRun, getStockKline, getStockQuote, getStockResearch } from "../../../lib/api";
+import { getChanlunAnalysis, getLatestScreenRun, getStockKline, getStockQuote, getStockResearch } from "../../../lib/api";
 import {
   buildKlineIndicatorState,
   KLINE_SUB_INDICATOR_OPTIONS,
@@ -38,6 +39,8 @@ import {
   type StockDetailFrom,
 } from "../../../lib/stockNavigation";
 import type {
+  ChanlunAnalysisResponse,
+  ChanlunLayerKey,
   GsgfChartAnnotation,
   KlineBar,
   StockKlineResponse,
@@ -45,6 +48,7 @@ import type {
   StockResearchResponse,
   StrongStockScreeningItem,
 } from "../../../lib/types";
+import { buildChanlunWorkspaceHref, isChanlunUnavailable, shouldRenderChanlunOverlay } from "./stockKlineChanlun";
 
 type ChartTab = "day" | "week" | "info" | "strategy" | "concept";
 type MovingAverageField = "ma5" | "ma10" | "ma20" | "ma60";
@@ -67,6 +71,12 @@ const CHART_TABS: Array<{ key: ChartTab; label: string }> = [
 
 const KLINE_CHART_HEIGHT = 680;
 const KLINE_INDICATOR_STORAGE_KEY = "strong-stock-screener:kline-indicator-layout";
+const STOCK_DETAIL_CHANLUN_LAYERS: Record<ChanlunLayerKey, boolean> = {
+  fractals: false,
+  strokes: false,
+  segments: true,
+  zones: true,
+};
 
 const MOVING_AVERAGES: Array<{ color: string; field: MovingAverageField; label: string; period: number }> = [
   { color: "#1683ff", field: "ma5", label: "MA5", period: 5 },
@@ -96,6 +106,10 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
   const [activeChartTab, setActiveChartTab] = useState<ChartTab>("day");
   const [candidateListCollapsed, setCandidateListCollapsed] = useState(false);
   const [showGsgfAnnotations, setShowGsgfAnnotations] = useState(true);
+  const [chanlunAnalysis, setChanlunAnalysis] = useState<ChanlunAnalysisResponse | null>(null);
+  const [chanlunLoading, setChanlunLoading] = useState(false);
+  const [chanlunUnavailable, setChanlunUnavailable] = useState(false);
+  const [showChanlunOverlay, setShowChanlunOverlay] = useState(false);
   const chartDataSource: KlineChartDataSourceMode = "tickflow";
   const [visibleMovingAverages, setVisibleMovingAverages] = useState<MovingAverageField[]>([
     "ma5",
@@ -113,6 +127,8 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setChanlunUnavailable(false);
+    setShowChanlunOverlay(false);
     getStockKline(symbol, 220)
       .then((response) => {
         if (!cancelled) {
@@ -133,6 +149,35 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
       cancelled = true;
     };
   }, [symbol]);
+
+  useEffect(() => {
+    if (activeChartTab !== "day" || (chanlunAnalysis?.symbol === symbol && chanlunAnalysis.period === "1d")) {
+      return;
+    }
+    let cancelled = false;
+    setChanlunLoading(true);
+    setChanlunUnavailable(false);
+    getChanlunAnalysis(symbol, { lookback: 220, period: "1d" })
+      .then((response) => {
+        if (!cancelled) {
+          setChanlunAnalysis(response);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setChanlunAnalysis(null);
+          setChanlunUnavailable(true);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setChanlunLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeChartTab, chanlunAnalysis?.period, chanlunAnalysis?.symbol, symbol]);
 
   useEffect(() => {
     let cancelled = false;
@@ -236,6 +281,9 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
   const gsgfAnnotations = data?.gsgf_annotations ?? [];
   const annotationCount = gsgfAnnotations.length;
   const canShowGsgfAnnotations = activeChartTab === "day" && chartDataSource === "tickflow" && annotationCount > 0;
+  const dailyChanlunAnalysis = chanlunAnalysis?.symbol === symbol && chanlunAnalysis.period === "1d" ? chanlunAnalysis : null;
+  const canShowChanlunOverlay = activeChartTab === "day" && shouldRenderChanlunOverlay(dailyChanlunAnalysis);
+  const chanlunIsUnavailable = chanlunUnavailable || isChanlunUnavailable(dailyChanlunAnalysis);
 
   function toggleMovingAverage(field: MovingAverageField) {
     setVisibleMovingAverages((current) => {
@@ -297,15 +345,21 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
                   dataSource={chartDataSourceLabel}
                   annotationCount={annotationCount}
                   canShowGsgfAnnotations={canShowGsgfAnnotations}
+                  canShowChanlunOverlay={canShowChanlunOverlay}
+                  chanlunLoading={chanlunLoading}
+                  chanlunUnavailable={chanlunIsUnavailable}
                   indicatorState={indicatorState}
                   isChartTab={isChartTab}
+                  isDailyChart={activeChartTab === "day"}
                   loading={loading}
                   movingAverageSummaryText={movingAverageSummary(visibleMovingAverages)}
                   onAnnotationToggle={() => setShowGsgfAnnotations((value) => !value)}
+                  onChanlunToggle={setShowChanlunOverlay}
                   onMovingAverageToggle={toggleMovingAverage}
                   onSubIndicatorChange={changeSubIndicator}
                   onSubPaneCountChange={changeSubPaneCount}
                   showGsgfAnnotations={showGsgfAnnotations}
+                  showChanlunOverlay={showChanlunOverlay}
                   symbol={symbol}
                   chartBarCount={chartBars.length}
                   visibleMovingAverages={visibleMovingAverages}
@@ -327,6 +381,8 @@ export function StockKlineWorkspace({ symbol }: { symbol: string }) {
                             : []
                         }
                         bars={chartBars}
+                        chanlun={canShowChanlunOverlay && showChanlunOverlay ? dailyChanlunAnalysis : null}
+                        chanlunLayers={STOCK_DETAIL_CHANLUN_LAYERS}
                         dataSourceMode={chartDataSource}
                         height={KLINE_CHART_HEIGHT}
                         movingAverages={visibleMovingAverages}
@@ -513,39 +569,51 @@ function GsgfEvidenceSummary({
 function ChartControlBar({
   activeTabLabel,
   annotationCount,
+  canShowChanlunOverlay,
   canShowGsgfAnnotations,
   chartBarCount,
   chartDataSource,
+  chanlunLoading,
+  chanlunUnavailable,
   currentStock,
   dataSource,
   indicatorState,
   isChartTab,
+  isDailyChart,
   loading,
   movingAverageSummaryText,
   onAnnotationToggle,
+  onChanlunToggle,
   onMovingAverageToggle,
   onSubIndicatorChange,
   onSubPaneCountChange,
   showGsgfAnnotations,
+  showChanlunOverlay,
   symbol,
   visibleMovingAverages,
 }: {
   activeTabLabel: string;
   annotationCount: number;
+  canShowChanlunOverlay: boolean;
   canShowGsgfAnnotations: boolean;
   chartBarCount: number;
   chartDataSource: KlineChartDataSourceMode;
+  chanlunLoading: boolean;
+  chanlunUnavailable: boolean;
   currentStock: StockListItem | null;
   dataSource: string;
   indicatorState: KlineIndicatorState;
   isChartTab: boolean;
+  isDailyChart: boolean;
   loading: boolean;
   movingAverageSummaryText: string;
   onAnnotationToggle: () => void;
+  onChanlunToggle: (checked: boolean) => void;
   onMovingAverageToggle: (field: MovingAverageField) => void;
   onSubIndicatorChange: (index: number, indicator: KlineSubIndicator) => void;
   onSubPaneCountChange: (paneCount: KlineSubPaneCount) => void;
   showGsgfAnnotations: boolean;
+  showChanlunOverlay: boolean;
   symbol: string;
   visibleMovingAverages: MovingAverageField[];
 }) {
@@ -582,6 +650,16 @@ function ChartControlBar({
               onToggle={onAnnotationToggle}
             />
           )}
+          {isDailyChart ? (
+            <ChanlunControl
+              available={canShowChanlunOverlay}
+              loading={chanlunLoading}
+              onToggle={onChanlunToggle}
+              symbol={symbol}
+              unavailable={chanlunUnavailable}
+              visible={showChanlunOverlay}
+            />
+          ) : null}
           <SubIndicatorControl
             indicatorState={indicatorState}
             onPaneCountChange={onSubPaneCountChange}
@@ -589,6 +667,43 @@ function ChartControlBar({
           />
         </div>
       )}
+    </div>
+  );
+}
+
+function ChanlunControl({
+  available,
+  loading,
+  onToggle,
+  symbol,
+  unavailable,
+  visible,
+}: {
+  available: boolean;
+  loading: boolean;
+  onToggle: (checked: boolean) => void;
+  symbol: string;
+  unavailable: boolean;
+  visible: boolean;
+}) {
+  const status = loading ? "读取中" : unavailable ? "暂不可用" : available ? "日线结构" : "结构不足";
+
+  return (
+    <div className="flex items-center gap-1.5">
+      <Typography.Text className="whitespace-nowrap text-xs font-black text-slate-500">缠论</Typography.Text>
+      <Switch
+        aria-label="显示缠论日线结构"
+        checked={visible}
+        checkedChildren="开"
+        disabled={!available}
+        onChange={onToggle}
+        size="small"
+        unCheckedChildren="关"
+      />
+      <Typography.Text className="whitespace-nowrap text-xs font-semibold text-slate-400">{status}</Typography.Text>
+      <Button href={buildChanlunWorkspaceHref(symbol)} size="small" type="link">
+        工作台
+      </Button>
     </div>
   );
 }

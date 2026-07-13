@@ -81,6 +81,11 @@ HeatmapMarketKey = Literal["all", "sse", "szse", "hs300", "zza500", "cyb", "kcb"
 HeatmapSizeMode = Literal["market_cap", "turnover"]
 HeatmapTrendFilter = Literal["all", "rise", "fall"]
 HeatmapExchange = Literal["SH", "SZ", "BJ"]
+ChanlunPeriod = Literal["1d", "60m", "30m", "5m"]
+ChanlunStatus = Literal["observing", "provisional", "confirmed", "final"]
+ChanlunDirection = Literal["up", "down", "unknown"]
+ChanlunAvailability = Literal["ready", "backfilling", "insufficient_bars", "stale", "unavailable"]
+ChanlunLayerKey = Literal["fractals", "strokes", "segments", "zones"]
 
 
 class GsgfScoreBreakdown(BaseModel):
@@ -219,6 +224,75 @@ class StrongStockSourceStatus(BaseModel):
     source: str
     status: SourceStatusValue
     detail: str
+
+
+class ChanlunFractal(BaseModel):
+    id: str
+    occurred_at: str
+    price: float
+    mark: Literal["top", "bottom"]
+    status: ChanlunStatus
+
+
+class ChanlunStroke(BaseModel):
+    id: str
+    start_at: str
+    start_price: float
+    end_at: str
+    end_price: float
+    direction: ChanlunDirection
+    status: ChanlunStatus
+
+
+class ChanlunZone(BaseModel):
+    id: str
+    start_at: str
+    end_at: str
+    high: float
+    low: float
+    virtual: bool = False
+    status: ChanlunStatus
+
+
+class ChanlunAnalysisResponse(BaseModel):
+    symbol: str
+    period: ChanlunPeriod
+    availability: ChanlunAvailability
+    bars: list[KlineBar] = Field(default_factory=list)
+    fractals: list[ChanlunFractal] = Field(default_factory=list)
+    strokes: list[ChanlunStroke] = Field(default_factory=list)
+    segments: list[ChanlunStroke] = Field(default_factory=list)
+    zones: list[ChanlunZone] = Field(default_factory=list)
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    calculated_at: str = Field(
+        default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
+    )
+    last_closed_bar_at: str | None = None
+    adjustment_mode: str = "raw_unadjusted"
+    rule_version: str = "cl-v1"
+
+
+class ChanlunPeriodSummary(BaseModel):
+    period: ChanlunPeriod
+    availability: ChanlunAvailability
+    direction: ChanlunDirection = "unknown"
+    latest_zone: ChanlunZone | None = None
+    last_closed_bar_at: str | None = None
+
+
+class ChanlunWorkspaceResponse(BaseModel):
+    symbol: str
+    periods: list[ChanlunPeriodSummary] = Field(default_factory=list)
+    analysis: ChanlunAnalysisResponse
+
+
+class ChanlunBackfillRequest(BaseModel):
+    history_days: int = Field(default=60, ge=5, le=240)
+
+
+class ChanlunSymbolMatch(BaseModel):
+    symbol: str
+    name: str
 
 
 class HeatmapStockNode(BaseModel):

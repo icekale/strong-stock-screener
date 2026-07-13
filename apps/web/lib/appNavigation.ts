@@ -7,6 +7,7 @@ export type NavigationItemKey =
   | "market"
   | "watchlist"
   | "sentiment"
+  | "chanlun"
   | "system";
 
 export type NavigationItem = {
@@ -43,6 +44,7 @@ export const navigationGroups = [
     items: [
       { key: "watchlist", href: "/watchlist", label: "自选与风险" },
       { key: "sentiment", href: "/sentiment", label: "情绪与复盘" },
+      { key: "chanlun", href: "/chanlun", label: "缠论工作台" },
     ],
   },
   {

@@ -23,6 +23,10 @@ from app.main import (
     startup_sector_workbench_sampler,
 )
 from app.models import (
+    ChanlunAnalysisResponse,
+    ChanlunPeriodSummary,
+    ChanlunSymbolMatch,
+    ChanlunWorkspaceResponse,
     KlineBar,
     MarketAdvanceDeclineSummary,
     MarketIndexSnapshot,
@@ -349,6 +353,78 @@ class FakeQuoteProvider:
         from app.models import StrongStockSourceStatus
 
         return StrongStockSourceStatus(source="TickFlow", status="missing_key", detail="TICKFLOW_API_KEY 未配置")
+
+
+class FakeChanlunService:
+    def __init__(self) -> None:
+        self.analysis_calls: list[tuple[str, str, int, bool]] = []
+
+    def analysis(
+        self,
+        symbol: str,
+        *,
+        period: str,
+        lookback: int,
+        include_observing: bool,
+    ) -> ChanlunAnalysisResponse:
+        self.analysis_calls.append((symbol, period, lookback, include_observing))
+        return ChanlunAnalysisResponse(
+            symbol=symbol,
+            period=period,  # type: ignore[arg-type]
+            availability="ready",
+            source_status=[
+                StrongStockSourceStatus(source="fake Chanlun", status="success", detail="fake analysis")
+            ],
+        )
+
+    def workspace(self, symbol: str, *, lookback: int) -> ChanlunWorkspaceResponse:
+        analysis = self.analysis(symbol, period="1d", lookback=lookback, include_observing=True)
+        return ChanlunWorkspaceResponse(
+            symbol=symbol,
+            periods=[
+                ChanlunPeriodSummary(
+                    period="1d",
+                    availability="ready",
+                    direction="up",
+                )
+            ],
+            analysis=analysis,
+        )
+
+    def backfill(self, symbol: str, *, progress, should_cancel) -> dict[str, object]:
+        if should_cancel():
+            raise RuntimeError("backfill canceled")
+        progress(1, 1, "fake backfill complete")
+        return {"symbol": symbol, "written_bars": 120}
+
+
+class BlockingChanlunService(FakeChanlunService):
+    def __init__(self) -> None:
+        super().__init__()
+        self.started = Event()
+        self.release = Event()
+
+    def backfill(self, symbol: str, *, progress, should_cancel) -> dict[str, object]:
+        self.started.set()
+        assert self.release.wait(timeout=2) is True
+        return super().backfill(symbol, progress=progress, should_cancel=should_cancel)
+
+
+class FakeChanlunSymbolSearchService:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, int]] = []
+
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int,
+    ) -> tuple[list[ChanlunSymbolMatch], list[StrongStockSourceStatus]]:
+        self.calls.append((query, limit))
+        return (
+            [ChanlunSymbolMatch(symbol="600000.SH", name="浦发银行")],
+            [StrongStockSourceStatus(source="fake symbols", status="success", detail="fake search")],
+        )
 
 
 class FakeNewsRiskProvider:
@@ -1180,6 +1256,8 @@ def _client(
     news_risk_provider: object | None = None,
     market_overview_provider: object | None = None,
     concept_provider: object | None = None,
+    chanlun_analysis_service: object | None = None,
+    chanlun_symbol_search_service: object | None = None,
 ) -> TestClient:
     app.state.candidate_provider = candidate_provider or FakeCandidateProvider()
     app.state.kline_provider = kline_provider or FakeKlineProvider()
@@ -1194,6 +1272,14 @@ def _client(
         delattr(app.state, "concept_provider")
     if hasattr(app.state, "default_concept_provider"):
         delattr(app.state, "default_concept_provider")
+    if chanlun_analysis_service is not None:
+        app.state.chanlun_analysis_service = chanlun_analysis_service
+    elif hasattr(app.state, "chanlun_analysis_service"):
+        delattr(app.state, "chanlun_analysis_service")
+    if chanlun_symbol_search_service is not None:
+        app.state.chanlun_symbol_search_service = chanlun_symbol_search_service
+    elif hasattr(app.state, "chanlun_symbol_search_service"):
+        delattr(app.state, "chanlun_symbol_search_service")
     app.state.auction_sampler_disabled = True
     app.state.sector_workbench_sampler_disabled = True
     AUCTION_SNAPSHOT_CACHE.clear()
@@ -1534,6 +1620,66 @@ def test_stock_kline_endpoint_reuses_cached_provider_result(tmp_path: Path) -> N
     assert second.status_code == 200
     assert third.status_code == 200
     assert kline_provider.symbols == ["603890.SH", "603890.SH"]
+
+
+def test_chanlun_analysis_endpoint_returns_project_owned_layers(tmp_path: Path) -> None:
+    service = FakeChanlunService()
+    client = _client(tmp_path, chanlun_analysis_service=service)
+
+    response = client.get("/api/chanlun/stocks/600000.SH/analysis?period=5m&lookback=120")
+
+    assert response.status_code == 200
+    assert response.json()["period"] == "5m"
+    assert response.json()["rule_version"] == "cl-v1"
+    assert service.analysis_calls == [("600000.SH", "5m", 120, False)]
+
+
+def test_chanlun_analysis_validates_lookback_for_each_period(tmp_path: Path) -> None:
+    client = _client(tmp_path, chanlun_analysis_service=FakeChanlunService())
+
+    daily_response = client.get("/api/chanlun/stocks/600000.SH/analysis?period=1d&lookback=261")
+    intraday_response = client.get("/api/chanlun/stocks/600000.SH/analysis?period=5m&lookback=2401")
+
+    assert daily_response.status_code == 422
+    assert intraday_response.status_code == 422
+
+
+def test_chanlun_workspace_and_symbol_search_return_service_payloads(tmp_path: Path) -> None:
+    analysis_service = FakeChanlunService()
+    symbol_search_service = FakeChanlunSymbolSearchService()
+    client = _client(
+        tmp_path,
+        chanlun_analysis_service=analysis_service,
+        chanlun_symbol_search_service=symbol_search_service,
+    )
+
+    workspace = client.get("/api/chanlun/stocks/600000.SH/workspace?lookback=120")
+    search = client.get("/api/chanlun/symbols/search?query=%E6%B5%A6%E5%8F%91&limit=5")
+
+    assert workspace.status_code == 200
+    assert workspace.json()["analysis"]["period"] == "1d"
+    assert search.status_code == 200
+    assert search.json()["items"] == [{"symbol": "600000.SH", "name": "浦发银行"}]
+    assert search.json()["source_status"][0]["source"] == "fake symbols"
+    assert symbol_search_service.calls == [("浦发", 5)]
+
+
+def test_chanlun_backfill_reuses_active_symbol_job_and_reports_status(tmp_path: Path) -> None:
+    service = BlockingChanlunService()
+    client = _client(tmp_path, chanlun_analysis_service=service)
+
+    first = client.post("/api/chanlun/stocks/600000.sh/backfill", json={"history_days": 60})
+    assert service.started.wait(timeout=1) is True
+    second = client.post("/api/chanlun/stocks/600000.SH/backfill", json={"history_days": 60})
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["type"] == "chanlun_backfill:600000.SH"
+    assert first.json()["job_id"] == second.json()["job_id"]
+    status = client.get(f"/api/chanlun/stocks/600000.SH/backfill/{first.json()['job_id']}")
+    assert status.status_code == 200
+    assert status.json()["status"] in {"pending", "running"}
+    service.release.set()
 
 
 def test_stock_research_reports_missing_ifind_key_without_breaking(tmp_path: Path) -> None:

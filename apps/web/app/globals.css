@@ -310,6 +310,66 @@ body {
   color: var(--app-muted);
 }
 
+.chanlun-status-rail {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--app-border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--app-surface);
+}
+
+.chanlun-status-rail__item {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px;
+  border: 0;
+  border-inline-end: 1px solid var(--app-border);
+  background: var(--app-surface);
+  color: var(--app-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  text-align: left;
+}
+
+.chanlun-status-rail__item:last-child {
+  border-inline-end: 0;
+}
+
+.chanlun-status-rail__item:hover,
+.chanlun-status-rail__item.is-active {
+  background: var(--app-raised);
+}
+
+.chanlun-status-rail__item.is-active {
+  box-shadow: inset 0 2px 0 var(--app-primary);
+}
+
+.chanlun-status-rail__chart {
+  height: 520px;
+}
+
+@media (max-width: 640px) {
+  .chanlun-status-rail {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .chanlun-status-rail__item:nth-child(2) {
+    border-inline-end: 0;
+  }
+
+  .chanlun-status-rail__item:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--app-border);
+  }
+
+  .chanlun-status-rail__chart {
+    height: 420px;
+  }
+}
+
 .app-muted {
   color: var(--app-muted);
 }
@@ -1119,6 +1179,20 @@ body {
 .tickflow-kline-chart > div {
   height: 100% !important;
   width: 100% !important;
+}
+
+@media (max-width: 640px) {
+  .tickflow-kline-chart [role="toolbar"] {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: thin;
+  }
+
+  .tickflow-kline-chart [role="toolbar"] > * {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
 }
 
 .market-radar-page-content {

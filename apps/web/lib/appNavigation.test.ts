@@ -13,6 +13,11 @@ test("navigation groups preserve the market decision path", () => {
   assert.deepEqual(getNavigationSelection("/stock/603823.SH"), { groupKey: "market", itemKey: null });
 });
 
+test("navigation selects the Chanlun workbench", () => {
+  assert.deepEqual(getNavigationSelection("/chanlun"), { groupKey: "observe", itemKey: "chanlun" });
+  assert.ok(navigationGroups.find((group) => group.key === "observe")?.items.some((item) => item.href === "/chanlun"));
+});
+
 test("legacy routes resolve to unified workspaces", () => {
   assert.equal(getLegacyDestination("/sectors"), "/market?view=sectors");
   assert.equal(getLegacyDestination("/heatmap"), "/market?view=heatmap");

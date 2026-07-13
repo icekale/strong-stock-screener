@@ -2,7 +2,8 @@ import type { EChartsOption } from "echarts";
 import type { CandlestickSeriesOption } from "echarts/charts";
 import type { KlineData } from "kline-charts-react";
 import type { KlineSubIndicator } from "./klineIndicatorLayout";
-import type { GsgfChartAnnotation } from "./types";
+import { buildChanlunOverlaySeries } from "./chanlunOverlay.ts";
+import type { ChanlunAnalysisResponse, ChanlunLayerKey, GsgfChartAnnotation } from "./types";
 
 const BRICK_UP_COLOR = "#f43f5e";
 const BRICK_DOWN_COLOR = "#10b981";
@@ -116,14 +117,20 @@ export function buildBrickIndicatorSeries(
 
 export function buildTickFlowOverlayOption({
   annotations,
+  chanlun,
+  chanlunLayers,
   chartData,
   showGsgfAnnotations,
   subIndicators,
+  visibleBarCount,
 }: {
   annotations: GsgfChartAnnotation[];
+  chanlun?: ChanlunAnalysisResponse | null;
+  chanlunLayers?: Record<ChanlunLayerKey, boolean>;
   chartData: KlineData[];
   showGsgfAnnotations: boolean;
   subIndicators: KlineSubIndicator[];
+  visibleBarCount?: number;
 }): EChartsOption {
   const brickPoints = calculateBrickIndicator(
     chartData
@@ -185,7 +192,14 @@ export function buildTickFlowOverlayOption({
           },
         ]
       : [];
-  const series = [...annotationSeries, ...brickSeries];
+  const chanlunSeries = chanlun
+    ? buildChanlunOverlaySeries(
+        chanlun,
+        chanlunLayers ?? { fractals: false, segments: true, strokes: false, zones: true },
+        { chartDates: chartData.map((bar) => bar.date), visibleBarCount },
+      )
+    : [];
+  const series = [...annotationSeries, ...chanlunSeries, ...brickSeries];
 
   return series.length > 0 ? ({ series } as EChartsOption) : {};
 }

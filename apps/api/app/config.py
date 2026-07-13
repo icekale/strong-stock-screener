@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     auction_top3_training_window_days: int = Field(default=60, ge=5, le=365)
     auction_top3_simulated_initial_capital: float = Field(default=100000, gt=0)
     auction_top3_simulated_position_pct: float = Field(default=0.33, gt=0, le=1)
+    chanlun_history_days: int = Field(default=60, ge=5, le=240)
+    chanlun_minute_retention_days: int = Field(default=180, ge=30, le=730)
+    chanlun_cache_seconds: int = Field(default=30, ge=5, le=600)
+    chanlun_backfill_max_bars: int = Field(default=4800, ge=240, le=24000)
+    chanlun_tdx_enabled: bool = True
+    chanlun_tdx_timeout_seconds: float = Field(default=4, ge=1, le=15)
 
     model_config = SettingsConfigDict(
         env_prefix="STRONG_STOCK_",

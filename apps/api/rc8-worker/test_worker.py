@@ -1,4 +1,5 @@
 import ast
+import copy
 import importlib.metadata
 import importlib.util
 import json
@@ -63,8 +64,7 @@ def _available_at(period: str, date: str) -> str:
 def make_request() -> dict[str, object]:
     periods = {period: _zig_zag_bars(period) for period in PERIODS}
     boundaries = {
-        period: _available_at(period, bars[-1]["date"])
-        for period, bars in periods.items()
+        period: _available_at(period, bars[-1]["date"]) for period, bars in periods.items()
     }
     return {
         "schema_version": "czsc-rc8-jsonl-v1",
@@ -73,13 +73,52 @@ def make_request() -> dict[str, object]:
         "catalog_version": "czsc-v2-catalog-1",
         "adjustment_mode": "qfq",
         "decision_at": max(
-            datetime.fromisoformat(value).astimezone(timezone.utc)
-            for value in boundaries.values()
-        ).astimezone(SHANGHAI).isoformat(),
+            datetime.fromisoformat(value).astimezone(timezone.utc) for value in boundaries.values()
+        )
+        .astimezone(SHANGHAI)
+        .isoformat(),
         "last_closed_by_period": boundaries,
         "input_snapshot_id": f"sha256:{'a' * 64}",
         "periods": periods,
     }
+
+
+def _request_ending_at(
+    request: dict[str, object],
+    occurred_at: str,
+) -> dict[str, object]:
+    cutoff = datetime.fromisoformat(occurred_at).astimezone(SHANGHAI)
+    prefix = copy.deepcopy(request)
+    for period in PERIODS:
+        bars = [
+            bar
+            for bar in prefix["periods"][period]
+            if datetime.fromisoformat(_available_at(period, bar["date"])).astimezone(SHANGHAI)
+            <= cutoff
+        ]
+        if not bars:
+            raise AssertionError(f"fixture has no {period} bars at {occurred_at}")
+        prefix["periods"][period] = bars
+        prefix["last_closed_by_period"][period] = _available_at(period, bars[-1]["date"])
+    prefix["decision_at"] = cutoff.isoformat(timespec="seconds")
+    prefix["request_id"] = f"prefix-{occurred_at}"
+    return prefix
+
+
+def _event_identity(event: dict[str, object]) -> tuple[object, ...]:
+    return (
+        event["catalog_id"],
+        event["period"],
+        event["higher_period"],
+        event["lower_period"],
+        event["occurred_at"],
+        event["raw_key"],
+        event["raw_value"],
+    )
+
+
+def _event_clock_period(event: dict[str, object]) -> object:
+    return event["period"] or event["lower_period"]
 
 
 def _scope(state: dict[str, object]) -> tuple[object, object, object, object]:
@@ -186,10 +225,7 @@ def _reference_reduce(
     times: list[str],
     last_closed_at: str,
 ) -> tuple[dict[str, object], list[dict[str, object]]]:
-    signals = [
-        Signal(key=item["raw_key"], value=f"{value}_任意_任意_0")
-        for value in values
-    ]
+    signals = [Signal(key=item["raw_key"], value=f"{value}_任意_任意_0") for value in values]
     previous = None
     run_started_at = times[0]
     events = []
@@ -291,11 +327,68 @@ class WorkerTests(unittest.TestCase):
             for item in self.response["events"]
         ]
 
-        self.assertEqual([_scope(item) for item in self.response["current_states"]], expected_scopes)
-        self.assertEqual(event_keys, sorted(event_keys, key=lambda item: tuple(str(x) for x in item)))
+        self.assertEqual(
+            [_scope(item) for item in self.response["current_states"]], expected_scopes
+        )
+        self.assertEqual(
+            event_keys, sorted(event_keys, key=lambda item: tuple(str(x) for x in item))
+        )
         self.assertEqual(
             json.dumps(self.response, ensure_ascii=False, sort_keys=True),
             json.dumps(WORKER.handle_request(make_request()), ensure_ascii=False, sort_keys=True),
+        )
+
+    def test_full_timeline_matches_prefix_first_visibility(self) -> None:
+        request = make_request()
+        full = WORKER.handle_request(request)
+        approved_catalog_ids = {item["catalog_id"] for item in WORKER._APPROVED_CATALOG}
+        events = [event for event in full["events"] if event["catalog_id"] in approved_catalog_ids]
+
+        self.assertTrue(events, "deterministic fixture must emit a whitelisted event")
+        self.assertEqual(events, full["events"])
+        prefixes = {}
+        for event in events:
+            occurred_at = event["occurred_at"]
+            prefix = _request_ending_at(request, occurred_at)
+            observed = WORKER.handle_request(prefix)
+            prefixes[occurred_at] = (prefix, observed)
+            self.assertIn(
+                _event_identity(event),
+                {_event_identity(item) for item in observed["events"]},
+            )
+
+        removable_events = []
+        for occurred_at, (prefix, observed) in prefixes.items():
+            for period in PERIODS:
+                final_close = prefix["last_closed_by_period"][period]
+                if final_close != occurred_at or len(prefix["periods"][period]) < 2:
+                    continue
+                at_final_close = [
+                    event
+                    for event in observed["events"]
+                    if event["occurred_at"] == final_close and _event_clock_period(event) == period
+                ]
+                if not at_final_close:
+                    continue
+
+                without_final_bar = copy.deepcopy(prefix)
+                without_final_bar["periods"][period].pop()
+                previous_bar = without_final_bar["periods"][period][-1]
+                without_final_bar["last_closed_by_period"][period] = _available_at(
+                    period, previous_bar["date"]
+                )
+                without_final_bar["request_id"] = f"without-final-{period}-{occurred_at}"
+                without_final = WORKER.handle_request(without_final_bar)
+                without_final_identities = {
+                    _event_identity(item) for item in without_final["events"]
+                }
+                for event in at_final_close:
+                    removable_events.append(event)
+                    self.assertNotIn(_event_identity(event), without_final_identities)
+
+        self.assertTrue(
+            removable_events,
+            "fixture must emit an event at a removable final close",
         )
 
     def test_worker_rejects_catalog_protocol_or_request_configuration(self) -> None:
@@ -342,10 +435,7 @@ class WorkerTests(unittest.TestCase):
         }
         values = ["其他", "看多", "看多", "其他", "看多"]
         times = [f"2026-01-01T10:{index:02d}:00+08:00" for index in range(5)]
-        signals = [
-            Signal(key=item["raw_key"], value=f"{value}_任意_任意_0")
-            for value in values
-        ]
+        signals = [Signal(key=item["raw_key"], value=f"{value}_任意_任意_0") for value in values]
 
         current, events = WORKER._reduce_signals(
             item=item,

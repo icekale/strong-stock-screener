@@ -119,13 +119,7 @@ class ChanlunResearchStore:
                       id, input_snapshot_id, occurred_at, engine_version,
                       catalog_version, rule_version, payload_json
                     ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET
-                      input_snapshot_id = excluded.input_snapshot_id,
-                      occurred_at = excluded.occurred_at,
-                      engine_version = excluded.engine_version,
-                      catalog_version = excluded.catalog_version,
-                      rule_version = excluded.rule_version,
-                      payload_json = excluded.payload_json
+                    ON CONFLICT(id) DO NOTHING
                     """,
                     (
                         event.id,
@@ -212,6 +206,8 @@ class ChanlunResearchStore:
             ).fetchone()
             if batch is None:
                 raise ValueError(f"batch does not exist: {batch_id}")
+            if batch["status"] != "pending":
+                raise ValueError("batch must be pending to save scores")
             baseline_symbols = _baseline_symbols(batch)
             try:
                 expected_rank = baseline_symbols.index(score.symbol) + 1
@@ -260,10 +256,8 @@ class ChanlunResearchStore:
 
         baseline_symbols = _baseline_symbols(batch)
         items = [_score_from_row(row, baseline_symbols) for row in score_rows]
-        if batch["status"] == "ready" and any(
-            item.status != "ready" or item.score is None for item in items
-        ):
-            raise ValueError("ready batch contains a non-ready candidate score")
+        if batch["status"] in {"ready", "partial", "unavailable"}:
+            _validate_terminal_batch_status(batch["status"], items, len(baseline_symbols))
         return CzscV2BatchResult(
             batch_id=batch["batch_id"],
             job_id=batch["job_id"],
@@ -287,32 +281,22 @@ class ChanlunResearchStore:
             ).fetchone()
             if batch is None:
                 raise ValueError(f"batch does not exist: {batch_id}")
-            if status == "ready":
-                score_rows = connection.execute(
-                    """
-                    SELECT symbol, baseline_rank, status, score
-                    FROM shadow_scores WHERE batch_id = ?
-                    ORDER BY baseline_rank, symbol
-                    """,
-                    (batch_id,),
-                ).fetchall()
-                baseline_symbols = _baseline_symbols(batch)
-                complete = len(score_rows) == len(baseline_symbols) and all(
-                    row["baseline_rank"] == rank
-                    and row["symbol"] == baseline_symbols[rank - 1]
-                    and row["status"] == "ready"
-                    and row["score"] is not None
-                    for rank, row in enumerate(score_rows, start=1)
-                )
-                if not complete:
-                    raise ValueError(
-                        "ready batch requires every baseline symbol to have a ready score"
-                    )
             current_status = batch["status"]
+            if current_status not in {"pending", status}:
+                raise ValueError(f"invalid batch status transition: {current_status} -> {status}")
+            score_rows = connection.execute(
+                """
+                SELECT * FROM shadow_scores
+                WHERE batch_id = ?
+                ORDER BY baseline_rank, symbol
+                """,
+                (batch_id,),
+            ).fetchall()
+            baseline_symbols = _baseline_symbols(batch)
+            items = [_score_from_row(row, baseline_symbols) for row in score_rows]
+            _validate_terminal_batch_status(status, items, len(baseline_symbols))
             if current_status == status:
                 return
-            if current_status != "pending":
-                raise ValueError(f"invalid batch status transition: {current_status} -> {status}")
             connection.execute(
                 "UPDATE shadow_batches SET status = ? WHERE batch_id = ?",
                 (status, batch_id),
@@ -485,3 +469,26 @@ def _score_from_row(
     if indexed_identity != payload_identity or score.symbol != baseline_symbols[rank - 1]:
         raise ValueError("stored score does not match its immutable baseline")
     return score
+
+
+def _validate_terminal_batch_status(
+    status: CzscV2BatchStatus,
+    items: list[CzscV2CandidateScore],
+    pool_size: int,
+) -> None:
+    ready_count = sum(item.status == "ready" and item.score is not None for item in items)
+    complete_all_ready = len(items) == pool_size and ready_count == pool_size
+    if status == "ready":
+        if not complete_all_ready:
+            raise ValueError("ready batch requires every baseline symbol to have a ready score")
+        return
+    if status == "partial":
+        if not items:
+            raise ValueError("partial batch requires at least one processed item")
+        if ready_count == 0:
+            raise ValueError("partial batch requires at least one ready score")
+        if complete_all_ready:
+            raise ValueError("partial batch cannot contain a complete all-ready baseline")
+        return
+    if status == "unavailable" and ready_count:
+        raise ValueError("unavailable batch cannot contain a ready score")

@@ -135,6 +135,70 @@ def test_store_upserts_snapshot_and_deduplicates_events(tmp_path: Path) -> None:
     assert store.count_events() == len(snapshot.events)
 
 
+def test_duplicate_event_id_preserves_first_observed_provenance_after_prune(
+    tmp_path: Path,
+) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    first_event = _evidence(
+        "sha256:first",
+        event_id="stable-event",
+        occurred_at="2024-01-01T14:55:00+08:00",
+    )
+    first_snapshot = _snapshot(
+        "sha256:first",
+        calculated_at="2024-01-01T15:00:00+08:00",
+        events=[first_event],
+    )
+    later_event = _evidence(
+        "sha256:later",
+        event_id="stable-event",
+        occurred_at="2024-01-01T14:55:00+08:00",
+        engine_version="1.0.1",
+        catalog_version="catalog-v2",
+        rule_version="rule-v2",
+    )
+    later_snapshot = _snapshot(
+        "sha256:later",
+        calculated_at="2024-01-02T15:00:00+08:00",
+        engine_version="1.0.1",
+        catalog_version="catalog-v2",
+        rule_version="rule-v2",
+        events=[later_event],
+    )
+    version_pointer = _snapshot(
+        "sha256:pointer",
+        calculated_at="2024-01-03T15:00:00+08:00",
+        engine_version="1.0.1",
+        catalog_version="catalog-v2",
+        rule_version="rule-v2",
+        events=[],
+    )
+    store.save_snapshot(first_snapshot)
+    store.save_snapshot(later_snapshot)
+    store.save_snapshot(version_pointer)
+
+    store.prune(
+        now=datetime(2026, 7, 13, tzinfo=SHANGHAI),
+        snapshot_days=180,
+        evidence_days=180,
+    )
+
+    assert store.load_snapshot("sha256:first") == first_snapshot
+    assert store.load_snapshot("sha256:later") is None
+    assert store.load_snapshot("sha256:pointer") == version_pointer
+    assert store.count_events() == 1
+    with store._connect() as connection:
+        row = connection.execute(
+            "SELECT * FROM signal_evidence WHERE id = 'stable-event'"
+        ).fetchone()
+    assert row is not None
+    assert row["input_snapshot_id"] == "sha256:first"
+    assert row["engine_version"] == "1.0.0rc8"
+    assert row["catalog_version"] == "czsc-v2-catalog-1"
+    assert row["rule_version"] == "czsc-score-v2-rule-1"
+    assert json.loads(row["payload_json"]) == first_event.model_dump(mode="json")
+
+
 def test_store_never_returns_snapshot_for_a_different_input_hash(tmp_path: Path) -> None:
     store = ChanlunResearchStore(tmp_path / "research.sqlite3")
     store.save_snapshot(_snapshot("sha256:a"))
@@ -348,6 +412,57 @@ def test_batch_score_upsert_is_idempotent_and_loads_in_baseline_order(tmp_path: 
     assert [item.score for item in result.items] == [90, 75]
 
 
+@pytest.mark.parametrize("terminal_status", ["ready", "partial", "unavailable"])
+def test_terminal_batch_rejects_score_updates_and_preserves_result(
+    tmp_path: Path,
+    terminal_status: str,
+) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    symbols = ["600000.SH", "600001.SH"] if terminal_status == "partial" else ["600000.SH"]
+    store.create_batch("batch-1", "2026-07-10", symbols)
+    initial = (
+        _candidate("600000.SH", 1)
+        if terminal_status != "unavailable"
+        else _candidate("600000.SH", 1, status="unavailable", score=None)
+    )
+    store.save_batch_score("batch-1", initial)
+    store.finish_batch("batch-1", terminal_status)
+    before = store.load_batch("batch-1")
+
+    replacement = (
+        _candidate("600000.SH", 1, score=75)
+        if terminal_status != "unavailable"
+        else _candidate("600000.SH", 1, status="unavailable", score=None)
+    )
+    with pytest.raises(ValueError, match="pending"):
+        store.save_batch_score("batch-1", replacement)
+
+    assert store.load_batch("batch-1") == before
+
+
+@pytest.mark.parametrize("terminal_status", ["partial", "unavailable"])
+def test_terminal_batch_rejects_new_score_rows_and_preserves_result(
+    tmp_path: Path,
+    terminal_status: str,
+) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    store.create_batch("batch-1", "2026-07-10", ["600000.SH", "600001.SH"])
+    if terminal_status == "partial":
+        store.save_batch_score("batch-1", _candidate("600000.SH", 1))
+    store.finish_batch("batch-1", terminal_status)
+    before = store.load_batch("batch-1")
+
+    new_score = (
+        _candidate("600001.SH", 2)
+        if terminal_status == "partial"
+        else _candidate("600001.SH", 2, status="unavailable", score=None)
+    )
+    with pytest.raises(ValueError, match="pending"):
+        store.save_batch_score("batch-1", new_score)
+
+    assert store.load_batch("batch-1") == before
+
+
 def test_finish_batch_requires_complete_scoreable_rows_before_ready(tmp_path: Path) -> None:
     store = ChanlunResearchStore(tmp_path / "research.sqlite3")
     store.create_batch("batch-1", "2026-07-10", ["600000.SH", "600001.SH"])
@@ -373,12 +488,85 @@ def test_finish_batch_requires_complete_scoreable_rows_before_ready(tmp_path: Pa
     assert result.completed_count == result.pool_size == 2
 
 
+@pytest.mark.parametrize(
+    ("terminal_status", "candidate_status", "candidate_score", "message"),
+    [
+        ("partial", None, None, "at least one processed"),
+        ("partial", "unavailable", None, "ready score"),
+        ("partial", "ready", 80, "complete all-ready"),
+        ("unavailable", "ready", 80, "cannot contain a ready score"),
+    ],
+)
+def test_finish_batch_rejects_invalid_terminal_status_content(
+    tmp_path: Path,
+    terminal_status: str,
+    candidate_status: str | None,
+    candidate_score: int | None,
+    message: str,
+) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    store.create_batch("batch-1", "2026-07-10", ["600000.SH"])
+    if candidate_status is not None:
+        store.save_batch_score(
+            "batch-1",
+            _candidate(
+                "600000.SH",
+                1,
+                status=candidate_status,
+                score=candidate_score,
+            ),
+        )
+
+    with pytest.raises(ValueError, match=message):
+        store.finish_batch("batch-1", terminal_status)
+
+    result = store.load_batch("batch-1")
+    assert result is not None and result.status == "pending"
+
+
+def test_finish_batch_accepts_partial_complete_mixed_results(tmp_path: Path) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    store.create_batch("batch-1", "2026-07-10", ["600000.SH", "600001.SH"])
+    store.save_batch_score("batch-1", _candidate("600000.SH", 1))
+    store.save_batch_score(
+        "batch-1",
+        _candidate("600001.SH", 2, status="unavailable", score=None),
+    )
+
+    store.finish_batch("batch-1", "partial")
+
+    result = store.load_batch("batch-1")
+    assert result is not None and result.status == "partial"
+    assert result.completed_count == result.pool_size == 2
+
+
+def test_finish_batch_accepts_unavailable_with_only_non_score_results(tmp_path: Path) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    store.create_batch("batch-1", "2026-07-10", ["600000.SH", "600001.SH"])
+    store.save_batch_score(
+        "batch-1",
+        _candidate("600000.SH", 1, status="unavailable", score=None),
+    )
+    store.save_batch_score(
+        "batch-1",
+        _candidate("600001.SH", 2, status="stale", score=None),
+    )
+
+    store.finish_batch("batch-1", "unavailable")
+
+    result = store.load_batch("batch-1")
+    assert result is not None and result.status == "unavailable"
+    assert result.completed_count == 2
+
+
 def test_finish_batch_preserves_partial_and_unavailable_terminal_states(tmp_path: Path) -> None:
     store = ChanlunResearchStore(tmp_path / "research.sqlite3")
     store.create_batch("partial", "2026-07-10", ["600000.SH", "600001.SH"])
     store.save_batch_score("partial", _candidate("600000.SH", 1))
     store.finish_batch("partial", "partial")
+    store.finish_batch("partial", "partial")
     store.create_batch("unavailable", "2026-07-10", ["600002.SH"])
+    store.finish_batch("unavailable", "unavailable")
     store.finish_batch("unavailable", "unavailable")
 
     partial = store.load_batch("partial")
@@ -417,6 +605,44 @@ def test_load_batch_rejects_ready_state_with_non_ready_candidate(tmp_path: Path)
         connection.execute("UPDATE shadow_batches SET status = 'ready' WHERE batch_id = 'batch-1'")
 
     with pytest.raises(ValueError, match="ready batch"):
+        store.load_batch("batch-1")
+
+
+@pytest.mark.parametrize(
+    ("stored_status", "candidate_status", "candidate_score", "message"),
+    [
+        ("partial", None, None, "at least one processed"),
+        ("partial", "unavailable", None, "ready score"),
+        ("partial", "ready", 80, "complete all-ready"),
+        ("unavailable", "ready", 80, "cannot contain a ready score"),
+    ],
+)
+def test_load_batch_rejects_invalid_persisted_terminal_status_content(
+    tmp_path: Path,
+    stored_status: str,
+    candidate_status: str | None,
+    candidate_score: int | None,
+    message: str,
+) -> None:
+    store = ChanlunResearchStore(tmp_path / "research.sqlite3")
+    store.create_batch("batch-1", "2026-07-10", ["600000.SH"])
+    if candidate_status is not None:
+        store.save_batch_score(
+            "batch-1",
+            _candidate(
+                "600000.SH",
+                1,
+                status=candidate_status,
+                score=candidate_score,
+            ),
+        )
+    with store._connect() as connection:
+        connection.execute(
+            "UPDATE shadow_batches SET status = ? WHERE batch_id = 'batch-1'",
+            (stored_status,),
+        )
+
+    with pytest.raises(ValueError, match=message):
         store.load_batch("batch-1")
 
 

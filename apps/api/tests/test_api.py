@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi.testclient import TestClient
 
+import app.main as main_module
 from app.main import (
     AUCTION_SNAPSHOT_CACHE,
     MARKET_OVERVIEW_CACHE,
@@ -33,6 +34,7 @@ from app.models import (
     ChanlunScreeningSummary,
     ChanlunSymbolMatch,
     ChanlunWorkspaceResponse,
+    CzscResearchSnapshot,
     KlineBar,
     MarketAdvanceDeclineSummary,
     MarketIndexSnapshot,
@@ -54,7 +56,10 @@ from app.models import (
 )
 from app.providers.watchlist import WatchlistSnapshot, WatchlistItem
 from app.providers.tickflow import TickFlowIntradayBar, TickFlowQuote
-from app.services.plate_rotation_reference import PlateRotationReferenceResponse, PlateRotationThemeItem
+from app.services.plate_rotation_reference import (
+    PlateRotationReferenceResponse,
+    PlateRotationThemeItem,
+)
 from app.services.sector_workbench_store import SectorThemeRowsStore
 from app.providers.news_risk import NegativeNewsRisk
 
@@ -381,7 +386,9 @@ class FakeQuoteProvider:
     def status(self):
         from app.models import StrongStockSourceStatus
 
-        return StrongStockSourceStatus(source="TickFlow", status="missing_key", detail="TICKFLOW_API_KEY 未配置")
+        return StrongStockSourceStatus(
+            source="TickFlow", status="missing_key", detail="TICKFLOW_API_KEY 未配置"
+        )
 
 
 class FakeChanlunService:
@@ -402,7 +409,9 @@ class FakeChanlunService:
             period=period,  # type: ignore[arg-type]
             availability="ready",
             source_status=[
-                StrongStockSourceStatus(source="fake Chanlun", status="success", detail="fake analysis")
+                StrongStockSourceStatus(
+                    source="fake Chanlun", status="success", detail="fake analysis"
+                )
             ],
         )
 
@@ -427,7 +436,9 @@ class FakeChanlunService:
             availability="ready",
         )
 
-    def backtest(self, symbol: str, *, period: str, lookback: int, horizons: list[int]) -> dict[str, object]:
+    def backtest(
+        self, symbol: str, *, period: str, lookback: int, horizons: list[int]
+    ) -> dict[str, object]:
         return {
             "symbol": symbol,
             "period": period,
@@ -440,6 +451,46 @@ class FakeChanlunService:
             raise RuntimeError("backfill canceled")
         progress(1, 1, "fake backfill complete")
         return {"symbol": symbol, "written_bars": 120}
+
+
+class StaticResearchService:
+    def __init__(
+        self,
+        snapshot: CzscResearchSnapshot,
+        *,
+        health_status: dict[str, object] | None = None,
+    ) -> None:
+        self.snapshot = snapshot
+        self.health_status = health_status or {
+            "status": "ready",
+            "queue_depth": 0,
+            "circuit_state": "closed",
+            "engine_version": "1.0.0rc8",
+            "inflight_count": 0,
+            "error": None,
+        }
+        self.calls: list[tuple[str, int]] = []
+
+    def get(
+        self,
+        symbol: str,
+        lookback: int,
+        priority: int = 0,
+        wait_seconds: float | None = None,
+    ) -> CzscResearchSnapshot:
+        self.calls.append((symbol, lookback))
+        return self.snapshot
+
+    def health(self) -> dict[str, object]:
+        return dict(self.health_status)
+
+
+class CloseRecordingRc8Client:
+    def __init__(self) -> None:
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
 
 
 class BlockingChanlunService(FakeChanlunService):
@@ -533,7 +584,11 @@ class FakeChanlunSymbolSearchService:
         self.calls.append((query, limit))
         return (
             [ChanlunSymbolMatch(symbol="600000.SH", name="浦发银行")],
-            [StrongStockSourceStatus(source="fake symbols", status="success", detail="fake search")],
+            [
+                StrongStockSourceStatus(
+                    source="fake symbols", status="success", detail="fake search"
+                )
+            ],
         )
 
 
@@ -799,9 +854,15 @@ class FakeIfindResearchProvider:
         return StockResearchResponse(
             symbol=symbol,
             source_status=[
-                StrongStockSourceStatus(source="iFinD A股数据", status="success", detail="fake profile"),
-                StrongStockSourceStatus(source="iFinD 新闻公告", status="success", detail="fake news"),
-                StrongStockSourceStatus(source="iFinD 指数板块", status="success", detail="fake sector"),
+                StrongStockSourceStatus(
+                    source="iFinD A股数据", status="success", detail="fake profile"
+                ),
+                StrongStockSourceStatus(
+                    source="iFinD 新闻公告", status="success", detail="fake news"
+                ),
+                StrongStockSourceStatus(
+                    source="iFinD 指数板块", status="success", detail="fake sector"
+                ),
             ],
             profile={"公司简称": "春秋电子", "所属行业": "消费电子"},
             valuation={"市盈率TTM": "28.5", "市净率": "3.2"},
@@ -1173,7 +1234,9 @@ class FakeTdxSectorRadarProvider:
         self.calls: list[int] = []
 
     def status(self) -> StrongStockSourceStatus:
-        return StrongStockSourceStatus(source="通达信MCP", status="success", detail="fake tdx configured")
+        return StrongStockSourceStatus(
+            source="通达信MCP", status="success", detail="fake tdx configured"
+        )
 
     def get_sector_radar(self, limit: int = 20) -> SectorRadarResponse:
         self.calls.append(limit)
@@ -1211,7 +1274,9 @@ class FailingTdxSectorRadarProvider:
 
 
 class FakeTdxThemeRowsProvider(FakeTdxSectorRadarProvider):
-    def query_rows(self, question: str, size: int = 50, page: int = 1, market_range: str = "AG") -> list[dict[str, object]]:
+    def query_rows(
+        self, question: str, size: int = 50, page: int = 1, market_range: str = "AG"
+    ) -> list[dict[str, object]]:
         return [
             {
                 "代码": "300001.SZ",
@@ -1266,8 +1331,22 @@ class FakePlateRotationReferenceProvider:
         return PlateRotationReferenceResponse(
             source=source,
             themes=[
-                PlateRotationThemeItem(rank=1, code="801159", name="机器人", score=35630, value_type="score", color="red"),
-                PlateRotationThemeItem(rank=2, code="801314", name="ST板块", score=12964, value_type="score", color="red"),
+                PlateRotationThemeItem(
+                    rank=1,
+                    code="801159",
+                    name="机器人",
+                    score=35630,
+                    value_type="score",
+                    color="red",
+                ),
+                PlateRotationThemeItem(
+                    rank=2,
+                    code="801314",
+                    name="ST板块",
+                    score=12964,
+                    value_type="score",
+                    color="red",
+                ),
             ][:limit],
             source_status=[
                 StrongStockSourceStatus(
@@ -1371,7 +1450,19 @@ def _client(
     chanlun_paper_order_service: object | None = None,
     chanlun_symbol_search_service: object | None = None,
     chanlun_screening_summarizer: object | None = None,
+    chanlun_research_service: object | None = None,
+    chanlun_rc8_client: object | None = None,
 ) -> TestClient:
+    shutdown_research = getattr(main_module, "shutdown_chanlun_research", None)
+    if shutdown_research is not None:
+        shutdown_research()
+    else:
+        existing_client = getattr(app.state, "chanlun_rc8_client", None)
+        if existing_client is not None and hasattr(existing_client, "close"):
+            existing_client.close()
+        for attribute in ("chanlun_research_service", "chanlun_rc8_client"):
+            if hasattr(app.state, attribute):
+                delattr(app.state, attribute)
     app.state.candidate_provider = candidate_provider or FakeCandidateProvider()
     app.state.kline_provider = kline_provider or FakeKlineProvider()
     app.state.quote_provider = quote_provider or FakeQuoteProvider()
@@ -1401,6 +1492,10 @@ def _client(
         app.state.chanlun_symbol_search_service = chanlun_symbol_search_service
     elif hasattr(app.state, "chanlun_symbol_search_service"):
         delattr(app.state, "chanlun_symbol_search_service")
+    if chanlun_research_service is not None:
+        app.state.chanlun_research_service = chanlun_research_service
+    if chanlun_rc8_client is not None:
+        app.state.chanlun_rc8_client = chanlun_rc8_client
     app.state.chanlun_screening_summarizer = chanlun_screening_summarizer
     app.state.auction_sampler_disabled = True
     app.state.sector_workbench_sampler_disabled = True
@@ -1471,13 +1566,102 @@ def _seed_sector_theme_rows(
     )
 
 
+def _research_snapshot(input_snapshot_id: str = "sha256:api") -> CzscResearchSnapshot:
+    return CzscResearchSnapshot(
+        status="ready",
+        symbol="600000.SH",
+        last_closed_by_period={
+            "1d": "2026-07-10T15:00:00+08:00",
+            "60m": "2026-07-10T15:00:00+08:00",
+            "30m": "2026-07-10T15:00:00+08:00",
+            "5m": "2026-07-10T15:00:00+08:00",
+        },
+        input_snapshot_id=input_snapshot_id,
+        score=12,
+        engine_version="1.0.0rc8",
+        adjustment_mode="raw_unadjusted",
+    )
+
+
 def test_health_returns_ok(tmp_path: Path) -> None:
     client = _client(tmp_path)
 
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    assert response.json()["status"] == "ok"
+    assert response.json()["chanlun_research"]["status"] in {"ready", "unavailable"}
+
+
+def test_health_reports_unavailable_or_disabled_research_without_api_failure(
+    tmp_path: Path,
+) -> None:
+    for status in ("unavailable", "disabled"):
+        service = StaticResearchService(
+            _research_snapshot(),
+            health_status={
+                "status": status,
+                "queue_depth": 3,
+                "circuit_state": "open" if status == "unavailable" else "disabled",
+                "engine_version": None,
+                "inflight_count": 1,
+                "error": "/private/worker.py\nTraceback secret"
+                if status == "unavailable"
+                else None,
+            },
+        )
+        client = _client(tmp_path, chanlun_research_service=service)
+
+        response = client.get("/health")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "ok"
+        assert payload["chanlun_research"]["status"] == status
+        assert payload["chanlun_research"]["queue_depth"] == 3
+        assert "\n" not in str(payload["chanlun_research"].get("error"))
+        assert "/private/" not in str(payload["chanlun_research"].get("error"))
+        assert "Traceback" not in str(payload["chanlun_research"].get("error"))
+
+
+def test_lifespan_closes_the_rc8_client(tmp_path: Path) -> None:
+    rc8_client = CloseRecordingRc8Client()
+    research_service = StaticResearchService(_research_snapshot())
+
+    with _client(
+        tmp_path,
+        chanlun_research_service=research_service,
+        chanlun_rc8_client=rc8_client,
+    ) as client:
+        assert client.get("/health").status_code == 200
+
+    assert rc8_client.close_calls == 1
+
+
+def test_data_source_cache_reset_closes_the_rc8_client() -> None:
+    main_module.shutdown_chanlun_research()
+    rc8_client = CloseRecordingRc8Client()
+    app.state.chanlun_research_service = StaticResearchService(_research_snapshot())
+    app.state.chanlun_rc8_client = rc8_client
+
+    try:
+        main_module._clear_data_source_caches()
+
+        assert rc8_client.close_calls == 1
+        assert not hasattr(app.state, "chanlun_research_service")
+        assert not hasattr(app.state, "chanlun_rc8_client")
+    finally:
+        main_module.shutdown_chanlun_research()
+
+
+def test_docker_runners_set_the_rc8_python_environment() -> None:
+    repo_root = Path(__file__).parents[3]
+
+    for dockerfile in (repo_root / "Dockerfile", repo_root / "apps/api/Dockerfile"):
+        assert (
+            "STRONG_STOCK_CHANLUN_RC8_PYTHON=/opt/czsc-rc8-venv/bin/python"
+            in dockerfile.read_text(encoding="utf-8")
+        )
 
 
 def test_data_source_status_reports_tickflow_missing_key(tmp_path: Path) -> None:
@@ -1776,6 +1960,35 @@ def test_chanlun_analysis_endpoint_returns_project_owned_layers(tmp_path: Path) 
     assert service.analysis_calls == [("600000.SH", "5m", 120, False)]
 
 
+def test_chanlun_research_endpoint_is_normalized_and_independent_from_formal_analysis(
+    tmp_path: Path,
+) -> None:
+    formal_service = FakeChanlunService()
+    research_service = StaticResearchService(_research_snapshot("sha256:research-api"))
+    client = _client(
+        tmp_path,
+        chanlun_analysis_service=formal_service,
+        chanlun_research_service=research_service,
+    )
+
+    response = client.get("/api/chanlun/stocks/600000.sh/research-signals?lookback=220")
+
+    assert response.status_code == 200
+    assert response.json()["input_snapshot_id"] == "sha256:research-api"
+    assert research_service.calls == [("600000.SH", 220)]
+    assert formal_service.analysis_calls == []
+
+
+def test_chanlun_research_endpoint_enforces_workspace_lookback_bounds(tmp_path: Path) -> None:
+    research_service = StaticResearchService(_research_snapshot())
+    client = _client(tmp_path, chanlun_research_service=research_service)
+
+    response = client.get("/api/chanlun/stocks/600000.SH/research-signals?lookback=19")
+
+    assert response.status_code == 422
+    assert research_service.calls == []
+
+
 def test_chanlun_replay_endpoint_returns_confirmed_event_frames(tmp_path: Path) -> None:
     client = _client(tmp_path, chanlun_analysis_service=FakeChanlunService())
 
@@ -1791,7 +2004,9 @@ def test_chanlun_replay_endpoint_returns_confirmed_event_frames(tmp_path: Path) 
 def test_chanlun_backtest_endpoint_accepts_fixed_horizons(tmp_path: Path) -> None:
     client = _client(tmp_path, chanlun_analysis_service=FakeChanlunService())
 
-    response = client.get("/api/chanlun/stocks/600000.SH/backtests?period=1d&lookback=120&horizons=1,3")
+    response = client.get(
+        "/api/chanlun/stocks/600000.SH/backtests?period=1d&lookback=120&horizons=1,3"
+    )
 
     assert response.status_code == 200
     payload = response.json()
@@ -1814,11 +2029,15 @@ def test_chanlun_alert_endpoints_refresh_and_list_persisted_events(tmp_path: Pat
     assert listed.json()["items"] == []
 
 
-def test_chanlun_paper_order_endpoints_require_a_draft_before_manual_approval(tmp_path: Path) -> None:
+def test_chanlun_paper_order_endpoints_require_a_draft_before_manual_approval(
+    tmp_path: Path,
+) -> None:
     service = FakeChanlunPaperOrderService()
     client = _client(tmp_path, chanlun_paper_order_service=service)
 
-    draft = client.post("/api/chanlun/stocks/600000.SH/paper-orders/drafts?lookback=120", json={"quantity": 100})
+    draft = client.post(
+        "/api/chanlun/stocks/600000.SH/paper-orders/drafts?lookback=120", json={"quantity": 100}
+    )
     approved = client.post("/api/chanlun/paper-orders/paper-test/approve")
     account = client.get("/api/chanlun/paper-account")
 
@@ -2063,7 +2282,9 @@ def test_market_overview_endpoint_reuses_cached_snapshot(tmp_path: Path) -> None
 def test_homepage_slow_caches_use_stale_while_revalidate(monkeypatch) -> None:
     market_refresh_keys: list[str] = []
     sector_refresh_keys: list[str] = []
-    monkeypatch.setattr(app.state, "market_overview_provider", FakeMarketOverviewProvider(), raising=False)
+    monkeypatch.setattr(
+        app.state, "market_overview_provider", FakeMarketOverviewProvider(), raising=False
+    )
     MARKET_OVERVIEW_CACHE.clear()
     SECTOR_RADAR_CACHE.clear()
 
@@ -2446,7 +2667,9 @@ def test_auction_review_finalize_keeps_partial_results_when_one_kline_fails(tmp_
     assert records_by_symbol["300002.SZ"]["source_status"][-1]["status"] == "failed"
 
 
-def test_auction_review_finalize_uses_quote_when_daily_kline_misses_trade_date(tmp_path: Path) -> None:
+def test_auction_review_finalize_uses_quote_when_daily_kline_misses_trade_date(
+    tmp_path: Path,
+) -> None:
     client = _client(
         tmp_path,
         kline_provider=MissingTradeDateAuctionReviewKlineProvider(),
@@ -2489,7 +2712,10 @@ def test_auction_review_finalize_batches_quote_close_fallback(tmp_path: Path) ->
     assert finalize_response.status_code == 200
     payload = finalize_response.json()
     assert quote_provider.batch_sizes == [50, 10]
-    assert sum(1 for record in payload["records"] if record["day_result"]["close_pct"] is not None) == 60
+    assert (
+        sum(1 for record in payload["records"] if record["day_result"]["close_pct"] is not None)
+        == 60
+    )
 
 
 def test_auction_review_finalize_seeds_records_from_latest_snapshot(tmp_path: Path) -> None:
@@ -2535,10 +2761,14 @@ def test_auction_review_finalize_expands_existing_manual_records(tmp_path: Path)
     assert second_response.json()["record_count"] == 2
 
 
-def test_auction_review_backfill_reports_unavailable_without_verified_source(tmp_path: Path) -> None:
+def test_auction_review_backfill_reports_unavailable_without_verified_source(
+    tmp_path: Path,
+) -> None:
     client = _client(tmp_path)
 
-    response = client.post("/api/auction/review/backfill?start_date=2026-06-01&end_date=2026-06-05&max_days=3")
+    response = client.post(
+        "/api/auction/review/backfill?start_date=2026-06-01&end_date=2026-06-05&max_days=3"
+    )
 
     assert response.status_code == 200
     assert response.json()["status"] == "data_unavailable"
@@ -2591,7 +2821,9 @@ def test_sector_radar_falls_back_to_tdx_when_primary_source_is_empty(tmp_path: P
     assert provider.calls == [5]
 
 
-def test_sector_radar_falls_back_to_tickflow_industry_aggregation_when_primary_sources_are_empty(tmp_path: Path) -> None:
+def test_sector_radar_falls_back_to_tickflow_industry_aggregation_when_primary_sources_are_empty(
+    tmp_path: Path,
+) -> None:
     client = _client(tmp_path, market_overview_provider=EmptySectorRadarProvider())
     app.state.tdx_provider = FailingTdxSectorRadarProvider()
 
@@ -2679,7 +2911,9 @@ def test_sector_replica_board_stocks_endpoint_returns_rows(tmp_path: Path) -> No
     assert payload["rows"][0]["compat_row"][0] == "300001"
 
 
-def test_sector_replica_board_stocks_endpoint_prefers_live_numeric_board_code(tmp_path: Path) -> None:
+def test_sector_replica_board_stocks_endpoint_prefers_live_numeric_board_code(
+    tmp_path: Path,
+) -> None:
     client = _client(tmp_path)
     provider = FakeSectorReplicaLiveProvider()
     app.state.sector_replica_live_provider = provider
@@ -2722,8 +2956,7 @@ def test_sector_replica_board_stocks_endpoint_falls_back_when_live_provider_fail
     app.state.sector_now = datetime(2026, 7, 3, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
 
     response = client.get(
-        "/api/sectors/replica/boards/801159/stocks"
-        "?mode=strength&board_name=机器人&limit=10"
+        "/api/sectors/replica/boards/801159/stocks?mode=strength&board_name=机器人&limit=10"
     )
 
     assert response.status_code == 200
@@ -2744,8 +2977,7 @@ def test_sector_replica_board_stocks_endpoint_falls_back_when_live_rows_are_empt
     app.state.sector_now = datetime(2026, 7, 3, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
 
     response = client.get(
-        "/api/sectors/replica/boards/801159/stocks"
-        "?mode=strength&board_name=机器人&limit=10"
+        "/api/sectors/replica/boards/801159/stocks?mode=strength&board_name=机器人&limit=10"
     )
 
     assert response.status_code == 200
@@ -2754,12 +2986,16 @@ def test_sector_replica_board_stocks_endpoint_falls_back_when_live_rows_are_empt
     assert payload["source_status"][0]["status"] == "stale"
 
 
-def test_sector_workbench_endpoint_explicit_industry_scope_ignores_theme_snapshot_status(tmp_path: Path) -> None:
+def test_sector_workbench_endpoint_explicit_industry_scope_ignores_theme_snapshot_status(
+    tmp_path: Path,
+) -> None:
     client = _client(tmp_path)
     _seed_sector_theme_rows(tmp_path)
     app.state.sector_now = datetime(2026, 7, 3, 10, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
 
-    response = client.get("/api/sectors/workbench?mode=strength&scope=industry&limit=5&stock_limit=10")
+    response = client.get(
+        "/api/sectors/workbench?mode=strength&scope=industry&limit=5&stock_limit=10"
+    )
 
     assert response.status_code == 200
     payload = response.json()
@@ -2769,7 +3005,9 @@ def test_sector_workbench_endpoint_explicit_industry_scope_ignores_theme_snapsho
     assert all(item["source"] != "题材快照" for item in payload["source_status"])
 
 
-def test_sector_workbench_endpoint_falls_back_to_concept_tags_when_tdx_theme_rows_unavailable(tmp_path: Path) -> None:
+def test_sector_workbench_endpoint_falls_back_to_concept_tags_when_tdx_theme_rows_unavailable(
+    tmp_path: Path,
+) -> None:
     client = _client(tmp_path, concept_provider=FakeConceptTagProvider())
     _seed_sector_theme_rows(
         tmp_path,
@@ -2822,7 +3060,9 @@ def test_plate_rotation_reference_endpoint_returns_theme_system(tmp_path: Path) 
     assert provider.calls == [(2, "kaipan", 20)]
 
 
-def test_sector_workbench_endpoint_does_not_block_on_theme_refresh_when_snapshot_missing(tmp_path: Path) -> None:
+def test_sector_workbench_endpoint_does_not_block_on_theme_refresh_when_snapshot_missing(
+    tmp_path: Path,
+) -> None:
     candidate_provider = FailingIfCalledCandidateProvider()
     quote_provider = CountingIntradayQuoteProvider()
     client = _client(
@@ -2850,8 +3090,12 @@ def test_refresh_sector_theme_rows_persists_theme_snapshot(tmp_path: Path) -> No
     _client(tmp_path, concept_provider=FakeConceptTagProvider())
     app.state.tdx_provider = FakeTdxSectorRadarProvider()
 
-    rows, status = _refresh_sector_theme_rows(trade_date=datetime.now().astimezone().date().isoformat())
-    stored_rows, stored_status = app.state.sector_theme_rows_store.load(datetime.now().astimezone().date().isoformat())
+    rows, status = _refresh_sector_theme_rows(
+        trade_date=datetime.now().astimezone().date().isoformat()
+    )
+    stored_rows, stored_status = app.state.sector_theme_rows_store.load(
+        datetime.now().astimezone().date().isoformat()
+    )
 
     assert rows
     assert status is not None
@@ -2861,7 +3105,9 @@ def test_refresh_sector_theme_rows_persists_theme_snapshot(tmp_path: Path) -> No
     assert stored_status.source == "东财 slist 概念归属"
 
 
-def test_sector_workbench_endpoint_schedules_tickflow_intraday_history_when_missing(tmp_path: Path) -> None:
+def test_sector_workbench_endpoint_schedules_tickflow_intraday_history_when_missing(
+    tmp_path: Path,
+) -> None:
     client = _client(tmp_path, quote_provider=FakeLiveQuoteProvider())
     _seed_sector_theme_rows(tmp_path)
 
@@ -2875,7 +3121,9 @@ def test_sector_workbench_endpoint_schedules_tickflow_intraday_history_when_miss
     )
 
 
-def test_sector_workbench_endpoint_does_not_block_on_intraday_refresh_when_history_missing(tmp_path: Path) -> None:
+def test_sector_workbench_endpoint_does_not_block_on_intraday_refresh_when_history_missing(
+    tmp_path: Path,
+) -> None:
     quote_provider = CountingIntradayQuoteProvider()
     client = _client(tmp_path, quote_provider=quote_provider)
     _seed_sector_theme_rows(tmp_path)
@@ -2892,7 +3140,9 @@ def test_sector_workbench_endpoint_does_not_block_on_intraday_refresh_when_histo
     )
 
 
-def test_sector_workbench_endpoint_does_not_persist_after_hours_snapshot_samples(tmp_path: Path) -> None:
+def test_sector_workbench_endpoint_does_not_persist_after_hours_snapshot_samples(
+    tmp_path: Path,
+) -> None:
     client = _client(tmp_path, quote_provider=CountingIntradayQuoteProvider())
     _seed_sector_theme_rows(tmp_path)
     app.state.sector_intraday_async_refresh_disabled = True
@@ -2944,7 +3194,9 @@ def test_sector_workbench_endpoint_caches_tickflow_intraday_failure(tmp_path: Pa
     )
 
 
-def test_sector_workbench_status_endpoint_reports_local_cache_without_heavy_refresh(tmp_path: Path) -> None:
+def test_sector_workbench_status_endpoint_reports_local_cache_without_heavy_refresh(
+    tmp_path: Path,
+) -> None:
     quote_provider = CountingIntradayQuoteProvider()
     client = _client(tmp_path, quote_provider=quote_provider)
     _seed_sector_theme_rows(tmp_path)
@@ -2953,7 +3205,9 @@ def test_sector_workbench_status_endpoint_reports_local_cache_without_heavy_refr
 
     workbench = client.get("/api/sectors/workbench?mode=strength&scope=auto&limit=5&stock_limit=10")
     workbench_payload = workbench.json()
-    response = client.get(f"/api/sectors/workbench/status?trade_date={workbench_payload['trade_date']}")
+    response = client.get(
+        f"/api/sectors/workbench/status?trade_date={workbench_payload['trade_date']}"
+    )
 
     assert workbench.status_code == 200
     assert response.status_code == 200
@@ -2969,7 +3223,9 @@ def test_sector_workbench_status_endpoint_reports_local_cache_without_heavy_refr
     assert quote_provider.intraday_calls == 0
 
 
-def test_sector_workbench_endpoint_falls_back_to_sector_radar_when_rankings_fail(tmp_path: Path) -> None:
+def test_sector_workbench_endpoint_falls_back_to_sector_radar_when_rankings_fail(
+    tmp_path: Path,
+) -> None:
     client = _client(tmp_path, market_overview_provider=FailingMarketRankingsProvider())
 
     response = client.get("/api/sectors/workbench?mode=strength&scope=auto&limit=5")
@@ -3212,7 +3468,9 @@ def test_screen_run_scores_industry_strength_without_overriding_trend_risk(tmp_p
         kline_provider=IndustryClusterKlineProvider(),
     )
 
-    response = client.post("/api/screen/runs", json={"trade_date": "2026-06-11", "limit": 10, "scan_limit": 4})
+    response = client.post(
+        "/api/screen/runs", json={"trade_date": "2026-06-11", "limit": 10, "scan_limit": 4}
+    )
 
     assert response.status_code == 200
     payload = response.json()
@@ -3246,7 +3504,14 @@ def test_screen_run_accepts_gsgf_strategy_and_returns_metadata(tmp_path: Path) -
     assert "final_displayed_count" in payload["gsgf_funnel"]
     assert "gsgf_observation_items" in payload
     assert payload["items"][0]["gsgf"]["total_score"] >= 0
-    assert payload["items"][0]["gsgf"]["final_status"] in {"确认买点", "候选", "低吸观察", "观察", "减仓", "回避"}
+    assert payload["items"][0]["gsgf"]["final_status"] in {
+        "确认买点",
+        "候选",
+        "低吸观察",
+        "观察",
+        "减仓",
+        "回避",
+    }
     assert "setup_score" in payload["items"][0]["gsgf"]
     assert "confirm_score" in payload["items"][0]["gsgf"]
     assert "evidence_refs" in payload["items"][0]["gsgf"]
@@ -3266,7 +3531,14 @@ def test_gsgf_backtest_returns_bucketed_forward_stats(tmp_path: Path) -> None:
     assert payload["windows"] == [1, 3]
     assert payload["sample_count"] > 0
     assert payload["source_status"][0]["source"] == "股是股非回测"
-    assert payload["buckets"][0]["status"] in {"确认买点", "候选", "低吸观察", "观察", "减仓", "回避"}
+    assert payload["buckets"][0]["status"] in {
+        "确认买点",
+        "候选",
+        "低吸观察",
+        "观察",
+        "减仓",
+        "回避",
+    }
     assert payload["buckets"][0]["windows"][0]["window_days"] == 1
     assert payload["buckets"][0]["windows"][0]["sample_count"] > 0
     assert "avg_return_pct" in payload["buckets"][0]["windows"][0]
@@ -3335,7 +3607,9 @@ def test_gsgf_review_endpoints_persist_and_recheck_latest_screen_run(tmp_path: P
     snapshot_payload = snapshot_response.json()
     assert snapshot_payload["saved_count"] == 0
 
-    summary_response = client.post("/api/gsgf/review/recheck", json={"windows": [1, 3], "count": 90})
+    summary_response = client.post(
+        "/api/gsgf/review/recheck", json={"windows": [1, 3], "count": 90}
+    )
     assert summary_response.status_code == 200
     summary_payload = summary_response.json()
     assert summary_payload["record_count"] > 0
@@ -3354,7 +3628,9 @@ def test_screen_run_auto_saves_gsgf_review_snapshot(tmp_path: Path) -> None:
     )
 
     assert response.status_code == 200
-    records = (tmp_path / "gsgf_review" / "snapshots.jsonl").read_text(encoding="utf-8").splitlines()
+    records = (
+        (tmp_path / "gsgf_review" / "snapshots.jsonl").read_text(encoding="utf-8").splitlines()
+    )
     assert len(records) > 0
 
 
@@ -3481,9 +3757,13 @@ def test_latest_returns_404_before_first_run(tmp_path: Path) -> None:
     assert response.status_code == 404
 
 
-def test_intraday_snapshot_uses_latest_screen_run_symbols_without_empty_status(tmp_path: Path) -> None:
+def test_intraday_snapshot_uses_latest_screen_run_symbols_without_empty_status(
+    tmp_path: Path,
+) -> None:
     client = _client(tmp_path, quote_provider=FakeLiveQuoteProvider())
-    screen_response = client.post("/api/screen/runs", json={"trade_date": "2026-06-11", "limit": 10})
+    screen_response = client.post(
+        "/api/screen/runs", json={"trade_date": "2026-06-11", "limit": 10}
+    )
     assert screen_response.status_code == 200
 
     response = client.post("/api/intraday/snapshot", json={"limit": 10})

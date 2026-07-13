@@ -48,6 +48,7 @@ FROM python:3.12-slim AS runner
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     DEBIAN_FRONTEND=noninteractive \
+    STRONG_STOCK_CHANLUN_RC8_PYTHON=/opt/czsc-rc8-venv/bin/python \
     PATH=/opt/strong-stock-api-venv/bin:$PATH
 
 WORKDIR /app

@@ -33,6 +33,7 @@ from app.models import (
     ChanlunBackfillRequest,
     ChanlunPeriod,
     ChanlunWorkspaceResponse,
+    CzscResearchSnapshot,
     GsgfAnalysis,
     GsgfBacktestSummary,
     GsgfModelHealth,
@@ -104,6 +105,10 @@ from app.services.chanlun.alert_service import ChanlunAlertService
 from app.services.chanlun.alerts import ChanlunAlertStore
 from app.services.chanlun.paper import ChanlunPaperOrderStore
 from app.services.chanlun.paper_service import ChanlunPaperOrderService
+from app.services.chanlun.rc8_client import Rc8WorkerClient
+from app.services.chanlun.research_catalog import ResearchCatalog, load_research_catalog
+from app.services.chanlun.research_service import CzscResearchService
+from app.services.chanlun.research_store import ChanlunResearchStore
 from app.services.chanlun.service import ChanlunAnalysisService
 from app.services.chanlun.screening import CachedChanlunScreeningSummarizer
 from app.services.chanlun.store import ChanlunMinuteBarStore
@@ -140,7 +145,10 @@ from app.services.auction_review import (
 )
 from app.services.auction_review_store import AuctionReviewStore
 from app.services.auction_sampler import AuctionSnapshotSampler
-from app.services.sector_workbench_sampler import SectorWorkbenchSampler, is_sector_workbench_sample_window
+from app.services.sector_workbench_sampler import (
+    SectorWorkbenchSampler,
+    is_sector_workbench_sample_window,
+)
 from app.services.auction_snapshot_store import AuctionSnapshotStore
 from app.services.market_emotion_history import MarketEmotionHistoryStore
 from app.services.model_maintenance_packet import build_model_maintenance_packet
@@ -291,6 +299,7 @@ async def lifespan(_app: FastAPI):
     try:
         yield
     finally:
+        shutdown_chanlun_research()
         shutdown_sector_workbench_sampler()
         shutdown_auction_sampler()
         shutdown_gsgf_auto_review()
@@ -325,11 +334,15 @@ SECTOR_RADAR_CACHE: TtlCache[SectorRadarResponse] = TtlCache(ttl_seconds=45, nam
 PLATE_ROTATION_REFERENCE_CACHE: TtlCache[PlateRotationReferenceResponse] = TtlCache(
     ttl_seconds=120, name="plate_rotation_reference"
 )
-SECTOR_INTRADAY_CACHE: TtlCache[tuple[list[SectorWorkbenchSeries], StrongStockSourceStatus]] = TtlCache(
-    ttl_seconds=90,
-    name="sector_intraday",
+SECTOR_INTRADAY_CACHE: TtlCache[tuple[list[SectorWorkbenchSeries], StrongStockSourceStatus]] = (
+    TtlCache(
+        ttl_seconds=90,
+        name="sector_intraday",
+    )
 )
-SECTOR_THEME_ROWS_CACHE: TtlCache[tuple[list[dict[str, object]], StrongStockSourceStatus | None]] = TtlCache(
+SECTOR_THEME_ROWS_CACHE: TtlCache[
+    tuple[list[dict[str, object]], StrongStockSourceStatus | None]
+] = TtlCache(
     ttl_seconds=300,
     name="sector_theme_rows",
 )
@@ -413,9 +426,58 @@ def shutdown_gsgf_auto_review() -> None:
         service.stop()
 
 
+def shutdown_chanlun_research() -> None:
+    client = getattr(app.state, "chanlun_rc8_client", None)
+    if client is not None:
+        try:
+            client.close()
+        except Exception:
+            pass
+    for attribute in ("chanlun_research_service", "chanlun_rc8_client"):
+        if hasattr(app.state, attribute):
+            delattr(app.state, attribute)
+
+
+def _chanlun_research_health() -> dict[str, object]:
+    try:
+        payload = dict(_chanlun_research_service().health())
+    except Exception as exc:
+        payload = {
+            "status": "unavailable",
+            "queue_depth": 0,
+            "circuit_state": "unavailable",
+            "engine_version": None,
+            "inflight_count": 0,
+            "error": _sanitized_health_error(exc),
+        }
+    if payload.get("status") not in {"ready", "unavailable", "disabled"}:
+        payload["status"] = "unavailable"
+    payload.setdefault("queue_depth", 0)
+    payload.setdefault("circuit_state", "unknown")
+    payload.setdefault("engine_version", None)
+    payload.setdefault("inflight_count", 0)
+    if payload.get("error") is not None:
+        payload["error"] = _sanitized_health_error(payload["error"])
+    else:
+        payload["error"] = None
+    return payload
+
+
+def _sanitized_health_error(error: object) -> str:
+    if isinstance(error, BaseException):
+        return error.__class__.__name__
+    message = str(error).splitlines()[0].strip()
+    if "Traceback" in message or "/" in message or "\\" in message:
+        return "worker unavailable"
+    return message[:160] if message else "unavailable"
+
+
 @app.get("/health")
-def health() -> dict[str, str]:
-    return {"status": "ok"}
+def health() -> dict[str, object]:
+    return {
+        "status": "ok",
+        "chanlun_research": _chanlun_research_health(),
+    }
 
 
 @app.get("/api/system/cache", response_model=SystemCacheSummary)
@@ -460,10 +522,14 @@ def data_source_status() -> dict[str, object]:
     kline_provider = _kline_provider()
     quote_provider = _quote_provider()
     news_risk_provider = _news_risk_provider()
-    candidate_status = candidate_provider.status() if hasattr(candidate_provider, "status") else None
+    candidate_status = (
+        candidate_provider.status() if hasattr(candidate_provider, "status") else None
+    )
     kline_status = kline_provider.status() if hasattr(kline_provider, "status") else None
     quote_status = quote_provider.status() if hasattr(quote_provider, "status") else None
-    news_risk_status = news_risk_provider.status() if hasattr(news_risk_provider, "status") else None
+    news_risk_status = (
+        news_risk_provider.status() if hasattr(news_risk_provider, "status") else None
+    )
     return {
         "items": [
             (
@@ -577,9 +643,13 @@ def settings_health(symbol: str = "605289.SH") -> dict[str, object]:
         "probes": [
             _probe(
                 getattr(_candidate_provider(), "source_name", "候选池"),
-                lambda: _candidate_provider().status()
-                if hasattr(_candidate_provider(), "status")
-                else StrongStockSourceStatus(source="候选池", status="success", detail="候选池源已配置"),
+                lambda: (
+                    _candidate_provider().status()
+                    if hasattr(_candidate_provider(), "status")
+                    else StrongStockSourceStatus(
+                        source="候选池", status="success", detail="候选池源已配置"
+                    )
+                ),
             ).model_dump(mode="json"),
             _probe(
                 getattr(_kline_provider(), "source_name", "K线"),
@@ -627,7 +697,9 @@ def create_screen_run_job(request: ScreenRunRequest) -> dict[str, object]:
     job_request = request.model_copy(deep=True)
     job = store.create_transient_job(
         "screen_run",
-        lambda progress, should_cancel: _execute_screen_run_job(job_request, progress, should_cancel),
+        lambda progress, should_cancel: _execute_screen_run_job(
+            job_request, progress, should_cancel
+        ),
         running_message="选股任务运行中",
         success_message="选股任务完成",
         progress_total=4,
@@ -687,7 +759,9 @@ def _execute_screen_run(
         progress(3, 4, "保存筛选记录")
     _run_store().save(result)
     auto_review_config = load_runtime_settings(_runtime_config_path()).gsgf_auto_review
-    if auto_review_config.auto_snapshot_enabled and any(item.gsgf is not None for item in result.items):
+    if auto_review_config.auto_snapshot_enabled and any(
+        item.gsgf is not None for item in result.items
+    ):
         _gsgf_review_store().persist_snapshot(result, dedupe=True)
     if progress is not None:
         progress(4, 4, "筛选完成")
@@ -802,7 +876,9 @@ def create_gsgf_review_snapshot_from_latest() -> dict[str, object]:
     result = _run_store().load_latest()
     if result is None:
         raise HTTPException(status_code=404, detail="no screen run")
-    snapshot: GsgfReviewSnapshotResponse = _gsgf_review_store().persist_snapshot(result, dedupe=True)
+    snapshot: GsgfReviewSnapshotResponse = _gsgf_review_store().persist_snapshot(
+        result, dedupe=True
+    )
     return snapshot.model_dump(mode="json")
 
 
@@ -884,7 +960,9 @@ def analyze_model_maintenance(request: Request) -> ModelMaintenanceReport:
     store = _model_maintenance_store()
     packet = store.load_latest_packet()
     if packet is None:
-        packet = _build_and_save_model_maintenance_packet(packet_base_url=_request_base_url(request))
+        packet = _build_and_save_model_maintenance_packet(
+            packet_base_url=_request_base_url(request)
+        )
     return store.save_report(
         analyze_model_maintenance_packet(
             packet,
@@ -904,7 +982,10 @@ def list_model_maintenance_reports(limit: int = 20) -> list[ModelMaintenanceRepo
     return _model_maintenance_store().list_reports(limit)
 
 
-@app.post("/api/model-maintenance/suggestions/{suggestion_id}/accept", response_model=ModelMaintenanceSuggestion)
+@app.post(
+    "/api/model-maintenance/suggestions/{suggestion_id}/accept",
+    response_model=ModelMaintenanceSuggestion,
+)
 def accept_model_maintenance_suggestion(suggestion_id: str) -> ModelMaintenanceSuggestion:
     try:
         return _model_maintenance_store().update_suggestion_status(suggestion_id, "accepted")
@@ -912,7 +993,10 @@ def accept_model_maintenance_suggestion(suggestion_id: str) -> ModelMaintenanceS
         raise HTTPException(status_code=404, detail="建议不存在") from exc
 
 
-@app.post("/api/model-maintenance/suggestions/{suggestion_id}/ignore", response_model=ModelMaintenanceSuggestion)
+@app.post(
+    "/api/model-maintenance/suggestions/{suggestion_id}/ignore",
+    response_model=ModelMaintenanceSuggestion,
+)
 def ignore_model_maintenance_suggestion(suggestion_id: str) -> ModelMaintenanceSuggestion:
     try:
         return _model_maintenance_store().update_suggestion_status(suggestion_id, "ignored")
@@ -920,7 +1004,10 @@ def ignore_model_maintenance_suggestion(suggestion_id: str) -> ModelMaintenanceS
         raise HTTPException(status_code=404, detail="建议不存在") from exc
 
 
-@app.post("/api/model-maintenance/suggestions/{suggestion_id}/snooze", response_model=ModelMaintenanceSuggestion)
+@app.post(
+    "/api/model-maintenance/suggestions/{suggestion_id}/snooze",
+    response_model=ModelMaintenanceSuggestion,
+)
 def snooze_model_maintenance_suggestion(suggestion_id: str) -> ModelMaintenanceSuggestion:
     try:
         return _model_maintenance_store().update_suggestion_status(suggestion_id, "snoozed")
@@ -980,8 +1067,12 @@ def generate_auction_top3_training_samples(trade_date: str | None = None) -> dic
     return {"saved_count": len(saved), "performance": performance.model_dump(mode="json")}
 
 
-@app.post("/api/model-maintenance/auction-top3/manual-trades", response_model=AuctionTop3ManualTradeSample)
-def save_auction_top3_manual_trade(sample: AuctionTop3ManualTradeSample) -> AuctionTop3ManualTradeSample:
+@app.post(
+    "/api/model-maintenance/auction-top3/manual-trades", response_model=AuctionTop3ManualTradeSample
+)
+def save_auction_top3_manual_trade(
+    sample: AuctionTop3ManualTradeSample,
+) -> AuctionTop3ManualTradeSample:
     return _auction_top3_training_store().upsert_manual_trade(sample)
 
 
@@ -1012,7 +1103,9 @@ def get_market_rankings(limit: int = 50) -> dict[str, object]:
     except StrongStockDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"全A实时排行榜获取失败: {exc.__class__.__name__}") from exc
+        raise HTTPException(
+            status_code=503, detail=f"全A实时排行榜获取失败: {exc.__class__.__name__}"
+        ) from exc
     return result.model_dump(mode="json")
 
 
@@ -1171,11 +1264,17 @@ def _run_auction_model_top3_generation_job(
 def get_auction_snapshot(limit: int = 100, refresh: bool = False) -> dict[str, object]:
     bounded_limit = max(1, min(limit, 100))
     try:
-        result = _refresh_auction_snapshot(bounded_limit) if refresh else _cached_auction_snapshot(bounded_limit)
+        result = (
+            _refresh_auction_snapshot(bounded_limit)
+            if refresh
+            else _cached_auction_snapshot(bounded_limit)
+        )
     except StrongStockDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"竞价雷达获取失败: {exc.__class__.__name__}") from exc
+        raise HTTPException(
+            status_code=503, detail=f"竞价雷达获取失败: {exc.__class__.__name__}"
+        ) from exc
     return result.model_dump(mode="json")
 
 
@@ -1230,7 +1329,9 @@ def finalize_auction_review(trade_date: str) -> dict[str, object]:
     store = _auction_review_store()
     records = store.load_records(trade_date)
     latest_snapshot = _auction_snapshot_store().latest(max_age_seconds=24 * 3600, limit=100)
-    can_seed_from_latest = latest_snapshot.snapshot_status != "missing" and latest_snapshot.trade_date == trade_date
+    can_seed_from_latest = (
+        latest_snapshot.snapshot_status != "missing" and latest_snapshot.trade_date == trade_date
+    )
     should_seed_manual = not records or (
         can_seed_from_latest
         and all(record.selected_at_label == "manual" for record in records)
@@ -1360,7 +1461,9 @@ def get_sector_workbench(
             limit=bounded_limit,
             stock_limit=bounded_stock_limit,
             sampled_at=sampled_at,
-            theme_source=theme_status.source if theme_status is not None else "通达信MCP涨停概念映射",
+            theme_source=theme_status.source
+            if theme_status is not None
+            else "通达信MCP涨停概念映射",
         )
         if theme_status is not None and result.scope == "industry" and scope != "industry":
             result.source_status.insert(0, theme_status)
@@ -1384,8 +1487,7 @@ def get_sector_workbench(
     )
     is_trading_sample_time = is_sector_workbench_sample_window(sampled_at)
     theme_snapshot_pending = any(
-        item.source == "题材快照" and item.status == "stale"
-        for item in result.source_status
+        item.source == "题材快照" and item.status == "stale" for item in result.source_status
     )
     if intraday_history:
         result.series = intraday_history
@@ -1520,7 +1622,10 @@ def get_sector_replica_radar(
     return fallback_response
 
 
-@app.get("/api/sectors/replica/boards/{board_code:path}/stocks", response_model=SectorReplicaStocksResponse)
+@app.get(
+    "/api/sectors/replica/boards/{board_code:path}/stocks",
+    response_model=SectorReplicaStocksResponse,
+)
 def get_sector_replica_board_stocks(
     board_code: str,
     mode: SectorReplicaMode = "strength",
@@ -1811,7 +1916,9 @@ def get_short_term_sentiment_detail(
     if not refresh:
         raise HTTPException(status_code=404, detail="no sentiment snapshot")
     try:
-        sentiment, market_emotion = _build_and_persist_sentiment_snapshots(trade_date, bounded_limit)
+        sentiment, market_emotion = _build_and_persist_sentiment_snapshots(
+            trade_date, bounded_limit
+        )
     except StrongStockDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     return SentimentDetailResponse(
@@ -1922,7 +2029,9 @@ def get_stock_kline(symbol: str, count: int = 220) -> dict[str, object]:
     except StrongStockDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"K线获取失败: {exc.__class__.__name__}") from exc
+        raise HTTPException(
+            status_code=503, detail=f"K线获取失败: {exc.__class__.__name__}"
+        ) from exc
     return result.model_dump(mode="json")
 
 
@@ -1934,7 +2043,9 @@ def get_stock_quote(symbol: str) -> dict[str, object]:
     except StrongStockDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"实时行情获取失败: {exc.__class__.__name__}") from exc
+        raise HTTPException(
+            status_code=503, detail=f"实时行情获取失败: {exc.__class__.__name__}"
+        ) from exc
     if not quotes:
         raise HTTPException(status_code=503, detail="实时行情未返回数据")
     quote = quotes[0]
@@ -1943,7 +2054,11 @@ def get_stock_quote(symbol: str) -> dict[str, object]:
     source_status = (
         quote_provider.status()
         if hasattr(quote_provider, "status")
-        else StrongStockSourceStatus(source=getattr(quote_provider, "source_name", "实时行情"), status="success", detail="实时行情源已配置")
+        else StrongStockSourceStatus(
+            source=getattr(quote_provider, "source_name", "实时行情"),
+            status="success",
+            detail="实时行情源已配置",
+        )
     )
     return StockQuoteResponse(
         symbol=quote.symbol,
@@ -2001,6 +2116,19 @@ def get_chanlun_workspace(symbol: str, lookback: int = 220) -> ChanlunWorkspaceR
         return _chanlun_analysis_service().workspace(symbol, lookback=lookback)
     except StrongStockDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get(
+    "/api/chanlun/stocks/{symbol}/research-signals",
+    response_model=CzscResearchSnapshot,
+)
+def get_chanlun_research_signals(
+    symbol: str,
+    lookback: int = 220,
+) -> CzscResearchSnapshot:
+    _validate_chanlun_lookback("1d", lookback)
+    normalized_symbol = normalize_chanlun_symbol(symbol) or symbol.strip().upper()
+    return _chanlun_research_service().get(normalized_symbol, lookback)
 
 
 @app.get("/api/chanlun/stocks/{symbol}/replays")
@@ -2091,7 +2219,9 @@ def fill_chanlun_paper_order(order_id: str) -> ChanlunPaperOrder:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"更新模拟成交失败: {exc.__class__.__name__}") from exc
+        raise HTTPException(
+            status_code=503, detail=f"更新模拟成交失败: {exc.__class__.__name__}"
+        ) from exc
 
 
 @app.post("/api/chanlun/paper-orders/{order_id}/cancel")
@@ -2192,7 +2322,9 @@ def create_intraday_snapshot(request: IntradaySnapshotRequest) -> dict[str, obje
             industry_map=industry_map,
             group_map=group_map,
             tag_map=tag_map,
-            gsgf_context={symbol.strip().upper(): value for symbol, value in request.gsgf_context.items()},
+            gsgf_context={
+                symbol.strip().upper(): value for symbol, value in request.gsgf_context.items()
+            },
             limit=request.limit,
             period=request.period,
             count=request.count,
@@ -2281,7 +2413,9 @@ def _cached_short_term_sentiment(trade_date: str, limit: int) -> ShortTermSentim
 def _cached_market_overview() -> MarketOverviewResponse:
     provider = _market_overview_provider()
     cache_key = f"market-overview:{_provider_cache_key(provider)}"
-    return MARKET_OVERVIEW_CACHE.get_or_refresh(cache_key, provider.get_overview).model_copy(deep=True)
+    return MARKET_OVERVIEW_CACHE.get_or_refresh(cache_key, provider.get_overview).model_copy(
+        deep=True
+    )
 
 
 def _cached_market_rankings(limit: int) -> MarketRankingsResponse:
@@ -2376,12 +2510,10 @@ def _refresh_auction_snapshot(limit: int) -> AuctionSnapshotResponse:
     return _backfill_auction_snapshot_industries(saved)
 
 
-def _backfill_auction_snapshot_industries(snapshot: AuctionSnapshotResponse) -> AuctionSnapshotResponse:
-    missing_symbols = [
-        item.symbol
-        for item in snapshot.items
-        if item.symbol and not item.industry
-    ]
+def _backfill_auction_snapshot_industries(
+    snapshot: AuctionSnapshotResponse,
+) -> AuctionSnapshotResponse:
+    missing_symbols = [item.symbol for item in snapshot.items if item.symbol and not item.industry]
     if not missing_symbols:
         return snapshot
     provider = _market_overview_provider()
@@ -2401,7 +2533,9 @@ def _backfill_auction_snapshot_industries(snapshot: AuctionSnapshotResponse) -> 
         else item
         for item in snapshot.items
     ]
-    patched = sum(1 for before, after in zip(snapshot.items, items) if not before.industry and after.industry)
+    patched = sum(
+        1 for before, after in zip(snapshot.items, items) if not before.industry and after.industry
+    )
     if not patched:
         return snapshot
     return snapshot.model_copy(
@@ -2420,9 +2554,13 @@ def _backfill_auction_snapshot_industries(snapshot: AuctionSnapshotResponse) -> 
     )
 
 
-def _auction_hot_theme_refs() -> tuple[list[tuple[str, int, float]], StrongStockSourceStatus | None]:
+def _auction_hot_theme_refs() -> tuple[
+    list[tuple[str, int, float]], StrongStockSourceStatus | None
+]:
     try:
-        reference = _plate_rotation_reference_provider().get_today_themes(limit=10, source="kaipan", days=20)
+        reference = _plate_rotation_reference_provider().get_today_themes(
+            limit=10, source="kaipan", days=20
+        )
     except Exception as exc:
         return [], StrongStockSourceStatus(
             source="短线题材联动",
@@ -2542,7 +2680,11 @@ def _cached_sector_intraday_series(
                 count=260,
             )
         except Exception as exc:
-            reason = f"{exc.__class__.__name__}: {str(exc).strip()}" if str(exc).strip() else exc.__class__.__name__
+            reason = (
+                f"{exc.__class__.__name__}: {str(exc).strip()}"
+                if str(exc).strip()
+                else exc.__class__.__name__
+            )
             return [], StrongStockSourceStatus(
                 source="TickFlow 当日分钟线",
                 status="failed",
@@ -2553,8 +2695,12 @@ def _cached_sector_intraday_series(
     return [item.model_copy(deep=True) for item in series], status.model_copy(deep=True)
 
 
-def _cached_sector_intraday_status(result: SectorWorkbenchResponse) -> StrongStockSourceStatus | None:
-    cached = SECTOR_INTRADAY_CACHE.get_if_fresh(_sector_intraday_cache_key(result, _quote_provider()))
+def _cached_sector_intraday_status(
+    result: SectorWorkbenchResponse,
+) -> StrongStockSourceStatus | None:
+    cached = SECTOR_INTRADAY_CACHE.get_if_fresh(
+        _sector_intraday_cache_key(result, _quote_provider())
+    )
     if cached is None:
         return None
     _series, status = cached
@@ -2657,11 +2803,16 @@ def _tickflow_sector_radar(provider: object, limit: int) -> SectorRadarResponse:
             members,
             key=lambda item: (item.pct_change or -999, item.turnover_cny or 0, item.symbol),
         )
-        avg_change = (
-            sum(item.pct_change or 0 for item in members if item.pct_change is not None)
-            / max(1, sum(1 for item in members if item.pct_change is not None))
+        avg_change = sum(
+            item.pct_change or 0 for item in members if item.pct_change is not None
+        ) / max(1, sum(1 for item in members if item.pct_change is not None))
+        strength_score = round(
+            avg_change * 10
+            + advance_count * 3
+            - decline_count * 2
+            + min(turnover_cny / 1_000_000_000, 20),
+            2,
         )
-        strength_score = round(avg_change * 10 + advance_count * 3 - decline_count * 2 + min(turnover_cny / 1_000_000_000, 20), 2)
         sector_items.append(
             SectorRadarItem(
                 name=industry,
@@ -2749,7 +2900,9 @@ def _cached_stock_research(symbol: str) -> StockResearchResponse:
     return STOCK_RESEARCH_CACHE.get_or_set(cache_key, build).model_copy(deep=True)
 
 
-def _quote_valuation_for_symbol(symbol: str) -> tuple[object | None, StrongStockSourceStatus | None]:
+def _quote_valuation_for_symbol(
+    symbol: str,
+) -> tuple[object | None, StrongStockSourceStatus | None]:
     valuation_provider = _valuation_quote_provider()
     source_name = getattr(valuation_provider, "source_name", "估值行情")
     try:
@@ -2764,16 +2917,21 @@ def _quote_valuation_for_symbol(symbol: str) -> tuple[object | None, StrongStock
         )
     matched = next((quote for quote in quotes if getattr(quote, "symbol", "") == symbol), None)
     if matched is None:
-        return None, StrongStockSourceStatus(source=source_name, status="failed", detail="估值行情未返回当前股票")
+        return None, StrongStockSourceStatus(
+            source=source_name, status="failed", detail="估值行情未返回当前股票"
+        )
     status = (
         valuation_provider.status()
         if hasattr(valuation_provider, "status")
-        else StrongStockSourceStatus(source=source_name, status="success", detail="估值行情源已配置")
+        else StrongStockSourceStatus(
+            source=source_name, status="success", detail="估值行情源已配置"
+        )
     )
     return matched, status
 
 
 def _clear_data_source_caches() -> None:
+    shutdown_chanlun_research()
     CACHE_REGISTRY.clear()
     if hasattr(app.state, "chanlun_analysis_service"):
         delattr(app.state, "chanlun_analysis_service")
@@ -2787,7 +2945,9 @@ def _system_jobs() -> list[dict[str, object]]:
     sentiment_monitor = getattr(app.state, "sentiment_monitor", None)
     gsgf_service = getattr(app.state, "gsgf_auto_review_service", None)
     runtime = load_runtime_settings(_runtime_config_path())
-    auction_running, auction_detail = _auction_sampler_running_status(auction_sampler, "竞价时段采样器")
+    auction_running, auction_detail = _auction_sampler_running_status(
+        auction_sampler, "竞价时段采样器"
+    )
     sector_running, sector_detail = _attribute_running_status(
         sector_sampler,
         "running",
@@ -3134,6 +3294,60 @@ def _chanlun_analysis_service() -> ChanlunAnalysisService:
     return service
 
 
+def _chanlun_research_catalog() -> ResearchCatalog:
+    injected = getattr(app.state, "chanlun_research_catalog", None)
+    if injected is not None:
+        return injected
+    catalog = load_research_catalog()
+    app.state.chanlun_research_catalog = catalog
+    return catalog
+
+
+def _chanlun_rc8_client() -> Rc8WorkerClient | None:
+    if hasattr(app.state, "chanlun_rc8_client"):
+        return app.state.chanlun_rc8_client
+    settings = get_settings()
+    if not settings.chanlun_rc8_enabled:
+        app.state.chanlun_rc8_client = None
+        return None
+    python_path = Path(settings.chanlun_rc8_python)
+    worker_path = Path(__file__).resolve().parent / "services" / "chanlun" / "rc8_worker.py"
+    if not python_path.is_file() or not worker_path.is_file():
+        app.state.chanlun_rc8_client = None
+        return None
+    client = Rc8WorkerClient(
+        python_path=python_path,
+        worker_path=worker_path,
+        hard_timeout_seconds=settings.chanlun_rc8_hard_timeout_seconds,
+    )
+    app.state.chanlun_rc8_client = client
+    return client
+
+
+def _chanlun_research_store() -> ChanlunResearchStore:
+    injected = getattr(app.state, "chanlun_research_store", None)
+    if injected is not None:
+        return injected
+    store = ChanlunResearchStore(get_settings().data_dir / "chanlun" / "research.sqlite3")
+    app.state.chanlun_research_store = store
+    return store
+
+
+def _chanlun_research_service() -> CzscResearchService:
+    injected = getattr(app.state, "chanlun_research_service", None)
+    if injected is not None:
+        return injected
+    service = CzscResearchService(
+        store=_chanlun_research_store(),
+        client=_chanlun_rc8_client(),
+        input_provider=_chanlun_analysis_service(),
+        catalog=_chanlun_research_catalog(),
+        settings=get_settings(),
+    )
+    app.state.chanlun_research_service = service
+    return service
+
+
 def _chanlun_screening_summarizer() -> CachedChanlunScreeningSummarizer | None:
     if hasattr(app.state, "chanlun_screening_summarizer"):
         return app.state.chanlun_screening_summarizer
@@ -3195,7 +3409,7 @@ def _chanlun_symbol_search_service() -> ChanlunSymbolSearchService:
     if injected is not None:
         return injected
     service = ChanlunSymbolSearchService(
-        watchlist_loader=lambda: (_watchlist_snapshot().items if _watchlist_snapshot() else []),
+        watchlist_loader=lambda: _watchlist_snapshot().items if _watchlist_snapshot() else [],
         latest_screen_loader=lambda: (
             _run_store().load_latest().items if _run_store().load_latest() is not None else []
         ),
@@ -3217,9 +3431,17 @@ def _parse_chanlun_backtest_horizons(value: str) -> list[int]:
     try:
         horizons = [int(item.strip()) for item in value.split(",") if item.strip()]
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail="horizons must be comma-separated integers") from exc
-    if not horizons or len(horizons) > 8 or any(horizon < 1 or horizon > 60 for horizon in horizons):
-        raise HTTPException(status_code=422, detail="horizons must contain up to 8 integers from 1 to 60")
+        raise HTTPException(
+            status_code=422, detail="horizons must be comma-separated integers"
+        ) from exc
+    if (
+        not horizons
+        or len(horizons) > 8
+        or any(horizon < 1 or horizon > 60 for horizon in horizons)
+    ):
+        raise HTTPException(
+            status_code=422, detail="horizons must contain up to 8 integers from 1 to 60"
+        )
     return horizons
 
 
@@ -3330,7 +3552,9 @@ def _sector_theme_rows_store() -> SectorThemeRowsStore:
         getattr(
             app.state,
             "sector_theme_rows_dir",
-            Path(getattr(app.state, "runs_dir", get_settings().data_dir)) / "sectors" / "theme-rows",
+            Path(getattr(app.state, "runs_dir", get_settings().data_dir))
+            / "sectors"
+            / "theme-rows",
         )
     )
     store = SectorThemeRowsStore(data_dir)
@@ -3376,7 +3600,9 @@ def _schedule_sector_theme_rows_refresh(trade_date: str) -> None:
     Thread(target=run, name=f"sector-theme-rows-refresh-{trade_date}", daemon=True).start()
 
 
-def _refresh_sector_theme_rows(trade_date: str | None = None) -> tuple[list[dict[str, object]], StrongStockSourceStatus | None]:
+def _refresh_sector_theme_rows(
+    trade_date: str | None = None,
+) -> tuple[list[dict[str, object]], StrongStockSourceStatus | None]:
     current_trade_date = trade_date or datetime.now().astimezone().date().isoformat()
     candidate_provider = _candidate_provider()
     concept_provider = _concept_provider()
@@ -3485,7 +3711,9 @@ def _auction_review_summary(records: list, *, trade_date: str | None) -> Auction
         record_count=len(records),
         pending_count=sum(1 for record in records if record.review_status == "pending"),
         completed_count=sum(1 for record in records if record.review_status == "next_day_done"),
-        data_incomplete_count=sum(1 for record in records if record.review_status == "data_incomplete"),
+        data_incomplete_count=sum(
+            1 for record in records if record.review_status == "data_incomplete"
+        ),
         records=records,
         buckets=build_auction_rule_buckets(records),
     )
@@ -3495,7 +3723,9 @@ def _fill_auction_review_close_from_quotes(
     records: list[AuctionReviewRecord],
     trade_date: str,
 ) -> list[AuctionReviewRecord]:
-    missing_symbols = sorted({record.symbol for record in records if record.day_result.close_pct is None})
+    missing_symbols = sorted(
+        {record.symbol for record in records if record.day_result.close_pct is None}
+    )
     if not missing_symbols:
         return records
     provider = _quote_provider()
@@ -3515,7 +3745,9 @@ def _fill_auction_review_close_from_quotes(
     if not quotes_by_symbol:
         return records
     return [
-        _fill_auction_review_record_close_from_quote(record, quotes_by_symbol.get(record.symbol), trade_date)
+        _fill_auction_review_record_close_from_quote(
+            record, quotes_by_symbol.get(record.symbol), trade_date
+        )
         for record in records
     ]
 
@@ -3548,9 +3780,13 @@ def _fill_auction_review_record_close_from_quote(
     return updated.model_copy(update={"score": score_auction_record(updated)})
 
 
-def _auction_review_quote_day_outcome(quote: object, trade_date: str) -> AuctionReviewOutcome | None:
+def _auction_review_quote_day_outcome(
+    quote: object, trade_date: str
+) -> AuctionReviewOutcome | None:
     close_pct = getattr(quote, "pct_change", None)
-    if close_pct is None or not _quote_time_matches_trade_date(getattr(quote, "quote_time", None), trade_date):
+    if close_pct is None or not _quote_time_matches_trade_date(
+        getattr(quote, "quote_time", None), trade_date
+    ):
         return None
     close_pct = round(float(close_pct), 2)
     prev_close = getattr(quote, "prev_close", None)
@@ -3582,13 +3818,18 @@ def _quote_time_matches_trade_date(quote_time: str | None, trade_date: str) -> b
         try:
             timestamp = int(value)
             seconds = timestamp / 1000 if timestamp > 10_000_000_000 else timestamp
-            return datetime.fromtimestamp(seconds, ZoneInfo("Asia/Shanghai")).date().isoformat() == trade_date
+            return (
+                datetime.fromtimestamp(seconds, ZoneInfo("Asia/Shanghai")).date().isoformat()
+                == trade_date
+            )
         except (OverflowError, OSError, ValueError):
             return False
     return False
 
 
-def _mark_auction_review_kline_unavailable(record: AuctionReviewRecord, detail: str) -> AuctionReviewRecord:
+def _mark_auction_review_kline_unavailable(
+    record: AuctionReviewRecord, detail: str
+) -> AuctionReviewRecord:
     unavailable = AuctionReviewOutcome(status="data_incomplete")
     return record.model_copy(
         deep=True,
@@ -3611,7 +3852,9 @@ def _mark_auction_review_kline_unavailable(record: AuctionReviewRecord, detail: 
 
 def _auction_review_selected_at(trade_date: str) -> datetime:
     current = _auction_now()
-    return datetime.fromisoformat(f"{trade_date}T{current.hour:02d}:{current.minute:02d}:{current.second:02d}+08:00")
+    return datetime.fromisoformat(
+        f"{trade_date}T{current.hour:02d}:{current.minute:02d}:{current.second:02d}+08:00"
+    )
 
 
 def _watchlist_snapshot() -> WatchlistSnapshot | None:
@@ -3788,12 +4031,16 @@ def _start_gsgf_weekly_calibration(
             should_cancel=should_cancel,
         ),
         on_success=(
-            lambda result: _send_sentiment_monitor_notification(
-                "GSGF 每周真实样本校准完成",
-                build_gsgf_model_health(_gsgf_review_store().load_latest_summary(), result).summary_text,
+            lambda result: (
+                _send_sentiment_monitor_notification(
+                    "GSGF 每周真实样本校准完成",
+                    build_gsgf_model_health(
+                        _gsgf_review_store().load_latest_summary(), result
+                    ).summary_text,
+                )
+                if config.notify_on_success
+                else None
             )
-            if config.notify_on_success
-            else None
         ),
     )
 
@@ -3817,7 +4064,7 @@ def _recent_screen_trade_dates(count: int) -> list[str]:
         if trade_date not in seen:
             seen.add(trade_date)
             deduped.append(trade_date)
-    return deduped[-max(1, count):]
+    return deduped[-max(1, count) :]
 
 
 def _gsgf_model_health() -> GsgfModelHealth:
@@ -3854,7 +4101,8 @@ def _save_sentiment_monitor_config(config: SentimentMonitorConfig) -> None:
             ifind_base_url=current.ifind_base_url or effective.ifind_base_url,
             ifind_service_id=current.ifind_service_id or effective.ifind_service_id,
             tdx_base_url=current.tdx_base_url or effective.tdx_base_url,
-            provider_timeout_seconds=current.provider_timeout_seconds or effective.provider_timeout_seconds,
+            provider_timeout_seconds=current.provider_timeout_seconds
+            or effective.provider_timeout_seconds,
             notification_channels=current.notification_channels,
             sentiment_monitor=config,
         ),
@@ -3877,7 +4125,11 @@ def _effective_settings():
 
 
 def _estimated_sector_radar(overview: MarketOverviewResponse, limit: int) -> SectorRadarResponse:
-    items = [_estimated_sector_radar_item(sector) for sector in overview.sectors if sector.turnover_cny is not None]
+    items = [
+        _estimated_sector_radar_item(sector)
+        for sector in overview.sectors
+        if sector.turnover_cny is not None
+    ]
     inflow = sorted(
         [item for item in items if item.net_flow_cny is not None and item.net_flow_cny > 0],
         key=lambda item: item.net_flow_cny or 0,

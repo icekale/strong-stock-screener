@@ -86,6 +86,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PORT=3110 \
     HOSTNAME=0.0.0.0 \
     STRONG_STOCK_DATA_DIR=/app/data \
+    STRONG_STOCK_CHANLUN_RC8_PYTHON=/opt/czsc-rc8-venv/bin/python \
     TZ=Asia/Shanghai
 
 WORKDIR /app

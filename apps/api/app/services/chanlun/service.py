@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from statistics import mean, median
 from typing import Literal
@@ -9,6 +10,7 @@ from zoneinfo import ZoneInfo
 from app.config import get_settings
 from app.models import (
     ChanlunAnalysisResponse,
+    ChanlunAvailability,
     ChanlunBacktestBucket,
     ChanlunBacktestResponse,
     ChanlunBacktestWindowStat,
@@ -36,6 +38,32 @@ _RAW_ADJUSTMENT = "raw_unadjusted"
 _INTRADAY_PERIOD_MINUTES = {"5m": 5, "30m": 30, "60m": 60}
 _DEFAULT_BACKTEST_HORIZONS = [1, 3, 5, 10]
 _BUY_SIGNAL_TYPES = {"one_buy", "two_buy", "three_buy"}
+_WORKSPACE_PERIODS: tuple[ChanlunPeriod, ...] = ("1d", "60m", "30m", "5m")
+
+ClosedInputFreshness = Literal["fresh", "stale", "insufficient"]
+
+
+@dataclass(frozen=True)
+class ClosedWorkspaceInputs:
+    symbol: str
+    periods: dict[ChanlunPeriod, tuple[KlineBar, ...]]
+    availability: dict[ChanlunPeriod, ChanlunAvailability]
+    freshness: dict[ChanlunPeriod, ClosedInputFreshness]
+    last_closed_by_period: dict[ChanlunPeriod, str]
+    adjustment_mode: str
+    source_status: dict[ChanlunPeriod, tuple[StrongStockSourceStatus, ...]]
+    adjustment_by_period: dict[ChanlunPeriod, str] = field(default_factory=dict)
+    unavailable_detail_by_period: dict[ChanlunPeriod, str] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _ClosedPeriodData:
+    bars: tuple[KlineBar, ...]
+    availability: ChanlunAvailability
+    freshness: ClosedInputFreshness
+    source_status: tuple[StrongStockSourceStatus, ...]
+    adjustment_mode: str
+    unavailable_detail: str | None = None
 
 
 class _IncompleteIntradayPayloadError(Exception):
@@ -126,6 +154,10 @@ class ChanlunAnalysisService:
             ttl_seconds=cache_seconds or settings.chanlun_cache_seconds,
             name="chanlun_analysis",
         )
+        self.closed_input_cache: TtlCache[ClosedWorkspaceInputs] = TtlCache(
+            ttl_seconds=cache_seconds or settings.chanlun_cache_seconds,
+            name="chanlun_closed_workspace_inputs",
+        )
         self.minute_retention_days = minute_retention_days or settings.chanlun_minute_retention_days
         self.history_max_bars = history_max_bars or settings.chanlun_backfill_max_bars
 
@@ -155,22 +187,309 @@ class ChanlunAnalysisService:
             now=current,
         )
 
-    def workspace(self, symbol: str, *, lookback: int) -> ChanlunWorkspaceResponse:
-        analyses = {
-            period: self.analysis(
-                symbol,
-                period=period,
-                lookback=lookback,
-                include_observing=period == "1d",
-            )
-            for period in ("1d", "60m", "30m", "5m")
-        }
+    def workspace(
+        self,
+        symbol: str,
+        *,
+        lookback: int,
+        now: datetime | None = None,
+    ) -> ChanlunWorkspaceResponse:
+        if not hasattr(self, "closed_input_cache"):
+            analyses = {
+                period: self.analysis(
+                    symbol,
+                    period=period,
+                    lookback=lookback,
+                    include_observing=period == "1d",
+                )
+                for period in _WORKSPACE_PERIODS
+            }
+        else:
+            inputs = self.closed_workspace_inputs(symbol, lookback=lookback, now=now)
+            analyses = {
+                period: self._analyze_closed_workspace_period(
+                    inputs,
+                    period=period,
+                    lookback=lookback,
+                    include_observing=period == "1d",
+                )
+                for period in _WORKSPACE_PERIODS
+            }
         return ChanlunWorkspaceResponse(
             symbol=normalize_chanlun_symbol(symbol) or symbol.strip().upper(),
-            periods=[_summary(analyses[period]) for period in ("1d", "60m", "30m", "5m")],
+            periods=[_summary(analyses[period]) for period in _WORKSPACE_PERIODS],
             analysis=analyses["1d"],
             confluence_signals=derive_confluence_signals(analyses),
         )
+
+    def closed_workspace_inputs(
+        self,
+        symbol: str,
+        *,
+        lookback: int,
+        now: datetime | None = None,
+    ) -> ClosedWorkspaceInputs:
+        normalized_symbol = normalize_chanlun_symbol(symbol) or symbol.strip().upper()
+        explicit_now = now is not None
+        current = _to_shanghai(now or datetime.now(tz=SHANGHAI))
+        cache_key = f"{normalized_symbol}:{lookback}"
+        if explicit_now:
+            cache_key = f"{cache_key}:{current.isoformat(timespec='minutes')}"
+        return self.closed_input_cache.get_or_set(
+            cache_key,
+            lambda: self._build_closed_workspace_inputs(
+                normalized_symbol,
+                lookback=lookback,
+                now=current,
+            ),
+        )
+
+    def _build_closed_workspace_inputs(
+        self,
+        symbol: str,
+        *,
+        lookback: int,
+        now: datetime,
+    ) -> ClosedWorkspaceInputs:
+        period_data: dict[ChanlunPeriod, _ClosedPeriodData] = {
+            "1d": self._load_closed_daily_period(symbol, lookback=lookback, now=now),
+            **self._load_closed_intraday_periods(
+                symbol,
+                periods=("60m", "30m", "5m"),
+                lookback=lookback,
+                now=now,
+            ),
+        }
+        adjustment_by_period = {
+            period: period_data[period].adjustment_mode for period in _WORKSPACE_PERIODS
+        }
+        adjustment_modes = set(adjustment_by_period.values())
+        adjustment_mode = (
+            next(iter(adjustment_modes)) if len(adjustment_modes) == 1 else "adjustment_mismatch"
+        )
+        return ClosedWorkspaceInputs(
+            symbol=symbol,
+            periods={period: period_data[period].bars for period in _WORKSPACE_PERIODS},
+            availability={
+                period: period_data[period].availability for period in _WORKSPACE_PERIODS
+            },
+            freshness={period: period_data[period].freshness for period in _WORKSPACE_PERIODS},
+            last_closed_by_period={
+                period: _closed_bar_boundary(period, period_data[period].bars[-1].date)
+                for period in _WORKSPACE_PERIODS
+                if period_data[period].bars
+            },
+            adjustment_mode=adjustment_mode,
+            source_status={
+                period: period_data[period].source_status for period in _WORKSPACE_PERIODS
+            },
+            adjustment_by_period=adjustment_by_period,
+            unavailable_detail_by_period={
+                period: period_data[period].unavailable_detail
+                for period in _WORKSPACE_PERIODS
+                if period_data[period].unavailable_detail is not None
+            },
+        )
+
+    def _load_closed_daily_period(
+        self,
+        symbol: str,
+        *,
+        lookback: int,
+        now: datetime,
+    ) -> _ClosedPeriodData:
+        provider = self.daily_provider
+        source_name = getattr(provider, "source_name", "日K线")
+        adjustment_mode = _daily_adjustment_mode(provider)
+        if provider is None:
+            return _ClosedPeriodData(
+                bars=(),
+                availability="unavailable",
+                freshness="insufficient",
+                source_status=(
+                    StrongStockSourceStatus(
+                        source=source_name,
+                        status="failed",
+                        detail="日K线数据源未配置",
+                    ),
+                ),
+                adjustment_mode=adjustment_mode,
+            )
+        try:
+            daily_bars = provider.get_klines(
+                symbol,
+                count=max(lookback + 1, _MIN_COMPLETED_BARS + 1),
+            )
+        except Exception as exc:
+            return _ClosedPeriodData(
+                bars=(),
+                availability="unavailable",
+                freshness="insufficient",
+                source_status=(
+                    StrongStockSourceStatus(
+                        source=source_name,
+                        status="failed",
+                        detail=f"日K线读取失败: {_exception_detail(exc)}",
+                    ),
+                ),
+                adjustment_mode=adjustment_mode,
+            )
+
+        bars = tuple(_completed_daily_bars(daily_bars, now)[-lookback:])
+        availability: ChanlunAvailability = (
+            "ready" if len(bars) >= _MIN_COMPLETED_BARS else "insufficient_bars"
+        )
+        return _ClosedPeriodData(
+            bars=bars,
+            availability=availability,
+            freshness="fresh" if availability == "ready" else "insufficient",
+            source_status=(
+                StrongStockSourceStatus(
+                    source=source_name,
+                    status="success",
+                    detail=f"返回 {len(bars)} 条已完成日K",
+                ),
+            ),
+            adjustment_mode=adjustment_mode,
+        )
+
+    def _load_closed_intraday_periods(
+        self,
+        symbol: str,
+        *,
+        periods: tuple[Literal["5m", "30m", "60m"], ...],
+        lookback: int,
+        now: datetime,
+    ) -> dict[ChanlunPeriod, _ClosedPeriodData]:
+        source_name = getattr(self.intraday_provider, "source_name", "TickFlow 分钟线")
+        live_failed = False
+        live_status: StrongStockSourceStatus
+        try:
+            fetch_count = max(_intraday_fetch_count(period, lookback) for period in periods)
+            payload = self.intraday_provider.get_intraday_bars(
+                [symbol],
+                period="1m",
+                count=fetch_count,
+            )
+            raw_bars = payload.get(symbol)
+            if raw_bars is None:
+                raise _IncompleteIntradayPayloadError(f"响应缺少 {symbol} 分钟线")
+            if not raw_bars:
+                raise _IncompleteIntradayPayloadError(f"响应中 {symbol} 分钟线为空")
+            current_bars = normalize_intraday_bars(raw_bars)
+            if not current_bars:
+                raise _IncompleteIntradayPayloadError(f"响应中 {symbol} 没有有效分钟线")
+            self._upsert_live_minutes(symbol, current_bars, source=source_name, now=now)
+            live_status = StrongStockSourceStatus(
+                source=source_name,
+                status="success",
+                detail=f"读取并写入 {len(current_bars)} 条当前1分钟线",
+            )
+        except Exception as exc:
+            live_failed = True
+            live_status = StrongStockSourceStatus(
+                source=source_name,
+                status="failed",
+                detail=f"当前1分钟线读取失败: {_exception_detail(exc)}",
+            )
+
+        minute_bars = _stored_closed_minutes(self.store.read(symbol))
+        result: dict[ChanlunPeriod, _ClosedPeriodData] = {}
+        for period in periods:
+            completed = tuple(
+                aggregate_closed_intraday_bars(minute_bars, period=period, now=now)[-lookback:]
+            )
+            archive_status = StrongStockSourceStatus(
+                source="Chanlun SQLite分钟线",
+                status="stale" if live_failed else "success",
+                detail=(
+                    f"从 {len(minute_bars)} 条闭合原始分钟线生成 {len(completed)} 条{period}闭合K线"
+                ),
+            )
+            if live_failed and len(completed) < _MIN_COMPLETED_BARS:
+                availability: ChanlunAvailability = "unavailable"
+                freshness: ClosedInputFreshness = "insufficient"
+                unavailable_detail = "实时分钟线不可用且本地闭合历史不足以生成缠论结构"
+            elif len(completed) < _MIN_COMPLETED_BARS:
+                availability = "insufficient_bars"
+                freshness = "insufficient"
+                unavailable_detail = None
+            elif live_failed:
+                availability = "stale"
+                freshness = "stale"
+                unavailable_detail = None
+            else:
+                availability = "ready"
+                freshness = "fresh"
+                unavailable_detail = None
+            result[period] = _ClosedPeriodData(
+                bars=completed,
+                availability=availability,
+                freshness=freshness,
+                source_status=(live_status, archive_status),
+                adjustment_mode=_RAW_ADJUSTMENT,
+                unavailable_detail=unavailable_detail,
+            )
+        return result
+
+    def _analyze_closed_workspace_period(
+        self,
+        inputs: ClosedWorkspaceInputs,
+        *,
+        period: ChanlunPeriod,
+        lookback: int,
+        include_observing: bool,
+    ) -> ChanlunAnalysisResponse:
+        return self._analyze_closed_period_data(
+            inputs.symbol,
+            period=period,
+            period_data=_ClosedPeriodData(
+                bars=inputs.periods[period],
+                availability=inputs.availability[period],
+                freshness=inputs.freshness[period],
+                source_status=inputs.source_status[period],
+                adjustment_mode=inputs.adjustment_by_period.get(
+                    period,
+                    inputs.adjustment_mode,
+                ),
+                unavailable_detail=inputs.unavailable_detail_by_period.get(period),
+            ),
+            lookback=lookback,
+            include_observing=include_observing,
+        )
+
+    def _analyze_closed_period_data(
+        self,
+        symbol: str,
+        *,
+        period: ChanlunPeriod,
+        period_data: _ClosedPeriodData,
+        lookback: int,
+        include_observing: bool,
+    ) -> ChanlunAnalysisResponse:
+        bars = list(period_data.bars)
+        source_status = list(period_data.source_status)
+        if period_data.availability == "unavailable":
+            return _unavailable_response(
+                symbol,
+                period,
+                bars,
+                source_status,
+                adjustment_mode=period_data.adjustment_mode,
+                detail=period_data.unavailable_detail,
+            )
+        result = self._analyze_completed(
+            symbol,
+            period=period,
+            bars=bars,
+            lookback=lookback,
+            include_observing=include_observing,
+            source_status=source_status,
+            adjustment_mode=period_data.adjustment_mode,
+        )
+        if period_data.availability == "stale" and result.availability == "ready":
+            return result.model_copy(deep=True, update={"availability": "stale"})
+        return result
 
     def replay(
         self,
@@ -353,6 +672,7 @@ class ChanlunAnalysisService:
         _raise_if_canceled(should_cancel)
         self.store.prune(keep_days=self.minute_retention_days)
         self.cache.clear()
+        self.closed_input_cache.clear()
         progress(3, 3, "分钟历史补齐完成")
         return {"symbol": normalized_symbol, "written_bars": len(normalized_bars)}
 
@@ -364,56 +684,12 @@ class ChanlunAnalysisService:
         include_observing: bool,
         now: datetime,
     ) -> ChanlunAnalysisResponse:
-        provider = self.daily_provider
-        source_name = getattr(provider, "source_name", "日K线")
-        adjustment_mode = _daily_adjustment_mode(provider)
-        if provider is None:
-            return _unavailable_response(
-                symbol,
-                "1d",
-                [],
-                [
-                    StrongStockSourceStatus(
-                        source=source_name,
-                        status="failed",
-                        detail="日K线数据源未配置",
-                    )
-                ],
-                adjustment_mode=adjustment_mode,
-            )
-        try:
-            daily_bars = provider.get_klines(symbol, count=max(lookback + 1, _MIN_COMPLETED_BARS + 1))
-        except Exception as exc:
-            return _unavailable_response(
-                symbol,
-                "1d",
-                [],
-                [
-                    StrongStockSourceStatus(
-                        source=source_name,
-                        status="failed",
-                        detail=f"日K线读取失败: {_exception_detail(exc)}",
-                    )
-                ],
-                adjustment_mode=adjustment_mode,
-            )
-
-        bars = _completed_daily_bars(daily_bars, now)[-lookback:]
-        source_status = [
-            StrongStockSourceStatus(
-                source=source_name,
-                status="success",
-                detail=f"返回 {len(bars)} 条已完成日K",
-            )
-        ]
-        return self._analyze_completed(
+        return self._analyze_closed_period_data(
             symbol,
             period="1d",
-            bars=bars,
+            period_data=self._load_closed_daily_period(symbol, lookback=lookback, now=now),
             lookback=lookback,
             include_observing=include_observing,
-            source_status=source_status,
-            adjustment_mode=adjustment_mode,
         )
 
     def _intraday_analysis(
@@ -425,73 +701,18 @@ class ChanlunAnalysisService:
         include_observing: bool,
         now: datetime,
     ) -> ChanlunAnalysisResponse:
-        source_name = getattr(self.intraday_provider, "source_name", "TickFlow 分钟线")
-        live_failed = False
-        source_status: list[StrongStockSourceStatus] = []
-        try:
-            payload = self.intraday_provider.get_intraday_bars(
-                [symbol],
-                period="1m",
-                count=_intraday_fetch_count(period, lookback),
-            )
-            raw_bars = payload.get(symbol)
-            if raw_bars is None:
-                raise _IncompleteIntradayPayloadError(f"响应缺少 {symbol} 分钟线")
-            if not raw_bars:
-                raise _IncompleteIntradayPayloadError(f"响应中 {symbol} 分钟线为空")
-            current_bars = normalize_intraday_bars(raw_bars)
-            if not current_bars:
-                raise _IncompleteIntradayPayloadError(f"响应中 {symbol} 没有有效分钟线")
-            self._upsert_live_minutes(symbol, current_bars, source=source_name, now=now)
-            source_status.append(
-                StrongStockSourceStatus(
-                    source=source_name,
-                    status="success",
-                    detail=f"读取并写入 {len(current_bars)} 条当前1分钟线",
-                )
-            )
-        except Exception as exc:
-            live_failed = True
-            source_status.append(
-                StrongStockSourceStatus(
-                    source=source_name,
-                    status="failed",
-                    detail=f"当前1分钟线读取失败: {_exception_detail(exc)}",
-                )
-            )
-
-        minute_bars = _stored_closed_minutes(self.store.read(symbol))
-        completed = aggregate_closed_intraday_bars(minute_bars, period=period, now=now)[-lookback:]
-        source_status.append(
-            StrongStockSourceStatus(
-                source="Chanlun SQLite分钟线",
-                status="stale" if live_failed else "success",
-                detail=f"从 {len(minute_bars)} 条闭合原始分钟线生成 {len(completed)} 条{period}闭合K线",
-            )
-        )
-
-        if live_failed and len(completed) < _MIN_COMPLETED_BARS:
-            return _unavailable_response(
-                symbol,
-                period,
-                completed,
-                source_status,
-                adjustment_mode=_RAW_ADJUSTMENT,
-                detail="实时分钟线不可用且本地闭合历史不足以生成缠论结构",
-            )
-
-        result = self._analyze_completed(
+        return self._analyze_closed_period_data(
             symbol,
             period=period,
-            bars=completed,
+            period_data=self._load_closed_intraday_periods(
+                symbol,
+                periods=(period,),
+                lookback=lookback,
+                now=now,
+            )[period],
             lookback=lookback,
             include_observing=include_observing,
-            source_status=source_status,
-            adjustment_mode=_RAW_ADJUSTMENT,
         )
-        if live_failed and result.availability == "ready":
-            return result.model_copy(deep=True, update={"availability": "stale"})
-        return result
 
     def _upsert_live_minutes(
         self,
@@ -599,7 +820,9 @@ def _unavailable_response(
 ) -> ChanlunAnalysisResponse:
     statuses = list(source_status)
     if detail:
-        statuses.append(StrongStockSourceStatus(source="Chanlun结构", status="failed", detail=detail))
+        statuses.append(
+            StrongStockSourceStatus(source="Chanlun结构", status="failed", detail=detail)
+        )
     return ChanlunAnalysisResponse(
         symbol=symbol,
         period=period,
@@ -623,6 +846,15 @@ def _completed_daily_bars(bars: list[KlineBar], now: datetime) -> list[KlineBar]
         if trade_date < current_date or (trade_date == current_date and current_time >= time(15)):
             completed.append((trade_date, bar))
     return [bar for _trade_date, bar in sorted(completed, key=lambda value: value[0])]
+
+
+def _closed_bar_boundary(period: ChanlunPeriod, value: str) -> str:
+    if period != "1d":
+        return value
+    trade_date = _bar_trade_date(value)
+    if trade_date is None:
+        return value
+    return datetime.combine(trade_date, time(15), tzinfo=SHANGHAI).isoformat(timespec="seconds")
 
 
 def _bar_trade_date(value: str) -> date | None:

@@ -141,6 +141,30 @@ def test_request_rejects_non_finite_or_invalid_ohlcv(field: str, value: float) -
         CzscRc8Request.model_validate(payload)
 
 
+def test_request_rejects_unknown_bar_fields() -> None:
+    payload = _request_payload()
+    payload["periods"]["5m"][0]["unexpected"] = True
+
+    with pytest.raises(ValidationError):
+        CzscRc8Request.model_validate(payload)
+
+
+def test_request_requires_the_exact_bar_field_set() -> None:
+    payload = _request_payload()
+    del payload["periods"]["5m"][0]["ma60"]
+
+    with pytest.raises(ValidationError):
+        CzscRc8Request.model_validate(payload)
+
+
+def test_request_rejects_coercible_numeric_strings_in_bars() -> None:
+    payload = _request_payload()
+    payload["periods"]["5m"][0]["open"] = "10.0"
+
+    with pytest.raises(ValidationError):
+        CzscRc8Request.model_validate(payload)
+
+
 def test_daily_source_date_is_available_at_shanghai_close() -> None:
     request = build_research_request(
         "600000.SH",
@@ -190,6 +214,30 @@ def test_response_requires_exact_structured_signal_fields_and_integer_score() ->
     coerced["current_states"][0]["value_fields"]["score"] = "0"
     with pytest.raises(ValidationError):
         CzscRc8Response.model_validate(coerced)
+
+
+@pytest.mark.parametrize(
+    ("period", "higher_period", "lower_period"),
+    [
+        ("5m", "1d", None),
+        (None, "1d", None),
+    ],
+    ids=["mixed-single-and-pair", "partial-pair"],
+)
+def test_response_rejects_mixed_or_partial_signal_scope(
+    period: str | None,
+    higher_period: str | None,
+    lower_period: str | None,
+) -> None:
+    payload = _response_payload()
+    payload["current_states"][0].update(
+        period=period,
+        higher_period=higher_period,
+        lower_period=lower_period,
+    )
+
+    with pytest.raises(ValidationError, match="exactly one period or one period pair"):
+        CzscRc8Response.model_validate(payload)
 
 
 def test_ready_response_requires_all_diagnostics_and_sanitized_error_text() -> None:

@@ -27,6 +27,34 @@ APPROVED_PERIODS: tuple[ChanlunPeriod, ...] = ("1d", "60m", "30m", "5m")
 _APPROVED_PERIOD_SET = frozenset(APPROVED_PERIODS)
 _DATE_ONLY = re.compile(r"\d{4}-\d{2}-\d{2}")
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
+_BAR_FIELD_SET = frozenset(
+    {
+        "date",
+        "open",
+        "close",
+        "high",
+        "low",
+        "volume",
+        "amount",
+        "ma5",
+        "ma10",
+        "ma20",
+        "ma60",
+    }
+)
+
+
+class CzscRc8Bar(KlineBar):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _require_exact_fields(cls, value: object) -> object:
+        if isinstance(value, KlineBar):
+            value = value.model_dump(mode="python")
+        if not isinstance(value, Mapping) or set(value) != _BAR_FIELD_SET:
+            raise ValueError("bar must contain the exact KlineBar field set")
+        return value
 
 
 class CzscRc8ValueFields(BaseModel):
@@ -58,9 +86,17 @@ class CzscRc8RawSignal(BaseModel):
 
     @model_validator(mode="after")
     def _validate_scope(self) -> CzscRc8RawSignal:
-        is_single = self.period is not None
-        is_pair = self.higher_period is not None and self.lower_period is not None
-        if is_single == is_pair:
+        is_single = (
+            self.period is not None
+            and self.higher_period is None
+            and self.lower_period is None
+        )
+        is_pair = (
+            self.period is None
+            and self.higher_period is not None
+            and self.lower_period is not None
+        )
+        if not (is_single or is_pair):
             raise ValueError("signal requires exactly one period or one period pair")
         return self
 
@@ -85,7 +121,7 @@ class CzscRc8Request(BaseModel):
     decision_at: str
     last_closed_by_period: dict[ChanlunPeriod, str]
     input_snapshot_id: str
-    periods: dict[ChanlunPeriod, list[KlineBar]]
+    periods: dict[ChanlunPeriod, list[CzscRc8Bar]]
 
     @field_validator("request_id", "adjustment_mode", "input_snapshot_id")
     @classmethod
@@ -124,8 +160,8 @@ class CzscRc8Request(BaseModel):
     @classmethod
     def _order_periods(
         cls,
-        value: dict[ChanlunPeriod, list[KlineBar]],
-    ) -> dict[ChanlunPeriod, list[KlineBar]]:
+        value: dict[ChanlunPeriod, list[CzscRc8Bar]],
+    ) -> dict[ChanlunPeriod, list[CzscRc8Bar]]:
         return {period: value[period] for period in APPROVED_PERIODS if period in value}
 
     @model_validator(mode="after")
@@ -215,7 +251,9 @@ def build_research_request(
 ) -> CzscRc8Request:
     copied_periods = {
         period: [
-            bar if isinstance(bar, KlineBar) else KlineBar.model_validate(bar)
+            CzscRc8Bar.model_validate(
+                bar.model_dump(mode="python") if isinstance(bar, KlineBar) else bar
+            )
             for bar in bars
         ]
         for period, bars in periods.items()

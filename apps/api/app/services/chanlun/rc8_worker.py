@@ -22,6 +22,21 @@ PERIODS = ("1d", "60m", "30m", "5m")
 _PERIOD_SET = frozenset(PERIODS)
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _DATE_ONLY = re.compile(r"\d{4}-\d{2}-\d{2}")
+_BAR_KEYS = frozenset(
+    {
+        "date",
+        "open",
+        "close",
+        "high",
+        "low",
+        "volume",
+        "amount",
+        "ma5",
+        "ma10",
+        "ma20",
+        "ma60",
+    }
+)
 _REQUEST_KEYS = frozenset(
     {
         "schema_version",
@@ -544,9 +559,10 @@ def _to_raw_bars(symbol: str, period: str, bars: list[dict[str, Any]]) -> list[R
 def _validate_bar(period: str, bar: Any) -> None:
     if not isinstance(bar, dict):
         raise ValueError(f"{period} bar must be an object")
-    required = {"date", "open", "close", "high", "low", "volume"}
-    if not required.issubset(bar) or not isinstance(bar["date"], str):
-        raise ValueError(f"{period} bar is missing OHLCV fields")
+    if set(bar) != _BAR_KEYS:
+        raise ValueError(f"{period} bar must contain the exact protocol field set")
+    if not isinstance(bar["date"], str):
+        raise ValueError(f"{period} bar date must be a string")
     values = []
     for field in ("open", "close", "high", "low", "volume"):
         value = bar[field]
@@ -556,13 +572,14 @@ def _validate_bar(period: str, bar: Any) -> None:
     open_price, close_price, high, low, volume = values
     if not all(math.isfinite(value) for value in values):
         raise ValueError(f"{period} OHLCV values must be finite")
-    amount = bar.get("amount")
-    if amount is not None and (
-        isinstance(amount, bool)
-        or not isinstance(amount, (int, float))
-        or not math.isfinite(float(amount))
-    ):
-        raise ValueError(f"{period} amount must be finite")
+    for field in ("amount", "ma5", "ma10", "ma20", "ma60"):
+        value = bar[field]
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+        ):
+            raise ValueError(f"{period} bar {field} must be a finite number or null")
     if volume < 0:
         raise ValueError(f"{period} volume cannot be negative")
     if high < max(open_price, close_price) or low > min(open_price, close_price):

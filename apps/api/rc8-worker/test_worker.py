@@ -43,6 +43,10 @@ def _zig_zag_bars(period: str, count: int = 96) -> list[dict[str, object]]:
                 "low": price - 0.1,
                 "volume": 1_000 + index,
                 "amount": (1_000 + index) * price,
+                "ma5": None,
+                "ma10": None,
+                "ma20": None,
+                "ma60": None,
             }
         )
     return bars
@@ -193,6 +197,27 @@ class WorkerTests(unittest.TestCase):
                 payload[field] = value
                 with self.assertRaises(ValueError):
                     WORKER.handle_request(payload)
+
+    def test_worker_rejects_unknown_bar_fields(self) -> None:
+        payload = make_request()
+        payload["periods"]["5m"][0]["unexpected"] = True
+
+        with self.assertRaises(ValueError):
+            WORKER.handle_request(payload)
+
+    def test_worker_requires_the_exact_bar_field_set(self) -> None:
+        payload = make_request()
+        del payload["periods"]["5m"][0]["ma60"]
+
+        with self.assertRaises(ValueError):
+            WORKER.handle_request(payload)
+
+    def test_worker_rejects_numeric_strings_in_bars(self) -> None:
+        payload = make_request()
+        payload["periods"]["5m"][0]["open"] = "10.0"
+
+        with self.assertRaises(ValueError):
+            WORKER.handle_request(payload)
 
     def test_zone_adapter_exact_fixture_without_public_independent_priming(self) -> None:
         # rc8 cannot publicly prime a trader from two independently closed period arrays.

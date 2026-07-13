@@ -44,11 +44,11 @@ WORKDIR /build/rc8
 COPY apps/api/rc8-worker/pyproject.toml apps/api/rc8-worker/uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/pip \
     python -m venv /opt/czsc-rc8-venv \
-    && /opt/czsc-rc8-venv/bin/python -m pip install setuptools wheel uv==0.11.6 \
+    && /opt/czsc-rc8-venv/bin/python -m pip install setuptools==83.0.0 wheel==0.47.0 uv==0.11.6 \
     && /opt/czsc-rc8-venv/bin/uv export --locked --no-dev --no-emit-project --format requirements-txt -o requirements.txt \
     && /opt/czsc-rc8-venv/bin/python -m pip uninstall -y uv \
     && /opt/czsc-rc8-venv/bin/python -m pip install --no-build-isolation -r requirements.txt \
-    && /opt/czsc-rc8-venv/bin/python -c "import importlib.metadata; assert importlib.metadata.version('czsc') == '1.0.0rc8'"
+    && /opt/czsc-rc8-venv/bin/python -c "import czsc; import importlib.metadata; assert importlib.metadata.version('czsc') == '1.0.0rc8'"
 
 
 FROM node:22-slim AS web-deps
@@ -106,7 +106,8 @@ COPY --from=web-builder /build/web/.next/static ./web/.next/static
 COPY scripts/start-single-container.sh ./start-single-container.sh
 
 RUN /opt/strong-stock-api-venv/bin/python -c "import czsc, mootdx; print(czsc.__version__, mootdx.__version__)" \
-    && /opt/czsc-rc8-venv/bin/python -c "import importlib.metadata; assert importlib.metadata.version('czsc') == '1.0.0rc8'" \
+    && /opt/strong-stock-api-venv/bin/python -c "import importlib.metadata; assert importlib.metadata.version('czsc') == '0.10.12'" \
+    && /opt/czsc-rc8-venv/bin/python -c "import czsc; import importlib.metadata; assert importlib.metadata.version('czsc') == '1.0.0rc8'" \
     && chmod +x ./start-single-container.sh \
     && mkdir -p /app/data
 

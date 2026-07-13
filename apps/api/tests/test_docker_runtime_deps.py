@@ -22,7 +22,7 @@ def _docker_instructions(content: str) -> list[tuple[str, str]]:
             continue
 
         candidate, body = stripped.split(" ", maxsplit=1)
-        if candidate not in {"COPY", "RUN"}:
+        if candidate not in {"COPY", "FROM", "RUN"}:
             continue
 
         instruction = candidate
@@ -32,6 +32,22 @@ def _docker_instructions(content: str) -> list[tuple[str, str]]:
             current = []
 
     return instructions
+
+
+def _docker_stages(content: str) -> dict[str, list[tuple[str, str]]]:
+    stages: dict[str, list[tuple[str, str]]] = {}
+    current_stage = ""
+
+    for instruction, body in _docker_instructions(content):
+        if instruction == "FROM":
+            tokens = body.split()
+            assert len(tokens) >= 3 and tokens[-2].upper() == "AS"
+            current_stage = tokens[-1]
+            stages[current_stage] = []
+        elif current_stage:
+            stages[current_stage].append((instruction, body))
+
+    return stages
 
 
 def test_dockerfiles_install_lightgbm_openmp_runtime() -> None:
@@ -65,13 +81,81 @@ def test_rc8_worker_has_an_independent_locked_project() -> None:
     assert (repo_root / "apps/api/rc8-worker/uv.lock").exists()
 
 
-def test_dockerfiles_build_and_copy_an_isolated_rc8_venv() -> None:
+def test_rc8_builders_use_independent_locked_projects_and_pinned_bootstrap() -> None:
     repo_root = Path(__file__).parents[3]
-    for path in [repo_root / "Dockerfile", repo_root / "apps/api/Dockerfile"]:
-        content = path.read_text(encoding="utf-8")
-        assert "/opt/czsc-rc8-venv" in content
-        assert "importlib.metadata.version('czsc')" in content
-        assert "1.0.0rc8" in content
+    dockerfiles = {
+        repo_root / "Dockerfile": (
+            "apps/api/rc8-worker/pyproject.toml apps/api/rc8-worker/uv.lock ./"
+        ),
+        repo_root / "apps/api/Dockerfile": (
+            "rc8-worker/pyproject.toml rc8-worker/uv.lock ./"
+        ),
+    }
+    rc8_import_smoke = (
+        '/opt/czsc-rc8-venv/bin/python -c "import czsc; import importlib.metadata; '
+        "assert importlib.metadata.version('czsc') == '1.0.0rc8'\""
+    )
+
+    for path, project_copy in dockerfiles.items():
+        rc8_builder = _docker_stages(path.read_text(encoding="utf-8"))["rc8-builder"]
+        build_runs = [
+            body
+            for instruction, body in rc8_builder
+            if instruction == "RUN" and "python -m venv /opt/czsc-rc8-venv" in body
+        ]
+
+        assert ("COPY", project_copy) in rc8_builder
+        assert len(build_runs) == 1
+        assert "setuptools==83.0.0 wheel==0.47.0 uv==0.11.6" in build_runs[0]
+        assert rc8_import_smoke in build_runs[0]
+
+
+def test_rc8_runners_copy_and_import_the_venv_after_runtime_dependencies() -> None:
+    repo_root = Path(__file__).parents[3]
+    dockerfiles = [repo_root / "Dockerfile", repo_root / "apps/api/Dockerfile"]
+    rc8_venv_copy = "--from=rc8-builder /opt/czsc-rc8-venv /opt/czsc-rc8-venv"
+    rc8_import_smoke = (
+        '/opt/czsc-rc8-venv/bin/python -c "import czsc; import importlib.metadata; '
+        "assert importlib.metadata.version('czsc') == '1.0.0rc8'\""
+    )
+
+    for path in dockerfiles:
+        runner = _docker_stages(path.read_text(encoding="utf-8"))["runner"]
+        copy_indices = [
+            index
+            for index, (instruction, body) in enumerate(runner)
+            if instruction == "COPY" and body == rc8_venv_copy
+        ]
+        libgomp_indices = [
+            index
+            for index, (instruction, body) in enumerate(runner)
+            if instruction == "RUN" and "libgomp1" in body
+        ]
+        smoke_indices = [
+            index
+            for index, (instruction, body) in enumerate(runner)
+            if instruction == "RUN" and rc8_import_smoke in body
+        ]
+
+        assert len(copy_indices) == 1
+        assert len(libgomp_indices) == 1
+        assert len(smoke_indices) == 1
+        assert smoke_indices[0] > copy_indices[0]
+        assert smoke_indices[0] > libgomp_indices[0]
+
+
+def test_root_runner_asserts_the_formal_czsc_metadata_version() -> None:
+    repo_root = Path(__file__).parents[3]
+    runner = _docker_stages((repo_root / "Dockerfile").read_text(encoding="utf-8"))["runner"]
+    formal_version_assertion = (
+        '/opt/strong-stock-api-venv/bin/python -c "import importlib.metadata; '
+        "assert importlib.metadata.version('czsc') == '0.10.12'\""
+    )
+
+    assert any(
+        instruction == "RUN" and formal_version_assertion in body
+        for instruction, body in runner
+    )
 
 
 def test_dev_dependencies_use_httpx2_for_starlette_testclient() -> None:

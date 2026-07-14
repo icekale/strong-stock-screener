@@ -79,6 +79,7 @@ export function ChanlunWorkspace() {
   const [layers, setLayers] = useState<Record<ChanlunLayerKey, boolean>>(DEFAULT_CHANLUN_LAYERS);
   const [showMovingAverages, setShowMovingAverages] = useState(false);
   const [showResearch, setShowResearch] = useState(true);
+  const [taskTab, setTaskTab] = useState("evidence");
   const [research, setResearch] = useState<CzscResearchSnapshot | null>(null);
   const [researchError, setResearchError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -598,14 +599,17 @@ export function ChanlunWorkspace() {
             </section>
 
             <Tabs
+              activeKey={taskTab}
               items={[
                 { key: "evidence", label: "分析证据", children: <ChanlunResearchEvidence snapshot={researchError ? null : activeResearch} /> },
-                { key: "replay", label: "回放验证", children: <Typography.Text type="secondary">历史回放与绩效回测位于下方。</Typography.Text> },
-                { key: "simulation", label: "预警模拟", children: <Typography.Text type="secondary">预警记录与模拟订单位于下方，订单需人工确认。</Typography.Text> },
+                { key: "replay", label: "回放验证" },
+                { key: "simulation", label: "预警模拟" },
               ]}
+              onChange={setTaskTab}
             />
             {researchError ? <Alert message={researchError} showIcon type="warning" /> : null}
 
+            {taskTab === "evidence" ? <>
             <section className="compact-panel">
               <div className="compact-panel__header">
                 <Typography.Text strong>确认信号</Typography.Text>
@@ -657,6 +661,9 @@ export function ChanlunWorkspace() {
               </div>
             </section>
 
+            </> : null}
+
+            {taskTab === "replay" ? <>
             <section className="compact-panel">
               <div className="compact-panel__header flex-wrap gap-3">
                 <Typography.Text strong>历史回放</Typography.Text>
@@ -744,6 +751,9 @@ export function ChanlunWorkspace() {
               </div>
             </section>
 
+            </> : null}
+
+            {taskTab === "simulation" ? <>
             <section className="compact-panel">
               <div className="compact-panel__header flex-wrap gap-3">
                 <Typography.Text strong>预警记录</Typography.Text>
@@ -887,6 +897,8 @@ export function ChanlunWorkspace() {
                 ) : null}
               </div>
             </section>
+
+            </> : null}
 
             <section className="compact-panel">
               <div className="compact-panel__header">

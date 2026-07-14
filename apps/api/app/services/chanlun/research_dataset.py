@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+import hashlib
+import json
+from pathlib import Path
 from typing import Iterable
 
 from app.models import StrongStockCandidate
@@ -13,6 +16,101 @@ class ResearchCandidateRecord:
     last_limit_up_date: str
     limit_up_hits_20d: int
     decision_date: str
+
+
+@dataclass(frozen=True)
+class DatasetPartition:
+    path: str
+    sha256: str
+    row_count: int
+    start_date: str | None
+    end_date: str | None
+
+
+@dataclass(frozen=True)
+class DatasetQuality:
+    adjustment_mismatch_count: int = 0
+    invalid_row_count: int = 0
+    duplicate_row_count: int = 0
+
+
+@dataclass(frozen=True)
+class DatasetSample:
+    symbol: str
+    decision_date: str
+    baseline_rank: int
+
+
+@dataclass(frozen=True)
+class ResearchDatasetManifest:
+    dataset_id: str
+    root: Path
+    start: str
+    end: str
+    source: str
+    adjustment_mode: str
+    quality: DatasetQuality
+    partitions: tuple[DatasetPartition, ...]
+    samples: tuple[DatasetSample, ...]
+
+
+class ResearchDatasetBuilder:
+    def __init__(self, *, source: object) -> None:
+        self.source = source
+
+    def build(self, *, start: str, end: str, output: Path) -> ResearchDatasetManifest:
+        daily_rows = list(self.source.daily_rows(start=start, end=end))
+        quality = DatasetQuality(
+            adjustment_mismatch_count=sum(
+                1 for row in daily_rows if bool(row.get("adjustment_break"))
+            )
+        )
+        candidates = reconstruct_candidates(daily_rows, trade_date=end)
+        broken_codes = {
+            _raw_code(row.get("code"))
+            for row in daily_rows
+            if bool(row.get("adjustment_break"))
+        }
+        candidates = [
+            item
+            for item in candidates
+            if _raw_code(item.candidate.symbol) not in broken_codes
+        ]
+        samples = tuple(
+            DatasetSample(
+                symbol=item.candidate.symbol,
+                decision_date=item.decision_date,
+                baseline_rank=index,
+            )
+            for index, item in enumerate(candidates, start=1)
+        )
+        digest = _dataset_digest(daily_rows, start=start, end=end)
+        root = output / f"dataset-{digest[:16]}"
+        root.mkdir(parents=True, exist_ok=True)
+        partitions = [_write_parquet_partition(root / "daily.parquet", daily_rows)]
+        for sample in samples:
+            bars = self.source.minute_bars(sample.symbol, start=start, end=end)
+            if bars:
+                rows = [bar.model_dump(mode="json") for bar in bars]
+                partitions.append(
+                    _write_parquet_partition(
+                        root / "minute" / f"{sample.symbol.replace('.', '_')}.parquet",
+                        rows,
+                    )
+                )
+        manifest = ResearchDatasetManifest(
+            dataset_id=f"sha256:{digest}",
+            root=root,
+            start=start,
+            end=end,
+            source=type(self.source).__name__,
+            adjustment_mode=str(getattr(self.source, "adjustment_mode", "unknown")),
+            quality=quality,
+            partitions=tuple(partitions),
+            samples=samples,
+        )
+        _write_manifest(manifest)
+        return manifest
 
 
 def reconstruct_candidates(
@@ -62,6 +160,63 @@ def reconstruct_candidates(
         records,
         key=lambda item: (-item.limit_up_hits_20d, item.last_limit_up_date, item.candidate.symbol),
     )
+
+
+def _dataset_digest(rows: list[dict[str, object]], *, start: str, end: str) -> str:
+    payload = json.dumps(
+        {"start": start, "end": end, "rows": rows},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _write_parquet_partition(path: Path, rows: list[dict[str, object]]) -> DatasetPartition:
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    table = pa.Table.from_pylist(rows)
+    pq.write_table(table, temporary)
+    temporary.replace(path)
+    digest = _sha256_file(path)
+    dates = [str(row.get("date"))[:10] for row in rows if row.get("date")]
+    return DatasetPartition(
+        path=str(path.relative_to(path.parents[2])),
+        sha256=f"sha256:{digest}",
+        row_count=len(rows),
+        start_date=min(dates) if dates else None,
+        end_date=max(dates) if dates else None,
+    )
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _write_manifest(manifest: ResearchDatasetManifest) -> None:
+    payload = {
+        "dataset_id": manifest.dataset_id,
+        "start": manifest.start,
+        "end": manifest.end,
+        "source": manifest.source,
+        "adjustment_mode": manifest.adjustment_mode,
+        "quality": manifest.quality.__dict__,
+        "partitions": [partition.__dict__ for partition in manifest.partitions],
+        "samples": [sample.__dict__ for sample in manifest.samples],
+    }
+    temporary = manifest.root / "manifest.json.tmp"
+    temporary.write_text(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2),
+        encoding="utf-8",
+    )
+    temporary.replace(manifest.root / "manifest.json")
 
 
 def _is_limit_up(row: dict[str, object], code: str) -> bool:

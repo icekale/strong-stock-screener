@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 const {
   createChanlunBackfillJob,
+  getCzscResearchSignals,
   getAuctionModelTop3,
   getChanlunAnalysis,
   getChanlunAlerts,
@@ -52,6 +53,7 @@ test("Chanlun client encodes symbols and analysis query parameters", async () =>
       lookback: 120,
       includeObserving: true,
     });
+    await getCzscResearchSignals("600000.SH/test", { lookback: 220 });
     await getChanlunWorkspace("600000.SH/test", { lookback: 180 });
     await getChanlunReplay("600000.SH/test", { period: "30m", lookback: 180 });
     await getChanlunBacktest("600000.SH/test", { period: "30m", lookback: 180 });
@@ -73,37 +75,39 @@ test("Chanlun client encodes symbols and analysis query parameters", async () =>
   assert.equal(requests[0].url.searchParams.get("period"), "5m");
   assert.equal(requests[0].url.searchParams.get("lookback"), "120");
   assert.equal(requests[0].url.searchParams.get("include_observing"), "true");
-  assert.equal(requests[1].url.pathname, "/api/chanlun/stocks/600000.SH%2Ftest/workspace");
-  assert.equal(requests[1].url.searchParams.get("lookback"), "180");
-  assert.equal(requests[2].url.pathname, "/api/chanlun/stocks/600000.SH%2Ftest/replays");
-  assert.equal(requests[2].url.searchParams.get("period"), "30m");
+  assert.equal(requests[1].url.pathname, "/api/chanlun/stocks/600000.SH%2Ftest/research-signals");
+  assert.equal(requests[1].url.searchParams.get("lookback"), "220");
+  assert.equal(requests[2].url.pathname, "/api/chanlun/stocks/600000.SH%2Ftest/workspace");
   assert.equal(requests[2].url.searchParams.get("lookback"), "180");
-  assert.equal(requests[3].url.pathname, "/api/chanlun/stocks/600000.SH%2Ftest/backtests");
+  assert.equal(requests[3].url.pathname, "/api/chanlun/stocks/600000.SH%2Ftest/replays");
   assert.equal(requests[3].url.searchParams.get("period"), "30m");
   assert.equal(requests[3].url.searchParams.get("lookback"), "180");
-  assert.equal(requests[4].url.pathname, "/api/chanlun/alerts");
-  assert.equal(requests[4].url.searchParams.get("symbol"), "600000.SH/test");
-  assert.equal(requests[4].url.searchParams.get("limit"), "5");
-  assert.equal(requests[5].url.pathname, "/api/chanlun/stocks/600000.SH%2Ftest/alerts/refresh");
-  assert.equal(requests[5].url.searchParams.get("period"), "30m");
-  assert.equal(requests[5].url.searchParams.get("lookback"), "180");
-  assert.equal(requests[5].init?.method, "POST");
-  assert.equal(requests[6].url.pathname, "/api/chanlun/stocks/600000.SH%2Ftest/paper-orders/drafts");
+  assert.equal(requests[4].url.pathname, "/api/chanlun/stocks/600000.SH%2Ftest/backtests");
+  assert.equal(requests[4].url.searchParams.get("period"), "30m");
+  assert.equal(requests[4].url.searchParams.get("lookback"), "180");
+  assert.equal(requests[5].url.pathname, "/api/chanlun/alerts");
+  assert.equal(requests[5].url.searchParams.get("symbol"), "600000.SH/test");
+  assert.equal(requests[5].url.searchParams.get("limit"), "5");
+  assert.equal(requests[6].url.pathname, "/api/chanlun/stocks/600000.SH%2Ftest/alerts/refresh");
+  assert.equal(requests[6].url.searchParams.get("period"), "30m");
   assert.equal(requests[6].url.searchParams.get("lookback"), "180");
   assert.equal(requests[6].init?.method, "POST");
-  assert.equal(requests[6].init?.body, JSON.stringify({ quantity: 100 }));
-  assert.equal(requests[7].url.pathname, "/api/chanlun/paper-orders/paper%2Ftest/approve");
+  assert.equal(requests[7].url.pathname, "/api/chanlun/stocks/600000.SH%2Ftest/paper-orders/drafts");
+  assert.equal(requests[7].url.searchParams.get("lookback"), "180");
   assert.equal(requests[7].init?.method, "POST");
-  assert.equal(requests[8].url.pathname, "/api/chanlun/paper-orders/paper%2Ftest/cancel");
+  assert.equal(requests[7].init?.body, JSON.stringify({ quantity: 100 }));
+  assert.equal(requests[8].url.pathname, "/api/chanlun/paper-orders/paper%2Ftest/approve");
   assert.equal(requests[8].init?.method, "POST");
-  assert.equal(requests[9].url.pathname, "/api/chanlun/paper-orders/paper%2Ftest/fill");
+  assert.equal(requests[9].url.pathname, "/api/chanlun/paper-orders/paper%2Ftest/cancel");
   assert.equal(requests[9].init?.method, "POST");
-  assert.equal(requests[10].url.pathname, "/api/chanlun/paper-account");
-  assert.equal(requests[11].url.searchParams.get("query"), "浦发 银行");
-  assert.equal(requests[11].url.searchParams.get("limit"), "5");
-  assert.equal(requests[12].init?.method, "POST");
-  assert.equal(requests[12].init?.body, JSON.stringify({ history_days: 60 }));
-  assert.equal(requests[13].url.pathname, "/api/chanlun/stocks/600000.SH%2Ftest/backfill/job%2F1");
+  assert.equal(requests[10].url.pathname, "/api/chanlun/paper-orders/paper%2Ftest/fill");
+  assert.equal(requests[10].init?.method, "POST");
+  assert.equal(requests[11].url.pathname, "/api/chanlun/paper-account");
+  assert.equal(requests[12].url.searchParams.get("query"), "浦发 银行");
+  assert.equal(requests[12].url.searchParams.get("limit"), "5");
+  assert.equal(requests[13].init?.method, "POST");
+  assert.equal(requests[13].init?.body, JSON.stringify({ history_days: 60 }));
+  assert.equal(requests[14].url.pathname, "/api/chanlun/stocks/600000.SH%2Ftest/backfill/job%2F1");
 });
 
 test("Chanlun client errors include response status and body", async () => {
@@ -113,6 +117,14 @@ test("Chanlun client errors include response status and body", async () => {
   try {
     await assert.rejects(
       () => getChanlunAnalysis("600000.SH"),
+      (error: unknown) => {
+        assert.match(String(error), /503/);
+        assert.match(String(error), /source unavailable/);
+        return true;
+      },
+    );
+    await assert.rejects(
+      () => getCzscResearchSignals("600000.SH"),
       (error: unknown) => {
         assert.match(String(error), /503/);
         assert.match(String(error), /source unavailable/);

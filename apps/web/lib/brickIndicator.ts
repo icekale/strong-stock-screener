@@ -3,7 +3,8 @@ import type { CandlestickSeriesOption } from "echarts/charts";
 import type { KlineData } from "kline-charts-react";
 import type { KlineSubIndicator } from "./klineIndicatorLayout";
 import { buildChanlunOverlaySeries } from "./chanlunOverlay.ts";
-import type { ChanlunAnalysisResponse, ChanlunLayerKey, GsgfChartAnnotation } from "./types";
+import { buildCzscResearchClearSeries, buildCzscResearchOverlaySeries } from "./czscResearchOverlay.ts";
+import type { ChanlunAnalysisResponse, ChanlunLayerKey, CzscResearchSnapshot, GsgfChartAnnotation } from "./types";
 
 const BRICK_UP_COLOR = "#f43f5e";
 const BRICK_DOWN_COLOR = "#10b981";
@@ -119,7 +120,9 @@ export function buildTickFlowOverlayOption({
   annotations,
   chanlun,
   chanlunLayers,
+  czscResearch,
   chartData,
+  showCzscResearch,
   showGsgfAnnotations,
   subIndicators,
   visibleBarCount,
@@ -127,7 +130,9 @@ export function buildTickFlowOverlayOption({
   annotations: GsgfChartAnnotation[];
   chanlun?: ChanlunAnalysisResponse | null;
   chanlunLayers?: Partial<Record<ChanlunLayerKey, boolean>>;
+  czscResearch?: CzscResearchSnapshot | null;
   chartData: KlineData[];
+  showCzscResearch?: boolean;
   showGsgfAnnotations: boolean;
   subIndicators: KlineSubIndicator[];
   visibleBarCount?: number;
@@ -199,7 +204,12 @@ export function buildTickFlowOverlayOption({
         { chartDates: chartData.map((bar) => bar.date), visibleBarCount },
       )
     : [];
-  const series = [...annotationSeries, ...chanlunSeries, ...brickSeries];
+  const researchSeries = showCzscResearch === true
+    ? [buildCzscResearchOverlaySeries(czscResearch, { chartData, visibleBarCount })]
+    : showCzscResearch === false
+      ? [buildCzscResearchClearSeries()]
+      : [];
+  const series = [...annotationSeries, ...chanlunSeries, ...researchSeries, ...brickSeries];
 
   return series.length > 0 ? ({ series } as EChartsOption) : {};
 }

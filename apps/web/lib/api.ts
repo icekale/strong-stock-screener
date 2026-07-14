@@ -21,6 +21,7 @@ import type {
   ChanlunReplayResponse,
   ChanlunSymbolSearchResponse,
   ChanlunWorkspaceResponse,
+  CzscResearchSnapshot,
   DataSourceStatusResponse,
   GsgfAnalysis,
   GsgfAutoReviewConfig,
@@ -1151,6 +1152,20 @@ export async function getChanlunAnalysis(
     throw new Error(`读取缠论分析失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<ChanlunAnalysisResponse>;
+}
+
+export async function getCzscResearchSignals(
+  symbol: string,
+  options: { lookback?: number } = {},
+): Promise<CzscResearchSnapshot> {
+  const params = new URLSearchParams({ lookback: String(options.lookback ?? 220) });
+  const response = await fetch(
+    `${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/research-signals?${params.toString()}`,
+  );
+  if (!response.ok) {
+    throw new Error(`读取缠论研究信号失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<CzscResearchSnapshot>;
 }
 
 export async function getChanlunWorkspace(

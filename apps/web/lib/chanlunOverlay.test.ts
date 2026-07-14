@@ -348,6 +348,19 @@ test("chanlun series merge preserves base K-line series and replaces stale Chanl
   assert.notDeepEqual(merged[2]?.data, ["stale"]);
 });
 
+test("chanlun series merge clears stale CZSC research markers", () => {
+  const merged = mergeChanlunSeries(
+    [
+      { id: "kline-candles", type: "candlestick" },
+      { data: ["stale"], id: "czsc-research-markers", type: "scatter" },
+    ],
+    [{ data: [], id: "czsc-research-markers", type: "scatter" }],
+  );
+
+  assert.deepEqual(merged.map((item) => item.id), ["kline-candles", "czsc-research-markers"]);
+  assert.deepEqual(merged[1]?.data, []);
+});
+
 test("K-line overlays wait for a current base series snapshot", () => {
   const baseSeries = [
     { id: "kline-candles", type: "candlestick" },

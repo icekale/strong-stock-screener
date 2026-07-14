@@ -1486,6 +1486,64 @@ export type ChanlunConfluenceType =
   | "sub_three_buy"
   | "sub_three_sell";
 export type ChanlunLayerKey = "fractals" | "strokes" | "segments" | "zones" | "divergences" | "signals";
+export type CzscResearchStatus = "ready" | "pending" | "stale" | "unavailable" | "insufficient_bars" | "adjustment_mismatch";
+export type CzscEvidenceFamily = "trend_context" | "second_buy" | "third_buy" | "zone_confluence" | "divergence" | "sell_risk";
+export type CzscEvidenceRole = "primary" | "confirmation" | "risk" | "observation";
+export type CzscEvidenceDirection = "bullish" | "bearish" | "neutral";
+
+export type CzscSignalEvidence = {
+  id: string;
+  catalog_id: string;
+  family: CzscEvidenceFamily;
+  role: CzscEvidenceRole;
+  direction: CzscEvidenceDirection;
+  period: ChanlunPeriod | null;
+  higher_period: ChanlunPeriod | null;
+  lower_period: ChanlunPeriod | null;
+  occurred_at: string;
+  last_closed_bar_at: string;
+  signal_name: string;
+  params: Record<string, unknown>;
+  engine_version: string;
+  catalog_version: string;
+  rule_version: string;
+};
+
+export type CzscSignalEvidenceSummary = Pick<
+  CzscSignalEvidence,
+  "id" | "catalog_id" | "family" | "role" | "direction" | "period" | "higher_period" | "lower_period" | "occurred_at"
+> & {
+  reason: string;
+};
+
+export type CzscResearchSnapshot = {
+  status: CzscResearchStatus;
+  symbol: string;
+  current_states: CzscSignalEvidence[];
+  events: CzscSignalEvidence[];
+  last_closed_by_period: Partial<Record<ChanlunPeriod, string>>;
+  input_snapshot_id: string;
+  score: number | null;
+  eligible: boolean;
+  engine_version: string;
+  catalog_version: string;
+  rule_version: string;
+  source_status: StrongStockSourceStatus[];
+  adjustment_mode: string;
+  calculated_at: string;
+};
+
+export type CzscV2CandidateScore = {
+  symbol: string;
+  status: CzscResearchStatus;
+  score: number | null;
+  shadow_rank: number | null;
+  eligible: boolean;
+  baseline_rank: number;
+  evidence: CzscSignalEvidenceSummary[];
+  input_snapshot_id: string;
+  rule_version: string;
+};
 
 export type ChanlunFractal = {
   id: string;

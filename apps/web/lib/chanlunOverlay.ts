@@ -100,7 +100,7 @@ export function mergeChanlunSeries(
   chanlunSeries: readonly EchartsSeries[],
 ): EchartsSeries[] {
   return [
-    ...baseSeries.filter((series) => !(typeof series.id === "string" && series.id.startsWith("chanlun-"))),
+    ...baseSeries.filter((series) => !isManagedOverlaySeriesId(series.id)),
     ...chanlunSeries,
   ];
 }
@@ -290,7 +290,11 @@ function buildStrokeSeries(
   };
 }
 
-function resolveChartDate(value: string, chartDates?: readonly string[]): string {
+function isManagedOverlaySeriesId(id: unknown): boolean {
+  return typeof id === "string" && (id.startsWith("chanlun-") || id === "czsc-research-markers");
+}
+
+export function resolveChartDate(value: string, chartDates?: readonly string[]): string {
   const normalized = normalizeDate(value);
   if (!chartDates?.length) {
     return normalized;

@@ -10,8 +10,6 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Protocol
 
-import httpx
-
 from app.models import (
     AuctionModelBacktestSummary,
     AuctionModelPredictionItem,
@@ -20,6 +18,7 @@ from app.models import (
     StrongStockCandidate,
     StrongStockSourceStatus,
 )
+from app.providers.free_stockdb import FreeStockDbClient, FreeStockDbRequestError
 
 FEATURE_VERSION = "morning_auction_features_v1"
 GUARD_RULE = "10:00收益<0则退出，否则持有到T+1收盘"
@@ -92,27 +91,6 @@ class KlineProvider(Protocol):
         ...
 
 
-class FreeStockDbClient:
-    def __init__(self, *, base_url: str, timeout_seconds: float = 10.0) -> None:
-        self._base_url = base_url.rstrip("/") + "/"
-        self._timeout_seconds = timeout_seconds
-
-    def vals(self, *, table: str, k1: str, k2: str) -> list[Any]:
-        params = {"cmd": "vals", "t": table, "k1": k1, "k2": k2}
-        try:
-            with httpx.Client(timeout=self._timeout_seconds) as client:
-                response = client.get(self._base_url, params=params)
-                response.raise_for_status()
-                payload = response.json()
-        except httpx.HTTPError as exc:
-            raise AuctionModelDataError(f"free-stockdb 请求失败：{exc}") from exc
-        except ValueError as exc:
-            raise AuctionModelDataError("free-stockdb 返回了无效 JSON") from exc
-        if not isinstance(payload, list):
-            raise AuctionModelDataError("free-stockdb 返回结构异常：预期 list")
-        return payload
-
-
 class FreeStockDbAuctionModelSource:
     source_name = "free-stockdb"
 
@@ -126,7 +104,7 @@ class FreeStockDbAuctionModelSource:
             raise ValueError("lookback must be positive")
         end_key = _normalize_date_key(feature_end_date)
         start_key = _start_key_for_lookback(end_key, lookback)
-        rows = self._client.vals(table="日k", k1="all:", k2=f"fwd:{start_key},{end_key}")
+        rows = self._vals(table="日k", k1="all:", k2=f"fwd:{start_key},{end_key}")
 
         rows_by_date: dict[str, list[dict[str, object]]] = {}
         bars_by_code: dict[str, list[DailyBar]] = {}
@@ -145,7 +123,7 @@ class FreeStockDbAuctionModelSource:
     def candidate_universe(self, trade_date: str) -> list[dict[str, object]]:
         date_key = _normalize_date_key(trade_date)
         if self._prefetched_rows_by_date is None:
-            rows = self._client.vals(table="日k", k1="all:", k2=f"key:{date_key}")
+            rows = self._vals(table="日k", k1="all:", k2=f"key:{date_key}")
         else:
             rows = self._prefetched_rows_by_date.get(date_key, [])
         candidates: list[dict[str, object]] = []
@@ -176,10 +154,16 @@ class FreeStockDbAuctionModelSource:
             return bars[-lookback:]
 
         start_key = _start_key_for_lookback(end_key, lookback)
-        rows = self._client.vals(table="日k", k1=f"key:{code}", k2=f"fwd:{start_key},{end_key}")
+        rows = self._vals(table="日k", k1=f"key:{code}", k2=f"fwd:{start_key},{end_key}")
         bars = [_daily_bar_from_row(row) for row in rows if isinstance(row, dict)]
         bars.sort(key=lambda bar: bar.trade_date)
         return bars[-lookback:]
+
+    def _vals(self, *, table: str, k1: str, k2: str) -> list[Any]:
+        try:
+            return self._client.vals(table=table, k1=k1, k2=k2)
+        except FreeStockDbRequestError as exc:
+            raise AuctionModelDataError(str(exc)) from exc
 
 
 class ProviderAuctionModelSource:

@@ -21,6 +21,7 @@ from app.rules import analyze_screening_item, analyze_watchlist_risk
 from app.providers.news_risk import NegativeNewsRisk
 from app.services.gsgf_trade_plan import build_gsgf_trade_plan
 from app.services.chanlun.screening import passes_chanlun_screening_filters
+from app.services.chanlun.shadow_service import CzscShadowCandidate, CzscShadowSchedulerProtocol
 
 
 class ScreeningFilters(Protocol):
@@ -71,11 +72,13 @@ class StrongStockScreener:
         kline_provider: KlineProvider,
         news_risk_provider: NewsRiskProvider | None = None,
         chanlun_summarizer: ChanlunScreeningSummarizer | None = None,
+        chanlun_v2_scheduler: CzscShadowSchedulerProtocol | None = None,
     ) -> None:
         self.candidate_provider = candidate_provider
         self.kline_provider = kline_provider
         self.news_risk_provider = news_risk_provider
         self.chanlun_summarizer = chanlun_summarizer
+        self.chanlun_v2_scheduler = chanlun_v2_scheduler
 
     def screen(
         self,
@@ -178,13 +181,18 @@ class StrongStockScreener:
             before_hard_risk = len(items)
             items = [item for item in items if not _has_gsgf_hard_risk(item)]
             funnel.hard_risk_filtered_count = before_hard_risk - len(items)
-        items = _enrich_chanlun_candidates(
+        items, shadow_pool = _enrich_chanlun_candidates(
             items,
             bars_by_symbol=bars_by_symbol,
             summarizer=self.chanlun_summarizer,
             trade_date=trade_date,
             limit=limit,
             strategy=strategy,
+        )
+        czsc_v2_job_id = _submit_shadow_batch(
+            self.chanlun_v2_scheduler,
+            trade_date=trade_date,
+            items=shadow_pool,
         )
         enriched_by_symbol = {item.symbol: item for item in items}
         observation_items = [
@@ -209,6 +217,8 @@ class StrongStockScreener:
             gsgf_funnel=funnel,
             gsgf_observation_items=ranked_observations,
             watchlist_risk_items=self._watchlist_risks(watchlist_snapshot, trade_date),
+            czsc_v2_job_id=czsc_v2_job_id,
+            czsc_v2_status="pending" if czsc_v2_job_id is not None else None,
         )
 
     def _watchlist_risks(
@@ -396,11 +406,13 @@ def _enrich_chanlun_candidates(
     trade_date: str,
     limit: int,
     strategy: ScreenStrategy,
-) -> list[StrongStockScreeningItem]:
-    if summarizer is None or not items:
-        return items
+) -> tuple[list[StrongStockScreeningItem], list[StrongStockScreeningItem]]:
+    if not items:
+        return [], []
     pool_size = min(max(limit * 2, 20), 60)
     pool = sorted(items, key=lambda item: _screening_rank_key(item, strategy))[:pool_size]
+    if summarizer is None:
+        return items, pool
     enriched: dict[str, StrongStockScreeningItem] = {}
     for item in pool:
         try:
@@ -412,7 +424,31 @@ def _enrich_chanlun_candidates(
         except Exception:
             continue
         enriched[item.symbol] = item.model_copy(update={"chanlun_summary": summary})
-    return [enriched.get(item.symbol, item) for item in items]
+    enriched_items = [enriched.get(item.symbol, item) for item in items]
+    enriched_pool = [enriched.get(item.symbol, item) for item in pool]
+    return enriched_items, enriched_pool
+
+
+def _submit_shadow_batch(
+    scheduler: CzscShadowSchedulerProtocol | None,
+    *,
+    trade_date: str,
+    items: list[StrongStockScreeningItem],
+) -> str | None:
+    if scheduler is None or not 20 <= len(items) <= 60:
+        return None
+    candidates = [
+        CzscShadowCandidate(
+            symbol=item.symbol,
+            baseline_rank=index,
+            trade_date=trade_date,
+        )
+        for index, item in enumerate(items, start=1)
+    ]
+    try:
+        return scheduler.submit(trade_date=trade_date, candidates=candidates)
+    except Exception:
+        return None
 
 
 def _passes_chanlun_filters(

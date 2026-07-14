@@ -1454,6 +1454,7 @@ def _client(
     chanlun_screening_summarizer: object | None = None,
     chanlun_research_service: object | None = None,
     chanlun_rc8_client: object | None = None,
+    chanlun_shadow_scheduler: object | None = None,
 ) -> TestClient:
     shutdown_research = getattr(main_module, "shutdown_chanlun_research", None)
     if shutdown_research is not None:
@@ -1498,6 +1499,10 @@ def _client(
         app.state.chanlun_research_service = chanlun_research_service
     if chanlun_rc8_client is not None:
         app.state.chanlun_rc8_client = chanlun_rc8_client
+    if chanlun_shadow_scheduler is not None:
+        app.state.chanlun_shadow_scheduler = chanlun_shadow_scheduler
+    elif hasattr(app.state, "chanlun_shadow_scheduler"):
+        delattr(app.state, "chanlun_shadow_scheduler")
     app.state.chanlun_screening_summarizer = chanlun_screening_summarizer
     app.state.auction_sampler_disabled = True
     app.state.sector_workbench_sampler_disabled = True
@@ -3337,6 +3342,42 @@ def test_screen_run_returns_items_and_persists_latest_without_empty_status(tmp_p
     assert latest_response.status_code == 200
     assert latest_response.json()["trade_date"] == "2026-06-11"
     assert (tmp_path / "latest.json").exists()
+
+
+def test_shadow_screening_job_endpoint_returns_progress_and_persisted_batch(tmp_path: Path) -> None:
+    from app.services.background_jobs import BackgroundJobStore
+    from app.services.chanlun.research_store import ChanlunResearchStore
+    from app.services.chanlun.shadow_service import CzscShadowCandidate, CzscShadowScheduler
+
+    jobs = BackgroundJobStore(tmp_path)
+    scheduler = CzscShadowScheduler(
+        jobs=jobs,
+        store=ChanlunResearchStore(tmp_path / "research.sqlite3"),
+        runner=StaticResearchService(_research_snapshot()),
+    )
+    job_id = scheduler.submit(
+        trade_date="2026-07-10",
+        candidates=[
+            CzscShadowCandidate(
+                symbol=f"600{index:03d}.SH",
+                baseline_rank=index + 1,
+                trade_date="2026-07-10",
+            )
+            for index in range(20)
+        ],
+    )
+    jobs.wait(job_id)
+    client = _client(tmp_path, chanlun_shadow_scheduler=scheduler)
+    app.state.background_job_store = jobs
+    app.state.background_job_store_data_dir = tmp_path
+
+    response = client.get(f"/api/chanlun/screening/shadow/jobs/{job_id}")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["job"]["job_id"] == job_id
+    assert payload["batch"]["status"] == "ready"
+    assert payload["batch"]["completed_count"] == 20
 
 
 def test_screen_run_respects_scan_limit_before_fetching_klines(tmp_path: Path) -> None:

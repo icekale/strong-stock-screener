@@ -109,6 +109,7 @@ from app.services.chanlun.rc8_client import Rc8WorkerClient
 from app.services.chanlun.research_catalog import ResearchCatalog, load_research_catalog
 from app.services.chanlun.research_service import CzscResearchService
 from app.services.chanlun.research_store import ChanlunResearchStore
+from app.services.chanlun.shadow_service import CzscShadowScheduler
 from app.services.chanlun.service import ChanlunAnalysisService
 from app.services.chanlun.screening import CachedChanlunScreeningSummarizer
 from app.services.chanlun.store import ChanlunMinuteBarStore
@@ -435,7 +436,11 @@ def shutdown_chanlun_research() -> None:
                 client.close()
             except Exception:
                 pass
-        for attribute in ("chanlun_research_service", "chanlun_rc8_client"):
+        for attribute in (
+            "chanlun_research_service",
+            "chanlun_rc8_client",
+            "chanlun_shadow_scheduler",
+        ):
             if hasattr(app.state, attribute):
                 delattr(app.state, attribute)
 
@@ -743,6 +748,7 @@ def _execute_screen_run(
         kline_provider=_kline_provider(),
         news_risk_provider=_news_risk_provider(),
         chanlun_summarizer=_chanlun_screening_summarizer(),
+        chanlun_v2_scheduler=_chanlun_shadow_scheduler(),
     )
     if progress is not None:
         progress(2, 4, f"扫描 {request.scan_limit} 只候选并计算K线结构")
@@ -768,6 +774,19 @@ def _execute_screen_run(
     if progress is not None:
         progress(4, 4, "筛选完成")
     return result
+
+
+@app.get("/api/chanlun/screening/shadow/jobs/{job_id}")
+def get_chanlun_shadow_screening_job(job_id: str) -> dict[str, object]:
+    try:
+        job = _background_job_store().get(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="CZSC shadow job not found") from exc
+    batch = _chanlun_shadow_scheduler().get(job_id)
+    return {
+        "job": job.model_dump(mode="json"),
+        "batch": batch.model_dump(mode="json") if batch is not None else None,
+    }
 
 
 @app.get("/api/screen/runs/latest")
@@ -3367,6 +3386,21 @@ def _chanlun_research_service() -> CzscResearchService:
         )
         app.state.chanlun_research_service = service
         return service
+
+
+def _chanlun_shadow_scheduler() -> CzscShadowScheduler:
+    with _CHANLUN_RESEARCH_LOCK:
+        injected = getattr(app.state, "chanlun_shadow_scheduler", None)
+        if injected is not None:
+            return injected
+        scheduler = CzscShadowScheduler(
+            jobs=_background_job_store(),
+            store=_chanlun_research_store(),
+            runner=_chanlun_research_service(),
+            hard_timeout_seconds=get_settings().chanlun_rc8_hard_timeout_seconds,
+        )
+        app.state.chanlun_shadow_scheduler = scheduler
+        return scheduler
 
 
 def _chanlun_screening_summarizer() -> CachedChanlunScreeningSummarizer | None:

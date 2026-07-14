@@ -169,6 +169,27 @@ def test_chanlun_enrichment_is_bounded_before_final_ranking(monkeypatch) -> None
     assert len(summarizer.calls) == 20
 
 
+def test_shadow_scheduler_never_changes_formal_order(monkeypatch) -> None:
+    monkeypatch.setattr(screener_module, "analyze_screening_item", simple_analyze_screening_item)
+    scheduler = RecordingShadowScheduler(job_id="shadow-1")
+    screener = StrongStockScreener(
+        candidate_provider=ManyStaticCandidateProvider(count=25),
+        kline_provider=StaticKlineProvider(),
+        chanlun_v2_scheduler=scheduler,
+    )
+
+    result = screener.screen("2026-07-10", limit=3, scan_limit=25)
+
+    assert [item.symbol for item in result.items] == ["603100.SH", "603101.SH", "603102.SH"]
+    assert result.czsc_v2_job_id == "shadow-1"
+    assert result.czsc_v2_status == "pending"
+    assert all(item.czsc_score_v2 is None for item in result.items)
+    assert 20 <= len(scheduler.candidates) <= 60
+    assert [candidate.baseline_rank for candidate in scheduler.candidates] == list(
+        range(1, len(scheduler.candidates) + 1)
+    )
+
+
 def test_chanlun_stale_summary_does_not_break_core_score_ties() -> None:
     stale = _item("603110.SH", GsgfAnalysis(total_score=50)).model_copy(
         update={"chanlun_summary": _chanlun_summary(score=100, confirmed_buy=True).model_copy(update={"freshness": "stale"})}
@@ -260,6 +281,16 @@ class ManyStaticCandidateProvider:
             )
             for index in range(self.count)
         ]
+
+
+class RecordingShadowScheduler:
+    def __init__(self, job_id: str) -> None:
+        self.job_id = job_id
+        self.candidates: list[object] = []
+
+    def submit(self, *, trade_date: str, candidates: list[object]) -> str:
+        self.candidates = list(candidates)
+        return self.job_id
 
 
 class RecordingChanlunSummarizer:

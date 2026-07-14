@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
+import { createRequire } from "node:module";
+
 const baseUrl = process.env.SMOKE_UI_BASE_URL ?? "http://127.0.0.1:3110";
-const routes = ["/", "/auction", "/sectors", "/heatmap", "/watchlist", "/stock/002080.SZ", "/settings", "/sentiment"];
+const routes = ["/", "/auction", "/sectors", "/heatmap", "/watchlist", "/stock/002080.SZ", "/chanlun?symbol=300308.SZ", "/settings", "/sentiment"];
 const viewports = [
   { name: "desktop", width: 1440, height: 900 },
   { name: "mobile", width: 390, height: 844 },
@@ -9,7 +11,8 @@ const viewports = [
 
 let chromium;
 try {
-  ({ chromium } = await import("playwright"));
+  const require = createRequire(new URL("../apps/web/package.json", import.meta.url));
+  ({ chromium } = require("playwright"));
 } catch {
   console.warn("smoke:ui skipped: Playwright is not installed in this workspace.");
   process.exit(0);

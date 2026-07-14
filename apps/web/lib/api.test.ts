@@ -39,6 +39,28 @@ test("cache-only Top3 marks a missing cache separately from an API failure", asy
   }
 });
 
+test("CZSC shadow client encodes a screening job ID", async () => {
+  const api = (await import(new URL("./api.ts", import.meta.url).href)) as {
+    getCzscShadowScreeningJob: (jobId: string) => Promise<unknown>;
+  };
+  const originalFetch = globalThis.fetch;
+  const requests: URL[] = [];
+  globalThis.fetch = async (input) => {
+    requests.push(new URL(String(input)));
+    return new Response(JSON.stringify({ job: {}, batch: null }), {
+      headers: { "Content-Type": "application/json" },
+    });
+  };
+
+  try {
+    await api.getCzscShadowScreeningJob("job/1");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requests[0].pathname, "/api/chanlun/screening/shadow/jobs/job%2F1");
+});
+
 test("Chanlun client encodes symbols and analysis query parameters", async () => {
   const originalFetch = globalThis.fetch;
   const requests: Array<{ url: URL; init?: RequestInit }> = [];

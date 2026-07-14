@@ -49,6 +49,7 @@ type ScreenerWorkbenchProps = {
   screenFilters: ScreenRunFilters;
   screenFiltersSaved: boolean;
   error: string | null;
+  czscResearchMessage: string | null;
   onScanLimitChange: (value: number) => void;
   onScreenFiltersChange: (value: ScreenRunFilters) => void;
   onSaveScreenFilters: () => void;
@@ -78,6 +79,7 @@ export function ScreenerWorkbench({
   screenFilters,
   screenFiltersSaved,
   error,
+  czscResearchMessage,
   onScanLimitChange,
   onScreenFiltersChange,
   onSaveScreenFilters,
@@ -160,6 +162,8 @@ export function ScreenerWorkbench({
 
         {result || running ? (
           <CandidateResults
+            czscResearchMessage={czscResearchMessage}
+            czscResearchPending={result?.czsc_v2_status === "pending" && czscResearchMessage === null}
             generatedAt={result?.generated_at ?? null}
             items={candidates}
             onAddManyToWatchlist={onAddManyToWatchlist}

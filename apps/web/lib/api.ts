@@ -22,6 +22,7 @@ import type {
   ChanlunSymbolSearchResponse,
   ChanlunWorkspaceResponse,
   CzscResearchSnapshot,
+  CzscShadowScreeningJobResponse,
   DataSourceStatusResponse,
   GsgfAnalysis,
   GsgfAutoReviewConfig,
@@ -769,6 +770,16 @@ export async function getScreenRunJob(jobId: string): Promise<ScreenRunJobState>
     throw new Error(`读取筛选任务失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<ScreenRunJobState>;
+}
+
+export async function getCzscShadowScreeningJob(jobId: string): Promise<CzscShadowScreeningJobResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/api/chanlun/screening/shadow/jobs/${encodeURIComponent(jobId)}`,
+  );
+  if (!response.ok) {
+    throw new Error(`读取CZSC研究任务失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<CzscShadowScreeningJobResponse>;
 }
 
 export async function getLatestScreenRun(): Promise<StrongStockScreeningResponse> {

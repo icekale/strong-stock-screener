@@ -1454,6 +1454,12 @@ export type StrongStockScreeningItem = {
   source_trace: string[];
   gsgf: GsgfAnalysis | null;
   chanlun_summary?: ChanlunScreeningSummary | null;
+  czsc_score_v2?: number | null;
+  czsc_v2_eligible?: boolean | null;
+  czsc_v2_shadow_rank?: number | null;
+  czsc_v2_evidence?: CzscSignalEvidenceSummary[] | null;
+  czsc_v2_status?: CzscResearchStatus | null;
+  czsc_v2_rule_version?: string | null;
 };
 
 export type KlineBar = {
@@ -1543,6 +1549,23 @@ export type CzscV2CandidateScore = {
   evidence: CzscSignalEvidenceSummary[];
   input_snapshot_id: string;
   rule_version: string;
+};
+
+export type CzscV2BatchStatus = "pending" | "ready" | "partial" | "unavailable";
+
+export type CzscV2BatchResult = {
+  batch_id: string;
+  job_id: string;
+  status: CzscV2BatchStatus;
+  trade_date: string;
+  pool_size: number;
+  completed_count: number;
+  items: CzscV2CandidateScore[];
+};
+
+export type CzscShadowScreeningJobResponse = {
+  job: BackgroundJobState;
+  batch: CzscV2BatchResult | null;
 };
 
 export type ChanlunFractal = {
@@ -1889,6 +1912,8 @@ export type StrongStockScreeningResponse = {
   gsgf_funnel: GsgfFunnelDiagnostics;
   gsgf_observation_items: StrongStockScreeningItem[];
   watchlist_risk_items: WatchlistRiskItem[];
+  czsc_v2_job_id?: string | null;
+  czsc_v2_status?: CzscV2BatchStatus | null;
   generated_at: string;
 };
 

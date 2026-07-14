@@ -6,6 +6,7 @@ import {
   addWatchlistPoolItem,
   createScreenRunJob,
   getDataSourceStatus,
+  getCzscShadowScreeningJob,
   getLatestScreenRun,
   getMarketOverview,
   getScreenRunJob,
@@ -13,6 +14,7 @@ import {
   getSentimentSummary,
   getWatchlistPool,
 } from "../lib/api";
+import { mergeShadowScores, shadowScoresBySymbol } from "../lib/czscShadow";
 import type {
   DataSourceStatusResponse,
   MarketOverviewResponse,
@@ -48,7 +50,10 @@ export function HomeWorkbench() {
   const [screenJob, setScreenJob] = useState<ScreenRunJobState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [watchlistMessage, setWatchlistMessage] = useState<string | null>(null);
+  const [czscResearchMessage, setCzscResearchMessage] = useState<string | null>(null);
   const screenRunPollerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const czscShadowPollerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const czscShadowGenerationRef = useRef(0);
 
   useEffect(() => {
     setScreenFilters(loadSavedScreenFilters());
@@ -62,6 +67,7 @@ export function HomeWorkbench() {
       if (screenRunPollerRef.current) {
         clearTimeout(screenRunPollerRef.current);
       }
+      stopCzscShadowPolling();
     };
   }, []);
 
@@ -114,7 +120,7 @@ export function HomeWorkbench() {
 
   async function refreshLatest() {
     try {
-      setResult(await getLatestScreenRun());
+      applyFormalResult(await getLatestScreenRun());
     } catch {
       setResult(null);
     }
@@ -133,6 +139,7 @@ export function HomeWorkbench() {
     if (screenRunPollerRef.current) {
       clearTimeout(screenRunPollerRef.current);
     }
+    stopCzscShadowPolling();
     setRunning(true);
     setError(null);
     setScreenJob(null);
@@ -150,7 +157,7 @@ export function HomeWorkbench() {
     if (job.status === "success") {
       setRunning(false);
       if (job.result) {
-        setResult(job.result);
+        applyFormalResult(job.result);
         setIntraday(null);
       } else {
         void refreshLatest();
@@ -180,6 +187,62 @@ export function HomeWorkbench() {
         }
       })();
     }, 2000);
+  }
+
+  function stopCzscShadowPolling() {
+    czscShadowGenerationRef.current += 1;
+    if (czscShadowPollerRef.current) {
+      clearTimeout(czscShadowPollerRef.current);
+      czscShadowPollerRef.current = null;
+    }
+  }
+
+  function applyFormalResult(next: StrongStockScreeningResponse) {
+    stopCzscShadowPolling();
+    setCzscResearchMessage(null);
+    setResult(next);
+    if (!next.czsc_v2_job_id) {
+      return;
+    }
+    pollCzscShadowJob(next.czsc_v2_job_id, next.trade_date, czscShadowGenerationRef.current);
+  }
+
+  function pollCzscShadowJob(jobId: string, resultTradeDate: string, generation: number) {
+    czscShadowPollerRef.current = setTimeout(() => {
+      void (async () => {
+        try {
+          const response = await getCzscShadowScreeningJob(jobId);
+          if (czscShadowGenerationRef.current !== generation) {
+            return;
+          }
+          const batch = response.batch;
+          if (batch) {
+            setResult((current) => {
+              if (!current || current.trade_date !== resultTradeDate) {
+                return current;
+              }
+              return {
+                ...current,
+                czsc_v2_status: batch.status,
+                items: mergeShadowScores(current.items, shadowScoresBySymbol(batch)),
+              };
+            });
+            if (batch.status !== "pending") {
+              return;
+            }
+          }
+          if (response.job.status === "failed" || response.job.status === "canceled") {
+            setCzscResearchMessage("CZSC研究暂不可用");
+            return;
+          }
+          pollCzscShadowJob(jobId, resultTradeDate, generation);
+        } catch {
+          if (czscShadowGenerationRef.current === generation) {
+            setCzscResearchMessage("CZSC研究暂不可用");
+          }
+        }
+      })();
+    }, 1200);
   }
 
   function handleSaveScreenFilters() {
@@ -240,6 +303,7 @@ export function HomeWorkbench() {
   return (
     <ScreenerWorkbench
       error={error}
+      czscResearchMessage={czscResearchMessage}
       intraday={intraday}
       marketOverview={marketOverview}
       marketSupportLoading={marketSupportLoading}
@@ -263,7 +327,12 @@ export function HomeWorkbench() {
       onScanLimitChange={setScanLimit}
       onScreenFiltersChange={handleScreenFiltersChange}
       onStrategyChange={setStrategy}
-      onTradeDateChange={setTradeDate}
+      onTradeDateChange={(nextTradeDate) => {
+        if (nextTradeDate !== tradeDate) {
+          stopCzscShadowPolling();
+        }
+        setTradeDate(nextTradeDate);
+      }}
       watchlistPoolItems={watchlistPoolItems}
       watchlistMessage={watchlistMessage}
     />

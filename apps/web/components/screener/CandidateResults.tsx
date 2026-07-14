@@ -11,6 +11,7 @@ import type {
   WatchlistPoolItem,
 } from "../../lib/types";
 import { chanlunScreeningView } from "../../lib/chanlunScreener";
+import { czscShadowLabel } from "../../lib/czscShadow";
 import { buildStockDetailHref } from "../../lib/stockNavigation";
 import {
   filterStockListByGsgf,
@@ -30,6 +31,8 @@ import {
 } from "./screenerUtils";
 
 export type CandidateTableProps = {
+  czscResearchMessage: string | null;
+  czscResearchPending: boolean;
   generatedAt: string | null;
   items: StrongStockScreeningItem[];
   onAddManyToWatchlist: (items: StrongStockScreeningItem[], group: string, tags: string[]) => void;
@@ -50,6 +53,8 @@ function DesignScreenerResultsTable(props: CandidateTableProps) {
 }
 
 function CandidateTable({
+  czscResearchMessage,
+  czscResearchPending,
   generatedAt,
   items,
   onAddManyToWatchlist,
@@ -170,6 +175,7 @@ function CandidateTable({
               </div>
               <GsgfSummaryText gsgf={item.gsgf} />
               <ChanlunSummaryText summary={item.chanlun_summary} symbol={item.symbol} />
+              <CzscShadowSummaryText item={item} pending={czscResearchPending} />
             </div>
           );
         },
@@ -244,7 +250,7 @@ function CandidateTable({
           </p>
         </div>
         <span className="text-xs font-medium text-[var(--app-muted)]">
-          点击股票名称查看 K 线详情
+          {czscResearchMessage ?? "点击股票名称查看 K 线详情"}
         </span>
       </div>
       {watchlistMessage && (
@@ -306,6 +312,7 @@ function CandidateTable({
         {items.length > 0 ? (
           visibleCandidates.length > 0 ? (
             <CandidateCardList
+              czscResearchPending={czscResearchPending}
               isBatchSelected={(symbol) => selectedCandidateSymbols.has(symbol)}
               items={visibleCandidates}
               isInWatchlist={(symbol) => watchlistSymbols.has(symbol)}
@@ -326,6 +333,7 @@ function CandidateTable({
 }
 
 function CandidateCardList({
+  czscResearchPending,
   isInWatchlist,
   isBatchSelected,
   items,
@@ -334,6 +342,7 @@ function CandidateCardList({
   onToggleBatchSelect,
   selectedSymbol,
 }: {
+  czscResearchPending: boolean;
   isInWatchlist: (symbol: string) => boolean;
   isBatchSelected: (symbol: string) => boolean;
   items: StrongStockScreeningItem[];
@@ -376,6 +385,7 @@ function CandidateCardList({
               <span className="text-xs font-semibold tabular-nums text-[var(--app-ink)]">得分 {item.score}</span>
               <GsgfSummaryText gsgf={item.gsgf} />
               <ChanlunSummaryText summary={item.chanlun_summary} symbol={item.symbol} />
+              <CzscShadowSummaryText item={item} pending={czscResearchPending} />
             </div>
             <div className="mt-3"><IndustrySummary item={item} /></div>
             <p className={`mt-3 line-clamp-2 text-xs leading-5 ${riskSummary.tone}`}>{riskSummary.text}</p>
@@ -618,6 +628,17 @@ function ChanlunSummaryText({
       <div className="candidate-decision-meta__detail" title={view.detail}>{view.detail}</div>
     </div>
   );
+}
+
+function CzscShadowSummaryText({
+  item,
+  pending,
+}: {
+  item: StrongStockScreeningItem;
+  pending: boolean;
+}) {
+  const label = czscShadowLabel(item, pending);
+  return label ? <div className="candidate-decision-meta text-[var(--app-muted)]">{label}</div> : null;
 }
 
 function IndustrySummary({ item }: { item: StrongStockScreeningItem }) {

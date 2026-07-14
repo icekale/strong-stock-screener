@@ -8,6 +8,7 @@ const filters = readFileSync(new URL("../components/screener/FilterLogicRail.tsx
 const candidates = readFileSync(new URL("../components/screener/CandidateResults.tsx", import.meta.url), "utf8");
 const screenerTypes = readFileSync(new URL("../components/screener/types.ts", import.meta.url), "utf8");
 const screenerUtils = readFileSync(new URL("../components/screener/screenerUtils.ts", import.meta.url), "utf8");
+const czscShadow = readFileSync(new URL("./czscShadow.ts", import.meta.url), "utf8");
 const globals = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 
 test("screener uses Chinese product copy instead of terminal-style bilingual labels", () => {
@@ -48,6 +49,12 @@ test("candidate metadata is text-first instead of a pill wall", () => {
   assert.doesNotMatch(candidates, /GsgfSummaryPills/);
   assert.doesNotMatch(candidates, /IndustryBadge/);
   assert.doesNotMatch(candidates, /bg-violet-50|bg-indigo-50|bg-sky-50/);
+});
+
+test("candidate results display shadow research without sorting by it", () => {
+  assert.match(czscShadow, /CZSC研究/);
+  assert.match(candidates, /CzscShadowSummaryText/);
+  assert.doesNotMatch(candidates, /sort\([^)]*czsc_v2_shadow_rank/);
 });
 
 test("screener panels use the compact product radius", () => {

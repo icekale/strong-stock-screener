@@ -184,7 +184,7 @@ def _write_parquet_partition(path: Path, rows: list[dict[str, object]]) -> Datas
     digest = _sha256_file(path)
     dates = [str(row.get("date"))[:10] for row in rows if row.get("date")]
     return DatasetPartition(
-        path=str(path.relative_to(path.parents[2])),
+        path=str(path.relative_to(path.parents[1])),
         sha256=f"sha256:{digest}",
         row_count=len(rows),
         start_date=min(dates) if dates else None,

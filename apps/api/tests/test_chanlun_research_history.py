@@ -42,6 +42,17 @@ def test_minute_source_uses_stockdb_range_contract() -> None:
     assert rows[0].date == "2026-07-10T10:00:00+08:00"
 
 
+def test_daily_source_exposes_raw_rows_for_candidate_reconstruction() -> None:
+    http = RecordingHttpClient(payload=[{"date": "20260710", "code": "600000", "close": 10}])
+    source = FreeStockDbResearchSource(base_url="http://stockdb.test:7899", http_client=http)
+
+    rows = source.daily_rows(start="20260701", end="20260710")
+
+    assert rows[0]["code"] == "600000"
+    assert http.requests[0]["t"] == "日k"
+    assert http.requests[0]["k1"] == "all:"
+
+
 def test_history_source_discards_invalid_rows_and_future_bars() -> None:
     http = RecordingHttpClient(
         payload=[

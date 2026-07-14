@@ -28,6 +28,18 @@ class FreeStockDbResearchSource:
     def daily_bars(self, symbol: str, *, start: str, end: str) -> list[KlineBar]:
         return self._bars(table="日k", symbol=symbol, start=start, end=end)
 
+    def daily_rows(self, *, start: str, end: str) -> list[dict[str, object]]:
+        start_date = _parse_date(start)
+        end_date = _parse_date(end)
+        if start_date > end_date:
+            raise ValueError("history start must not be after end")
+        rows = self.client.vals(
+            table="日k",
+            k1="all:",
+            k2=f"{start_date:%Y%m%d}000000<{end_date:%Y%m%d}235959",
+        )
+        return [row for row in rows if isinstance(row, dict)]
+
     def minute_bars(self, symbol: str, *, start: str, end: str) -> list[KlineBar]:
         return self._bars(table="分钟k", symbol=symbol, start=start, end=end)
 

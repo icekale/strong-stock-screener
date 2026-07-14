@@ -1,6 +1,6 @@
 import type { KlineData } from "kline-charts-react";
 import { resolveChartDate } from "./chanlunOverlay.ts";
-import type { CzscResearchSnapshot, CzscSignalEvidence } from "./types";
+import type { ChanlunPeriod, CzscResearchSnapshot, CzscSignalEvidence } from "./types";
 
 type CzscResearchOverlaySeries = Record<string, unknown> & { id: "czsc-research-markers" };
 type ResearchSide = "bullish" | "bearish" | "neutral";
@@ -9,7 +9,7 @@ const RESEARCH_MARKER_ID = "czsc-research-markers" as const;
 
 export function buildCzscResearchOverlaySeries(
   snapshot: CzscResearchSnapshot | null | undefined,
-  options: { chartDates?: readonly string[]; chartData?: readonly KlineData[]; visibleBarCount?: number } = {},
+  options: { chartDates?: readonly string[]; chartData?: readonly KlineData[]; period?: ChanlunPeriod; visibleBarCount?: number } = {},
 ): CzscResearchOverlaySeries {
   const chartDates = options.chartDates ?? options.chartData?.map((bar) => bar.date);
   const candlesByDate = new Map(
@@ -20,6 +20,7 @@ export function buildCzscResearchOverlaySeries(
   const groups = new Map<string, { chartDate: string; evidence: CzscSignalEvidence[]; side: ResearchSide }>();
 
   for (const evidence of snapshot?.status === "ready" ? snapshot.events : []) {
+    if (options.period && evidence.period !== options.period) continue;
     const chartDate = resolveChartDate(evidence.occurred_at, chartDates);
     const side = resolveSide(evidence);
     const key = `${chartDate}|${side}`;

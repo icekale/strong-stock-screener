@@ -20,7 +20,7 @@ import {
 } from "../lib/klineIndicatorLayout";
 import { buildTickFlowOverlayOption } from "../lib/brickIndicator";
 import { resolveKlineOverlaySeries, resolveVisibleBarCount, type KlineSeriesSnapshot } from "../lib/chanlunOverlay.ts";
-import type { ChanlunAnalysisResponse, ChanlunLayerKey, CzscResearchSnapshot, GsgfChartAnnotation, KlineBar } from "../lib/types";
+import type { ChanlunAnalysisResponse, ChanlunLayerKey, ChanlunPeriod, CzscResearchSnapshot, GsgfChartAnnotation, KlineBar } from "../lib/types";
 
 useEcharts([MarkAreaComponent]);
 
@@ -53,6 +53,7 @@ export function TickFlowKlineChart({
   chanlun,
   chanlunLayers,
   czscResearch,
+  czscResearchPeriod,
   dataSourceMode = "tickflow",
   height,
   movingAverages,
@@ -67,6 +68,7 @@ export function TickFlowKlineChart({
   chanlun?: ChanlunAnalysisResponse | null;
   chanlunLayers?: Partial<Record<ChanlunLayerKey, boolean>>;
   czscResearch?: CzscResearchSnapshot | null;
+  czscResearchPeriod?: ChanlunPeriod;
   dataSourceMode?: KlineChartDataSourceMode;
   height: number;
   movingAverages: KlineMovingAverage[];
@@ -103,6 +105,7 @@ export function TickFlowKlineChart({
         chanlun,
         chanlunLayers,
         czscResearch,
+        czscResearchPeriod,
         chartData,
         showGsgfAnnotations: dataSourceMode === "tickflow" && showGsgfAnnotations,
         showCzscResearch,
@@ -114,6 +117,7 @@ export function TickFlowKlineChart({
       chanlun,
       chanlunLayers,
       czscResearch,
+      czscResearchPeriod,
       chartData,
       dataSourceMode,
       showGsgfAnnotations,

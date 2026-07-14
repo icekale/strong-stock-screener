@@ -1,6 +1,6 @@
 "use client";
 
-import { AutoComplete, Alert, Button, Checkbox, Empty, Input, Skeleton, Space, Tag, Typography } from "antd";
+import { AutoComplete, Alert, Button, Checkbox, Empty, Input, Skeleton, Space, Tabs, Tag, Typography } from "antd";
 import { ReloadOutlined, SearchOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -19,6 +19,7 @@ import {
   getChanlunPaperAccount,
   getChanlunReplay,
   getChanlunWorkspace,
+  getCzscResearchSignals,
   refreshChanlunAlerts,
   searchChanlunSymbols,
 } from "../../lib/api";
@@ -33,6 +34,7 @@ import type {
   ChanlunPeriod,
   ChanlunReplayResponse,
   ChanlunWorkspaceResponse,
+  CzscResearchSnapshot,
   SourceStatusValue,
 } from "../../lib/types";
 import {
@@ -46,6 +48,7 @@ import {
   toChartPeriod,
   type ChanlunAvailabilityDescription,
 } from "./chanlunWorkspaceHelpers";
+import { ChanlunResearchEvidence } from "./ChanlunResearchEvidence";
 
 const PERIOD_LABELS: Record<ChanlunPeriod, string> = {
   "1d": "日线",
@@ -75,6 +78,9 @@ export function ChanlunWorkspace() {
   const [period, setPeriod] = useState<ChanlunPeriod>("1d");
   const [layers, setLayers] = useState<Record<ChanlunLayerKey, boolean>>(DEFAULT_CHANLUN_LAYERS);
   const [showMovingAverages, setShowMovingAverages] = useState(false);
+  const [showResearch, setShowResearch] = useState(true);
+  const [research, setResearch] = useState<CzscResearchSnapshot | null>(null);
+  const [researchError, setResearchError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -100,6 +106,7 @@ export function ChanlunWorkspace() {
   const backtestRequestId = useRef(0);
   const alertRequestId = useRef(0);
   const searchId = useRef(0);
+  const researchRequestId = useRef(0);
   const mounted = useRef(true);
   const selectedSymbol = useRef<string | null>(symbol);
 
@@ -162,6 +169,29 @@ export function ChanlunWorkspace() {
       void loadWorkspace(symbol);
     }
   }, [loadWorkspace, symbol]);
+
+  useEffect(() => {
+    const currentRequest = researchRequestId.current + 1;
+    researchRequestId.current = currentRequest;
+    setResearch(null);
+    setResearchError(null);
+    if (!symbol) return;
+    let active = true;
+    const load = async () => {
+      try {
+        let snapshot = await getCzscResearchSignals(symbol);
+        while (active && snapshot.status === "pending") {
+          await sleep(1000);
+          snapshot = await getCzscResearchSignals(symbol);
+        }
+        if (active && researchRequestId.current === currentRequest && isChanlunSymbolCurrent(symbol, selectedSymbol.current)) setResearch(snapshot);
+      } catch (err) {
+        if (active && researchRequestId.current === currentRequest) setResearchError(err instanceof Error ? err.message : "读取上游研究信号失败");
+      }
+    };
+    void load();
+    return () => { active = false; };
+  }, [symbol]);
 
   useEffect(() => {
     if (!symbol || !workspace || workspace.symbol !== symbol || analysis?.period === period) {
@@ -418,6 +448,7 @@ export function ChanlunWorkspace() {
   const activeAnalysis = isChanlunAnalysisCurrent(analysis, symbol, period) ? analysis : null;
   const activeWorkspace = isChanlunWorkspaceCurrent(workspace, symbol) ? workspace : null;
   const activePeriodSummary = activeWorkspace?.periods.find((item) => item.period === period) ?? null;
+  const activeResearch = research?.symbol === symbol ? research : null;
   const availability = activeAnalysis?.availability ?? activePeriodSummary?.availability ?? null;
   const isIntradayBackfillState = period !== "1d" && (availability === "insufficient_bars" || availability === "backfilling");
   const backfillActive = backfillLoading || backfillJob?.status === "pending" || backfillJob?.status === "running";
@@ -538,6 +569,9 @@ export function ChanlunWorkspace() {
                   <Checkbox checked={showMovingAverages} onChange={(event) => setShowMovingAverages(event.target.checked)}>
                     均线
                   </Checkbox>
+                  <Checkbox checked={showResearch} onChange={(event) => setShowResearch(event.target.checked)}>
+                    上游研究信号
+                  </Checkbox>
                 </Space>
               </div>
               <div className="chanlun-status-rail__chart">
@@ -547,10 +581,13 @@ export function ChanlunWorkspace() {
                     bars={activeAnalysis.bars}
                     chanlun={activeAnalysis}
                     chanlunLayers={layers}
+                    czscResearch={activeResearch}
+                    czscResearchPeriod={period}
                     height={720}
                     movingAverages={showMovingAverages ? ["ma5", "ma10", "ma20", "ma60"] : []}
                     period={toChartPeriod(period)}
                     showGsgfAnnotations={false}
+                    showCzscResearch={showResearch}
                     subIndicators={[]}
                     symbol={activeAnalysis.symbol}
                   />
@@ -559,6 +596,15 @@ export function ChanlunWorkspace() {
                 )}
               </div>
             </section>
+
+            <Tabs
+              items={[
+                { key: "evidence", label: "分析证据", children: <ChanlunResearchEvidence snapshot={researchError ? null : activeResearch} /> },
+                { key: "replay", label: "回放验证", children: <Typography.Text type="secondary">历史回放与绩效回测位于下方。</Typography.Text> },
+                { key: "simulation", label: "预警模拟", children: <Typography.Text type="secondary">预警记录与模拟订单位于下方，订单需人工确认。</Typography.Text> },
+              ]}
+            />
+            {researchError ? <Alert message={researchError} showIcon type="warning" /> : null}
 
             <section className="compact-panel">
               <div className="compact-panel__header">

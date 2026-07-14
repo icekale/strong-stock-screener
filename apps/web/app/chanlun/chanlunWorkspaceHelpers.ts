@@ -1,5 +1,5 @@
 import type { KlineChartPeriod } from "../../components/TickFlowKlineChart";
-import type { ChanlunAvailability, ChanlunPeriod } from "../../lib/types";
+import type { ChanlunAvailability, ChanlunPeriod, CzscResearchSnapshot } from "../../lib/types";
 
 export const CHANLUN_PERIODS = ["1d", "60m", "30m", "5m"] as const satisfies readonly ChanlunPeriod[];
 
@@ -77,4 +77,12 @@ export function isChanlunWorkspaceCurrent(
   symbol: string | null,
 ): boolean {
   return workspace?.symbol === symbol;
+}
+
+export function groupCzscResearchEvidence(snapshot: CzscResearchSnapshot | null): Record<"primary" | "confirmation" | "risk" | "observation", CzscResearchSnapshot["events"]> {
+  const groups = { primary: [], confirmation: [], risk: [], observation: [] } as Record<"primary" | "confirmation" | "risk" | "observation", CzscResearchSnapshot["events"]>;
+  for (const evidence of snapshot?.status === "ready" ? snapshot.events : []) {
+    groups[evidence.role].push(evidence);
+  }
+  return groups;
 }

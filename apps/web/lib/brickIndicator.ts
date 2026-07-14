@@ -4,7 +4,7 @@ import type { KlineData } from "kline-charts-react";
 import type { KlineSubIndicator } from "./klineIndicatorLayout";
 import { buildChanlunOverlaySeries } from "./chanlunOverlay.ts";
 import { buildCzscResearchClearSeries, buildCzscResearchOverlaySeries } from "./czscResearchOverlay.ts";
-import type { ChanlunAnalysisResponse, ChanlunLayerKey, CzscResearchSnapshot, GsgfChartAnnotation } from "./types";
+import type { ChanlunAnalysisResponse, ChanlunLayerKey, ChanlunPeriod, CzscResearchSnapshot, GsgfChartAnnotation } from "./types";
 
 const BRICK_UP_COLOR = "#f43f5e";
 const BRICK_DOWN_COLOR = "#10b981";
@@ -121,6 +121,7 @@ export function buildTickFlowOverlayOption({
   chanlun,
   chanlunLayers,
   czscResearch,
+  czscResearchPeriod,
   chartData,
   showCzscResearch,
   showGsgfAnnotations,
@@ -131,6 +132,7 @@ export function buildTickFlowOverlayOption({
   chanlun?: ChanlunAnalysisResponse | null;
   chanlunLayers?: Partial<Record<ChanlunLayerKey, boolean>>;
   czscResearch?: CzscResearchSnapshot | null;
+  czscResearchPeriod?: ChanlunPeriod;
   chartData: KlineData[];
   showCzscResearch?: boolean;
   showGsgfAnnotations: boolean;
@@ -205,7 +207,7 @@ export function buildTickFlowOverlayOption({
       )
     : [];
   const researchSeries = showCzscResearch === true
-    ? [buildCzscResearchOverlaySeries(czscResearch, { chartData, visibleBarCount })]
+    ? [buildCzscResearchOverlaySeries(czscResearch, { chartData, period: czscResearchPeriod, visibleBarCount })]
     : showCzscResearch === false
       ? [buildCzscResearchClearSeries()]
       : [];

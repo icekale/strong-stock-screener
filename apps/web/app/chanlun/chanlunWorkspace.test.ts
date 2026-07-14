@@ -6,6 +6,7 @@ const {
   CHANLUN_PERIODS,
   DEFAULT_CHANLUN_LAYERS,
   describeChanlunAvailability,
+  groupCzscResearchEvidence,
   isChanlunAnalysisCurrent,
   isChanlunSymbolCurrent,
   isChanlunWorkspaceCurrent,
@@ -14,6 +15,29 @@ const {
 } = (await import(
   new URL("./chanlunWorkspaceHelpers.ts", import.meta.url).href,
 )) as typeof import("./chanlunWorkspaceHelpers");
+
+test("research evidence grouping keeps operational roles separate", () => {
+  const groups = groupCzscResearchEvidence({ status: "ready", events: [
+    { role: "primary" }, { role: "risk" }, { role: "primary" }, { role: "observation" },
+  ] } as never);
+  assert.deepEqual(Object.fromEntries(Object.entries(groups).map(([key, items]) => [key, items.length])), {
+    primary: 2, confirmation: 0, risk: 1, observation: 1,
+  });
+});
+
+test("workbench enables research signals and keeps moving averages disabled", () => {
+  const source = readFileSync(new URL("./ChanlunWorkspace.tsx", import.meta.url), "utf8");
+  assert.match(source, /\[showResearch, setShowResearch\] = useState\(true\)/);
+  assert.match(source, /\[showMovingAverages, setShowMovingAverages\] = useState\(false\)/);
+  assert.match(source, /上游研究信号/);
+});
+
+test("workbench separates analysis replay and simulation tasks", () => {
+  const source = readFileSync(new URL("./ChanlunWorkspace.tsx", import.meta.url), "utf8");
+  assert.match(source, /分析证据/);
+  assert.match(source, /回放验证/);
+  assert.match(source, /预警模拟/);
+});
 
 test("workbench status marks insufficient history non-actionable", () => {
   assert.deepEqual(describeChanlunAvailability("insufficient_bars"), {

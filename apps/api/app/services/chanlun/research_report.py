@@ -5,6 +5,7 @@ import gzip
 import hashlib
 import io
 import json
+from html import escape
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -67,7 +68,9 @@ def verify_dataset_manifest(manifest_path: Path) -> None:
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     root = manifest_path.parent
     for partition in payload.get("partitions", []):
-        path = root.parent / partition["path"]
+        path = root / partition["path"]
+        if not path.exists():
+            path = root.parent / partition["path"]
         if not path.exists() or f"sha256:{_sha256(path.read_bytes())}" != partition["sha256"]:
             raise ValueError(f"dataset checksum mismatch: {partition.get('path')}")
 
@@ -95,8 +98,35 @@ def _samples_gzip_bytes(samples: list[dict[str, Any]]) -> bytes:
 def _html_bytes(result: ValidationReportInput, generated_at: str) -> bytes:
     metrics = result.metrics
     rows = "".join(
-        f"<tr><td>{name}</td><td>{json.dumps(value, ensure_ascii=False, sort_keys=True)}</td></tr>"
+        f"<tr><td>{escape(str(name))}</td><td><pre>{escape(json.dumps(value, ensure_ascii=False, sort_keys=True))}</pre></td></tr>"
         for name, value in sorted(metrics.items())
+        if not str(name).startswith("top")
+    )
+    portfolio_rows = "".join(
+        "<tr>"
+        f"<td>{escape(str(label).capitalize())}</td>"
+        f"<td>{escape(_metric_text(value, 'baseline_net_return_pct'))}</td>"
+        f"<td>{escape(_metric_text(value, 'v2_net_return_pct'))}</td>"
+        f"<td>{escape(_metric_text(value, 'baseline_max_drawdown_pct'))}</td>"
+        f"<td>{escape(_metric_text(value, 'v2_max_drawdown_pct'))}</td>"
+        "</tr>"
+        for label, value in ((name, value) for name, value in sorted(metrics.items()) if str(name).startswith("top"))
+        if isinstance(value, dict)
+    )
+    portfolio_table = (
+        "<table><thead><tr><th>组合</th><th>基线累计净收益</th><th>v2累计净收益</th>"
+        "<th>基线最大回撤</th><th>v2最大回撤</th></tr></thead><tbody>"
+        f"{portfolio_rows}</tbody></table>"
+    )
+    folds = result.folds
+    fold_rows = "".join(
+        "<tr>"
+        f"<td>{escape(str(fold.get('test_start', '')))}</td>"
+        f"<td>{escape(str(fold.get('test_end', '')))}</td>"
+        f"<td>{escape(str(fold.get('sample_count', '')))}</td>"
+        f"<td>{escape(str(fold.get('top5_v2_net_return_pct', '')))}</td>"
+        "</tr>"
+        for fold in folds
     )
     html = f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><title>CZSC 研究验证报告</title></head>
@@ -104,12 +134,22 @@ def _html_bytes(result: ValidationReportInput, generated_at: str) -> bytes:
 <h1>CZSC 五年影子验证</h1>
 <p>生成时间：{generated_at}</p>
 <p>推荐结论：{result.recommendation}</p>
+<p>研究状态：{escape(str(metrics.get('research_status', 'unknown')))}</p>
+<h2>组合对比</h2>{portfolio_table}
 <h2>指标</h2><table><tbody>{rows}</tbody></table>
+<h2>晋级门槛</h2><p>{escape(str(metrics.get('failed_gates', [])))}</p>
 <h2>数据质量</h2><pre>{json.dumps(result.manifest.get("quality", {}), ensure_ascii=False, sort_keys=True)}</pre>
-<h2>折叠</h2><pre>{json.dumps(result.folds, ensure_ascii=False, sort_keys=True)}</pre>
-<h2>样本曲线</h2><p>样本数量：{len(result.samples)}</p>
+<h2>折叠</h2><table><thead><tr><th>测试开始</th><th>测试结束</th><th>样本数</th><th>Top5 v2累计净收益</th></tr></thead><tbody>{fold_rows}</tbody></table>
+<h2>权益与回撤</h2><pre>{escape(json.dumps({name: value for name, value in metrics.items() if str(name).startswith('top')}, ensure_ascii=False, sort_keys=True))}</pre>
+<h2>样本</h2><p>样本数量：{len(result.samples)}</p>
 </main></body></html>"""
     return html.encode("utf-8")
+
+
+def _metric_text(value: object, key: str) -> str:
+    if not isinstance(value, dict):
+        return ""
+    return str(value.get(key, ""))
 
 
 def _json_bytes(value: Any) -> bytes:

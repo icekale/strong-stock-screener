@@ -45,7 +45,8 @@ wait_for_api_ready
 cd /app/web
 export PORT="${PORT:-3110}"
 export HOSTNAME="${HOSTNAME:-0.0.0.0}"
-node server.js &
+export API_INTERNAL_URL="${API_INTERNAL_URL:-http://127.0.0.1:8010}"
+node server.mjs &
 web_pid="$!"
 
 shutdown() {

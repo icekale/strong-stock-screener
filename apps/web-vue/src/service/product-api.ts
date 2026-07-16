@@ -84,6 +84,10 @@ import type {
 import { apiFetch } from "./product-request";
 
 function defaultApiBaseUrl(): string {
+  if (import.meta.env.MODE === "prod") {
+    return "";
+  }
+
   if (typeof window !== "undefined" && window.location.hostname) {
     return `${window.location.protocol}//${window.location.hostname}:8010`;
   }

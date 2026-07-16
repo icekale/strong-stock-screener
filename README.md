@@ -54,7 +54,7 @@ Docker Hub 镜像：
 icekale/strong-stock-screener:latest
 ```
 
-单容器同时运行 FastAPI 后端和 Next.js 前端，对外只暴露 `3110`。
+单容器同时运行 FastAPI 后端和 Vue 3/Soybean Admin 前端，对外只暴露 `3110`。
 
 ### 1. 准备目录
 
@@ -354,14 +354,14 @@ uv sync
 uv run uvicorn app.main:app --host 127.0.0.1 --port 8010
 ```
 
-前端：
+前端（Vue 3 + Vite + Ant Design Vue）：
 
 ```bash
-cd apps/web
+cd apps/web-vue
 corepack enable
 corepack prepare pnpm@9.15.0 --activate
 pnpm install --frozen-lockfile
-npm run dev -- --hostname 127.0.0.1 --port 3110
+pnpm dev --host 127.0.0.1 --port 3110
 ```
 
 全量检查：
@@ -370,9 +370,10 @@ npm run dev -- --hostname 127.0.0.1 --port 3110
 cd apps/api
 uv run pytest -q
 
-cd ../web
-corepack pnpm@9.15.0 --ignore-workspace test
-corepack pnpm@9.15.0 --ignore-workspace build
+cd ../web-vue
+pnpm typecheck
+pnpm test:unit --run
+pnpm build
 ```
 
 Docker 本地构建：

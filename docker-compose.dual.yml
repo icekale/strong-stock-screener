@@ -33,15 +33,14 @@ services:
 
   web:
     build:
-      context: ./apps/web
-      args:
-        NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL: ${NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL:-http://localhost:8010}
+      context: ./apps/web-vue
+      dockerfile: Dockerfile
     container_name: strong-stock-screener-web
     depends_on:
       api:
         condition: service_healthy
     environment:
-      NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL: ${NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL:-http://localhost:8010}
+      API_INTERNAL_URL: http://api:8010
       TZ: ${TZ:-Asia/Shanghai}
     ports:
       - "3110:3110"

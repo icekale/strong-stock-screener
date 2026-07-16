@@ -58,7 +58,8 @@ WORKDIR /build/web
 RUN corepack enable \
     && corepack prepare pnpm@9.15.0 --activate
 
-COPY apps/web/package.json apps/web/pnpm-lock.yaml ./
+COPY apps/web-vue/package.json apps/web-vue/pnpm-lock.yaml apps/web-vue/pnpm-workspace.yaml ./
+COPY apps/web-vue/packages ./packages
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store \
     pnpm install --frozen-lockfile
 
@@ -71,11 +72,11 @@ RUN corepack enable \
     && corepack prepare pnpm@9.15.0 --activate
 
 COPY --from=web-deps /build/web/node_modules ./node_modules
-COPY apps/web ./
-ARG NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL=
-ENV NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL=$NEXT_PUBLIC_STRONG_STOCK_API_BASE_URL
+COPY apps/web-vue ./
+ARG VITE_API_BASE_URL=
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 RUN pnpm build \
-    && test -f .next/standalone/server.js
+    && test -f dist/index.html
 
 
 FROM python:3.12-slim AS runner
@@ -102,14 +103,16 @@ COPY --from=api-builder /opt/strong-stock-api-venv /opt/strong-stock-api-venv
 COPY --from=rc8-builder /opt/czsc-rc8-venv /opt/czsc-rc8-venv
 COPY apps/api/app ./api/app
 COPY apps/api/artifacts ./api/artifacts
-COPY --from=web-builder /build/web/.next/standalone ./web
-COPY --from=web-builder /build/web/.next/static ./web/.next/static
+COPY --from=web-builder /build/web/dist ./web/dist
+COPY --from=web-builder /build/web/server.mjs ./web/server.mjs
 COPY scripts/start-single-container.sh ./start-single-container.sh
 
 RUN test -f /app/api/app/services/chanlun/rc8_worker.py \
     && /opt/strong-stock-api-venv/bin/python -c "import czsc, mootdx; print(czsc.__version__, mootdx.__version__)" \
     && /opt/strong-stock-api-venv/bin/python -c "import importlib.metadata; assert importlib.metadata.version('czsc') == '0.10.12'" \
     && /opt/czsc-rc8-venv/bin/python -c "import czsc; import importlib.metadata; assert importlib.metadata.version('czsc') == '1.0.0rc8'" \
+    && test -f /app/web/dist/index.html \
+    && test -f /app/web/server.mjs \
     && chmod +x ./start-single-container.sh \
     && mkdir -p /app/data
 

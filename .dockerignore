@@ -12,9 +12,11 @@ node_modules
 apps/api/.venv
 apps/api/data
 apps/web/node_modules
+apps/web-vue/node_modules
 apps/web/.next
 apps/web/.next-dev
 apps/web/.turbo
+apps/web-vue/dist
 dist
 data
 *.tsbuildinfo

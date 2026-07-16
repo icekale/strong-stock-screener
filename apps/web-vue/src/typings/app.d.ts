@@ -272,7 +272,7 @@ declare namespace App {
       key: LangType;
     };
 
-    type I18nRouteKey = Exclude<RouteKey, 'root' | 'not-found'>;
+    type I18nRouteKey = Exclude<RouteKey, 'not-found'>;
 
     type FormMsg = {
       required: string;

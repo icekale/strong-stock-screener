@@ -1,31 +1,17 @@
-import type { CustomRoute } from '@elegant-router/types';
+import type { ElegantConstRoute } from '@elegant-router/types';
 import { layouts, views } from '../elegant/imports';
-import { getRoutePath, transformElegantRoutesToVueRoutes } from '../elegant/transform';
+import { transformElegantRoutesToVueRoutes } from '../elegant/transform';
+import { productRoutes } from '../product-routes';
 
-export const ROOT_ROUTE: CustomRoute = {
-  name: 'root',
-  path: '/',
-  redirect: getRoutePath(import.meta.env.VITE_ROUTE_HOME) || '/home',
-  meta: {
-    title: 'root',
-    constant: true
-  }
-};
+export const ROOT_ROUTE = productRoutes[0] as ElegantConstRoute;
 
-const NOT_FOUND_ROUTE: CustomRoute = {
+const NOT_FOUND_ROUTE: ElegantConstRoute = {
   name: 'not-found',
   path: '/:pathMatch(.*)*',
   component: 'layout.blank$view.404',
-  meta: {
-    title: 'not-found',
-    constant: true
-  }
+  meta: { title: '页面不存在', constant: true }
 };
 
-/** builtin routes, it must be constant and setup in vue-router */
-const builtinRoutes: CustomRoute[] = [ROOT_ROUTE, NOT_FOUND_ROUTE];
-
-/** create builtin vue routes */
 export function createBuiltinVueRoutes() {
-  return transformElegantRoutesToVueRoutes(builtinRoutes, layouts, views);
+  return transformElegantRoutesToVueRoutes([NOT_FOUND_ROUTE], layouts, views);
 }

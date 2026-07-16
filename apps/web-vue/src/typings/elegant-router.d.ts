@@ -16,6 +16,18 @@ declare module "@elegant-router/types" {
    */
   export type RouteMap = {
     "root": "/";
+    "screener": "/screener";
+    "auction": "/auction";
+    "market": "/market";
+    "stock": "/stock/:symbol";
+    "watchlist": "/watchlist";
+    "sentiment": "/sentiment";
+    "chanlun": "/chanlun";
+    "system": "/system";
+    "settings": "/settings";
+    "sectors": "/sectors";
+    "heatmap": "/heatmap";
+    "model-maintenance": "/model-maintenance";
     "not-found": "/:pathMatch(.*)*";
     "exception": "/exception";
     "exception_403": "/exception/403";
@@ -76,6 +88,18 @@ declare module "@elegant-router/types" {
   export type CustomRouteKey = Extract<
     RouteKey,
     | "root"
+    | "screener"
+    | "auction"
+    | "market"
+    | "stock"
+    | "watchlist"
+    | "sentiment"
+    | "chanlun"
+    | "system"
+    | "settings"
+    | "sectors"
+    | "heatmap"
+    | "model-maintenance"
     | "not-found"
     | "exception"
     | "exception_403"
@@ -112,6 +136,19 @@ declare module "@elegant-router/types" {
     | "manage"
     | "multi-menu"
     | "user-center"
+    | "root"
+    | "screener"
+    | "auction"
+    | "market"
+    | "stock"
+    | "watchlist"
+    | "sentiment"
+    | "chanlun"
+    | "system"
+    | "settings"
+    | "sectors"
+    | "heatmap"
+    | "model-maintenance"
   >;
 
   /**
@@ -152,6 +189,19 @@ declare module "@elegant-router/types" {
     | "multi-menu_first_child"
     | "multi-menu_second_child_home"
     | "user-center"
+    | "root"
+    | "screener"
+    | "auction"
+    | "market"
+    | "stock"
+    | "watchlist"
+    | "sentiment"
+    | "chanlun"
+    | "system"
+    | "settings"
+    | "sectors"
+    | "heatmap"
+    | "model-maintenance"
   >;
 
   /**
@@ -306,7 +356,7 @@ declare module "@elegant-router/types" {
   /**
    * the custom route
    */
-  type CustomRoute = CustomSingleLevelRoute | CustomMultiLevelRoute;
+  type CustomRoute = ElegantConstRoute;
 
   /**
    * the generated route
@@ -316,5 +366,5 @@ declare module "@elegant-router/types" {
   /**
    * the elegant route
    */
-  type ElegantRoute = GeneratedRoute | CustomRoute;
+  type ElegantRoute = ElegantConstRoute;
 }

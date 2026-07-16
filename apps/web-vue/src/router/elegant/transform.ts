@@ -162,6 +162,18 @@ function transformElegantRouteToVueRoute(
  */
 const routeMap: RouteMap = {
   "root": "/",
+  "screener": "/screener",
+  "auction": "/auction",
+  "market": "/market",
+  "stock": "/stock/:symbol",
+  "watchlist": "/watchlist",
+  "sentiment": "/sentiment",
+  "chanlun": "/chanlun",
+  "system": "/system",
+  "settings": "/settings",
+  "sectors": "/sectors",
+  "heatmap": "/heatmap",
+  "model-maintenance": "/model-maintenance",
   "not-found": "/:pathMatch(.*)*",
   "exception": "/exception",
   "exception_403": "/exception/403",
@@ -219,6 +231,10 @@ export function getRoutePath<T extends RouteKey>(name: T) {
  * @param path route path
  */
 export function getRouteName(path: RoutePath) {
+  if (path.startsWith('/stock/')) {
+    return 'stock' as RouteKey;
+  }
+
   const routeEntries = Object.entries(routeMap) as [RouteKey, RoutePath][];
 
   const routeName: RouteKey | null = routeEntries.find(([, routePath]) => routePath === path)?.[0] || null;

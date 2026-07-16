@@ -1,0 +1,119 @@
+{
+  "name": "soybean-admin-antd",
+  "type": "module",
+  "version": "1.3.11",
+  "description": "A fresh and elegant admin template, based on Vue3,Vite3,TypeScript,AntDesign and UnoCSS.",
+  "author": {
+    "name": "Soybean",
+    "email": "soybeanjs@outlook.com",
+    "url": "https://github.com/soybeanjs"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/soybeanjs/soybean-admin-antd",
+  "repository": {
+    "url": "https://github.com/soybeanjs/soybean-admin-antd.git"
+  },
+  "bugs": {
+    "url": "https://github.com/soybeanjs/soybean-admin-antd/issues"
+  },
+  "keywords": [
+    "Vue3 admin ",
+    "vue-admin-template",
+    "Vite5",
+    "TypeScript",
+    "naive-ui",
+    "naive-ui-admin",
+    "ant-design-vue v4",
+    "UnoCSS"
+  ],
+  "engines": {
+    "node": ">=18.12.0",
+    "pnpm": ">=8.7.0"
+  },
+  "scripts": {
+    "build": "vite build --mode prod",
+    "build:test": "vite build --mode test",
+    "cleanup": "sa cleanup",
+    "commit": "sa git-commit",
+    "commit:zh": "sa git-commit -l=zh-cn",
+    "dev": "vite --mode test",
+    "dev:prod": "vite --mode prod",
+    "gen-route": "sa gen-route",
+    "lint": "eslint . --fix",
+    "prepare": "simple-git-hooks",
+    "preview": "vite preview",
+    "release": "sa release",
+    "test:unit": "vitest run",
+    "typecheck": "vue-tsc --noEmit --skipLibCheck",
+    "update-pkg": "sa update-pkg"
+  },
+  "dependencies": {
+    "@better-scroll/core": "2.5.1",
+    "@iconify/vue": "5.0.0",
+    "@sa/axios": "workspace:*",
+    "@sa/color": "workspace:*",
+    "@sa/fetch": "workspace:*",
+    "@sa/hooks": "workspace:*",
+    "@sa/materials": "workspace:*",
+    "@sa/utils": "workspace:*",
+    "@vueuse/core": "14.1.0",
+    "ant-design-vue": "4.2.6",
+    "clipboard": "2.0.11",
+    "dayjs": "1.11.19",
+    "defu": "6.1.4",
+    "echarts": "6.0.0",
+    "json5": "2.2.3",
+    "nprogress": "0.2.0",
+    "pinia": "3.0.4",
+    "tailwind-merge": "3.4.0",
+    "vue": "3.5.26",
+    "vue-draggable-plus": "0.6.0",
+    "vue-i18n": "11.2.7",
+    "vue-router": "4.6.4"
+  },
+  "devDependencies": {
+    "@elegant-router/vue": "0.3.8",
+    "@iconify/json": "2.2.417",
+    "@iconify/utils": "3.1.0",
+    "@sa/scripts": "workspace:*",
+    "@unocss/core": "66.5.10",
+    "@sa/uno-preset": "workspace:*",
+    "@soybeanjs/eslint-config": "1.7.5",
+    "@types/node": "25.0.3",
+    "@types/nprogress": "0.2.3",
+    "@unocss/eslint-config": "66.5.10",
+    "@unocss/preset-icons": "66.5.10",
+    "@unocss/preset-uno": "66.5.10",
+    "@unocss/transformer-directives": "66.5.10",
+    "@unocss/transformer-variant-group": "66.5.10",
+    "@unocss/vite": "66.5.10",
+    "@vitejs/plugin-vue": "6.0.3",
+    "@vitejs/plugin-vue-jsx": "5.1.3",
+    "eslint": "9.39.2",
+    "eslint-plugin-vue": "10.6.2",
+    "lint-staged": "16.2.7",
+    "sass": "1.97.1",
+    "simple-git-hooks": "2.13.1",
+    "tsx": "4.21.0",
+    "typescript": "5.9.3",
+    "unplugin-icons": "22.5.0",
+    "unplugin-vue-components": "30.0.0",
+    "vite": "7.3.0",
+    "vite-plugin-progress": "0.0.7",
+    "vite-plugin-svg-icons": "2.0.1",
+    "vite-plugin-vue-devtools": "8.0.5",
+    "vue-eslint-parser": "10.2.0",
+    "vue-tsc": "3.2.1",
+    "vitest": "3.2.4",
+    "@vue/test-utils": "2.4.6",
+    "axios": "1.13.2"
+  },
+  "simple-git-hooks": {
+    "commit-msg": "pnpm sa git-commit-verify",
+    "pre-commit": "pnpm typecheck && pnpm lint-staged"
+  },
+  "lint-staged": {
+    "*": "eslint --fix"
+  },
+  "website": "https://antd.soybeanjs.cn"
+}

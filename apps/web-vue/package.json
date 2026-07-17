@@ -91,6 +91,7 @@
     "@vitejs/plugin-vue-jsx": "5.1.3",
     "eslint": "9.39.2",
     "eslint-plugin-vue": "10.6.2",
+    "jsdom": "24.1.3",
     "lint-staged": "16.2.7",
     "sass": "1.97.1",
     "simple-git-hooks": "2.13.1",

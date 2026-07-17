@@ -212,21 +212,25 @@ onMounted(async () => {
       <div class="mb-8px pt-8px text-12px text-text-secondary">{{ getAuctionSortDescription(sortMode) }}</div>
       <DataList :items="items" :loading="loading" :error="error" empty-description="暂无竞价数据，请刷新快照">
         <template #list-item="{ item }">
-          <div class="auction-row">
-            <div class="auction-row__identity">
-              <div class="font-600">{{ asAuctionItem(item).name || '未命名' }} <span class="text-12px text-text-secondary">{{ asAuctionItem(item).symbol }}</span></div>
-              <div class="text-12px text-text-secondary">{{ asAuctionItem(item).industry || '未标注' }} · {{ tierLabel(asAuctionItem(item).tier) }}</div>
+          <div class="auction-row auction-row--two-line" data-layout="two-row">
+            <div class="auction-row__primary">
+              <div class="auction-row__identity">
+                <div class="font-600">{{ asAuctionItem(item).name || '未命名' }} <span class="text-12px text-text-secondary">{{ asAuctionItem(item).symbol }}</span></div>
+                <div class="text-12px text-text-secondary">{{ asAuctionItem(item).industry || '未标注' }} · {{ tierLabel(asAuctionItem(item).tier) }}</div>
+              </div>
+              <a-button class="auction-row__action" size="small" @click="addToWatchlist(asAuctionItem(item))">加入自选</a-button>
             </div>
-            <div class="auction-row__signals text-12px text-text-secondary">
-              <div>{{ asAuctionItem(item).signals.slice(0, 2).join(' / ') || '暂无信号' }}</div>
-              <div v-if="asAuctionItem(item).risk_flags.length" class="text-warning">{{ asAuctionItem(item).risk_flags.slice(0, 2).join(' / ') }}</div>
+            <div class="auction-row__secondary">
+              <div class="auction-row__numbers text-right">
+                <div :class="changeTone(asAuctionItem(item).open_gap_pct)" class="font-700">高开 {{ formatPct(asAuctionItem(item).open_gap_pct) }}</div>
+                <div class="text-12px text-text-secondary">额 {{ formatMoney(asAuctionItem(item).turnover_cny) }} · 换手 {{ formatPct(asAuctionItem(item).turnover_rate) }}</div>
+                <div v-if="getAuctionLiquidityWarning(asAuctionItem(item))" class="text-12px text-warning">{{ getAuctionLiquidityWarning(asAuctionItem(item)) }}</div>
+              </div>
+              <div class="auction-row__signals text-12px text-text-secondary">
+                <div>{{ asAuctionItem(item).signals.slice(0, 2).join(' / ') || '暂无信号' }}</div>
+                <div v-if="asAuctionItem(item).risk_flags.length" class="text-warning">{{ asAuctionItem(item).risk_flags.slice(0, 2).join(' / ') }}</div>
+              </div>
             </div>
-            <div class="auction-row__numbers text-right">
-              <div :class="changeTone(asAuctionItem(item).open_gap_pct)" class="font-700">高开 {{ formatPct(asAuctionItem(item).open_gap_pct) }}</div>
-              <div class="text-12px text-text-secondary">额 {{ formatMoney(asAuctionItem(item).turnover_cny) }} · 换手 {{ formatPct(asAuctionItem(item).turnover_rate) }}</div>
-              <div v-if="getAuctionLiquidityWarning(asAuctionItem(item))" class="text-12px text-warning">{{ getAuctionLiquidityWarning(asAuctionItem(item)) }}</div>
-            </div>
-            <a-button class="auction-row__action" size="small" @click="addToWatchlist(asAuctionItem(item))">加入自选</a-button>
           </div>
         </template>
       </DataList>
@@ -272,10 +276,36 @@ onMounted(async () => {
   min-width: 0;
 }
 
+.auction-row__primary,
+.auction-row__secondary {
+  display: contents;
+}
+
 .auction-row__identity,
 .auction-row__signals,
-.auction-row__numbers {
+.auction-row__numbers,
+.auction-row__action {
   min-width: 0;
+}
+
+.auction-row__identity {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.auction-row__numbers {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.auction-row__signals {
+  grid-column: 3;
+  grid-row: 1;
+}
+
+.auction-row__action {
+  grid-column: 4;
+  grid-row: 1;
 }
 
 .auction-row__signals > div,
@@ -303,24 +333,47 @@ onMounted(async () => {
   }
 
   .auction-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px 10px;
+    align-items: start;
+  }
+
+  .auction-row__primary,
+  .auction-row__secondary {
+    display: grid;
+    grid-column: 1;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 6px 10px;
     align-items: start;
   }
 
-  .auction-row__signals {
-    grid-column: 1 / -1;
-    line-height: 1.5;
+  .auction-row__primary {
+    grid-row: 1;
+  }
+
+  .auction-row__secondary {
+    grid-row: 2;
+  }
+
+  .auction-row__identity,
+  .auction-row__numbers,
+  .auction-row__signals,
+  .auction-row__action {
+    grid-column: auto;
+    grid-row: auto;
   }
 
   .auction-row__numbers {
-    grid-column: 1;
     text-align: left;
   }
 
+  .auction-row__signals {
+    grid-column: auto;
+    line-height: 1.5;
+  }
+
   .auction-row__action {
-    grid-column: 2;
-    grid-row: 3;
+    justify-self: end;
   }
 
   .auction-row__signals > div,

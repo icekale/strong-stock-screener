@@ -1,7 +1,6 @@
 import type { StockKlinePeriod } from '@/service/types';
 import {
   buildKlineIndicatorState,
-  parseStoredKlineIndicatorState,
   type KlineIndicatorState,
   type KlineMovingAverage,
   type KlineSubIndicator,
@@ -15,6 +14,8 @@ export type StockViewDefaults = {
   paneCount: KlineSubPaneCount;
   subIndicators: KlineSubIndicator[];
 };
+
+export type StockViewIndicatorState = StockViewDefaults;
 
 export type StockKlineQuery = {
   kline: { count: number; period: StockKlinePeriod };
@@ -37,6 +38,16 @@ export function isLatestStockRequest(requestId: number, currentRequestId: number
   return requestId === currentRequestId;
 }
 
+export function calculateCompleteMovingAverage(values: readonly number[], windowSize: number): Array<number | null> {
+  return values.map((_, index) => {
+    if (!Number.isInteger(windowSize) || windowSize <= 0 || index < windowSize - 1) return null;
+    const window = values.slice(index - windowSize + 1, index + 1);
+    return window.every(value => Number.isFinite(value))
+      ? window.reduce((sum, value) => sum + value, 0) / windowSize
+      : null;
+  });
+}
+
 export function buildStockKlineQuery({ period, count = 220 }: { period: StockKlinePeriod; count?: number }): StockKlineQuery {
   return {
     kline: { count, period },
@@ -44,13 +55,39 @@ export function buildStockKlineQuery({ period, count = 220 }: { period: StockKli
   };
 }
 
-export function serializeIndicatorState(state: { paneCount: KlineIndicatorState['paneCount']; subIndicators: readonly KlineSubIndicator[] }): string {
-  return JSON.stringify(state);
+export function serializeIndicatorState(state: {
+  visibleMovingAverages?: readonly KlineMovingAverage[];
+  paneCount: KlineIndicatorState['paneCount'];
+  subIndicators: readonly KlineSubIndicator[];
+}): string {
+  return JSON.stringify({
+    visibleMovingAverages: state.visibleMovingAverages ?? buildStockViewDefaults().visibleMovingAverages,
+    paneCount: state.paneCount,
+    subIndicators: state.subIndicators
+  });
 }
 
-export function parseIndicatorState(value: string | null): KlineIndicatorState {
-  if (!value) {
-    return buildKlineIndicatorState({ paneCount: 1, subIndicators: ['volume'] });
+export function parseIndicatorState(value: string | null): StockViewIndicatorState {
+  const defaults = buildStockViewDefaults();
+  if (!value) return defaults;
+  try {
+    const parsed = JSON.parse(value) as {
+      visibleMovingAverages?: unknown;
+      movingAverages?: unknown;
+      paneCount?: number | null;
+      subIndicators?: unknown;
+    };
+    const layout = buildKlineIndicatorState(parsed);
+    const storedMovingAverages = parsed.visibleMovingAverages ?? parsed.movingAverages;
+    const visibleMovingAverages = Array.isArray(storedMovingAverages)
+      ? storedMovingAverages.filter(isMovingAverage)
+      : defaults.visibleMovingAverages;
+    return { visibleMovingAverages, ...layout };
+  } catch {
+    return defaults;
   }
-  return parseStoredKlineIndicatorState(value);
+}
+
+function isMovingAverage(value: unknown): value is KlineMovingAverage {
+  return value === 'ma5' || value === 'ma10' || value === 'ma20' || value === 'ma60';
 }

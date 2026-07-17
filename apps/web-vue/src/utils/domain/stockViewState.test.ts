@@ -3,6 +3,7 @@ import type { StockKlinePeriod } from '@/service/types';
 import {
   buildStockKlineQuery,
   buildStockViewDefaults,
+  calculateCompleteMovingAverage,
   isLatestStockRequest,
   nextStockRequestId,
   parseIndicatorState,
@@ -38,9 +39,27 @@ describe('stock view state', () => {
   });
 
   it('round-trips indicator state and falls back for invalid JSON', () => {
-    const state = { paneCount: 2 as const, subIndicators: ['volume', 'macd'] as const };
+    const state = {
+      visibleMovingAverages: ['ma5', 'ma60'] as const,
+      paneCount: 2 as const,
+      subIndicators: ['volume', 'macd'] as const
+    };
 
     expect(parseIndicatorState(serializeIndicatorState(state))).toEqual(state);
-    expect(parseIndicatorState('{invalid json')).toEqual({ paneCount: 1, subIndicators: ['volume'] });
+    expect(parseIndicatorState(JSON.stringify({ paneCount: 2, subIndicators: ['macd'] }))).toEqual({
+      visibleMovingAverages: ['ma5', 'ma10', 'ma20'],
+      paneCount: 2,
+      subIndicators: ['macd', 'macd']
+    });
+    expect(parseIndicatorState('{invalid json')).toEqual({
+      visibleMovingAverages: ['ma5', 'ma10', 'ma20'],
+      paneCount: 1,
+      subIndicators: ['volume']
+    });
+  });
+
+  it('returns moving averages only after a complete window', () => {
+    expect(calculateCompleteMovingAverage([1, 2, 3, 4, 5], 3)).toEqual([null, null, 2, 3, 4]);
+    expect(calculateCompleteMovingAverage([1, Number.NaN, 3], 2)).toEqual([null, null, null]);
   });
 });

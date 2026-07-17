@@ -34,6 +34,7 @@ import { getVisibleGsgfAnnotations } from '@/utils/charts/klineOverlayOption';
 import {
   buildStockKlineQuery,
   buildStockViewDefaults,
+  calculateCompleteMovingAverage,
   isLatestStockRequest,
   KLINE_INDICATOR_STORAGE_KEY,
   nextStockRequestId,
@@ -122,7 +123,7 @@ const requestPeriod = computed<StockKlinePeriod>(() => (period.value === 'weekly
 const chartBars = computed(() => {
   const sourceBars = kline.value?.bars ?? [];
   const displayedBars = period.value === 'weekly' ? aggregateWeeklyBars(sourceBars) : sourceBars;
-  return withMovingAverages(displayedBars);
+  return period.value === 'weekly' ? displayedBars : withMovingAverages(displayedBars);
 });
 const latestBar = computed(() => chartBars.value.at(-1) ?? null);
 const currentCandidate = computed(() => screenItems.value.find(item => item.symbol === symbol.value) ?? null);
@@ -146,7 +147,7 @@ let stockRequestId = 0;
 let researchRequestId = 0;
 let screenRequestId = 0;
 
-async function loadStockData() {
+function loadStockData() {
   const currentSymbol = symbol.value;
   if (!currentSymbol) return;
 
@@ -162,46 +163,57 @@ async function loadStockData() {
   quoteError.value = null;
   chanlunError.value = null;
 
-  const [klineResult, quoteResult, chanlunResult] = await Promise.allSettled([
-    getStockKline(currentSymbol, query.kline),
-    getStockQuote(currentSymbol),
-    getChanlunAnalysis(currentSymbol, query.chanlun)
-  ]);
+  void getStockKline(currentSymbol, query.kline)
+    .then(response => {
+      if (isCurrentStockRequest(requestId, currentSymbol, currentPeriod)) kline.value = response;
+    })
+    .catch(cause => {
+      if (isCurrentStockRequest(requestId, currentSymbol, currentPeriod)) klineError.value = toErrorMessage(cause, `${periodLabel(currentPeriod)} K线读取失败`);
+    })
+    .finally(() => {
+      if (isCurrentStockRequest(requestId, currentSymbol, currentPeriod)) klineLoading.value = false;
+    });
 
-  if (!isLatestStockRequest(requestId, stockRequestId) || currentSymbol !== symbol.value || currentPeriod !== period.value) return;
+  void getStockQuote(currentSymbol)
+    .then(response => {
+      if (isCurrentStockRequest(requestId, currentSymbol, currentPeriod)) quote.value = response;
+    })
+    .catch(cause => {
+      if (isCurrentStockRequest(requestId, currentSymbol, currentPeriod)) quoteError.value = toErrorMessage(cause, '实时行情读取失败');
+    })
+    .finally(() => {
+      if (isCurrentStockRequest(requestId, currentSymbol, currentPeriod)) quoteLoading.value = false;
+    });
 
-  if (klineResult.status === 'fulfilled') {
-    kline.value = klineResult.value;
-  } else {
-    klineError.value = toErrorMessage(klineResult.reason, `${periodLabel(currentPeriod)} K线读取失败`);
-  }
-  if (quoteResult.status === 'fulfilled') {
-    quote.value = quoteResult.value;
-  } else {
-    quoteError.value = toErrorMessage(quoteResult.reason, '实时行情读取失败');
-  }
-  if (chanlunResult.status === 'fulfilled') {
-    chanlun.value = chanlunResult.value;
-  } else {
-    chanlunError.value = toErrorMessage(chanlunResult.reason, `${periodLabel(currentPeriod)} 缠论分析读取失败`);
-  }
+  void getChanlunAnalysis(currentSymbol, query.chanlun)
+    .then(response => {
+      if (isCurrentStockRequest(requestId, currentSymbol, currentPeriod)) chanlun.value = response;
+    })
+    .catch(cause => {
+      if (isCurrentStockRequest(requestId, currentSymbol, currentPeriod)) chanlunError.value = toErrorMessage(cause, `${periodLabel(currentPeriod)} 缠论分析读取失败`);
+    })
+    .finally(() => {
+      if (isCurrentStockRequest(requestId, currentSymbol, currentPeriod)) chanlunLoading.value = false;
+    });
+}
 
-  klineLoading.value = false;
-  quoteLoading.value = false;
-  chanlunLoading.value = false;
+function isCurrentStockRequest(requestId: number, currentSymbol: string, currentPeriod: StockViewPeriod) {
+  return isLatestStockRequest(requestId, stockRequestId) && currentSymbol === symbol.value && currentPeriod === period.value;
 }
 
 async function loadResearch() {
   const currentSymbol = symbol.value;
-  if (!currentSymbol || researchRequested.value) return;
-  researchRequested.value = true;
+  if (!currentSymbol || researchRequested.value || researchLoading.value) return;
   const requestId = nextStockRequestId(researchRequestId);
   researchRequestId = requestId;
   researchLoading.value = true;
   researchError.value = null;
   try {
     const response = await getStockResearch(currentSymbol);
-    if (isLatestStockRequest(requestId, researchRequestId) && currentSymbol === symbol.value) research.value = response;
+    if (isLatestStockRequest(requestId, researchRequestId) && currentSymbol === symbol.value) {
+      research.value = response;
+      researchRequested.value = true;
+    }
   } catch (cause) {
     if (isLatestStockRequest(requestId, researchRequestId) && currentSymbol === symbol.value) {
       researchError.value = toErrorMessage(cause, '个股研究读取失败');
@@ -213,15 +225,17 @@ async function loadResearch() {
 
 async function loadScreenRun() {
   const currentSymbol = symbol.value;
-  if (!currentSymbol || screenRequested.value) return;
-  screenRequested.value = true;
+  if (!currentSymbol || screenRequested.value || screenLoading.value) return;
   const requestId = nextStockRequestId(screenRequestId);
   screenRequestId = requestId;
   screenLoading.value = true;
   screenError.value = null;
   try {
     const response = await getLatestScreenRun();
-    if (isLatestStockRequest(requestId, screenRequestId) && currentSymbol === symbol.value) screenItems.value = response.items;
+    if (isLatestStockRequest(requestId, screenRequestId) && currentSymbol === symbol.value) {
+      screenItems.value = response.items;
+      screenRequested.value = true;
+    }
   } catch (cause) {
     if (isLatestStockRequest(requestId, screenRequestId) && currentSymbol === symbol.value) {
       screenError.value = toErrorMessage(cause, '选股结果读取失败');
@@ -355,21 +369,14 @@ function annotationColor(annotation: GsgfChartAnnotation) {
 
 function withMovingAverages(bars: KlineBar[]): KlineBar[] {
   const periods = [5, 10, 20, 60] as const;
-  const averages = Object.fromEntries(periods.map(size => [`ma${size}`, movingAverage(bars.map(bar => bar.close), size)])) as Record<`ma${(typeof periods)[number]}`, number[]>;
+  const averages = Object.fromEntries(periods.map(size => [`ma${size}`, calculateCompleteMovingAverage(bars.map(bar => bar.close), size)])) as Record<`ma${(typeof periods)[number]}`, Array<number | null>>;
   return bars.map((bar, index) => ({
     ...bar,
-    ma5: bar.ma5 ?? averages.ma5[index] ?? null,
-    ma10: bar.ma10 ?? averages.ma10[index] ?? null,
-    ma20: bar.ma20 ?? averages.ma20[index] ?? null,
-    ma60: bar.ma60 ?? averages.ma60[index] ?? null
+    ma5: index >= 4 ? bar.ma5 ?? averages.ma5[index] ?? null : null,
+    ma10: index >= 9 ? bar.ma10 ?? averages.ma10[index] ?? null : null,
+    ma20: index >= 19 ? bar.ma20 ?? averages.ma20[index] ?? null : null,
+    ma60: index >= 59 ? bar.ma60 ?? averages.ma60[index] ?? null : null
   }));
-}
-
-function movingAverage(values: number[], size: number) {
-  return values.map((_, index) => {
-    const window = values.slice(Math.max(0, index - size + 1), index + 1);
-    return window.length ? window.reduce((sum, value) => sum + value, 0) / window.length : null;
-  });
 }
 
 watch(
@@ -383,19 +390,24 @@ watch(
   { immediate: true }
 );
 watch(activeTab, value => ensureContentData(value));
-watch(
-  indicatorState,
-  value => {
-    if (indicatorStateLoaded.value && typeof window !== 'undefined') {
-      window.localStorage.setItem(KLINE_INDICATOR_STORAGE_KEY, serializeIndicatorState(value));
-    }
-  },
-  { deep: true }
-);
+function persistIndicatorState() {
+  if (indicatorStateLoaded.value && typeof window !== 'undefined') {
+    window.localStorage.setItem(KLINE_INDICATOR_STORAGE_KEY, serializeIndicatorState({
+      visibleMovingAverages: movingAverages.value,
+      paneCount: indicatorState.value.paneCount,
+      subIndicators: indicatorState.value.subIndicators
+    }));
+  }
+}
+
+watch(movingAverages, persistIndicatorState, { deep: true });
+watch(indicatorState, persistIndicatorState, { deep: true });
 
 onMounted(() => {
   if (typeof window !== 'undefined') {
-    indicatorState.value = parseIndicatorState(window.localStorage.getItem(KLINE_INDICATOR_STORAGE_KEY));
+    const storedState = parseIndicatorState(window.localStorage.getItem(KLINE_INDICATOR_STORAGE_KEY));
+    movingAverages.value = [...storedState.visibleMovingAverages];
+    indicatorState.value = { paneCount: storedState.paneCount, subIndicators: [...storedState.subIndicators] };
   }
   indicatorStateLoaded.value = true;
 });

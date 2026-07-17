@@ -145,6 +145,7 @@ describe('chart options', () => {
       gsgfAnnotations
     });
     const annotationSeries = option.series.find(item => item.id === 'custom-gsgf-annotations') as {
+      data: Array<unknown>;
       name: string;
       type: string;
       xAxisIndex: number;
@@ -153,7 +154,8 @@ describe('chart options', () => {
       markArea: { data: Array<Array<Record<string, unknown>>> };
     } | undefined;
 
-    expect(annotationSeries).toMatchObject({ name: 'GSGF标注', type: 'candlestick', xAxisIndex: 0, yAxisIndex: 0 });
+    expect(annotationSeries).toMatchObject({ name: 'GSGF标注', type: 'line', xAxisIndex: 0, yAxisIndex: 0 });
+    expect(annotationSeries?.data).toEqual([null, null]);
     expect(annotationSeries?.markPoint.data).toContainEqual(expect.objectContaining({
       coord: ['2026-07-16', 12],
       name: '星线蓄势'
@@ -226,11 +228,17 @@ describe('chart options', () => {
       subIndicators: ['macd', 'kdj', 'brick']
     });
     const series = option.series as Array<{ name: string; type: string; xAxisIndex: number; yAxisIndex: number; connectNulls?: boolean }>;
+    const brick = series.find(item => item.name === '砖形图') as { data: unknown[] } | undefined;
 
     expect(series.filter(item => item.name === 'MACD')).toContainEqual(expect.objectContaining({ type: 'bar', xAxisIndex: 1, yAxisIndex: 1 }));
     expect(series.filter(item => ['DIF', 'DEA'].includes(item.name))).toHaveLength(2);
     expect(series.filter(item => ['K', 'D', 'J'].includes(item.name))).toHaveLength(3);
     expect(series.some(item => item.name === '砖形图' && item.type === 'candlestick' && item.xAxisIndex === 3 && item.yAxisIndex === 3)).toBe(true);
+    expect(brick?.data.slice(0, 3)).toEqual([
+      { value: [null, null, null, null] },
+      { value: [null, null, null, null] },
+      { value: [null, null, null, null] }
+    ]);
     expect(series.filter(item => item.type === 'line').every(item => item.connectNulls === false)).toBe(true);
   });
 

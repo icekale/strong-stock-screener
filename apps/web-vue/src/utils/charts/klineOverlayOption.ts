@@ -234,12 +234,14 @@ function buildGsgfAnnotationSeries(
 
   if (points.length === 0 && ranges.length === 0) return [];
   return [{
-    data: [],
+    data: dates.map(() => null),
     id: 'custom-gsgf-annotations',
     markArea: { data: ranges, label: { formatter: '{b}', show: true }, silent: true },
     markPoint: { data: points, label: { formatter: '{b}', show: true }, symbol: 'pin', symbolSize: 52 },
     name: 'GSGF标注',
-    type: 'candlestick',
+    showSymbol: false,
+    silent: true,
+    type: 'line',
     xAxisIndex: 0,
     yAxisIndex: 0
   }];
@@ -492,12 +494,14 @@ function calculateSubIndicator(indicator: Exclude<KlineSubIndicator, 'volume'>, 
   }
 }
 
-function toBrickCandles(values: Array<number | null>): Array<[number, number, number, number] | null> {
+type BrickCandle = [number, number, number, number] | { value: [null, null, null, null] };
+
+function toBrickCandles(values: Array<number | null>): BrickCandle[] {
   let previous: number | null = null;
   return values.map(value => {
     if (value === null) {
       previous = null;
-      return null;
+      return { value: [null, null, null, null] };
     }
     const open = previous ?? value;
     previous = value;

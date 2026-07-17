@@ -55,7 +55,7 @@ onMounted(async () => {
   render();
 });
 
-watch(() => props.option, render, { deep: true });
+watch(() => props.option, render);
 watch(() => props.loading, render);
 
 onBeforeUnmount(() => {

@@ -17,8 +17,6 @@ const normalizedStatus = computed(() => normalizeWorkbenchStatus(props.status));
   <span
     class="wb-status-tag"
     :class="`wb-status-tag--${normalizedStatus.tone}`"
-    role="status"
-    :aria-label="normalizedStatus.label"
   >
     {{ normalizedStatus.label }}
   </span>

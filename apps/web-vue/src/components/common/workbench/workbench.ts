@@ -9,6 +9,10 @@ export type WorkbenchNumberKind = 'price' | 'money' | 'percent';
 
 export type WorkbenchMetricTone = WorkbenchStatusTone | 'positive' | 'negative';
 
+export type WorkbenchItemKey = string | number | symbol;
+
+export type WorkbenchItemKeyResolver = (item: unknown, index: number) => WorkbenchItemKey;
+
 export type WorkbenchMetric = {
   key: string;
   label: string;
@@ -35,7 +39,7 @@ export function formatWorkbenchNumber(value: number | null | undefined, kind: Wo
   const abs = Math.abs(value);
   const sign = value < 0 ? '-' : '';
 
-  if (abs >= 100_000_000_000) return `${sign}${(abs / 100_000_000_000).toFixed(2)}万亿`;
+  if (abs >= 1_000_000_000_000) return `${sign}${(abs / 1_000_000_000_000).toFixed(2)}万亿`;
   if (abs >= 100_000_000) return `${sign}${(abs / 100_000_000).toFixed(2)}亿`;
   if (abs >= 10_000) return `${sign}${(abs / 10_000).toFixed(2)}万`;
 

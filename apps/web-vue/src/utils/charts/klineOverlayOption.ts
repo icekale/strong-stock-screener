@@ -134,20 +134,26 @@ export function buildKlineOverlayOption({
 
 function buildGrids(subPaneCount: number, layout: { main: string; sub: string }): Array<Record<string, unknown>> {
   const grids: Array<Record<string, unknown>> = [
-    { left: 52, right: 18, top: 24, height: layout.main, containLabel: true }
+    { left: 52, right: 18, top: '0%', height: layout.main, containLabel: true }
   ];
-  const intermediateTops = subPaneCount >= 3 ? ['56%', '71%'] : ['66%'];
   for (let index = 0; index < subPaneCount; index += 1) {
     const isLast = index === subPaneCount - 1;
+    const position = isLast ? { bottom: '0%' } : { top: gridTop(index + 1, subPaneCount) };
     grids.push({
       left: 52,
       right: 18,
-      ...(isLast ? { bottom: 42 } : { top: intermediateTops[index] }),
+      ...position,
       height: layout.sub,
       containLabel: true
     });
   }
   return grids;
+}
+
+function gridTop(paneIndex: number, subPaneCount: number): string {
+  if (subPaneCount === 2) return '66%';
+  if (subPaneCount === 3) return paneIndex === 1 ? '54%' : '70%';
+  return `${paneIndex * 20 + 2}%`;
 }
 
 function buildXAxes(dates: string[], paneCount: number): Array<Record<string, unknown>> {

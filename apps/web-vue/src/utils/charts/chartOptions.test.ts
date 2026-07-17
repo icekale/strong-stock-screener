@@ -90,6 +90,26 @@ describe('chart options', () => {
     expect(option.yAxis).toHaveLength(heights.length);
   });
 
+  it.each([
+    ['volume'],
+    ['volume', 'macd'],
+    ['volume', 'macd', 'kdj']
+  ] as const)('keeps grid vertical intervals strictly increasing for %s panes', (...indicators) => {
+    const option = buildKlineOverlayOption({ bars: [bar('20260715', 10), bar('20260716', 12)], subIndicators: [...indicators] });
+    const grids = option.grid as Array<{ top?: string; height: string; bottom?: string }>;
+    const intervals = grids.map(grid => {
+      expect(grid.height).toMatch(/^\d+(?:\.\d+)?%$/);
+      expect(typeof grid.top === 'string' || typeof grid.bottom === 'string').toBe(true);
+      const height = percent(grid.height);
+      const start = grid.top ? percent(grid.top) : 100 - percent(grid.bottom ?? '0%') - height;
+      return { start, end: start + height };
+    });
+
+    intervals.slice(1).forEach((interval, index) => {
+      expect(interval.start).toBeGreaterThan(intervals[index]?.end ?? -1);
+    });
+  });
+
   it('maps MACD, KDJ, and brick results to their selected sub panes', () => {
     const option = buildKlineOverlayOption({
       bars: Array.from({ length: 32 }, (_, index) => bar(`202607${String(index + 1).padStart(2, '0')}`, 10 + index / 10)),
@@ -138,3 +158,8 @@ describe('chart options', () => {
     expect((option.series as Array<{ name: string }>)[0]?.name).toBe('计算机');
   });
 });
+
+function percent(value: string): number {
+  expect(value).toMatch(/^\d+(?:\.\d+)?%$/);
+  return Number.parseFloat(value);
+}

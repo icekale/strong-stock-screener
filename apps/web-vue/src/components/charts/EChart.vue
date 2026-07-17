@@ -39,6 +39,12 @@ function resize() {
   chart?.resize();
 }
 
+function restore() {
+  chart?.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
+}
+
+defineExpose({ resize, restore });
+
 onMounted(async () => {
   await nextTick();
   render();

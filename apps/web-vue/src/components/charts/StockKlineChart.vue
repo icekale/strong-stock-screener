@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { ChanlunAnalysisResponse, ChanlunLayerKey, KlineBar } from '@/service/types';
+import type { ChanlunAnalysisResponse, ChanlunLayerKey, KlineBar, StockKlinePeriod } from '@/service/types';
 import { buildKlineOverlayOption } from '@/utils/charts/klineOverlayOption';
 import type { KlineMovingAverage, KlineSubIndicator } from '@/utils/charts/klineIndicatorLayout';
 import EChart from './EChart.vue';
@@ -10,6 +10,8 @@ defineOptions({ name: 'StockKlineChart' });
 const props = withDefaults(
   defineProps<{
     bars: KlineBar[];
+    symbol?: string;
+    period?: StockKlinePeriod;
     movingAverages?: KlineMovingAverage[];
     subIndicators?: KlineSubIndicator[];
     chanlun?: ChanlunAnalysisResponse | null;
@@ -19,6 +21,14 @@ const props = withDefaults(
   }>(),
   { movingAverages: () => [], subIndicators: () => ['volume'], height: 620, loading: false }
 );
+
+const chartKey = computed(() => [
+  props.symbol ?? props.chanlun?.symbol ?? 'stock',
+  props.period ?? props.chanlun?.period ?? '1d',
+  props.bars.length,
+  props.bars[0]?.date ?? '',
+  props.bars.at(-1)?.date ?? ''
+].join(':'));
 
 const option = computed(() =>
   buildKlineOverlayOption({
@@ -33,5 +43,5 @@ const option = computed(() =>
 
 <template>
   <div v-if="bars.length === 0" class="flex min-h-80 items-center justify-center text-sm text-text-secondary">暂无 K 线数据</div>
-  <EChart v-else :height="height" :loading="loading" :option="option" />
+  <EChart v-else :key="chartKey" :height="height" :loading="loading" :option="option" />
 </template>

@@ -16,6 +16,7 @@ export type KlineSubPaneCount = 1 | 2 | 3;
 export type KlineIndicatorType = KlineMovingAverage | KlineSubIndicator | 'ma';
 export type IndicatorOptions = Record<string, Record<string, unknown>>;
 export type PaneConfig = { id: string; height: string; indicators: KlineIndicatorType[] };
+export type KlinePaneLayout = { main: string; sub: string };
 export type KlineIndicatorState = { paneCount: KlineSubPaneCount; subIndicators: KlineSubIndicator[] };
 
 export const KLINE_SUB_INDICATOR_OPTIONS: Array<{ label: string; value: KlineSubIndicator }> = [
@@ -54,7 +55,7 @@ export function parseStoredKlineIndicatorState(value: string | null): KlineIndic
 
 export function buildKlinePanes(movingAverages: KlineMovingAverage[], subIndicators: KlineSubIndicator[]) {
   const mainIndicators: KlineIndicatorType[] = movingAverages.length > 0 ? ['ma'] : [];
-  const layout = paneLayout(subIndicators.length);
+  const layout = getKlinePaneLayout(subIndicators.length);
   const panes: PaneConfig[] = [
     { id: 'main', height: layout.main, indicators: mainIndicators },
     ...subIndicators.map((indicator, index) => ({ id: `sub_${indicator}_${index}`, height: layout.sub, indicators: nativeSubIndicators(indicator) }))
@@ -88,7 +89,7 @@ export function updateKlineSubIndicator(current: KlineIndicatorState, index: num
   return buildKlineIndicatorState({ paneCount: current.paneCount, subIndicators: nextIndicators });
 }
 
-function paneLayout(count: number) {
+export function getKlinePaneLayout(count: number): KlinePaneLayout {
   if (count >= 3) return { main: '52%', sub: '14%' };
   if (count === 2) return { main: '62%', sub: '16%' };
   return { main: '76%', sub: '18%' };

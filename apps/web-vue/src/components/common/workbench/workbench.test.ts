@@ -5,7 +5,10 @@ import type { PropType } from 'vue';
 import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
 import DataList from './data-list.vue';
-import { formatWorkbenchNumber, normalizeWorkbenchStatus } from './workbench';
+import MetricStrip from './metric-strip.vue';
+import PageHeader from './page-header.vue';
+import SectionHeader from './section-header.vue';
+import { createWorkbenchItemKeyResolver, formatWorkbenchNumber, normalizeWorkbenchStatus } from './workbench';
 import StatusTag from './status-tag.vue';
 
 describe('normalizeWorkbenchStatus', () => {
@@ -78,6 +81,93 @@ describe('DataList', () => {
     await wrapper.setProps({ items: [items[1], items[0]] });
 
     expect(wrapper.findAll('li').map(item => item.text())).toEqual(['b:2', 'a:1']);
+  });
+
+  it('makes duplicate default object keys distinct and stable across reorders', async () => {
+    type Item = { id: string; label: string };
+    const items: Item[] = [
+      { id: 'duplicate', label: 'first' },
+      { id: 'duplicate', label: 'second' }
+    ];
+    let nextInstanceId = 0;
+    const TrackedItem = defineComponent({
+      props: {
+        item: { type: Object as PropType<Item>, required: true }
+      },
+      setup(props) {
+        const instanceId = ++nextInstanceId;
+        return () => h('span', `${props.item.label}:${instanceId}`);
+      }
+    });
+
+    const wrapper = mount(DataList, {
+      props: { items },
+      slots: {
+        'list-item': ({ item }: { item: unknown }) => h(TrackedItem, { item: item as Item })
+      }
+    });
+
+    expect(wrapper.findAll('li').map(item => item.text())).toEqual(['first:1', 'second:2']);
+
+    await wrapper.setProps({ items: [items[1], items[0]] });
+
+    expect(wrapper.findAll('li').map(item => item.text())).toEqual(['second:2', 'first:1']);
+  });
+
+  it('gives duplicate primitive values unique stable default keys', () => {
+    const resolveItemKeys = createWorkbenchItemKeyResolver();
+    const firstKeys = resolveItemKeys(['same', 'same']);
+    const secondKeys = resolveItemKeys(['same', 'same']);
+
+    expect(new Set(firstKeys).size).toBe(2);
+    expect(secondKeys).toEqual(firstKeys);
+  });
+});
+
+describe('shared workbench components', () => {
+  it('renders PageHeader title, description, metadata, and actions', () => {
+    const wrapper = mount(PageHeader, {
+      props: { title: '市场总览', description: '盘前扫描' },
+      slots: {
+        default: () => h('button', '刷新'),
+        meta: () => '2026-07-17'
+      }
+    });
+
+    expect(wrapper.find('h1').text()).toBe('市场总览');
+    expect(wrapper.find('.wb-page-header__description').text()).toBe('盘前扫描');
+    expect(wrapper.find('.wb-page-header__meta').text()).toBe('2026-07-17');
+    expect(wrapper.find('button').text()).toBe('刷新');
+  });
+
+  it('renders MetricStrip values, helpers, and tone classes', () => {
+    const wrapper = mount(MetricStrip, {
+      props: {
+        items: [
+          { key: 'index', label: '指数', value: '3,200', helper: '实时', tone: 'positive' },
+          { key: 'status', label: '状态', value: '正常' }
+        ]
+      }
+    });
+
+    expect(wrapper.findAll('.wb-metric')).toHaveLength(2);
+    expect(wrapper.find('.wb-metric').classes()).toContain('wb-metric--positive');
+    expect(wrapper.text()).toContain('指数');
+    expect(wrapper.text()).toContain('3,200');
+    expect(wrapper.text()).toContain('实时');
+    expect(wrapper.text()).toContain('正常');
+  });
+
+  it('renders SectionHeader title, source, update time, and action', () => {
+    const wrapper = mount(SectionHeader, {
+      props: { title: '数据源', source: 'iFinD', updatedAt: '09:35' },
+      slots: { default: () => h('button', '查看') }
+    });
+
+    expect(wrapper.find('h2').text()).toBe('数据源');
+    expect(wrapper.find('.wb-section-header__meta').text()).toContain('来源 iFinD');
+    expect(wrapper.find('.wb-section-header__meta').text()).toContain('更新 09:35');
+    expect(wrapper.find('button').text()).toBe('查看');
   });
 });
 

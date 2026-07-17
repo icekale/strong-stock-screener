@@ -1,7 +1,6 @@
 :root {
   --wb-primary: rgb(var(--primary-color, 36 91 138));
   --wb-primary-soft: #eef5fb;
-  --wb-primary-soft: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-surface));
   --wb-layout: rgb(var(--layout-bg-color, 244 247 250));
   --wb-surface: rgb(var(--container-bg-color, 255 255 255));
   --wb-border: #d9e2ea;
@@ -10,12 +9,9 @@
   --wb-positive: rgb(var(--error-color, 201 54 62));
   --wb-negative: rgb(var(--success-color, 22 128 92));
   --wb-warning: rgb(var(--warning-color, 166 106 0));
-  --wb-status-success-soft: #eef8f3;
-  --wb-status-success-soft: color-mix(in srgb, var(--wb-negative) 12%, var(--wb-surface));
-  --wb-status-error-soft: #fff1f2;
-  --wb-status-error-soft: color-mix(in srgb, var(--wb-positive) 12%, var(--wb-surface));
-  --wb-status-warning-soft: #fff8ea;
-  --wb-status-warning-soft: color-mix(in srgb, var(--wb-warning) 12%, var(--wb-surface));
+  --wb-status-success-soft: rgba(22, 128, 92, 0.08);
+  --wb-status-error-soft: rgba(201, 54, 62, 0.08);
+  --wb-status-warning-soft: rgba(166, 106, 0, 0.08);
   --wb-radius: 6px;
   --wb-gap: 16px;
 }
@@ -23,7 +19,6 @@
 html.dark {
   --wb-primary: rgb(var(--primary-color, 121 169 203));
   --wb-primary-soft: #203746;
-  --wb-primary-soft: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-surface));
   --wb-layout: rgb(var(--layout-bg-color, 18 18 18));
   --wb-surface: rgb(var(--container-bg-color, 28 28 28));
   --wb-border: #3a4652;
@@ -33,11 +28,24 @@ html.dark {
   --wb-negative: rgb(var(--success-color, 87 186 150));
   --wb-warning: rgb(var(--warning-color, 216 168 76));
   --wb-status-success-soft: #1d3830;
-  --wb-status-success-soft: color-mix(in srgb, var(--wb-negative) 16%, var(--wb-surface));
   --wb-status-error-soft: #4a2529;
-  --wb-status-error-soft: color-mix(in srgb, var(--wb-positive) 16%, var(--wb-surface));
   --wb-status-warning-soft: #493a1e;
-  --wb-status-warning-soft: color-mix(in srgb, var(--wb-warning) 16%, var(--wb-surface));
+}
+
+@supports (background-color: color-mix(in srgb, black, white)) {
+  :root {
+    --wb-primary-soft: color-mix(in srgb, var(--wb-primary) 10%, var(--wb-surface));
+    --wb-status-success-soft: color-mix(in srgb, var(--wb-negative) 12%, var(--wb-surface));
+    --wb-status-error-soft: color-mix(in srgb, var(--wb-positive) 12%, var(--wb-surface));
+    --wb-status-warning-soft: color-mix(in srgb, var(--wb-warning) 12%, var(--wb-surface));
+  }
+
+  html.dark {
+    --wb-primary-soft: color-mix(in srgb, var(--wb-primary) 12%, var(--wb-surface));
+    --wb-status-success-soft: color-mix(in srgb, var(--wb-negative) 16%, var(--wb-surface));
+    --wb-status-error-soft: color-mix(in srgb, var(--wb-positive) 16%, var(--wb-surface));
+    --wb-status-warning-soft: color-mix(in srgb, var(--wb-warning) 16%, var(--wb-surface));
+  }
 }
 
 body {

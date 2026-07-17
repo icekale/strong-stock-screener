@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import type { WorkbenchItemKey, WorkbenchItemKeyResolver } from './workbench';
+import { computed } from 'vue';
+import type { WorkbenchItemKeyResolver } from './workbench';
+import { createWorkbenchItemKeyResolver } from './workbench';
 
 defineOptions({ name: 'DataList' });
 
@@ -18,33 +20,8 @@ const props = withDefaults(defineProps<Props>(), {
   error: null
 });
 
-const objectKeys = new WeakMap<object, WorkbenchItemKey>();
-
-function getDefaultItemKey(item: unknown): WorkbenchItemKey {
-  if (item !== null && typeof item === 'object') {
-    const record = item as Record<string, unknown>;
-
-    for (const field of ['key', 'id', 'code', 'symbol']) {
-      const value = record[field];
-      if (typeof value === 'string' || typeof value === 'number' || typeof value === 'symbol') return value;
-    }
-
-    const existingKey = objectKeys.get(item);
-    if (existingKey) return existingKey;
-
-    const generatedKey = Symbol('workbench-item');
-    objectKeys.set(item, generatedKey);
-    return generatedKey;
-  }
-
-  if (typeof item === 'string' || typeof item === 'number' || typeof item === 'symbol') return item;
-
-  return `${typeof item}:${String(item)}`;
-}
-
-function getItemKey(item: unknown, index: number) {
-  return props.itemKey?.(item, index) ?? getDefaultItemKey(item);
-}
+const resolveItemKeys = createWorkbenchItemKeyResolver();
+const itemKeys = computed(() => resolveItemKeys(props.items, props.itemKey));
 </script>
 
 <template>
@@ -58,7 +35,7 @@ function getItemKey(item: unknown, index: number) {
     <template v-if="props.items.length">
       <div v-if="props.loading && !props.error" class="wb-data-list__loading" aria-live="polite">读取中...</div>
       <ul class="wb-data-list__items">
-        <li v-for="(item, index) in props.items" :key="getItemKey(item, index)" class="wb-data-list__item">
+        <li v-for="(item, index) in props.items" :key="itemKeys[index]" class="wb-data-list__item">
           <slot name="list-item" :item="item" :index="index">
             <span>{{ item }}</span>
           </slot>

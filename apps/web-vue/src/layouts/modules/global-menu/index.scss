@@ -3,33 +3,46 @@
     .ant-menu-item {
       width: calc(100% - 16px);
       margin-inline: 8px;
+      border-inline-start: 2px solid transparent;
     }
   }
 
   :deep(.ant-menu-submenu-title) {
     width: calc(100% - 16px);
     margin-inline: 8px;
+    border-inline-start: 2px solid transparent;
   }
 
   :deep(.ant-menu-inline-collapsed) {
-    > .ant-menu-item {
-      padding-inline: calc(50% - 14px);
+    > .ant-menu-item,
+    > .ant-menu-submenu > .ant-menu-submenu-title {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: calc(100% - 16px);
+      height: 40px;
+      margin: 4px 8px;
+      padding-inline: 0 !important;
     }
 
     .ant-menu-item-icon {
-      vertical-align: -0.25em;
+      margin-inline-end: 0 !important;
+      font-size: 18px;
+      line-height: 1;
     }
 
-    .ant-menu-submenu-title {
-      padding-inline: calc(50% - 18px);
+    .ant-menu-title-content {
+      display: none;
     }
   }
 }
 
 .select-menu {
   :deep(.ant-menu-inline) {
-    .ant-menu-item-selected {
-      background-color: var(--selected-bg-color);
+    .ant-menu-item-selected,
+    .ant-menu-submenu-selected > .ant-menu-submenu-title {
+      background-color: var(--wb-primary-soft);
+      border-inline-start-color: var(--wb-primary);
     }
   }
 }

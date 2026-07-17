@@ -121,13 +121,13 @@ init();
 </script>
 
 <template>
-  <DarkModeContainer class="size-full flex-y-center px-16px shadow-tab">
+  <DarkModeContainer class="base-layout-tab size-full flex-y-center gap-8px px-12px">
     <div ref="bsWrapper" class="h-full flex-1-hidden">
       <BetterScroll ref="bsScroll" :options="{ scrollX: true, scrollY: false, click: !isPCFlag }" @click="removeFocus">
         <div
           ref="tabRef"
-          class="h-full flex pr-18px"
-          :class="[themeStore.tab.mode === 'chrome' ? 'items-end' : 'items-center gap-12px']"
+          class="h-full flex items-center pr-12px"
+          :class="[themeStore.tab.mode === 'chrome' ? '' : 'gap-8px']"
         >
           <ContextMenu
             v-for="tab in tabStore.tabs"
@@ -141,6 +141,8 @@ init();
               :dark-mode="themeStore.darkMode"
               :active="tab.id === tabStore.activeTabId"
               :active-color="themeStore.themeColor"
+              chrome-class="base-layout-page-tab"
+              button-class="base-layout-page-tab"
               :closable="!tabStore.isTabRetain(tab.id)"
               @click="tabStore.switchRouteByTab(tab)"
               @close="handleCloseTab(tab)"
@@ -163,4 +165,19 @@ init();
   </DarkModeContainer>
 </template>
 
-<style scoped></style>
+<style scoped>
+.base-layout-tab {
+  border-bottom: 1px solid var(--wb-border);
+  box-shadow: none;
+}
+
+.base-layout-tab :deep(.base-layout-page-tab) {
+  min-height: 32px;
+  padding-block: 4px;
+  gap: 8px;
+}
+
+.base-layout-tab :deep(.base-layout-page-tab svg) {
+  opacity: 1;
+}
+</style>

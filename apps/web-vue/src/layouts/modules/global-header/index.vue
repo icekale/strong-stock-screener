@@ -7,6 +7,7 @@ import GlobalLogo from '../global-logo/index.vue';
 import GlobalBreadcrumb from '../global-breadcrumb/index.vue';
 import ThemeButton from './components/theme-button.vue';
 import UserAvatar from './components/user-avatar.vue';
+import { WORKBENCH_SIDER_WIDTH } from '../../base-layout/layoutState';
 
 defineOptions({
   name: 'GlobalHeader'
@@ -29,8 +30,8 @@ const { isFullscreen, toggle } = useFullscreen();
 </script>
 
 <template>
-  <DarkModeContainer class="h-full flex-y-center px-12px shadow-header">
-    <GlobalLogo v-if="showLogo" class="h-full" :style="{ width: themeStore.sider.width + 'px' }" />
+  <DarkModeContainer class="base-layout-header h-full flex-y-center gap-4px px-12px">
+    <GlobalLogo v-if="showLogo" class="h-full" :style="{ width: `${WORKBENCH_SIDER_WIDTH}px` }" />
     <MenuToggler v-if="showMenuToggler" :collapsed="appStore.siderCollapse" @click="appStore.toggleSiderCollapse" />
     <div v-if="showMenu" :id="GLOBAL_HEADER_MENU_ID" class="h-full flex-y-center flex-1-hidden pb-1px"></div>
     <div v-else class="h-full flex-y-center flex-1-hidden">
@@ -50,4 +51,14 @@ const { isFullscreen, toggle } = useFullscreen();
   </DarkModeContainer>
 </template>
 
-<style scoped></style>
+<style scoped>
+.base-layout-header {
+  border-bottom: 1px solid var(--wb-border);
+  box-shadow: none;
+}
+
+.base-layout-header :deep(.ant-breadcrumb) {
+  color: var(--wb-muted);
+  font-size: 13px;
+}
+</style>

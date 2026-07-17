@@ -11,6 +11,11 @@ import GlobalContent from '../modules/global-content/index.vue';
 import GlobalFooter from '../modules/global-footer/index.vue';
 import ThemeDrawer from '../modules/theme-drawer/index.vue';
 import { setupMixMenuContext } from '../context';
+import {
+  getContentBottomPadding,
+  WORKBENCH_SIDER_COLLAPSED_WIDTH,
+  WORKBENCH_SIDER_WIDTH
+} from './layoutState';
 
 defineOptions({
   name: 'BaseLayout'
@@ -67,15 +72,28 @@ const siderWidth = computed(() => getSiderWidth());
 
 const siderCollapsedWidth = computed(() => getSiderCollapsedWidth());
 
+const tabHeight = computed(() => Math.min(Math.max(themeStore.tab.height, 36), 40));
+
+const contentBottomPadding = computed(() =>
+  getContentBottomPadding({
+    fixedFooter: themeStore.footer.fixed,
+    footerHeight: themeStore.footer.height
+  })
+);
+
+const contentClass = computed(() =>
+  ['base-layout-content', appStore.contentXScrollable ? 'overflow-x-hidden' : ''].filter(Boolean).join(' ')
+);
+
 function getSiderWidth() {
   const { reverseHorizontalMix } = themeStore.layout;
-  const { width, mixWidth, mixChildMenuWidth } = themeStore.sider;
+  const { mixWidth, mixChildMenuWidth } = themeStore.sider;
 
   if (isHorizontalMix.value && reverseHorizontalMix) {
-    return isActiveFirstLevelMenuHasChildren.value ? width : 0;
+    return isActiveFirstLevelMenuHasChildren.value ? WORKBENCH_SIDER_WIDTH : 0;
   }
 
-  let w = isVerticalMix.value || isHorizontalMix.value ? mixWidth : width;
+  let w = isVerticalMix.value || isHorizontalMix.value ? mixWidth : WORKBENCH_SIDER_WIDTH;
 
   if (isVerticalMix.value && appStore.mixSiderFixed && childLevelMenus.value.length) {
     w += mixChildMenuWidth;
@@ -86,13 +104,13 @@ function getSiderWidth() {
 
 function getSiderCollapsedWidth() {
   const { reverseHorizontalMix } = themeStore.layout;
-  const { collapsedWidth, mixCollapsedWidth, mixChildMenuWidth } = themeStore.sider;
+  const { mixCollapsedWidth, mixChildMenuWidth } = themeStore.sider;
 
   if (isHorizontalMix.value && reverseHorizontalMix) {
-    return isActiveFirstLevelMenuHasChildren.value ? collapsedWidth : 0;
+    return isActiveFirstLevelMenuHasChildren.value ? WORKBENCH_SIDER_COLLAPSED_WIDTH : 0;
   }
 
-  let w = isVerticalMix.value || isHorizontalMix.value ? mixCollapsedWidth : collapsedWidth;
+  let w = isVerticalMix.value || isHorizontalMix.value ? mixCollapsedWidth : WORKBENCH_SIDER_COLLAPSED_WIDTH;
 
   if (isVerticalMix.value && appStore.mixSiderFixed && childLevelMenus.value.length) {
     w += mixChildMenuWidth;
@@ -104,6 +122,7 @@ function getSiderCollapsedWidth() {
 
 <template>
   <AdminLayout
+    class="base-layout-shell"
     v-model:sider-collapse="appStore.siderCollapse"
     :mode="layoutMode"
     :scroll-el-id="LAYOUT_SCROLL_EL_ID"
@@ -112,16 +131,21 @@ function getSiderCollapsedWidth() {
     :full-content="appStore.fullContent"
     :fixed-top="themeStore.fixedHeaderAndTab"
     :header-height="themeStore.header.height"
+    header-class="base-layout-header-placement"
     :tab-visible="themeStore.tab.visible"
-    :tab-height="themeStore.tab.height"
-    :content-class="appStore.contentXScrollable ? 'overflow-x-hidden' : ''"
+    :tab-height="tabHeight"
+    tab-class="base-layout-tab-placement"
+    :content-class="contentClass"
     :sider-visible="siderVisible"
     :sider-width="siderWidth"
     :sider-collapsed-width="siderCollapsedWidth"
+    sider-class="base-layout-sider-placement"
     :footer-visible="themeStore.footer.visible"
     :footer-height="themeStore.footer.height"
     :fixed-footer="themeStore.footer.fixed"
     :right-footer="themeStore.footer.right"
+    footer-class="base-layout-footer"
+    :style="{ '--wb-content-bottom-padding': `${contentBottomPadding}px` }"
   >
     <template #header>
       <GlobalHeader v-bind="headerProps" />
@@ -144,5 +168,9 @@ function getSiderCollapsedWidth() {
 <style lang="scss">
 #__SCROLL_EL_ID__ {
   @include scrollbar();
+}
+
+.base-layout-content {
+  padding-bottom: var(--wb-content-bottom-padding, 24px);
 }
 </style>

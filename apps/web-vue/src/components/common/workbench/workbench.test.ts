@@ -122,6 +122,16 @@ describe('DataList', () => {
     expect(new Set(firstKeys).size).toBe(2);
     expect(secondKeys).toEqual(firstKeys);
   });
+
+  it('keeps synthesized duplicate keys away from raw keys', () => {
+    const resolveItemKeys = createWorkbenchItemKeyResolver();
+    const keys = resolveItemKeys([{ id: 'x' }, { id: 'x' }, 'object:string:x:1']);
+
+    expect(new Set(keys).size).toBe(3);
+    expect(keys[2]).toBe('object:string:x:1');
+    expect(keys[0]).not.toBe(keys[2]);
+    expect(keys[1]).not.toBe(keys[2]);
+  });
 });
 
 describe('shared workbench components', () => {

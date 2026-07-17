@@ -51,20 +51,24 @@ export function createWorkbenchItemKeyResolver() {
     return `${typeof item}:${String(item)}`;
   }
 
-  function getObjectDuplicateSuffix(item: object, baseKey: WorkbenchItemKey) {
+  function getObjectDuplicateSuffix(
+    item: object,
+    baseKey: WorkbenchItemKey,
+    isAvailable: (key: WorkbenchItemKey) => boolean
+  ) {
     let suffixes = objectDuplicateSuffixes.get(item);
     if (!suffixes) {
       suffixes = new Map();
       objectDuplicateSuffixes.set(item, suffixes);
     }
 
-    const existingSuffix = suffixes.get(baseKey);
-    if (existingSuffix !== undefined) return existingSuffix;
+    let suffix = suffixes.get(baseKey) ?? (nextSuffixByBase.get(baseKey) ?? 0) + 1;
 
-    const nextSuffix = (nextSuffixByBase.get(baseKey) ?? 0) + 1;
-    nextSuffixByBase.set(baseKey, nextSuffix);
-    suffixes.set(baseKey, nextSuffix);
-    return nextSuffix;
+    while (!isAvailable(formatDuplicateKey('object', baseKey, suffix))) suffix += 1;
+
+    nextSuffixByBase.set(baseKey, Math.max(nextSuffixByBase.get(baseKey) ?? 0, suffix));
+    suffixes.set(baseKey, suffix);
+    return suffix;
   }
 
   function formatDuplicateKey(kind: 'object' | 'value', baseKey: WorkbenchItemKey, suffix: number) {
@@ -79,11 +83,17 @@ export function createWorkbenchItemKeyResolver() {
       baseCounts.set(baseKey, (baseCounts.get(baseKey) ?? 0) + 1);
     });
 
+    const rawKeys = new Set(baseKeys);
+    const finalKeys = new Set<WorkbenchItemKey>();
+    const isAvailable = (key: WorkbenchItemKey) => !rawKeys.has(key) && !finalKeys.has(key);
     const valueOccurrences = new Map<WorkbenchItemKey, number>();
     const objectOccurrences = new Map<object, number>();
 
     return baseKeys.map((baseKey, index) => {
-      if (baseCounts.get(baseKey) === 1) return baseKey;
+      if (baseCounts.get(baseKey) === 1) {
+        finalKeys.add(baseKey);
+        return baseKey;
+      }
 
       const item = items[index];
       if (item !== null && typeof item === 'object') {
@@ -91,14 +101,24 @@ export function createWorkbenchItemKeyResolver() {
         objectOccurrences.set(item, objectOccurrence + 1);
 
         if (objectOccurrence === 0) {
-          const suffix = getObjectDuplicateSuffix(item, baseKey);
-          return formatDuplicateKey('object', baseKey, suffix);
+          const suffix = getObjectDuplicateSuffix(item, baseKey, isAvailable);
+          const finalKey = formatDuplicateKey('object', baseKey, suffix);
+          finalKeys.add(finalKey);
+          return finalKey;
         }
       }
 
-      const valueOccurrence = (valueOccurrences.get(baseKey) ?? 0) + 1;
+      let valueOccurrence = (valueOccurrences.get(baseKey) ?? 0) + 1;
+      let finalKey = formatDuplicateKey('value', baseKey, valueOccurrence);
+
+      while (!isAvailable(finalKey)) {
+        valueOccurrence += 1;
+        finalKey = formatDuplicateKey('value', baseKey, valueOccurrence);
+      }
+
       valueOccurrences.set(baseKey, valueOccurrence);
-      return formatDuplicateKey('value', baseKey, valueOccurrence);
+      finalKeys.add(finalKey);
+      return finalKey;
     });
   };
 }

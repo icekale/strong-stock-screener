@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import dayjs from 'dayjs';
 import {
   clearSystemCache,
   generateModelMaintenancePacket,
@@ -11,7 +12,21 @@ import {
   getSystemCache,
   getSystemStatus
 } from '@/service/product-api';
-import type { AuctionTop3PerformanceResponse, AuctionTop3TrainingSummary, DataSourceStatusResponse, ModelMaintenancePacket, ModelMaintenanceReport, SystemCacheSummary, SystemStatusResponse } from '@/service/types';
+import type {
+  AuctionTop3PerformanceResponse,
+  AuctionTop3TrainingSummary,
+  DataSourceStatusResponse,
+  ModelMaintenancePacket,
+  ModelMaintenanceReport,
+  SourceStatusValue,
+  SystemCacheItem,
+  SystemCacheSummary,
+  SystemConfidence,
+  SystemJobStatus,
+  SystemStatusResponse
+} from '@/service/types';
+import { formatWorkbenchNumber } from '@/components/common/workbench/workbench';
+import type { WorkbenchMetric, WorkbenchMetricTone } from '@/components/common/workbench/workbench';
 
 defineOptions({ name: 'SystemView' });
 
@@ -22,10 +37,24 @@ const training = ref<AuctionTop3TrainingSummary | null>(null);
 const performance = ref<AuctionTop3PerformanceResponse | null>(null);
 const packet = ref<ModelMaintenancePacket | null>(null);
 const report = ref<ModelMaintenanceReport | null>(null);
-const cumulativeReturn = computed(() => performance.value?.points.at(-1)?.cumulative_return_pct ?? null);
 const loading = ref(false);
 const clearing = ref<string | null>(null);
 const error = ref<string | null>(null);
+
+const cumulativeReturn = computed(() => performance.value?.points.at(-1)?.cumulative_return_pct ?? null);
+const runningJobs = computed(() => status.value?.jobs.filter(job => job.running).length ?? '--');
+const systemMetrics = computed<WorkbenchMetric[]>(() => [
+  { key: 'system-status', label: '系统状态', value: systemStatusLabel(status.value?.status), tone: systemStatusTone(status.value?.status), helper: status.value?.generated_at ? `更新 ${formatGeneratedAt(status.value.generated_at)}` : '等待状态' },
+  { key: 'running-jobs', label: '运行任务', value: runningJobs.value, tone: Number(runningJobs.value) > 0 ? 'info' as const : 'neutral' as const, helper: `${status.value?.jobs.length ?? '--'} 个任务` },
+  { key: 'cache-items', label: '缓存条目', value: cache.value?.total ?? '--', helper: '可按分组清理' },
+  { key: 'confidence', label: '数据置信度', value: confidenceLabel(status.value?.confidence), tone: confidenceTone(status.value?.confidence), helper: status.value?.confidence || '等待状态' }
+]);
+const trainingMetrics = computed<WorkbenchMetric[]>(() => [
+  { key: 'signal-samples', label: '信号样本', value: training.value?.signal_sample_count ?? '--', helper: '竞价 Top3' },
+  { key: 'simulated-samples', label: '模拟样本', value: training.value?.simulated_trade_sample_count ?? '--', helper: '模拟交易' },
+  { key: 'manual-samples', label: '人工样本', value: training.value?.manual_trade_sample_count ?? '--', helper: '人工确认' },
+  { key: 'cumulative-return', label: '累计收益', value: formatPct(cumulativeReturn.value), tone: cumulativeReturn.value == null ? 'neutral' : cumulativeReturn.value >= 0 ? 'positive' : 'negative', helper: performance.value ? `更新 ${formatGeneratedAt(performance.value.generated_at)}` : '等待回测数据' }
+]);
 
 async function load() {
   loading.value = true;
@@ -44,16 +73,338 @@ async function load() {
 
 async function clear(group: string) {
   clearing.value = group;
-  try { await clearSystemCache(group); await load(); } catch (cause) { error.value = cause instanceof Error ? cause.message : '清理缓存失败'; } finally { clearing.value = null; }
+  try {
+    await clearSystemCache(group);
+    await load();
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '清理缓存失败';
+  } finally {
+    clearing.value = null;
+  }
 }
 
 async function generatePacket() {
-  try { packet.value = await generateModelMaintenancePacket(); } catch (cause) { error.value = cause instanceof Error ? cause.message : '生成维护包失败'; }
+  try {
+    packet.value = await generateModelMaintenancePacket();
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '生成维护包失败';
+  }
+}
+
+function formatPct(value: number | null | undefined) {
+  return formatWorkbenchNumber(value, 'percent');
+}
+
+function formatGeneratedAt(value: string | undefined) {
+  return value ? dayjs(value).format('HH:mm:ss') : '--';
+}
+
+function systemStatusLabel(value: SystemStatusResponse['status'] | undefined) {
+  if (value === 'ok') return '正常';
+  if (value === 'degraded') return '降级';
+  return '--';
+}
+
+function systemStatusTone(value: SystemStatusResponse['status'] | undefined): WorkbenchMetricTone {
+  if (value === 'ok') return 'success';
+  if (value === 'degraded') return 'warning';
+  return 'neutral';
+}
+
+function confidenceLabel(value: SystemConfidence | undefined) {
+  const labels: Record<SystemConfidence, string> = { fresh: '新鲜', stale: '陈旧', partial: '部分', degraded: '降级', unavailable: '不可用' };
+  return value ? labels[value] : '--';
+}
+
+function confidenceTone(value: SystemConfidence | undefined): WorkbenchMetricTone {
+  if (value === 'fresh') return 'success';
+  if (value === 'stale' || value === 'partial') return 'warning';
+  if (value === 'degraded' || value === 'unavailable') return 'error';
+  return 'neutral';
+}
+
+function sourceStatusLabel(value: SourceStatusValue) {
+  const labels: Record<SourceStatusValue, string> = { success: '成功', failed: '失败', disabled: '停用', missing_key: '缺少密钥', stale: '陈旧' };
+  return labels[value];
+}
+
+function sourceStatusTone(value: SourceStatusValue) {
+  if (value === 'success') return 'success';
+  if (value === 'failed') return 'error';
+  if (value === 'stale') return 'warning';
+  return 'neutral';
+}
+
+function jobStatusTone(job: SystemJobStatus) {
+  if (job.running) return 'running';
+  return job.enabled ? 'success' : 'neutral';
+}
+
+function cacheStatusTone(item: SystemCacheItem) {
+  if (item.last_error) return 'failed';
+  if (item.refreshing_count > 0) return 'running';
+  return 'success';
+}
+
+function reportStatusTone(value: ModelMaintenanceReport['health_status']) {
+  if (value === 'normal') return 'success';
+  if (value === 'watch' || value === 'insufficient_sample') return 'warning';
+  return 'error';
+}
+
+function asSource(value: unknown) {
+  return value as DataSourceStatusResponse['items'][number];
+}
+
+function asJob(value: unknown) {
+  return value as SystemJobStatus;
+}
+
+function asCacheItem(value: unknown) {
+  return value as SystemCacheItem;
 }
 
 onMounted(() => void load());
 </script>
 
 <template>
-  <div class="space-y-16px"><div class="flex flex-wrap items-center justify-between gap-12px"><div><div class="text-22px font-700 text-text-primary">模型与数据源</div><div class="mt-4px text-13px text-text-secondary">运行状态、缓存和训练维护</div></div><a-button :loading="loading" @click="load">刷新状态</a-button></div><a-alert v-if="error" :message="error" show-icon type="warning" /><a-row :gutter="12"><a-col :xs="12" :sm="6"><a-card size="small"><a-statistic title="系统状态" :value="status?.status ?? '--'" /></a-card></a-col><a-col :xs="12" :sm="6"><a-card size="small"><a-statistic title="运行任务" :value="status?.jobs.filter(job => job.running).length ?? '--'" /></a-card></a-col><a-col :xs="12" :sm="6"><a-card size="small"><a-statistic title="缓存条目" :value="cache?.total ?? '--'" /></a-card></a-col><a-col :xs="12" :sm="6"><a-card size="small"><a-statistic title="置信度" :value="status?.confidence ?? '--'" /></a-card></a-col></a-row><a-row :gutter="12"><a-col :xs="24" :lg="12"><a-card size="small" title="数据源"><a-list :data-source="sources?.items ?? []" size="small"><template #renderItem="{ item }"><a-list-item><a-list-item-meta :title="item.source" :description="item.detail" /><template #extra><a-tag :color="item.status === 'success' ? 'green' : item.status === 'failed' ? 'red' : 'orange'">{{ item.status }}</a-tag></template></a-list-item></template></a-list><a-empty v-if="!sources?.items.length" description="暂无数据源状态" /></a-card></a-col><a-col :xs="24" :lg="12"><a-card size="small" title="后台任务"><a-list :data-source="status?.jobs ?? []" size="small"><template #renderItem="{ item }"><a-list-item><span>{{ item.name }}</span><a-space><a-tag>{{ item.enabled ? '启用' : '停用' }}</a-tag><span class="text-12px text-text-secondary">{{ item.detail }}</span></a-space></a-list-item></template></a-list></a-card></a-col></a-row><a-card size="small" title="缓存维护"><a-list :data-source="cache?.items ?? []" size="small"><template #renderItem="{ item }"><a-list-item><a-list-item-meta :title="item.name" :description="`${item.group} · 命中 ${item.hits} · 未命中 ${item.misses}`" /><template #extra><a-button size="small" :loading="clearing === item.group" @click="clear(item.group)">清理</a-button></template></a-list-item></template></a-list><a-empty v-if="!cache?.items.length" description="暂无缓存" /></a-card><a-card size="small" title="竞价 Top3 训练"><a-row :gutter="12"><a-col :xs="12" :sm="6"><a-statistic title="信号样本" :value="training?.signal_sample_count ?? '--'" /></a-col><a-col :xs="12" :sm="6"><a-statistic title="模拟样本" :value="training?.simulated_trade_sample_count ?? '--'" /></a-col><a-col :xs="12" :sm="6"><a-statistic title="人工样本" :value="training?.manual_trade_sample_count ?? '--'" /></a-col><a-col :xs="12" :sm="6"><a-statistic title="累计收益" :value="cumulativeReturn == null ? '--' : `${cumulativeReturn.toFixed(2)}%`" /></a-col></a-row></a-card><a-card size="small" title="模型维护包"><template #extra><a-button size="small" type="primary" @click="generatePacket">生成维护包</a-button></template><a-descriptions v-if="packet" :column="2" size="small"><a-descriptions-item label="数据包 ID">{{ packet.packet_id }}</a-descriptions-item><a-descriptions-item label="交易日">{{ packet.trade_date }}</a-descriptions-item><a-descriptions-item label="生成时间">{{ packet.generated_at }}</a-descriptions-item><a-descriptions-item label="质量提示">{{ packet.data_quality_notes.length }} 条</a-descriptions-item></a-descriptions><a-empty v-else description="暂无维护包" /><a-alert v-if="report" class="mt-12px" :message="report.summary || '已有维护报告'" type="info" /></a-card></div>
+  <div class="space-y-16px">
+    <PageHeader title="模型与数据源" description="数据源健康、缓存维护和竞价模型训练">
+      <template #meta>{{ status?.generated_at ? formatGeneratedAt(status.generated_at) : '等待状态' }}</template>
+      <a-button :loading="loading" type="primary" @click="load">刷新状态</a-button>
+    </PageHeader>
+
+    <a-alert v-if="error" :title="error" show-icon type="warning" />
+    <MetricStrip :items="systemMetrics" />
+
+    <div class="grid grid-cols-1 gap-16px xl:grid-cols-2">
+      <section class="system-panel">
+        <SectionHeader title="数据源健康" source="运行时检查" />
+        <DataList :items="sources?.items ?? []" :loading="loading && !sources" empty-description="暂无数据源状态">
+          <template #list-item="{ item }">
+            <div class="system-source-row">
+              <div class="min-w-0">
+                <div class="font-600 truncate">{{ asSource(item).source }}</div>
+                <div class="system-detail">{{ asSource(item).detail || '暂无补充详情' }}</div>
+              </div>
+              <div class="system-status-column">
+                <StatusTag :status="sourceStatusTone(asSource(item).status)" />
+                <span class="text-12px text-text-secondary">{{ sourceStatusLabel(asSource(item).status) }}</span>
+              </div>
+            </div>
+          </template>
+        </DataList>
+      </section>
+
+      <section class="system-panel">
+        <SectionHeader title="后台任务" source="调度状态" />
+        <DataList :items="status?.jobs ?? []" :loading="loading && !status" empty-description="暂无后台任务">
+          <template #list-item="{ item }">
+            <div class="system-job-row">
+              <div class="min-w-0">
+                <div class="font-600 truncate">{{ asJob(item).name }}</div>
+                <div class="system-detail">{{ asJob(item).detail || '暂无任务详情' }}</div>
+              </div>
+              <div class="system-status-column">
+                <StatusTag :status="jobStatusTone(asJob(item))" />
+                <span class="text-12px text-text-secondary">{{ asJob(item).running ? '运行中' : asJob(item).enabled ? '启用' : '停用' }}</span>
+              </div>
+            </div>
+          </template>
+        </DataList>
+      </section>
+    </div>
+
+    <section class="system-panel">
+      <SectionHeader title="缓存维护" source="运行时缓存">
+        <StatusTag :status="cache ? 'success' : loading ? 'running' : 'unknown'" />
+      </SectionHeader>
+      <DataList :items="cache?.items ?? []" :loading="loading && !cache" empty-description="暂无缓存条目">
+        <template #list-item="{ item }">
+          <div class="system-cache-row">
+            <div class="min-w-0">
+              <div class="font-600 truncate">{{ asCacheItem(item).name }}</div>
+              <div class="system-detail">{{ asCacheItem(item).group }} · 命中 {{ asCacheItem(item).hits }} · 未命中 {{ asCacheItem(item).misses }} · 条目 {{ asCacheItem(item).size }}</div>
+              <div v-if="asCacheItem(item).last_error" class="system-detail system-detail--error">{{ asCacheItem(item).last_error }}</div>
+            </div>
+            <div class="system-cache-actions">
+              <StatusTag :status="cacheStatusTone(asCacheItem(item))" />
+              <a-button size="small" :loading="clearing === asCacheItem(item).group" @click="clear(asCacheItem(item).group)">清理</a-button>
+            </div>
+          </div>
+        </template>
+      </DataList>
+    </section>
+
+    <section class="system-panel">
+      <SectionHeader title="竞价 Top3 训练" source="训练与模拟表现" :updated-at="formatGeneratedAt(training?.latest_generated_at || undefined)" />
+      <MetricStrip :items="trainingMetrics" />
+      <div v-if="training?.quality_notes.length" class="system-notes">
+        <span class="system-notes__label">质量提示</span>
+        <span v-for="note in training.quality_notes" :key="note">{{ note }}</span>
+      </div>
+    </section>
+
+    <section class="system-panel">
+      <SectionHeader title="模型维护包" source="模型维护服务" :updated-at="formatGeneratedAt(packet?.generated_at)">
+        <a-button size="small" type="primary" @click="generatePacket">生成维护包</a-button>
+      </SectionHeader>
+      <div v-if="packet" class="system-packet-grid">
+        <div><span>数据包 ID</span><strong>{{ packet.packet_id }}</strong></div>
+        <div><span>交易日</span><strong>{{ packet.trade_date || '--' }}</strong></div>
+        <div><span>模型</span><strong>{{ packet.model_name }} · {{ packet.model_version || '--' }}</strong></div>
+        <div><span>质量提示</span><strong>{{ packet.data_quality_notes.length }} 条</strong></div>
+      </div>
+      <div v-else class="system-empty">暂无维护包</div>
+      <div v-if="report" class="system-report">
+        <div class="system-report__header">
+          <div>
+            <div class="font-600">维护报告</div>
+            <div class="text-12px text-text-secondary">{{ report.provider }} · {{ report.model }} · {{ formatGeneratedAt(report.generated_at) }}</div>
+          </div>
+          <div class="system-status-column">
+            <StatusTag :status="reportStatusTone(report.health_status)" />
+            <span class="text-12px text-text-secondary">{{ report.health_status }}</span>
+          </div>
+        </div>
+        <div class="system-report__summary">{{ report.summary || '已有维护报告' }}</div>
+      </div>
+    </section>
+  </div>
 </template>
+
+<style scoped>
+.system-panel {
+  padding: 12px;
+  background: var(--wb-surface);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius);
+}
+
+.system-source-row,
+.system-job-row,
+.system-cache-row,
+.system-report__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+}
+
+.system-detail {
+  margin-top: 3px;
+  overflow-wrap: anywhere;
+  color: var(--wb-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.system-detail--error {
+  color: var(--wb-positive);
+}
+
+.system-status-column,
+.system-cache-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.system-cache-row {
+  align-items: center;
+}
+
+.system-packet-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  padding-top: 14px;
+}
+
+.system-packet-grid div {
+  min-width: 0;
+  padding: 10px;
+  background: var(--wb-primary-soft);
+  border-radius: 4px;
+}
+
+.system-packet-grid span,
+.system-packet-grid strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.system-packet-grid span {
+  color: var(--wb-muted);
+  font-size: 12px;
+}
+
+.system-packet-grid strong {
+  margin-top: 5px;
+  color: var(--wb-ink);
+  font-size: 13px;
+}
+
+.system-report {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--wb-border);
+}
+
+.system-report__summary {
+  margin-top: 10px;
+  color: var(--wb-ink);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.system-notes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: var(--wb-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.system-notes__label {
+  color: var(--wb-warning);
+  font-weight: 600;
+}
+
+.system-empty {
+  padding: 20px 0 6px;
+  color: var(--wb-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+@media (max-width: 767px) {
+  .system-panel {
+    padding: 10px;
+  }
+
+  .system-packet-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 639px) {
+  .system-source-row,
+  .system-job-row,
+  .system-cache-row,
+  .system-report__header {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .system-status-column,
+  .system-cache-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+}
+</style>

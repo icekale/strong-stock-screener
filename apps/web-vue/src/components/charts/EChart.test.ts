@@ -22,20 +22,29 @@ const mocks = vi.hoisted(() => {
 vi.mock('echarts', () => ({ init: mocks.init }));
 
 const resizeObserver = {
+  callback: null as ResizeObserverCallback | null,
   observe: vi.fn(),
   disconnect: vi.fn()
 };
 
 class FakeResizeObserver {
-  observe = resizeObserver.observe;
-  disconnect = resizeObserver.disconnect;
+  constructor(callback: ResizeObserverCallback) {
+    resizeObserver.callback = callback;
+  }
 
-  constructor(_callback: ResizeObserverCallback) {}
+  observe(target: Element) {
+    resizeObserver.observe(target);
+  }
+
+  disconnect() {
+    resizeObserver.disconnect();
+  }
 }
 
 beforeEach(() => {
   Object.values(mocks.chart).forEach(mock => mock.mockClear());
   mocks.init.mockClear();
+  resizeObserver.callback = null;
   resizeObserver.observe.mockClear();
   resizeObserver.disconnect.mockClear();
   vi.stubGlobal('ResizeObserver', FakeResizeObserver);
@@ -53,12 +62,16 @@ it('wires EChart rendering, exposed controls, and cleanup to the chart instance'
 
   expect(mocks.init).toHaveBeenCalledOnce();
   expect(mocks.chart.setOption).toHaveBeenCalledWith(option, true);
+  expect(resizeObserver.observe).toHaveBeenCalledWith(wrapper.element);
+  expect(resizeObserver.callback).not.toBeNull();
+  resizeObserver.callback?.([] as ResizeObserverEntry[], {} as ResizeObserver);
+  expect(mocks.chart.resize).toHaveBeenCalledOnce();
 
   const exposed = wrapper.vm as unknown as { resize: () => void; restore: () => void };
   exposed.resize();
   exposed.restore();
 
-  expect(mocks.chart.resize).toHaveBeenCalledOnce();
+  expect(mocks.chart.resize).toHaveBeenCalledTimes(2);
   expect(mocks.chart.dispatchAction).toHaveBeenCalledWith({ type: 'dataZoom', start: 0, end: 100 });
 
   wrapper.unmount();

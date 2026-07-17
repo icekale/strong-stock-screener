@@ -29,12 +29,11 @@ import {
   type KlineSubIndicator,
   type KlineSubPaneCount
 } from '@/utils/charts/klineIndicatorLayout';
-import { aggregateWeeklyBars } from '@/utils/charts/klinePeriod';
 import { getVisibleGsgfAnnotations } from '@/utils/charts/klineOverlayOption';
 import {
   buildStockKlineQuery,
+  buildStockViewChartBars,
   buildStockViewDefaults,
-  calculateCompleteMovingAverage,
   isLatestStockRequest,
   KLINE_INDICATOR_STORAGE_KEY,
   nextStockRequestId,
@@ -122,8 +121,7 @@ const chanlunLayers: Partial<Record<ChanlunLayerKey, boolean>> = {
 const requestPeriod = computed<StockKlinePeriod>(() => (period.value === 'weekly' ? '1d' : period.value));
 const chartBars = computed(() => {
   const sourceBars = kline.value?.bars ?? [];
-  const displayedBars = period.value === 'weekly' ? aggregateWeeklyBars(sourceBars) : sourceBars;
-  return period.value === 'weekly' ? displayedBars : withMovingAverages(displayedBars);
+  return buildStockViewChartBars(sourceBars, period.value);
 });
 const latestBar = computed(() => chartBars.value.at(-1) ?? null);
 const currentCandidate = computed(() => screenItems.value.find(item => item.symbol === symbol.value) ?? null);
@@ -365,18 +363,6 @@ function annotationColor(annotation: GsgfChartAnnotation) {
   if (annotation.severity === 'warning') return 'orange';
   if (annotation.severity === 'danger') return 'green';
   return 'default';
-}
-
-function withMovingAverages(bars: KlineBar[]): KlineBar[] {
-  const periods = [5, 10, 20, 60] as const;
-  const averages = Object.fromEntries(periods.map(size => [`ma${size}`, calculateCompleteMovingAverage(bars.map(bar => bar.close), size)])) as Record<`ma${(typeof periods)[number]}`, Array<number | null>>;
-  return bars.map((bar, index) => ({
-    ...bar,
-    ma5: index >= 4 ? bar.ma5 ?? averages.ma5[index] ?? null : null,
-    ma10: index >= 9 ? bar.ma10 ?? averages.ma10[index] ?? null : null,
-    ma20: index >= 19 ? bar.ma20 ?? averages.ma20[index] ?? null : null,
-    ma60: index >= 59 ? bar.ma60 ?? averages.ma60[index] ?? null : null
-  }));
 }
 
 watch(

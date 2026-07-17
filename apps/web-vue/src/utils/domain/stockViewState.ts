@@ -1,4 +1,5 @@
-import type { StockKlinePeriod } from '@/service/types';
+import type { KlineBar, StockKlinePeriod } from '@/service/types';
+import { aggregateWeeklyBars } from '@/utils/charts/klinePeriod';
 import {
   buildKlineIndicatorState,
   type KlineIndicatorState,
@@ -46,6 +47,22 @@ export function calculateCompleteMovingAverage(values: readonly number[], window
       ? window.reduce((sum, value) => sum + value, 0) / windowSize
       : null;
   });
+}
+
+export function buildStockViewChartBars(bars: KlineBar[], period: StockKlinePeriod | 'weekly'): KlineBar[] {
+  const displayedBars = period === 'weekly' ? aggregateWeeklyBars(bars) : bars;
+  const periods = [5, 10, 20, 60] as const;
+  const averages = Object.fromEntries(
+    periods.map(size => [`ma${size}`, calculateCompleteMovingAverage(displayedBars.map(bar => bar.close), size)])
+  ) as Record<`ma${(typeof periods)[number]}`, Array<number | null>>;
+
+  return displayedBars.map((bar, index) => ({
+    ...bar,
+    ma5: index >= 4 ? bar.ma5 ?? averages.ma5[index] ?? null : null,
+    ma10: index >= 9 ? bar.ma10 ?? averages.ma10[index] ?? null : null,
+    ma20: index >= 19 ? bar.ma20 ?? averages.ma20[index] ?? null : null,
+    ma60: index >= 59 ? bar.ma60 ?? averages.ma60[index] ?? null : null
+  }));
 }
 
 export function buildStockKlineQuery({ period, count = 220 }: { period: StockKlinePeriod; count?: number }): StockKlineQuery {

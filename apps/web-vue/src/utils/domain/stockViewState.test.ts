@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { StockKlinePeriod } from '@/service/types';
+import type { KlineBar, StockKlinePeriod } from '@/service/types';
 import {
   buildStockKlineQuery,
+  buildStockViewChartBars,
   buildStockViewDefaults,
   calculateCompleteMovingAverage,
   isLatestStockRequest,
@@ -61,5 +62,34 @@ describe('stock view state', () => {
   it('returns moving averages only after a complete window', () => {
     expect(calculateCompleteMovingAverage([1, 2, 3, 4, 5], 3)).toEqual([null, null, 2, 3, 4]);
     expect(calculateCompleteMovingAverage([1, Number.NaN, 3], 2)).toEqual([null, null, null]);
+  });
+
+  it('fills MA5 on the fifth aggregated weekly bar, not before', () => {
+    const dailyBars: KlineBar[] = [];
+    const cursor = new Date(Date.UTC(2026, 0, 5));
+    for (let index = 0; index < 25; index += 1) {
+      while (cursor.getUTCDay() === 0 || cursor.getUTCDay() === 6) cursor.setUTCDate(cursor.getUTCDate() + 1);
+      const close = index + 1;
+      dailyBars.push({
+        date: cursor.toISOString().slice(0, 10).replaceAll('-', ''),
+        open: close - 1,
+        close,
+        high: close + 1,
+        low: close - 2,
+        volume: 100,
+        amount: 1000,
+        ma5: null,
+        ma10: null,
+        ma20: null,
+        ma60: null
+      });
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    }
+
+    const weeklyBars = buildStockViewChartBars(dailyBars, 'weekly');
+
+    expect(weeklyBars).toHaveLength(5);
+    expect(weeklyBars.slice(0, 4).map(bar => bar.ma5)).toEqual([null, null, null, null]);
+    expect(weeklyBars[4]?.ma5).toBe(15);
   });
 });

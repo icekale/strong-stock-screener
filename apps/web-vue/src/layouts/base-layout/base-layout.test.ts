@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { defineComponent, h } from 'vue';
+import { defineComponent, h, nextTick } from 'vue';
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -16,13 +16,15 @@ const AdminLayoutStub = defineComponent({
   props: {
     contentClass: String,
     fixedFooter: Boolean,
+    fullContent: Boolean,
     footerVisible: Boolean,
     siderCollapsedWidth: Number,
     siderWidth: Number,
+    style: Object,
     tabHeight: Number
   },
   setup(props, { slots }) {
-    return () => h('div', { class: props.contentClass }, slots.default?.());
+    return () => h('div', { class: props.contentClass, style: props.style }, slots.default?.());
   }
 });
 
@@ -149,7 +151,9 @@ describe('base layout state', () => {
     const original = {
       contentXScrollable: appStore.contentXScrollable,
       footerFixed: themeStore.footer.fixed,
+      footerHeight: themeStore.footer.height,
       footerVisible: themeStore.footer.visible,
+      fullContent: appStore.fullContent,
       mode: themeStore.layout.mode,
       siderCollapsedWidth: themeStore.sider.collapsedWidth,
       siderWidth: themeStore.sider.width,
@@ -160,8 +164,10 @@ describe('base layout state', () => {
     themeStore.sider.width = 216;
     themeStore.sider.collapsedWidth = 68;
     themeStore.tab.height = 32;
-    themeStore.footer.visible = false;
+    themeStore.footer.visible = true;
     themeStore.footer.fixed = true;
+    themeStore.footer.height = 48;
+    appStore.fullContent = false;
     appStore.setContentXScrollable(true);
 
     let wrapper;
@@ -186,10 +192,33 @@ describe('base layout state', () => {
       expect(adminLayout.props()).toMatchObject({
         contentClass: 'base-layout-content overflow-x-hidden',
         fixedFooter: true,
-        footerVisible: false,
+        footerVisible: true,
+        fullContent: false,
         siderCollapsedWidth: 68,
         siderWidth: 216,
+        style: { '--wb-content-bottom-padding': '72px' },
         tabHeight: 40
+      });
+
+      appStore.fullContent = true;
+      await nextTick();
+
+      expect(adminLayout.props()).toMatchObject({
+        contentClass: 'base-layout-content overflow-x-hidden',
+        fixedFooter: true,
+        footerVisible: true,
+        fullContent: true,
+        style: { '--wb-content-bottom-padding': '24px' }
+      });
+
+      appStore.fullContent = false;
+      await nextTick();
+
+      expect(adminLayout.props()).toMatchObject({
+        fixedFooter: true,
+        footerVisible: true,
+        fullContent: false,
+        style: { '--wb-content-bottom-padding': '72px' }
       });
     } finally {
       wrapper?.unmount();
@@ -198,8 +227,10 @@ describe('base layout state', () => {
       themeStore.sider.width = original.siderWidth;
       themeStore.sider.collapsedWidth = original.siderCollapsedWidth;
       themeStore.tab.height = original.tabHeight;
+      themeStore.footer.height = original.footerHeight;
       themeStore.footer.visible = original.footerVisible;
       themeStore.footer.fixed = original.footerFixed;
+      appStore.fullContent = original.fullContent;
       appStore.setContentXScrollable(original.contentXScrollable);
     }
   });

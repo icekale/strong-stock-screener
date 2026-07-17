@@ -81,7 +81,6 @@ async function loadModelCache() {
   try {
     model.value = await getAuctionModelTop3(tradeDate.value, { cacheOnly: true });
   } catch (cause) {
-    model.value = null;
     modelError.value = cause instanceof Error ? cause.message : '暂无竞价模型缓存';
   }
 }
@@ -166,7 +165,7 @@ onMounted(async () => {
       <a-button :loading="snapshotPolling.polling.value" @click="refreshSnapshot">刷新快照</a-button>
     </PageHeader>
 
-    <a-alert v-if="error" :message="error" show-icon type="warning" />
+    <a-alert v-if="error && items.length" :message="error" show-icon type="warning" />
     <MetricStrip :items="auctionMetrics" />
 
     <section class="border border-border rounded-6px bg-container p-12px">
@@ -180,7 +179,8 @@ onMounted(async () => {
         </div>
       </SectionHeader>
       <a-progress v-if="modelPolling.polling.value" class="mb-8px" :percent="modelPolling.progress.value" />
-      <DataList :items="selectedModelItems" :error="modelError" empty-description="暂无缓存结果，请运行模型">
+      <a-alert v-if="modelError && selectedModelItems.length" :message="modelError" show-icon type="info" />
+      <DataList :items="selectedModelItems" :error="modelError && !selectedModelItems.length ? modelError : null" empty-description="暂无缓存结果，请运行模型">
         <template #list-item="{ item }">
           <div
             class="model-row cursor-pointer"
@@ -188,6 +188,7 @@ onMounted(async () => {
             tabindex="0"
             @click="openStock(asModelItem(item).symbol, asModelItem(item).name, null, 'auction-model')"
             @keydown.enter="openStock(asModelItem(item).symbol, asModelItem(item).name, null, 'auction-model')"
+            @keydown.space.prevent="openStock(asModelItem(item).symbol, asModelItem(item).name, null, 'auction-model')"
           >
             <div class="model-row__rank font-700">{{ asModelItem(item).rank ?? '--' }}</div>
             <div class="model-row__identity">
@@ -210,7 +211,7 @@ onMounted(async () => {
         </div>
       </SectionHeader>
       <div class="mb-8px pt-8px text-12px text-text-secondary">{{ getAuctionSortDescription(sortMode) }}</div>
-      <DataList :items="items" :loading="loading" :error="error" empty-description="暂无竞价数据，请刷新快照">
+      <DataList :items="items" :loading="loading" :error="error && !items.length ? error : null" empty-description="暂无竞价数据，请刷新快照">
         <template #list-item="{ item }">
           <div class="auction-row auction-row--two-line" data-layout="two-row">
             <div class="auction-row__primary">

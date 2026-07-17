@@ -30,11 +30,14 @@ const screenerMetrics = computed(() => [
 
 async function loadLatest() {
   loading.value = true;
+  error.value = null;
   try {
-    result.value = await getLatestScreenRun();
-    if (result.value.trade_date) setTradeDate(result.value.trade_date);
-  } catch {
-    result.value = null;
+    const latest = await getLatestScreenRun();
+    result.value = latest;
+    strategy.value = latest.strategy;
+    if (latest.trade_date) setTradeDate(latest.trade_date);
+  } catch (cause) {
+    error.value = cause instanceof Error ? cause.message : '读取最近结果失败';
   } finally {
     loading.value = false;
   }
@@ -54,7 +57,10 @@ async function runScreen() {
       job.value = current;
     }
     if (current.status !== 'success') throw new Error(current.error || current.message || '筛选任务失败');
-    result.value = current.result;
+    const completedResult = current.result;
+    if (!completedResult) throw new Error('筛选任务未返回结果');
+    result.value = completedResult;
+    strategy.value = completedResult.strategy;
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '运行筛选失败';
   } finally {
@@ -111,7 +117,7 @@ onMounted(() => void loadLatest());
       <a-date-picker :value="dayjs(tradeDate)" value-format="YYYY-MM-DD" @change="(_, value) => setTradeDate(String(value))" />
       <a-button :loading="loading" @click="loadLatest">读取最近结果</a-button>
     </PageHeader>
-    <a-alert v-if="error" :message="error" show-icon type="error" />
+    <a-alert v-if="error && (result?.items.length ?? 0)" :message="error" show-icon type="error" />
     <section class="border border-border rounded-6px bg-container p-12px">
       <SectionHeader title="筛选参数" source="当前运行设置" />
       <div class="screener-filter-toolbar mt-12px">
@@ -129,7 +135,8 @@ onMounted(() => void loadLatest());
     <details class="border border-border rounded-6px bg-container px-12px py-10px" open>
       <summary class="cursor-pointer text-13px font-600">模型与筛选说明</summary>
       <div class="screener-explanation mt-10px text-12px text-text-secondary">
-        <span>策略 {{ strategyLabel(result?.strategy ?? strategy) }}</span>
+        <span>当前运行策略 {{ strategyLabel(strategy) }}</span>
+        <span>结果策略 {{ result ? strategyLabel(result.strategy) : '暂无结果' }}</span>
         <span>强势模型 {{ result?.strong_model_version ?? '运行后显示' }}</span>
         <span>GSGF 模型 {{ result?.gsgf_model_version ?? '未启用或待确认' }}</span>
         <span>排序 {{ result?.sort_version ?? '运行后显示' }}</span>
@@ -141,9 +148,9 @@ onMounted(() => void loadLatest());
       <SectionHeader title="筛选结果" :source="result ? strategyLabel(result.strategy) : '等待结果'" :updated-at="formatGeneratedAt(result?.generated_at)">
         <StatusTag :status="running ? 'running' : error ? 'failed' : result ? 'success' : 'unknown'" />
       </SectionHeader>
-      <DataList :items="result?.items ?? []" :loading="loading || running" :error="error" empty-description="暂无筛选结果，请读取最近结果或运行筛选">
+      <DataList :items="result?.items ?? []" :loading="loading || running" :error="error && !(result?.items.length ?? 0) ? error : null" empty-description="暂无筛选结果，请读取最近结果或运行筛选">
         <template #list-item="{ item }">
-          <div class="screener-row cursor-pointer" role="button" tabindex="0" @click="openStock(asScreeningItem(item).symbol, asScreeningItem(item).name, asScreeningItem(item).industry)" @keydown.enter="openStock(asScreeningItem(item).symbol, asScreeningItem(item).name, asScreeningItem(item).industry)">
+          <div class="screener-row cursor-pointer" role="button" tabindex="0" @click="openStock(asScreeningItem(item).symbol, asScreeningItem(item).name, asScreeningItem(item).industry)" @keydown.enter="openStock(asScreeningItem(item).symbol, asScreeningItem(item).name, asScreeningItem(item).industry)" @keydown.space.prevent="openStock(asScreeningItem(item).symbol, asScreeningItem(item).name, asScreeningItem(item).industry)">
             <div class="screener-row__identity">
               <div class="font-600">{{ asScreeningItem(item).name }} <span class="text-12px text-text-secondary">{{ asScreeningItem(item).symbol }}</span></div>
               <div class="text-12px text-text-secondary">{{ asScreeningItem(item).industry || '行业待补' }} · {{ asScreeningItem(item).rule_hits.slice(0, 3).join(' / ') || '规则待确认' }}</div>

@@ -76,22 +76,27 @@ export type EChartLifecycleTarget = {
 
 export type EChartResizeObserver = { disconnect: () => void };
 
-export function createEChartLifecycle(chart: EChartLifecycleTarget, resizeObserver?: EChartResizeObserver | null) {
-  return {
-    setOption(option: EChartsOption) {
-      chart.setOption(option, true);
-    },
-    restore() {
+export type EChartLifecycleAction =
+  | { type: 'setOption'; option: EChartsOption }
+  | { type: 'restore' }
+  | { type: 'resize' }
+  | { type: 'dispose'; resizeObserver?: EChartResizeObserver | null };
+
+export function runEChartLifecycle(chart: EChartLifecycleTarget, action: EChartLifecycleAction): void {
+  switch (action.type) {
+    case 'setOption':
+      chart.setOption(action.option, true);
+      return;
+    case 'restore':
       chart.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
-    },
-    resize() {
+      return;
+    case 'resize':
       chart.resize();
-    },
-    dispose() {
-      resizeObserver?.disconnect();
+      return;
+    case 'dispose':
+      action.resizeObserver?.disconnect();
       chart.dispose();
-    }
-  };
+  }
 }
 
 export function buildKlineOverlayOption({

@@ -2,7 +2,7 @@
 import type { ECharts, EChartsOption } from 'echarts';
 import * as echarts from 'echarts';
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { createEChartLifecycle } from '@/utils/charts/klineOverlayOption';
+import { runEChartLifecycle } from '@/utils/charts/klineOverlayOption';
 
 defineOptions({ name: 'EChart' });
 
@@ -23,27 +23,25 @@ const emit = defineEmits<{
 const root = ref<HTMLElement | null>(null);
 let chart: ECharts | null = null;
 let resizeObserver: ResizeObserver | null = null;
-let lifecycle: ReturnType<typeof createEChartLifecycle> | null = null;
 
 function render() {
   if (!root.value) return;
   if (!chart) {
     chart = echarts.init(root.value);
-    lifecycle = createEChartLifecycle(chart, resizeObserver);
     chart.on('click', params => emit('select', params));
     chart.on('mouseover', params => emit('hover', params));
   }
-  lifecycle?.setOption(props.option);
+  runEChartLifecycle(chart, { type: 'setOption', option: props.option });
   if (props.loading) chart.showLoading('default', { color: '#1677ff', maskColor: 'rgba(255,255,255,0.62)' });
   else chart.hideLoading();
 }
 
 function resize() {
-  lifecycle?.resize();
+  if (chart) runEChartLifecycle(chart, { type: 'resize' });
 }
 
 function restore() {
-  lifecycle?.restore();
+  if (chart) runEChartLifecycle(chart, { type: 'restore' });
 }
 
 defineExpose({ resize, restore });
@@ -61,8 +59,7 @@ watch(() => props.option, render, { deep: true });
 watch(() => props.loading, render);
 
 onBeforeUnmount(() => {
-  lifecycle?.dispose();
-  lifecycle = null;
+  if (chart) runEChartLifecycle(chart, { type: 'dispose', resizeObserver });
   resizeObserver = null;
   chart = null;
 });

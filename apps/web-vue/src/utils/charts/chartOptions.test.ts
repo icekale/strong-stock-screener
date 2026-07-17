@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ChanlunAnalysisResponse, KlineBar, SectorReplicaChartSeries } from '@/service/types';
 import { buildKlineIndicatorOptions, buildKlineIndicatorState, buildKlinePanes } from './klineIndicatorLayout';
-import { buildKlineOverlayOption, createEChartLifecycle } from './klineOverlayOption';
+import { buildKlineOverlayOption, runEChartLifecycle } from './klineOverlayOption';
 import { nextKlineWindowSize, sliceKlineWindow } from './klineWindow';
 import { buildSectorReplicaOption } from './sectorReplicaChartOption';
 
@@ -171,13 +171,12 @@ describe('chart options', () => {
       dispose: vi.fn()
     };
     const resizeObserver = { disconnect: vi.fn() };
-    const lifecycle = createEChartLifecycle(chart, resizeObserver);
     const option = { series: [] };
 
-    lifecycle.setOption(option);
-    lifecycle.restore();
-    lifecycle.resize();
-    lifecycle.dispose();
+    runEChartLifecycle(chart, { type: 'setOption', option });
+    runEChartLifecycle(chart, { type: 'restore' });
+    runEChartLifecycle(chart, { type: 'resize' });
+    runEChartLifecycle(chart, { type: 'dispose', resizeObserver });
 
     expect(chart.setOption).toHaveBeenCalledWith(option, true);
     expect(chart.dispatchAction).toHaveBeenCalledWith({ type: 'dataZoom', start: 0, end: 100 });

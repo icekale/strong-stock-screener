@@ -55,7 +55,7 @@ export function calculateKdj(bars: KlineBar[], options: KdjOptions = {}): KlineI
   const k = exponentialAverage(rsv, kPeriod);
   const d = exponentialAverage(k, dPeriod);
   const j = k.map((value, index) => finitePair(value, d[index], (left, right) => 3 * left - 2 * right));
-  return { name: 'KDJ', values: j, lines: [{ name: 'K', values: k }, { name: 'D', values: d }] };
+  return { name: 'J', values: j, lines: [{ name: 'K', values: k }, { name: 'D', values: d }] };
 }
 
 export function calculateRsi(bars: KlineBar[], options: MultiPeriodOptions = {}): KlineIndicatorSeries {

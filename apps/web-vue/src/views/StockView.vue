@@ -416,7 +416,7 @@ onMounted(() => {
 
     <a-alert v-if="quoteError" :message="`行情摘要：${quoteError}`" show-icon type="warning" />
     <a-row :gutter="12">
-      <a-col :xs="12" :sm="6"><a-card size="small"><a-statistic title="最新价" :value="quote?.last_price ?? '--'" :loading="quoteLoading" /></a-card></a-col>
+      <a-col :xs="12" :sm="6"><a-card size="small"><a-statistic title="最新价" :value="formatPrice(quote?.last_price)" :loading="quoteLoading" /></a-card></a-col>
       <a-col :xs="12" :sm="6"><a-card size="small"><a-statistic title="涨跌幅" :value="formatPct(quote?.pct_change)" :loading="quoteLoading" /></a-card></a-col>
       <a-col :xs="12" :sm="6"><a-card size="small"><a-statistic title="成交额" :value="formatAmount(quote?.turnover_cny)" :loading="quoteLoading" /></a-card></a-col>
       <a-col :xs="12" :sm="6"><a-card size="small"><a-statistic title="换手率" :value="quote?.turnover_rate == null ? '--' : `${quote.turnover_rate.toFixed(2)}%`" :loading="quoteLoading" /></a-card></a-col>

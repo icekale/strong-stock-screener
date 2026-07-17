@@ -99,6 +99,46 @@ describe('chart options', () => {
     expect(series.some(item => item.name === 'MA5')).toBe(true);
   });
 
+  it('colors volume bars by the direction of each kline', () => {
+    const option = buildKlineOverlayOption({
+      bars: [bar('20260715', 10), { ...bar('20260716', 9), open: 12, close: 9 }],
+      subIndicators: ['volume']
+    });
+    const volume = option.series.find(item => item.name === '成交量') as {
+      data: Array<{ value: number; itemStyle: { color: string } }>;
+    } | undefined;
+
+    expect(volume?.data).toEqual([
+      { value: 100, itemStyle: { color: '#d9363e' } },
+      { value: 100, itemStyle: { color: '#07845e' } }
+    ]);
+  });
+
+  it('shows the latest values in sub-pane legends and tooltip', () => {
+    const option = buildKlineOverlayOption({
+      bars: Array.from({ length: 40 }, (_, index) => bar(`202607${String(index + 1).padStart(2, '0')}`, 10 + index / 10)),
+      subIndicators: ['macd', 'kdj']
+    });
+    const legends = option.legend as Array<{
+      data: string[];
+      formatter: (name: string) => string;
+    }>;
+    const tooltip = option.tooltip as { formatter: (params: unknown) => string };
+
+    expect(legends).toHaveLength(2);
+    expect(legends[0]?.data).toEqual(['MACD', 'DIF', 'DEA']);
+    expect(legends[1]?.data).toEqual(['K', 'D', 'J']);
+    expect(legends[0]?.formatter('DIF')).toMatch(/^DIF -?\d+\.\d{2}$/);
+    expect(legends[1]?.formatter('K')).toMatch(/^K \d+\.\d{2}$/);
+    expect(tooltip.formatter([
+      { axisValue: '2026-07-16', seriesName: 'J', value: 64.1234 },
+      { axisValue: '2026-07-16', seriesName: 'D', value: 61.5 }
+    ])).toContain('J: 64.12');
+    expect(tooltip.formatter([
+      { axisValue: '2026-07-16', seriesName: 'K线', value: [209, 8.3, 8.2, 8.4, 8.5] }
+    ])).toContain('K线: 开 8.30 收 8.20 高 8.50 低 8.40');
+  });
+
   it('maps GSGF annotations to the main-pane mark point and mark area', () => {
     const option = buildKlineOverlayOption({
       bars: [bar('20260715', 10), bar('20260716', 12)],
@@ -189,7 +229,7 @@ describe('chart options', () => {
 
     expect(series.filter(item => item.name === 'MACD')).toContainEqual(expect.objectContaining({ type: 'bar', xAxisIndex: 1, yAxisIndex: 1 }));
     expect(series.filter(item => ['DIF', 'DEA'].includes(item.name))).toHaveLength(2);
-    expect(series.filter(item => ['K', 'D', 'KDJ'].includes(item.name))).toHaveLength(3);
+    expect(series.filter(item => ['K', 'D', 'J'].includes(item.name))).toHaveLength(3);
     expect(series.some(item => item.name === '砖形图' && item.type === 'candlestick' && item.xAxisIndex === 3 && item.yAxisIndex === 3)).toBe(true);
     expect(series.filter(item => item.type === 'line').every(item => item.connectNulls === false)).toBe(true);
   });

@@ -55,6 +55,7 @@ function expectWindowedSeries(result: KlineIndicatorSeries): void {
 
 describe('kline indicators', () => {
   it('returns fixed-length finite MACD, KDJ, RSI, WR and BIAS series', () => {
+    expect(calculateKdj(bars).name).toBe('J');
     [
       calculateMacd(bars, { short: 3, long: 5, signal: 2 }),
       calculateKdj(bars, { period: 5, kPeriod: 3, dPeriod: 3 }),

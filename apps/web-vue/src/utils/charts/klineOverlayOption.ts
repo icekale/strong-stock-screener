@@ -46,6 +46,7 @@ export type KlineOverlayOption = {
   grid: Array<Record<string, unknown>>;
   xAxis: Array<Record<string, unknown>>;
   yAxis: Array<Record<string, unknown>>;
+  legend: Array<Record<string, unknown>>;
   dataZoom: Array<Record<string, unknown>>;
   tooltip: Record<string, unknown>;
   series: Array<Record<string, unknown>>;
@@ -150,8 +151,10 @@ export function buildKlineOverlayOption({
   series.push(...buildGsgfAnnotationSeries(gsgfAnnotations, bars, dates));
 
   const indicatorOptions = buildKlineIndicatorOptions(movingAverages);
+  const legends: Array<Record<string, unknown>> = [];
   selectedSubIndicators.forEach((indicator, index) => {
     series.push(...buildSubIndicatorSeries(indicator, bars, index + 1, indicatorOptions));
+    legends.push(buildSubIndicatorLegend(indicator, bars, index + 1, selectedSubIndicators.length, indicatorOptions));
   });
 
   if (chanlun) {
@@ -170,11 +173,17 @@ export function buildKlineOverlayOption({
     grid: grids,
     xAxis: xAxes,
     yAxis: yAxes,
+    legend: legends,
     dataZoom: [
       { type: 'inside', xAxisIndex: axisIndexes(grids.length), start: 0, end: 100 },
       { type: 'slider', xAxisIndex: axisIndexes(grids.length), bottom: 8, height: 18 }
     ],
-    tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, confine: true },
+    tooltip: {
+      trigger: 'axis',
+      axisPointer: { type: 'cross' },
+      confine: true,
+      formatter: formatKlineTooltip
+    },
     series
   };
 }
@@ -315,11 +324,14 @@ function buildSubIndicatorSeries(
       id: `kline-volume-${axisIndex}`,
       name: '成交量',
       type: 'bar',
-      data: bars.map(bar => bar.volume),
+      data: bars.map(bar => ({
+        value: bar.volume,
+        itemStyle: { color: bar.close >= bar.open ? '#d9363e' : '#07845e' }
+      })),
       xAxisIndex: axisIndex,
       yAxisIndex: axisIndex,
       connectNulls: false,
-      itemStyle: { color: '#91caff' }
+      barMaxWidth: 12
     }];
   }
 
@@ -344,6 +356,92 @@ function buildSubIndicatorSeries(
     series.push(makeIndicatorSeries(line.name, 'line', line.values, axisIndex, index + 1));
   });
   return series;
+}
+
+function buildSubIndicatorLegend(
+  indicator: KlineSubIndicator,
+  bars: KlineBar[],
+  axisIndex: number,
+  subPaneCount: number,
+  options: IndicatorOptions
+): Record<string, unknown> {
+  const entries = indicator === 'volume'
+    ? [{ name: '成交量', value: bars.at(-1)?.volume ?? null }]
+    : (() => {
+        const result = calculateSubIndicator(indicator, bars, options);
+        const resultEntries = [
+          { name: result.name, value: result.values.at(-1) ?? null },
+          ...(result.lines ?? []).map(line => ({ name: line.name, value: line.values.at(-1) ?? null }))
+        ];
+        return indicator === 'kdj'
+          ? [...resultEntries.filter(entry => entry.name === 'K' || entry.name === 'D'), ...resultEntries.filter(entry => entry.name === 'J')]
+          : resultEntries;
+      })();
+
+  return {
+    data: entries.map(entry => entry.name),
+    left: 58,
+    top: subPaneLegendTop(axisIndex - 1, subPaneCount),
+    itemWidth: 8,
+    itemHeight: 8,
+    itemGap: 8,
+    selectedMode: false,
+    textStyle: { color: '#64748b', fontSize: 10 },
+    formatter: (name: string) => {
+      const entry = entries.find(item => item.name === name);
+      return `${name} ${formatIndicatorValue(name, entry?.value ?? null)}`;
+    }
+  };
+}
+
+function subPaneLegendTop(index: number, count: number): string {
+  const starts = count === 1
+    ? [82]
+    : count === 2
+      ? [66, 84]
+      : [54, 70, 86];
+  return `${Math.max((starts[index] ?? 0) - 2, 0)}%`;
+}
+
+function formatIndicatorValue(name: string, value: number | null): string {
+  if (value == null || !Number.isFinite(value)) return '--';
+  if (name === '成交量') {
+    if (Math.abs(value) >= 100_000_000) return `${(value / 100_000_000).toFixed(2)}亿`;
+    if (Math.abs(value) >= 10_000) return `${(value / 10_000).toFixed(2)}万`;
+  }
+  return value.toFixed(2);
+}
+
+function formatKlineTooltip(params: unknown): string {
+  const items = Array.isArray(params) ? params : [params];
+  const rows = items
+    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
+    .map(item => {
+      const name = String(item.seriesName ?? '');
+      return `${String(item.marker ?? '')}${name}: ${formatTooltipValue(name, item.value)}`;
+    })
+    .filter(row => !row.endsWith(': --'));
+  const axisValue = items[0] && typeof items[0] === 'object' ? (items[0] as Record<string, unknown>).axisValue : null;
+  return [axisValue ? String(axisValue) : '', ...rows].filter(Boolean).join('<br/>');
+}
+
+function formatTooltipValue(name: string, value: unknown): string {
+  if (Array.isArray(value)) {
+    if (name === 'K线' && value.length >= 4) {
+      const offset = value.length >= 5 ? 1 : 0;
+      return `开 ${formatNumber(value[offset])} 收 ${formatNumber(value[offset + 1])} 高 ${formatNumber(value[offset + 3])} 低 ${formatNumber(value[offset + 2])}`;
+    }
+    return value.map(formatNumber).join(' / ');
+  }
+  if (value && typeof value === 'object' && 'value' in value) {
+    return formatTooltipValue(name, (value as { value: unknown }).value);
+  }
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '--';
+  return formatIndicatorValue(name, value);
+}
+
+function formatNumber(value: unknown): string {
+  return typeof value === 'number' && Number.isFinite(value) ? value.toFixed(2) : '--';
 }
 
 function makeIndicatorSeries(

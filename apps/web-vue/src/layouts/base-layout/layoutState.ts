@@ -1,4 +1,7 @@
+const MIN_TAB_HEIGHT = 40;
+
 interface ContentBottomPaddingOptions {
+  fullContent: boolean;
   footerVisible: boolean;
   fixedFooter: boolean;
   footerHeight: number;
@@ -22,13 +25,14 @@ export interface LayoutGeometryOptions {
   siderWidth: number;
   siderCollapsedWidth: number;
   tabHeight: number;
+  fullContent: boolean;
   footerVisible: boolean;
   fixedFooter: boolean;
   footerHeight: number;
 }
 
-export function getContentBottomPadding({ footerVisible, fixedFooter, footerHeight }: ContentBottomPaddingOptions) {
-  return footerVisible && fixedFooter ? footerHeight + 24 : 24;
+export function getContentBottomPadding({ fullContent, footerVisible, fixedFooter, footerHeight }: ContentBottomPaddingOptions) {
+  return !fullContent && footerVisible && fixedFooter ? footerHeight + 24 : 24;
 }
 
 export function getSiderGeometry({
@@ -66,6 +70,7 @@ export function getLayoutGeometry({
   siderWidth,
   siderCollapsedWidth,
   tabHeight,
+  fullContent,
   footerVisible,
   fixedFooter,
   footerHeight
@@ -73,7 +78,7 @@ export function getLayoutGeometry({
   return {
     siderWidth,
     siderCollapsedWidth,
-    tabHeight,
-    contentBottomPadding: getContentBottomPadding({ footerVisible, fixedFooter, footerHeight })
+    tabHeight: Math.max(tabHeight, MIN_TAB_HEIGHT),
+    contentBottomPadding: getContentBottomPadding({ fullContent, footerVisible, fixedFooter, footerHeight })
   };
 }

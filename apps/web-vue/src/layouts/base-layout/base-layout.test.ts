@@ -1,13 +1,30 @@
 // @vitest-environment jsdom
 
-import { defineComponent } from 'vue';
+import { defineComponent, h } from 'vue';
 import { mount } from '@vue/test-utils';
 import { createPinia, setActivePinia } from 'pinia';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { router } from '@/router';
 import { useAppStore } from '@/store/modules/app';
+import { useThemeStore } from '@/store/modules/theme';
 import { themeSettings } from '@/theme/settings';
+import BaseLayout from './index.vue';
 import { getContentBottomPadding, getLayoutGeometry, getSiderGeometry } from './layoutState';
+
+const AdminLayoutStub = defineComponent({
+  name: 'AdminLayout',
+  props: {
+    contentClass: String,
+    fixedFooter: Boolean,
+    footerVisible: Boolean,
+    siderCollapsedWidth: Number,
+    siderWidth: Number,
+    tabHeight: Number
+  },
+  setup(props, { slots }) {
+    return () => h('div', { class: props.contentClass }, slots.default?.());
+  }
+});
 
 describe('base layout state', () => {
   beforeEach(() => {
@@ -15,9 +32,18 @@ describe('base layout state', () => {
   });
 
   it('reserves fixed footer space only when the footer is visible', () => {
-    expect(getContentBottomPadding({ footerVisible: true, fixedFooter: true, footerHeight: 48 })).toBe(72);
-    expect(getContentBottomPadding({ footerVisible: true, fixedFooter: false, footerHeight: 48 })).toBe(24);
-    expect(getContentBottomPadding({ footerVisible: false, fixedFooter: true, footerHeight: 48 })).toBe(24);
+    expect(getContentBottomPadding({ fullContent: false, footerVisible: true, fixedFooter: true, footerHeight: 48 })).toBe(
+      72
+    );
+    expect(
+      getContentBottomPadding({ fullContent: false, footerVisible: true, fixedFooter: false, footerHeight: 48 })
+    ).toBe(24);
+    expect(getContentBottomPadding({ fullContent: false, footerVisible: false, fixedFooter: true, footerHeight: 48 })).toBe(
+      24
+    );
+    expect(getContentBottomPadding({ fullContent: true, footerVisible: true, fixedFooter: true, footerHeight: 48 })).toBe(
+      24
+    );
   });
 
   it('keeps configured regular sider dimensions in the consumed geometry', () => {
@@ -44,6 +70,7 @@ describe('base layout state', () => {
         siderWidth: 232,
         siderCollapsedWidth: 72,
         tabHeight: 52,
+        fullContent: false,
         footerVisible: false,
         fixedFooter: true,
         footerHeight: 48
@@ -54,6 +81,31 @@ describe('base layout state', () => {
       tabHeight: 52,
       contentBottomPadding: 24
     });
+  });
+
+  it('keeps configured tab heights above the safe minimum and clamps smaller values', () => {
+    expect(
+      getLayoutGeometry({
+        siderWidth: 232,
+        siderCollapsedWidth: 72,
+        tabHeight: 52,
+        fullContent: false,
+        footerVisible: true,
+        fixedFooter: false,
+        footerHeight: 48
+      }).tabHeight
+    ).toBe(52);
+    expect(
+      getLayoutGeometry({
+        siderWidth: 232,
+        siderCollapsedWidth: 72,
+        tabHeight: 32,
+        fullContent: false,
+        footerVisible: true,
+        fixedFooter: false,
+        footerHeight: 48
+      }).tabHeight
+    ).toBe(40);
   });
 
   it('uses the financial workbench shell defaults', () => {
@@ -78,5 +130,77 @@ describe('base layout state', () => {
 
     expect(appStore.siderCollapse).toBe(false);
     wrapper.unmount();
+  });
+
+  it('passes store-derived shell geometry and content classes to AdminLayout', async () => {
+    await router.push('/layout-test');
+
+    const ShellStoreHarness = defineComponent({
+      setup() {
+        return { appStore: useAppStore(), themeStore: useThemeStore() };
+      },
+      template: '<div />'
+    });
+    const storeWrapper = mount(ShellStoreHarness, { global: { plugins: [router] } });
+    const { appStore, themeStore } = storeWrapper.vm as unknown as {
+      appStore: ReturnType<typeof useAppStore>;
+      themeStore: ReturnType<typeof useThemeStore>;
+    };
+    const original = {
+      contentXScrollable: appStore.contentXScrollable,
+      footerFixed: themeStore.footer.fixed,
+      footerVisible: themeStore.footer.visible,
+      mode: themeStore.layout.mode,
+      siderCollapsedWidth: themeStore.sider.collapsedWidth,
+      siderWidth: themeStore.sider.width,
+      tabHeight: themeStore.tab.height
+    };
+
+    themeStore.layout.mode = 'vertical';
+    themeStore.sider.width = 216;
+    themeStore.sider.collapsedWidth = 68;
+    themeStore.tab.height = 32;
+    themeStore.footer.visible = false;
+    themeStore.footer.fixed = true;
+    appStore.setContentXScrollable(true);
+
+    let wrapper;
+    try {
+      wrapper = mount(BaseLayout, {
+        global: {
+          plugins: [router],
+          stubs: {
+            AdminLayout: AdminLayoutStub,
+            GlobalContent: true,
+            GlobalFooter: true,
+            GlobalHeader: true,
+            GlobalMenu: true,
+            GlobalSider: true,
+            GlobalTab: true,
+            ThemeDrawer: true
+          }
+        }
+      });
+      const adminLayout = wrapper.findComponent(AdminLayoutStub);
+
+      expect(adminLayout.props()).toMatchObject({
+        contentClass: 'base-layout-content overflow-x-hidden',
+        fixedFooter: true,
+        footerVisible: false,
+        siderCollapsedWidth: 68,
+        siderWidth: 216,
+        tabHeight: 40
+      });
+    } finally {
+      wrapper?.unmount();
+      storeWrapper.unmount();
+      themeStore.layout.mode = original.mode;
+      themeStore.sider.width = original.siderWidth;
+      themeStore.sider.collapsedWidth = original.siderCollapsedWidth;
+      themeStore.tab.height = original.tabHeight;
+      themeStore.footer.visible = original.footerVisible;
+      themeStore.footer.fixed = original.footerFixed;
+      appStore.setContentXScrollable(original.contentXScrollable);
+    }
   });
 });

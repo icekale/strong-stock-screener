@@ -85,6 +85,7 @@ const layoutGeometry = computed(() =>
     siderWidth: siderGeometry.value.siderWidth,
     siderCollapsedWidth: siderGeometry.value.siderCollapsedWidth,
     tabHeight: themeStore.tab.height,
+    fullContent: appStore.fullContent,
     footerVisible: themeStore.footer.visible,
     fixedFooter: themeStore.footer.fixed,
     footerHeight: themeStore.footer.height

@@ -1,7 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ChanlunAnalysisResponse, KlineBar, SectorReplicaChartSeries } from '@/service/types';
 import { buildKlineIndicatorOptions, buildKlineIndicatorState, buildKlinePanes } from './klineIndicatorLayout';
-import { buildKlineOverlayOption } from './klineOverlayOption';
+import { buildKlineOverlayOption, createEChartLifecycle } from './klineOverlayOption';
 import { nextKlineWindowSize, sliceKlineWindow } from './klineWindow';
 import { buildSectorReplicaOption } from './sectorReplicaChartOption';
 
@@ -110,6 +110,19 @@ describe('chart options', () => {
     });
   });
 
+  it('caps four selected indicators at three sub panes without overlap', () => {
+    const option = buildKlineOverlayOption({
+      bars: [bar('20260715', 10), bar('20260716', 12)],
+      subIndicators: [...(['volume', 'macd', 'kdj', 'rsi'] as const)]
+    });
+    const grids = option.grid as Array<{ top?: string; height: string; bottom?: string }>;
+    const series = option.series as Array<{ name: string; xAxisIndex: number }>;
+
+    expect(grids).toHaveLength(4);
+    expect(gridIntervals(grids).slice(1).every((interval, index) => interval.start > (gridIntervals(grids)[index]?.end ?? -1))).toBe(true);
+    expect(series.some(item => item.name === 'RSI')).toBe(false);
+  });
+
   it('maps MACD, KDJ, and brick results to their selected sub panes', () => {
     const option = buildKlineOverlayOption({
       bars: Array.from({ length: 32 }, (_, index) => bar(`202607${String(index + 1).padStart(2, '0')}`, 10 + index / 10)),
@@ -150,6 +163,29 @@ describe('chart options', () => {
     expect(option.tooltip).toMatchObject({ trigger: 'axis', axisPointer: { type: 'cross' } });
   });
 
+  it('executes the chart lifecycle with replace, restore, resize, and cleanup actions', () => {
+    const chart = {
+      setOption: vi.fn(),
+      dispatchAction: vi.fn(),
+      resize: vi.fn(),
+      dispose: vi.fn()
+    };
+    const resizeObserver = { disconnect: vi.fn() };
+    const lifecycle = createEChartLifecycle(chart, resizeObserver);
+    const option = { series: [] };
+
+    lifecycle.setOption(option);
+    lifecycle.restore();
+    lifecycle.resize();
+    lifecycle.dispose();
+
+    expect(chart.setOption).toHaveBeenCalledWith(option, true);
+    expect(chart.dispatchAction).toHaveBeenCalledWith({ type: 'dataZoom', start: 0, end: 100 });
+    expect(chart.resize).toHaveBeenCalledOnce();
+    expect(resizeObserver.disconnect).toHaveBeenCalledOnce();
+    expect(chart.dispose).toHaveBeenCalledOnce();
+  });
+
   it('builds a sector replica option without changing the supplied axis', () => {
     const input: SectorReplicaChartSeries[] = [{ name: '计算机', type: 'line', data: [1, 2], smooth: true, showSymbol: false }];
     const option = buildSectorReplicaOption({ axis: ['09:30', '10:00'], series: input });
@@ -162,4 +198,12 @@ describe('chart options', () => {
 function percent(value: string): number {
   expect(value).toMatch(/^\d+(?:\.\d+)?%$/);
   return Number.parseFloat(value);
+}
+
+function gridIntervals(grids: Array<{ top?: string; height: string; bottom?: string }>) {
+  return grids.map(grid => {
+    const height = percent(grid.height);
+    const start = grid.top ? percent(grid.top) : 100 - percent(grid.bottom ?? '0%') - height;
+    return { start, end: start + height };
+  });
 }

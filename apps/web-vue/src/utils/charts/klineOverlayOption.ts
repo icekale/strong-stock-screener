@@ -1,4 +1,5 @@
 import type { ChanlunAnalysisResponse, ChanlunLayerKey, KlineBar } from '@/service/types';
+import type { EChartsOption } from 'echarts';
 import { buildChanlunOverlaySeries } from './chanlunOverlay';
 import {
   buildKlineIndicatorOptions,
@@ -64,6 +65,34 @@ const MA_COLORS: Record<KlineMovingAverage, string> = {
 };
 
 const INDICATOR_COLORS = ['#1677ff', '#f59e0b', '#7c3aed', '#0891b2'];
+const MAX_SUB_INDICATORS = 3;
+
+export type EChartLifecycleTarget = {
+  setOption: (option: EChartsOption, notMerge?: boolean) => void;
+  dispatchAction: (payload: { type: 'dataZoom'; start: number; end: number }) => void;
+  resize: () => void;
+  dispose: () => void;
+};
+
+export type EChartResizeObserver = { disconnect: () => void };
+
+export function createEChartLifecycle(chart: EChartLifecycleTarget, resizeObserver?: EChartResizeObserver | null) {
+  return {
+    setOption(option: EChartsOption) {
+      chart.setOption(option, true);
+    },
+    restore() {
+      chart.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
+    },
+    resize() {
+      chart.resize();
+    },
+    dispose() {
+      resizeObserver?.disconnect();
+      chart.dispose();
+    }
+  };
+}
 
 export function buildKlineOverlayOption({
   bars,
@@ -73,9 +102,10 @@ export function buildKlineOverlayOption({
   chanlunLayers,
   visibleBarCount
 }: KlineOverlayOptionInput): KlineOverlayOption {
+  const selectedSubIndicators = subIndicators.slice(0, MAX_SUB_INDICATORS);
   const dates = bars.map(bar => normalizeKlineDate(bar.date));
-  const layout = getKlinePaneLayout(subIndicators.length);
-  const grids = buildGrids(subIndicators.length, layout);
+  const layout = getKlinePaneLayout(selectedSubIndicators.length);
+  const grids = buildGrids(selectedSubIndicators.length, layout);
   const xAxes = buildXAxes(dates, grids.length);
   const yAxes = buildYAxes(grids.length);
   const series: Array<Record<string, unknown>> = [
@@ -103,7 +133,7 @@ export function buildKlineOverlayOption({
   });
 
   const indicatorOptions = buildKlineIndicatorOptions(movingAverages);
-  subIndicators.forEach((indicator, index) => {
+  selectedSubIndicators.forEach((indicator, index) => {
     series.push(...buildSubIndicatorSeries(indicator, bars, index + 1, indicatorOptions));
   });
 

@@ -41,6 +41,7 @@ import {
   parseIndicatorState,
   serializeIndicatorState
 } from '@/utils/domain/stockViewState';
+import type { WorkbenchMetric } from '@/components/common/workbench/workbench';
 
 defineOptions({ name: 'StockView' });
 
@@ -142,6 +143,32 @@ const chanlunStatus = computed(() => {
   if (chanlunSupported.value) return chanlunForPeriod.value?.availability || '可用';
   return '结构待确认';
 });
+const quoteMetrics = computed<WorkbenchMetric[]>(() => [
+  {
+    key: 'last-price',
+    label: '最新价',
+    value: formatPrice(quote.value?.last_price),
+    helper: quoteLoading.value ? '行情读取中' : '实时行情'
+  },
+  {
+    key: 'pct-change',
+    label: '涨跌幅',
+    value: formatPct(quote.value?.pct_change),
+    tone: quote.value?.pct_change == null ? 'neutral' : quote.value.pct_change >= 0 ? 'positive' : 'negative'
+  },
+  {
+    key: 'turnover',
+    label: '成交额',
+    value: formatAmount(quote.value?.turnover_cny),
+    helper: quote.value?.quote_time ? `报价 ${quote.value.quote_time}` : '当日成交'
+  },
+  {
+    key: 'turnover-rate',
+    label: '换手率',
+    value: quote.value?.turnover_rate == null ? '--' : `${quote.value.turnover_rate.toFixed(2)}%`,
+    helper: '流动性观察'
+  }
+]);
 
 let stockRequestId = 0;
 let researchRequestId = 0;
@@ -403,37 +430,32 @@ onMounted(() => {
 
 <template>
   <div class="space-y-16px pb-24px" :class="{ 'stock-view--footer-safe': themeStore.footer.fixed }">
-    <div class="flex flex-wrap items-center justify-between gap-12px">
-      <div>
-        <div class="text-22px font-700 text-text-primary">{{ displayName }}</div>
-        <div class="mt-4px text-13px text-text-secondary">{{ symbol }} · {{ displayIndustry }}</div>
-      </div>
-      <a-space>
-        <a-button @click="openChanlun">打开缠论工作台</a-button>
-        <a-button @click="router.back">返回</a-button>
-      </a-space>
-    </div>
+    <PageHeader :title="displayName" :description="`${symbol} · ${displayIndustry} · 行情与结构工作区`">
+      <template #meta>{{ periodLabel(period) }} · {{ chanlunStatus }}</template>
+      <a-button type="primary" @click="openChanlun">
+        <icon-carbon-chart-line />
+        打开缠论工作台
+      </a-button>
+      <a-button @click="router.back">
+        <icon-ic-round-arrow-back />
+        返回
+      </a-button>
+    </PageHeader>
 
     <a-alert v-if="quoteError" :message="`行情摘要：${quoteError}`" show-icon type="warning" />
-    <a-row :gutter="12">
-      <a-col :xs="12" :sm="6"><a-card size="small"><a-statistic title="最新价" :value="formatPrice(quote?.last_price)" :loading="quoteLoading" /></a-card></a-col>
-      <a-col :xs="12" :sm="6"><a-card size="small"><a-statistic title="涨跌幅" :value="formatPct(quote?.pct_change)" :loading="quoteLoading" /></a-card></a-col>
-      <a-col :xs="12" :sm="6"><a-card size="small"><a-statistic title="成交额" :value="formatAmount(quote?.turnover_cny)" :loading="quoteLoading" /></a-card></a-col>
-      <a-col :xs="12" :sm="6"><a-card size="small"><a-statistic title="换手率" :value="quote?.turnover_rate == null ? '--' : `${quote.turnover_rate.toFixed(2)}%`" :loading="quoteLoading" /></a-card></a-col>
-    </a-row>
+    <MetricStrip :items="quoteMetrics" />
 
-    <a-card size="small">
-      <template #title>
-        <a-space wrap>
-          <span>K 线与结构</span>
-          <a-segmented :value="period" size="small" :options="periodOptions" @change="value => setPeriod(value as StockViewPeriod)" />
-        </a-space>
-      </template>
+    <section class="stock-workspace border border-border rounded-6px bg-container p-12px">
       <a-tabs v-model:activeKey="activeTab" size="small">
         <a-tab-pane v-for="tab in contentTabs" :key="tab.key" :tab="tab.label">
           <template v-if="tab.key === 'chart'">
-            <div class="flex flex-wrap items-center justify-between gap-8px pb-12px">
-              <a-space wrap>
+            <div class="stock-control-strip">
+              <div class="stock-control-group stock-control-group--period">
+                <span class="stock-control-label">周期</span>
+                <a-segmented :value="period" size="small" :options="periodOptions" @change="value => setPeriod(value as StockViewPeriod)" />
+              </div>
+              <div class="stock-control-group">
+                <span class="stock-control-label">均线</span>
                 <a-button
                   v-for="item in movingAverageOptions"
                   :key="item.value"
@@ -441,6 +463,9 @@ onMounted(() => {
                   :type="movingAverages.includes(item.value) ? 'primary' : 'default'"
                   @click="toggleAverage(item.value)"
                 >{{ item.label }}</a-button>
+              </div>
+              <div class="stock-control-group">
+                <span class="stock-control-label">副图</span>
                 <a-segmented :value="indicatorState.paneCount" size="small" :options="[1, 2, 3].map(value => ({ label: `${value}图`, value }))" @change="value => changeSubPaneCount(value as KlineSubPaneCount)" />
                 <a-select
                   v-for="(indicator, index) in indicatorState.subIndicators"
@@ -451,21 +476,22 @@ onMounted(() => {
                   :options="KLINE_SUB_INDICATOR_OPTIONS"
                   @change="value => changeSubIndicator(index, value as KlineSubIndicator)"
                 />
-              </a-space>
-              <a-space wrap>
-                <span class="text-12px text-text-secondary">GSGF</span>
+              </div>
+              <div class="stock-control-group stock-control-group--overlays">
+                <span class="stock-control-label">叠加</span>
+                <span class="stock-control-switch-label">GSGF</span>
                 <a-switch v-model:checked="showGsgf" size="small" :disabled="!gsgfSupported" />
-                <span class="text-12px text-text-secondary">缠论</span>
+                <span class="stock-control-switch-label">缠论</span>
                 <a-switch v-model:checked="showChanlun" size="small" :disabled="!chanlunSupported" />
                 <span class="text-12px text-text-secondary">{{ chanlunStatus }}</span>
-              </a-space>
+              </div>
             </div>
             <a-alert v-if="klineError" :message="`${periodLabel(period)} K线：${klineError}`" show-icon type="warning" />
             <a-alert v-if="chanlunError" class="mt-8px" :message="`${periodLabel(period)} 缠论：${chanlunError}`" show-icon type="warning" />
             <div v-if="gsgfSupported && showGsgf" class="mb-8px flex flex-wrap gap-6px">
               <a-tag v-for="(annotation, index) in gsgfAnnotations" :key="`${annotation.type}-${annotation.label}-${index}`" :color="annotationColor(annotation)">{{ annotation.label }}</a-tag>
             </div>
-            <div class="min-h-720px overflow-hidden">
+            <div class="stock-chart-frame">
               <StockKlineChart
                 :bars="chartBars"
                 :chanlun="chartChanlun"
@@ -479,19 +505,21 @@ onMounted(() => {
                 :symbol="symbol"
               />
             </div>
-            <a-card class="mt-12px" size="small" title="当前结构">
+            <section class="stock-structure-summary mt-12px">
+              <SectionHeader title="当前结构" :source="chanlun?.rule_version || '缠论结构'" />
               <a-descriptions :column="{ xs: 1, sm: 2, md: 4 }" bordered size="small">
                 <a-descriptions-item label="状态">{{ chanlun?.availability || '待确认' }}</a-descriptions-item>
                 <a-descriptions-item label="方向">{{ chanlun?.strokes.at(-1)?.direction || '--' }}</a-descriptions-item>
                 <a-descriptions-item label="最新信号">{{ chanlun?.signals.at(-1)?.type || '--' }}</a-descriptions-item>
                 <a-descriptions-item label="背驰">{{ chanlun?.divergences.at(-1)?.type || '--' }}</a-descriptions-item>
               </a-descriptions>
-            </a-card>
+            </section>
           </template>
 
           <template v-else-if="tab.key === 'info'">
             <a-spin :spinning="researchLoading">
-              <a-card size="small" title="个股信息">
+              <section class="stock-tab-panel">
+                <SectionHeader title="个股信息" :source="research?.source_status.map(item => item.source).join(' / ') || '研究数据'" />
                 <a-alert v-if="researchError" :message="researchError" show-icon type="warning" />
                 <a-descriptions class="mt-8px" :column="{ xs: 1, sm: 2, md: 3 }" bordered size="small">
                   <a-descriptions-item label="行业">{{ displayIndustry }}</a-descriptions-item>
@@ -503,7 +531,7 @@ onMounted(() => {
                   <a-descriptions-item label="动态市盈率">{{ formatPrice(quote?.pe_ttm) === '--' ? pickResearchValue(['动态市盈率', '市盈率动态', '市盈率TTM', 'PE TTM', 'pe_ttm']) : formatPrice(quote?.pe_ttm) }}</a-descriptions-item>
                   <a-descriptions-item label="静态市盈率">{{ formatPrice(quote?.pe_static) === '--' ? pickResearchValue(['静态市盈率', '市盈率静态', '市盈率', 'PE', 'pe']) : formatPrice(quote?.pe_static) }}</a-descriptions-item>
                 </a-descriptions>
-              </a-card>
+              </section>
             </a-spin>
           </template>
 
@@ -511,27 +539,31 @@ onMounted(() => {
             <a-spin :spinning="researchLoading || screenLoading">
               <a-alert v-if="researchError" :message="researchError" show-icon type="warning" />
               <a-alert v-if="screenError" class="mt-8px" :message="screenError" show-icon type="warning" />
-              <a-card size="small" title="战法判断">
+              <section class="stock-tab-panel">
+                <SectionHeader title="战法判断" :source="currentCandidate ? '最近选股结果' : '等待选股结果'" />
                 <a-descriptions :column="{ xs: 1, sm: 2, md: 4 }" bordered size="small">
                   <a-descriptions-item label="候选状态">{{ statusLabel(currentCandidate?.status) }}</a-descriptions-item>
                   <a-descriptions-item label="收盘 / MA5">{{ comparePrice(latestBar?.close, latestBar?.ma5) }}</a-descriptions-item>
                   <a-descriptions-item label="收盘 / MA20">{{ comparePrice(latestBar?.close, latestBar?.ma20) }}</a-descriptions-item>
                   <a-descriptions-item label="收盘 / MA60">{{ comparePrice(latestBar?.close, latestBar?.ma60) }}</a-descriptions-item>
                 </a-descriptions>
-              </a-card>
-              <a-card class="mt-12px" size="small" title="股是股非模型选股条件">
+                <div class="stock-subsection">
+                  <SectionHeader title="股是股非模型选股条件" />
                 <a-space wrap>
                   <a-tag v-for="(condition, index) in gsgfModelConditions" :key="condition" color="blue">{{ index + 1 }}. {{ condition }}</a-tag>
                 </a-space>
-              </a-card>
-              <a-card class="mt-12px" size="small" title="规则命中">
+                </div>
+                <div class="stock-subsection">
+                  <SectionHeader title="规则命中" />
                 <a-space v-if="currentCandidate?.rule_hits.length" wrap><a-tag v-for="item in currentCandidate.rule_hits" :key="item" color="red">{{ item }}</a-tag></a-space>
                 <span v-else class="text-13px text-text-secondary">暂无命中规则</span>
-              </a-card>
-              <a-card class="mt-12px" size="small" title="风险提示">
+                </div>
+                <div class="stock-subsection">
+                  <SectionHeader title="风险提示" />
                 <a-space v-if="currentCandidate?.risk_flags.length" wrap><a-tag v-for="item in currentCandidate.risk_flags" :key="item" color="orange">{{ item }}</a-tag></a-space>
                 <span v-else class="text-13px text-text-secondary">暂无风险提示</span>
-              </a-card>
+                </div>
+              </section>
             </a-spin>
           </template>
 
@@ -539,7 +571,8 @@ onMounted(() => {
             <a-spin :spinning="researchLoading || screenLoading">
               <a-alert v-if="researchError" :message="researchError" show-icon type="warning" />
               <a-alert v-if="screenError" class="mt-8px" :message="screenError" show-icon type="warning" />
-              <a-card size="small" title="概念与板块">
+              <section class="stock-tab-panel">
+                <SectionHeader title="概念与板块" :source="research?.source_status.map(item => item.source).join(' / ') || '选股与研究数据'" />
                 <a-descriptions :column="{ xs: 1, sm: 2, md: 3 }" bordered size="small">
                   <a-descriptions-item label="所属行业">{{ displayIndustry }}</a-descriptions-item>
                   <a-descriptions-item label="板块强度">{{ currentCandidate?.industry_strength || '--' }}</a-descriptions-item>
@@ -552,17 +585,87 @@ onMounted(() => {
                 <div class="mb-8px text-13px font-600 text-text-secondary">板块备注</div>
                 <a-space v-if="currentCandidate?.industry_notes.length" wrap><a-tag v-for="item in currentCandidate.industry_notes" :key="item">{{ item }}</a-tag></a-space>
                 <span v-else class="text-13px text-text-secondary">暂无板块备注</span>
-              </a-card>
+              </section>
             </a-spin>
           </template>
         </a-tab-pane>
       </a-tabs>
-    </a-card>
+    </section>
   </div>
 </template>
 
 <style scoped>
+.stock-control-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin: 12px 0;
+  padding: 10px;
+  background: var(--wb-primary-soft);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius);
+}
+
+.stock-control-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.stock-control-group--period {
+  flex: 1 1 280px;
+}
+
+.stock-control-group--period :deep(.ant-segmented) {
+  flex: 1 1 auto;
+}
+
+.stock-control-group--overlays {
+  margin-left: auto;
+}
+
+.stock-control-label,
+.stock-control-switch-label {
+  color: var(--wb-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.stock-chart-frame {
+  min-height: 720px;
+  overflow: hidden;
+}
+
+.stock-tab-panel,
+.stock-structure-summary {
+  padding-top: 12px;
+}
+
+.stock-subsection {
+  margin-top: 16px;
+}
+
 .stock-view--footer-safe {
   padding-bottom: calc(var(--soy-footer-height, 48px) + 24px);
+}
+
+@media (max-width: 767px) {
+  .stock-control-group,
+  .stock-control-group--period,
+  .stock-control-group--overlays {
+    flex: 1 1 100%;
+    margin-left: 0;
+  }
+
+  .stock-control-group--period :deep(.ant-segmented) {
+    min-width: 0;
+  }
+
+  .stock-chart-frame {
+    min-height: 520px;
+  }
 }
 </style>

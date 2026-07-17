@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { ChanlunAnalysisResponse, KlineBar, SectorReplicaChartSeries } from '@/service/types';
+import type { ChanlunAnalysisResponse, GsgfChartAnnotation, KlineBar, SectorReplicaChartSeries } from '@/service/types';
 import { buildKlineIndicatorOptions, buildKlineIndicatorState, buildKlinePanes } from './klineIndicatorLayout';
-import { buildKlineOverlayOption, runEChartLifecycle } from './klineOverlayOption';
+import { buildKlineOverlayOption, getVisibleGsgfAnnotations, runEChartLifecycle } from './klineOverlayOption';
 import { nextKlineWindowSize, sliceKlineWindow } from './klineWindow';
 import { buildSectorReplicaOption } from './sectorReplicaChartOption';
 
@@ -47,6 +47,29 @@ const chanlun: ChanlunAnalysisResponse = {
   ]
 };
 
+const gsgfAnnotations: GsgfChartAnnotation[] = [
+  {
+    type: 'volume_structure',
+    label: '量能结构',
+    description: '近40日量能结构偏强。',
+    severity: 'positive',
+    date: null,
+    start_date: '2026-07-15',
+    end_date: '20260716',
+    price: null
+  },
+  {
+    type: 'trigger',
+    label: '星线蓄势',
+    description: '出现触发信号。',
+    severity: 'warning',
+    date: '20260716',
+    start_date: null,
+    end_date: null,
+    price: 12
+  }
+];
+
 describe('chart options', () => {
   it('keeps kline window bounds stable', () => {
     expect(nextKlineWindowSize(120, 'in', 220)).toBe(90);
@@ -74,6 +97,40 @@ describe('chart options', () => {
     expect(series[0]).toMatchObject({ type: 'candlestick', name: 'K线' });
     expect(series[0]?.data[0]).toEqual([9, 10, 8, 11]);
     expect(series.some(item => item.name === 'MA5')).toBe(true);
+  });
+
+  it('maps GSGF annotations to the main-pane mark point and mark area', () => {
+    const option = buildKlineOverlayOption({
+      bars: [bar('20260715', 10), bar('20260716', 12)],
+      gsgfAnnotations
+    });
+    const annotationSeries = option.series.find(item => item.id === 'custom-gsgf-annotations') as {
+      name: string;
+      type: string;
+      xAxisIndex: number;
+      yAxisIndex: number;
+      markPoint: { data: Array<Record<string, unknown>> };
+      markArea: { data: Array<Array<Record<string, unknown>>> };
+    } | undefined;
+
+    expect(annotationSeries).toMatchObject({ name: 'GSGF标注', type: 'candlestick', xAxisIndex: 0, yAxisIndex: 0 });
+    expect(annotationSeries?.markPoint.data).toContainEqual(expect.objectContaining({
+      coord: ['2026-07-16', 12],
+      name: '星线蓄势'
+    }));
+    expect(annotationSeries?.markArea.data).toContainEqual([
+      expect.objectContaining({ name: '量能结构', xAxis: '2026-07-15' }),
+      expect.objectContaining({ xAxis: '2026-07-16' })
+    ]);
+  });
+
+  it('keeps GSGF annotations out of minute and disabled chart paths', () => {
+    expect(getVisibleGsgfAnnotations('1d', true, gsgfAnnotations)).toEqual(gsgfAnnotations);
+    expect(getVisibleGsgfAnnotations('1d', false, gsgfAnnotations)).toEqual([]);
+    expect(getVisibleGsgfAnnotations('60m', true, gsgfAnnotations)).toEqual([]);
+    expect(getVisibleGsgfAnnotations('30m', true, gsgfAnnotations)).toEqual([]);
+    expect(getVisibleGsgfAnnotations('5m', true, gsgfAnnotations)).toEqual([]);
+    expect(getVisibleGsgfAnnotations('weekly', true, gsgfAnnotations)).toEqual([]);
   });
 
   it.each([

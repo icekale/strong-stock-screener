@@ -30,6 +30,7 @@ import {
   type KlineSubPaneCount
 } from '@/utils/charts/klineIndicatorLayout';
 import { aggregateWeeklyBars } from '@/utils/charts/klinePeriod';
+import { getVisibleGsgfAnnotations } from '@/utils/charts/klineOverlayOption';
 import {
   buildStockKlineQuery,
   buildStockViewDefaults,
@@ -127,6 +128,7 @@ const latestBar = computed(() => chartBars.value.at(-1) ?? null);
 const currentCandidate = computed(() => screenItems.value.find(item => item.symbol === symbol.value) ?? null);
 const gsgfAnnotations = computed(() => kline.value?.gsgf_annotations ?? []);
 const gsgfSupported = computed(() => period.value === '1d' && gsgfAnnotations.value.length > 0);
+const chartGsgfAnnotations = computed(() => getVisibleGsgfAnnotations(requestPeriod.value, period.value === '1d' && showGsgf.value, gsgfAnnotations.value));
 const chanlunForPeriod = computed(() => {
   if (period.value === 'weekly' || chanlun.value?.period !== requestPeriod.value) return null;
   return chanlun.value;
@@ -468,6 +470,7 @@ onMounted(() => {
                 :bars="chartBars"
                 :chanlun="chartChanlun"
                 :chanlun-layers="chanlunLayers"
+                :gsgf-annotations="chartGsgfAnnotations"
                 :height="720"
                 :loading="klineLoading"
                 :moving-averages="movingAverages"

@@ -1,4 +1,4 @@
-import type { ChanlunAnalysisResponse, ChanlunLayerKey, KlineBar } from '@/service/types';
+import type { ChanlunAnalysisResponse, ChanlunLayerKey, GsgfChartAnnotation, KlineBar, StockKlinePeriod } from '@/service/types';
 import type { EChartsOption } from 'echarts';
 import { buildChanlunOverlaySeries } from './chanlunOverlay';
 import {
@@ -34,6 +34,7 @@ export type KlineOverlayOptionInput = {
   bars: KlineBar[];
   movingAverages?: KlineMovingAverage[];
   subIndicators?: KlineSubIndicator[];
+  gsgfAnnotations?: GsgfChartAnnotation[];
   chanlun?: ChanlunAnalysisResponse | null;
   chanlunLayers?: Partial<Record<ChanlunLayerKey, boolean>>;
   visibleBarCount?: number;
@@ -99,10 +100,19 @@ export function runEChartLifecycle(chart: EChartLifecycleTarget, action: EChartL
   }
 }
 
+export function getVisibleGsgfAnnotations(
+  period: StockKlinePeriod | 'weekly',
+  enabled: boolean,
+  annotations: readonly GsgfChartAnnotation[]
+): GsgfChartAnnotation[] {
+  return period === '1d' && enabled ? [...annotations] : [];
+}
+
 export function buildKlineOverlayOption({
   bars,
   movingAverages = [],
   subIndicators = ['volume'],
+  gsgfAnnotations = [],
   chanlun,
   chanlunLayers,
   visibleBarCount
@@ -137,6 +147,8 @@ export function buildKlineOverlayOption({
     });
   });
 
+  series.push(...buildGsgfAnnotationSeries(gsgfAnnotations, bars, dates));
+
   const indicatorOptions = buildKlineIndicatorOptions(movingAverages);
   selectedSubIndicators.forEach((indicator, index) => {
     series.push(...buildSubIndicatorSeries(indicator, bars, index + 1, indicatorOptions));
@@ -165,6 +177,86 @@ export function buildKlineOverlayOption({
     tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, confine: true },
     series
   };
+}
+
+function buildGsgfAnnotationSeries(
+  annotations: readonly GsgfChartAnnotation[],
+  bars: KlineBar[],
+  dates: string[]
+): Array<Record<string, unknown>> {
+  const points = annotations
+    .filter(annotation => annotation.date != null)
+    .map(annotation => {
+      const index = resolveAnnotationDateIndex(annotation.date, dates);
+      if (index < 0 || !bars[index]) return null;
+      const price = annotation.price ?? bars[index].close;
+      return {
+        coord: [dates[index], price],
+        itemStyle: { color: annotationColor(annotation.severity) },
+        label: {
+          backgroundColor: annotationColor(annotation.severity),
+          borderRadius: 3,
+          color: '#ffffff',
+          fontSize: 11,
+          fontWeight: 700,
+          padding: [3, 5]
+        },
+        name: annotation.label,
+        value: annotation.label
+      };
+    })
+    .filter(point => point !== null);
+  const ranges = annotations
+    .filter(annotation => annotation.start_date != null && annotation.end_date != null)
+    .map(annotation => {
+      const startIndex = resolveAnnotationDateIndex(annotation.start_date, dates);
+      const endIndex = resolveAnnotationDateIndex(annotation.end_date, dates);
+      if (startIndex < 0 || endIndex < 0 || startIndex > endIndex) return null;
+      return [
+        {
+          itemStyle: { color: annotationAreaColor(annotation.severity) },
+          name: annotation.label,
+          xAxis: dates[startIndex]
+        },
+        { xAxis: dates[endIndex] }
+      ];
+    })
+    .filter(range => range !== null);
+
+  if (points.length === 0 && ranges.length === 0) return [];
+  return [{
+    data: [],
+    id: 'custom-gsgf-annotations',
+    markArea: { data: ranges, label: { formatter: '{b}', show: true }, silent: true },
+    markPoint: { data: points, label: { formatter: '{b}', show: true }, symbol: 'pin', symbolSize: 52 },
+    name: 'GSGF标注',
+    type: 'candlestick',
+    xAxisIndex: 0,
+    yAxisIndex: 0
+  }];
+}
+
+function resolveAnnotationDateIndex(value: string | null, dates: string[]): number {
+  if (!value) return -1;
+  const normalized = normalizeKlineDate(value);
+  const exactIndex = dates.indexOf(normalized);
+  if (exactIndex >= 0) return exactIndex;
+  const day = normalized.slice(0, 10);
+  return dates.findIndex(date => date.slice(0, 10) === day);
+}
+
+function annotationColor(severity: GsgfChartAnnotation['severity']): string {
+  if (severity === 'positive') return '#f43f5e';
+  if (severity === 'warning') return '#f59e0b';
+  if (severity === 'danger') return '#0f766e';
+  return '#64748b';
+}
+
+function annotationAreaColor(severity: GsgfChartAnnotation['severity']): string {
+  if (severity === 'positive') return 'rgba(244, 63, 94, 0.07)';
+  if (severity === 'warning') return 'rgba(245, 158, 11, 0.09)';
+  if (severity === 'danger') return 'rgba(15, 118, 110, 0.08)';
+  return 'rgba(100, 116, 139, 0.07)';
 }
 
 function buildGrids(subPaneCount: number, layout: { main: string; sub: string }): Array<Record<string, unknown>> {

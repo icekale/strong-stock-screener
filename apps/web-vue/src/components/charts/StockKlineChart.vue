@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue';
-import type { ChanlunAnalysisResponse, ChanlunLayerKey, KlineBar, StockKlinePeriod } from '@/service/types';
+import type { ChanlunAnalysisResponse, ChanlunLayerKey, GsgfChartAnnotation, KlineBar, StockKlinePeriod } from '@/service/types';
 import { buildKlineOverlayOption } from '@/utils/charts/klineOverlayOption';
 import type { KlineMovingAverage, KlineSubIndicator } from '@/utils/charts/klineIndicatorLayout';
 import EChart from './EChart.vue';
@@ -14,12 +14,13 @@ const props = withDefaults(
     period?: StockKlinePeriod;
     movingAverages?: KlineMovingAverage[];
     subIndicators?: KlineSubIndicator[];
+    gsgfAnnotations?: GsgfChartAnnotation[];
     chanlun?: ChanlunAnalysisResponse | null;
     chanlunLayers?: Partial<Record<ChanlunLayerKey, boolean>>;
     height?: number | string;
     loading?: boolean;
   }>(),
-  { movingAverages: () => [], subIndicators: () => ['volume'], height: 620, loading: false }
+  { movingAverages: () => [], subIndicators: () => ['volume'], gsgfAnnotations: () => [], height: 620, loading: false }
 );
 
 const chartKey = computed(() => [
@@ -35,6 +36,7 @@ const option = computed(() =>
     bars: props.bars,
     movingAverages: props.movingAverages,
     subIndicators: props.subIndicators,
+    gsgfAnnotations: props.gsgfAnnotations,
     chanlun: props.chanlun,
     chanlunLayers: props.chanlunLayers
   })

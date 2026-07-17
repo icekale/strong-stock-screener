@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
+import { useThemeStore } from '@/store/modules/theme';
 import {
   getChanlunAnalysis,
   getLatestScreenRun,
@@ -48,6 +49,7 @@ type StockContentTab = 'chart' | 'info' | 'strategy' | 'concept';
 
 const route = useRoute();
 const router = useRouter();
+const themeStore = useThemeStore();
 const symbol = computed(() => String(route.params.symbol || ''));
 const name = computed(() => String(route.query.name || symbol.value));
 const industry = computed(() => String(route.query.industry || '行业待补'));
@@ -400,7 +402,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="space-y-16px pb-24px">
+  <div class="space-y-16px pb-24px" :class="{ 'stock-view--footer-safe': themeStore.footer.fixed }">
     <div class="flex flex-wrap items-center justify-between gap-12px">
       <div>
         <div class="text-22px font-700 text-text-primary">{{ displayName }}</div>
@@ -558,3 +560,9 @@ onMounted(() => {
     </a-card>
   </div>
 </template>
+
+<style scoped>
+.stock-view--footer-safe {
+  padding-bottom: calc(var(--soy-footer-height, 48px) + 24px);
+}
+</style>

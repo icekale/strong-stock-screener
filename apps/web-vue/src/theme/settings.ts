@@ -32,13 +32,13 @@ export const themeSettings: App.Theme.ThemeSetting = {
   tab: {
     visible: true,
     cache: true,
-    height: 44,
+    height: 40,
     mode: 'chrome'
   },
   fixedHeaderAndTab: true,
   sider: {
     inverted: false,
-    width: 220,
+    width: 208,
     collapsedWidth: 64,
     mixWidth: 90,
     mixCollapsedWidth: 64,

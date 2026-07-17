@@ -11,11 +11,7 @@ import GlobalContent from '../modules/global-content/index.vue';
 import GlobalFooter from '../modules/global-footer/index.vue';
 import ThemeDrawer from '../modules/theme-drawer/index.vue';
 import { setupMixMenuContext } from '../context';
-import {
-  getContentBottomPadding,
-  WORKBENCH_SIDER_COLLAPSED_WIDTH,
-  WORKBENCH_SIDER_WIDTH
-} from './layoutState';
+import { getLayoutGeometry, getSiderGeometry } from './layoutState';
 
 defineOptions({
   name: 'BaseLayout'
@@ -68,14 +64,28 @@ const isVerticalMix = computed(() => themeStore.layout.mode === 'vertical-mix');
 
 const isHorizontalMix = computed(() => themeStore.layout.mode === 'horizontal-mix');
 
-const siderWidth = computed(() => getSiderWidth());
+const siderGeometry = computed(() =>
+  getSiderGeometry({
+    isVerticalMix: isVerticalMix.value,
+    isHorizontalMix: isHorizontalMix.value,
+    reverseHorizontalMix: themeStore.layout.reverseHorizontalMix,
+    hasActiveFirstLevelMenuChildren: isActiveFirstLevelMenuHasChildren.value,
+    width: themeStore.sider.width,
+    collapsedWidth: themeStore.sider.collapsedWidth,
+    mixWidth: themeStore.sider.mixWidth,
+    mixCollapsedWidth: themeStore.sider.mixCollapsedWidth,
+    mixChildMenuWidth: themeStore.sider.mixChildMenuWidth,
+    mixSiderFixed: appStore.mixSiderFixed,
+    hasChildMenus: childLevelMenus.value.length > 0
+  })
+);
 
-const siderCollapsedWidth = computed(() => getSiderCollapsedWidth());
-
-const tabHeight = computed(() => Math.min(Math.max(themeStore.tab.height, 36), 40));
-
-const contentBottomPadding = computed(() =>
-  getContentBottomPadding({
+const layoutGeometry = computed(() =>
+  getLayoutGeometry({
+    siderWidth: siderGeometry.value.siderWidth,
+    siderCollapsedWidth: siderGeometry.value.siderCollapsedWidth,
+    tabHeight: themeStore.tab.height,
+    footerVisible: themeStore.footer.visible,
     fixedFooter: themeStore.footer.fixed,
     footerHeight: themeStore.footer.height
   })
@@ -84,45 +94,10 @@ const contentBottomPadding = computed(() =>
 const contentClass = computed(() =>
   ['base-layout-content', appStore.contentXScrollable ? 'overflow-x-hidden' : ''].filter(Boolean).join(' ')
 );
-
-function getSiderWidth() {
-  const { reverseHorizontalMix } = themeStore.layout;
-  const { mixWidth, mixChildMenuWidth } = themeStore.sider;
-
-  if (isHorizontalMix.value && reverseHorizontalMix) {
-    return isActiveFirstLevelMenuHasChildren.value ? WORKBENCH_SIDER_WIDTH : 0;
-  }
-
-  let w = isVerticalMix.value || isHorizontalMix.value ? mixWidth : WORKBENCH_SIDER_WIDTH;
-
-  if (isVerticalMix.value && appStore.mixSiderFixed && childLevelMenus.value.length) {
-    w += mixChildMenuWidth;
-  }
-
-  return w;
-}
-
-function getSiderCollapsedWidth() {
-  const { reverseHorizontalMix } = themeStore.layout;
-  const { mixCollapsedWidth, mixChildMenuWidth } = themeStore.sider;
-
-  if (isHorizontalMix.value && reverseHorizontalMix) {
-    return isActiveFirstLevelMenuHasChildren.value ? WORKBENCH_SIDER_COLLAPSED_WIDTH : 0;
-  }
-
-  let w = isVerticalMix.value || isHorizontalMix.value ? mixCollapsedWidth : WORKBENCH_SIDER_COLLAPSED_WIDTH;
-
-  if (isVerticalMix.value && appStore.mixSiderFixed && childLevelMenus.value.length) {
-    w += mixChildMenuWidth;
-  }
-
-  return w;
-}
 </script>
 
 <template>
   <AdminLayout
-    class="base-layout-shell"
     v-model:sider-collapse="appStore.siderCollapse"
     :mode="layoutMode"
     :scroll-el-id="LAYOUT_SCROLL_EL_ID"
@@ -131,21 +106,17 @@ function getSiderCollapsedWidth() {
     :full-content="appStore.fullContent"
     :fixed-top="themeStore.fixedHeaderAndTab"
     :header-height="themeStore.header.height"
-    header-class="base-layout-header-placement"
     :tab-visible="themeStore.tab.visible"
-    :tab-height="tabHeight"
-    tab-class="base-layout-tab-placement"
+    :tab-height="layoutGeometry.tabHeight"
     :content-class="contentClass"
     :sider-visible="siderVisible"
-    :sider-width="siderWidth"
-    :sider-collapsed-width="siderCollapsedWidth"
-    sider-class="base-layout-sider-placement"
+    :sider-width="layoutGeometry.siderWidth"
+    :sider-collapsed-width="layoutGeometry.siderCollapsedWidth"
     :footer-visible="themeStore.footer.visible"
     :footer-height="themeStore.footer.height"
     :fixed-footer="themeStore.footer.fixed"
     :right-footer="themeStore.footer.right"
-    footer-class="base-layout-footer"
-    :style="{ '--wb-content-bottom-padding': `${contentBottomPadding}px` }"
+    :style="{ '--wb-content-bottom-padding': `${layoutGeometry.contentBottomPadding}px` }"
   >
     <template #header>
       <GlobalHeader v-bind="headerProps" />

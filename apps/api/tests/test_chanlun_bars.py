@@ -69,6 +69,28 @@ def test_unclosed_bucket_is_excluded_from_confirmed_bars() -> None:
     assert aggregate_closed_intraday_bars(bars, period="5m", now=shanghai("2026-07-10 09:33")) == []
 
 
+@pytest.mark.parametrize(
+    ("period", "bar_count", "cutoff"),
+    [("30m", 29, "10:00"), ("60m", 59, "10:30")],
+)
+def test_aggregate_excludes_incomplete_long_period_bucket(
+    period: str,
+    bar_count: int,
+    cutoff: str,
+) -> None:
+    start = shanghai("2026-07-10 09:30")
+    bars = [
+        minute_bar((start + timedelta(minutes=index)).isoformat())
+        for index in range(bar_count)
+    ]
+
+    assert aggregate_closed_intraday_bars(
+        bars,
+        period=period,  # type: ignore[arg-type]
+        now=shanghai(f"2026-07-10 {cutoff}"),
+    ) == []
+
+
 def test_complete_bucket_uses_last_close_and_close_label() -> None:
     bars = minute_bars(
         "2026-07-10 09:30",

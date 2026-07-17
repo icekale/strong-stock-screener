@@ -668,6 +668,37 @@ class FakeLiveQuoteProvider:
         }
 
 
+class PeriodAwareIntradayQuoteProvider(FakeLiveQuoteProvider):
+    source_name = "fake TickFlow"
+
+    def __init__(self) -> None:
+        self.intraday_requests: list[tuple[tuple[str, ...], str, int]] = []
+
+    def get_intraday_bars(
+        self,
+        symbols: list[str],
+        period: str = "1m",
+        count: int = 120,
+    ) -> dict[str, list[TickFlowIntradayBar]]:
+        self.intraday_requests.append((tuple(symbols), period, count))
+        start = datetime(2026, 7, 16, 9, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+        bars = []
+        for index in range(60):
+            open_price = 10.0 + index * 0.01
+            bars.append(
+                TickFlowIntradayBar(
+                    timestamp=int((start + timedelta(minutes=index)).timestamp() * 1000),
+                    open=open_price,
+                    high=open_price + 0.1,
+                    low=open_price - 0.1,
+                    close=open_price + 0.05,
+                    volume=100.0,
+                    amount=1_000.0,
+                )
+            )
+        return {symbol: bars for symbol in symbols}
+
+
 class FakeValuationQuoteProvider:
     source_name = "腾讯财经"
 
@@ -1989,6 +2020,7 @@ def test_settings_health_check_reports_provider_probes(tmp_path: Path) -> None:
 
 
 def test_stock_kline_endpoint_returns_daily_bars(tmp_path: Path) -> None:
+    main_module.STOCK_KLINE_CACHE.clear()
     client = _client(tmp_path)
 
     response = client.get("/api/stocks/603890.SH/kline?count=5")
@@ -1996,10 +2028,47 @@ def test_stock_kline_endpoint_returns_daily_bars(tmp_path: Path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["symbol"] == "603890.SH"
+    assert payload["period"] == "1d"
     assert payload["source_status"]["source"] == "fake K线"
     assert len(payload["bars"]) == 5
     assert payload["bars"][-1]["close"] > payload["bars"][0]["close"]
     assert payload["gsgf_annotations"] == []
+
+
+def test_stock_kline_endpoint_returns_closed_intraday_bars_without_daily_fallback(
+    tmp_path: Path,
+) -> None:
+    main_module.STOCK_KLINE_CACHE.clear()
+    kline_provider = CountingKlineProvider()
+    quote_provider = PeriodAwareIntradayQuoteProvider()
+    client = _client(
+        tmp_path,
+        kline_provider=kline_provider,
+        quote_provider=quote_provider,
+    )
+
+    response = client.get("/api/stocks/603890.SH/kline?count=1&period=30m")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["period"] == "30m"
+    assert len(payload["bars"]) == 1
+    assert "T" in payload["bars"][0]["date"]
+    assert payload["source_status"]["source"] == "fake TickFlow 30分钟K"
+    assert "period=30m" in payload["source_status"]["detail"]
+    assert "返回 1 条已闭合30分钟K" in payload["source_status"]["detail"]
+    assert payload["gsgf_annotations"] == []
+    assert kline_provider.symbols == []
+    assert quote_provider.intraday_requests == [(('603890.SH',), "1m", 120)]
+
+
+def test_stock_kline_endpoint_rejects_unknown_period(tmp_path: Path) -> None:
+    main_module.STOCK_KLINE_CACHE.clear()
+    client = _client(tmp_path)
+
+    response = client.get("/api/stocks/603890.SH/kline?period=1w")
+
+    assert response.status_code == 422
 
 
 def test_stock_kline_endpoint_returns_gsgf_chart_annotations(tmp_path: Path) -> None:
@@ -2014,17 +2083,30 @@ def test_stock_kline_endpoint_returns_gsgf_chart_annotations(tmp_path: Path) -> 
 
 
 def test_stock_kline_endpoint_reuses_cached_provider_result(tmp_path: Path) -> None:
+    main_module.STOCK_KLINE_CACHE.clear()
     kline_provider = CountingKlineProvider()
-    client = _client(tmp_path, kline_provider=kline_provider)
+    quote_provider = PeriodAwareIntradayQuoteProvider()
+    client = _client(
+        tmp_path,
+        kline_provider=kline_provider,
+        quote_provider=quote_provider,
+    )
 
     first = client.get("/api/stocks/603890.SH/kline?count=5")
     second = client.get("/api/stocks/603890.SH/kline?count=5")
     third = client.get("/api/stocks/603890.SH/kline?count=6")
+    minute_first = client.get("/api/stocks/603890.SH/kline?count=1&period=30m")
+    minute_second = client.get("/api/stocks/603890.SH/kline?count=1&period=30m")
+    minute_other_period = client.get("/api/stocks/603890.SH/kline?count=1&period=5m")
 
     assert first.status_code == 200
     assert second.status_code == 200
     assert third.status_code == 200
+    assert minute_first.status_code == 200
+    assert minute_second.status_code == 200
+    assert minute_other_period.status_code == 200
     assert kline_provider.symbols == ["603890.SH", "603890.SH"]
+    assert len(quote_provider.intraday_requests) == 2
 
 
 def test_chanlun_analysis_endpoint_returns_project_owned_layers(tmp_path: Path) -> None:

@@ -70,6 +70,7 @@ from app.models import (
     ShortTermIntradaySignalDigest,
     ShortTermSentimentResponse,
     StockKlineResponse,
+    StockKlinePeriod,
     StockQuoteResponse,
     StockResearchResponse,
     StrongStockDataUnavailable,
@@ -103,6 +104,7 @@ from app.services.cache_registry import CacheRegistry
 from app.services.chanlun.adapter import ChanlunAdapter
 from app.services.chanlun.alert_service import ChanlunAlertService
 from app.services.chanlun.alerts import ChanlunAlertStore
+from app.services.chanlun.bars import SHANGHAI, aggregate_closed_intraday_bars
 from app.services.chanlun.paper import ChanlunPaperOrderStore
 from app.services.chanlun.paper_service import ChanlunPaperOrderService
 from app.services.chanlun.rc8_client import Rc8WorkerClient
@@ -2043,10 +2045,14 @@ def get_short_term_intraday_signal_digest(
 
 
 @app.get("/api/stocks/{symbol}/kline")
-def get_stock_kline(symbol: str, count: int = 220) -> dict[str, object]:
+def get_stock_kline(
+    symbol: str,
+    count: int = 220,
+    period: StockKlinePeriod = "1d",
+) -> dict[str, object]:
     bounded_count = max(1, min(count, 260))
     try:
-        result = _cached_stock_kline(symbol, bounded_count)
+        result = _cached_stock_kline(symbol, bounded_count, period)
     except StrongStockDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
@@ -2877,22 +2883,54 @@ def _tickflow_sector_radar(provider: object, limit: int) -> SectorRadarResponse:
     )
 
 
-def _cached_stock_kline(symbol: str, count: int) -> StockKlineResponse:
-    kline_provider = _kline_provider()
+def _cached_stock_kline(
+    symbol: str,
+    count: int,
+    period: StockKlinePeriod = "1d",
+) -> StockKlineResponse:
+    provider = _kline_provider() if period == "1d" else _quote_provider()
     normalized_symbol = symbol.strip().upper()
-    cache_key = f"stock-kline:{_provider_cache_key(kline_provider)}:{normalized_symbol}:{count}"
+    cache_key = (
+        f"stock-kline:{_provider_cache_key(provider)}:{normalized_symbol}:{period}:{count}"
+    )
 
     def build() -> StockKlineResponse:
-        bars = kline_provider.get_klines(normalized_symbol, count=count)[-count:]
+        if period == "1d":
+            bars = provider.get_klines(normalized_symbol, count=count)[-count:]
+            source_status = StrongStockSourceStatus(
+                source=getattr(provider, "source_name", "K线源"),
+                status="success",
+                detail=f"period=1d，返回 {len(bars)} 条日K",
+            )
+            annotations = build_gsgf_chart_annotations(bars)
+        else:
+            fetch_count = min(2400, max(120, count * {"5m": 5, "30m": 30, "60m": 60}[period]))
+            raw_bars = provider.get_intraday_bars(
+                [normalized_symbol],
+                period="1m",
+                count=fetch_count,
+            ).get(normalized_symbol, [])
+            bars = aggregate_closed_intraday_bars(
+                raw_bars,
+                period=period,
+                now=datetime.now(tz=SHANGHAI),
+            )[-count:]
+            period_label = {"5m": "5分钟", "30m": "30分钟", "60m": "60分钟"}[period]
+            source_status = StrongStockSourceStatus(
+                source=f"{getattr(provider, 'source_name', '分钟线源')} {period_label}K",
+                status="success",
+                detail=(
+                    f"period={period}，返回 {len(bars)} 条已闭合{period_label}K"
+                    "（原始1分钟线聚合）"
+                ),
+            )
+            annotations = []
         return StockKlineResponse(
             symbol=normalized_symbol,
-            source_status=StrongStockSourceStatus(
-                source=getattr(kline_provider, "source_name", "K线源"),
-                status="success",
-                detail=f"返回 {len(bars)} 条日K",
-            ),
+            period=period,
+            source_status=source_status,
             bars=bars,
-            gsgf_annotations=build_gsgf_chart_annotations(bars),
+            gsgf_annotations=annotations,
         )
 
     return STOCK_KLINE_CACHE.get_or_set(cache_key, build).model_copy(deep=True)

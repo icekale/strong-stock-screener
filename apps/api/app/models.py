@@ -82,6 +82,7 @@ HeatmapSizeMode = Literal["market_cap", "turnover"]
 HeatmapTrendFilter = Literal["all", "rise", "fall"]
 HeatmapExchange = Literal["SH", "SZ", "BJ"]
 ChanlunPeriod = Literal["1d", "60m", "30m", "5m"]
+StockKlinePeriod = Literal["1d", "60m", "30m", "5m"]
 ChanlunStatus = Literal["observing", "provisional", "confirmed", "final"]
 ChanlunDirection = Literal["up", "down", "unknown"]
 ChanlunAvailability = Literal["ready", "backfilling", "insufficient_bars", "stale", "unavailable"]
@@ -1939,6 +1940,7 @@ class SentimentDetailResponse(BaseModel):
 
 class StockKlineResponse(BaseModel):
     symbol: str
+    period: StockKlinePeriod
     source_status: StrongStockSourceStatus
     bars: list[KlineBar] = Field(default_factory=list)
     gsgf_annotations: list[GsgfChartAnnotation] = Field(default_factory=list)

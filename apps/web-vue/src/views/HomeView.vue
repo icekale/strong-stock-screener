@@ -126,6 +126,19 @@ onMounted(() => void refresh());
 
     <a-alert v-if="error" :message="error" show-icon type="warning" />
 
+    <a-card size="small" title="主要指数">
+      <a-row :gutter="12"><a-col v-for="index in indices" :key="index.symbol" :xs="12" :sm="8" :lg="4"><div class="border border-border rounded-6px p-10px"><div class="text-12px text-text-secondary">{{ index.name }}</div><div class="mt-4px text-16px font-700">{{ index.last_price ?? '--' }}</div><div :class="(index.change_pct ?? 0) >= 0 ? 'text-error' : 'text-success'">{{ formatPct(index.change_pct) }}</div></div></a-col></a-row>
+    </a-card>
+
+    <a-row :gutter="12">
+      <a-col :xs="24" :xl="14">
+        <a-card size="small" title="板块资金流"><SectorRadarChart :height="300" :loading="loading && !sectors" :option="sectorOption" /></a-card>
+      </a-col>
+      <a-col :xs="24" :xl="10">
+        <a-card size="small" title="盘中情绪走势"><MarketTrendChart :height="300" :loading="loading && !emotion" :option="emotionOption" /></a-card>
+      </a-col>
+    </a-row>
+
     <a-row :gutter="12">
       <a-col :xs="24" :sm="12" :lg="6">
         <a-card size="small"><a-statistic title="总成交额" :value="turnover?.total_cny == null ? '--' : formatMoney(turnover.total_cny)" /><div class="mt-4px text-12px text-text-secondary">昨日对比 {{ formatPct(turnover?.change_pct) }}</div></a-card>
@@ -138,15 +151,6 @@ onMounted(() => void refresh());
       </a-col>
       <a-col :xs="24" :sm="12" :lg="6">
         <a-card size="small"><a-statistic title="盘面状态" :value="emotion?.metrics.emotion_level ?? '待确认'" /><div class="mt-4px text-12px text-text-secondary">情绪分 {{ emotion?.metrics.emotion_score ?? '--' }}</div></a-card>
-      </a-col>
-    </a-row>
-
-    <a-row :gutter="12">
-      <a-col :xs="24" :xl="14">
-        <a-card size="small" title="板块资金流"><SectorRadarChart :height="300" :loading="loading && !sectors" :option="sectorOption" /></a-card>
-      </a-col>
-      <a-col :xs="24" :xl="10">
-        <a-card size="small" title="盘中情绪走势"><MarketTrendChart :height="300" :loading="loading && !emotion" :option="emotionOption" /></a-card>
       </a-col>
     </a-row>
 
@@ -169,10 +173,6 @@ onMounted(() => void refresh());
         </a-card>
       </a-col>
     </a-row>
-
-    <a-card size="small" title="主要指数">
-      <a-row :gutter="12"><a-col v-for="index in indices" :key="index.symbol" :xs="12" :sm="8" :lg="4"><div class="border border-border rounded-6px p-10px"><div class="text-12px text-text-secondary">{{ index.name }}</div><div class="mt-4px text-16px font-700">{{ index.last_price ?? '--' }}</div><div :class="(index.change_pct ?? 0) >= 0 ? 'text-error' : 'text-success'">{{ formatPct(index.change_pct) }}</div></div></a-col></a-row>
-    </a-card>
 
     <div class="text-12px text-text-secondary">数据状态：{{ sourceItems.map(item => `${item.source} · ${item.status}`).join('  |  ') || '待确认' }}</div>
   </div>

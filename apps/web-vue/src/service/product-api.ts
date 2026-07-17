@@ -69,6 +69,7 @@ import type {
   ShortTermIntradaySentimentResponse,
   ShortTermIntradaySignalDigest,
   ShortTermSentimentResponse,
+  StockKlinePeriod,
   StockKlineResponse,
   StockQuoteResponse,
   StockResearchResponse,
@@ -1129,8 +1130,18 @@ export async function getWatchlistGsgfStatus(): Promise<WatchlistGsgfStatusRespo
   return response.json() as Promise<WatchlistGsgfStatusResponse>;
 }
 
-export async function getStockKline(symbol: string, count = 220): Promise<StockKlineResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/stocks/${encodeURIComponent(symbol)}/kline?count=${count}`);
+export async function getStockKline(
+  symbol: string,
+  optionsOrCount: { count?: number; period?: StockKlinePeriod } | number = {},
+): Promise<StockKlineResponse> {
+  const options = typeof optionsOrCount === "number" ? { count: optionsOrCount } : optionsOrCount;
+  const params = new URLSearchParams({ count: String(options.count ?? 220) });
+  if (typeof optionsOrCount !== "number" || options.period) {
+    params.set("period", options.period ?? "1d");
+  }
+  const response = await apiFetch(
+    `${API_BASE_URL}/api/stocks/${encodeURIComponent(symbol)}/kline?${params.toString()}`,
+  );
   if (!response.ok) {
     throw new Error(`读取K线失败：${response.status} ${await response.text()}`);
   }

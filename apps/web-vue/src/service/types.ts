@@ -1476,7 +1476,8 @@ export type KlineBar = {
   ma60: number | null;
 };
 
-export type ChanlunPeriod = "1d" | "60m" | "30m" | "5m";
+export type StockKlinePeriod = "1d" | "60m" | "30m" | "5m";
+export type ChanlunPeriod = StockKlinePeriod;
 export type ChanlunStatus = "observing" | "provisional" | "confirmed" | "final";
 export type ChanlunDirection = "up" | "down" | "unknown";
 export type ChanlunAvailability = "ready" | "backfilling" | "insufficient_bars" | "stale" | "unavailable";
@@ -1826,6 +1827,7 @@ export type ChanlunSymbolSearchResponse = {
 
 export type StockKlineResponse = {
   symbol: string;
+  period: StockKlinePeriod;
   source_status: StrongStockSourceStatus;
   bars: KlineBar[];
   gsgf_annotations: GsgfChartAnnotation[];

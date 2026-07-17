@@ -45,4 +45,16 @@ describe('apiRequest', () => {
 
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/stocks/600000.SH/kline?count=120');
   });
+
+  it('requests the selected stock kline period after count', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({}), { status: 200 })
+    );
+
+    await getStockKline('600000.SH', { count: 120, period: '30m' });
+
+    expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
+      '/api/stocks/600000.SH/kline?count=120&period=30m'
+    );
+  });
 });

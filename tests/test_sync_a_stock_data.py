@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import unittest
+from typing import get_type_hints, is_typeddict
 
 from scripts.sync_a_stock_data import (
     ArtifactValidationError,
@@ -45,6 +46,27 @@ class ArtifactValidationTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ArtifactValidationError, "name: a-stock-data"):
+            validate_artifacts(artifacts)
+
+    def test_body_name_does_not_rescue_wrong_frontmatter_name(self) -> None:
+        artifacts = valid_artifacts()
+        artifacts["SKILL.md"] = VALID_SKILL.replace(
+            b"name: a-stock-data", b"name: wrong"
+        ).replace(
+            "# A股全栈数据工具包".encode(),
+            "name: a-stock-data\n# A股全栈数据工具包".encode(),
+        )
+
+        with self.assertRaisesRegex(ArtifactValidationError, "name: a-stock-data"):
+            validate_artifacts(artifacts)
+
+    def test_rejects_version_value_on_the_next_line(self) -> None:
+        artifacts = valid_artifacts()
+        artifacts["SKILL.md"] = VALID_SKILL.replace(
+            b"version: 3.4.0", b"version:\n3.4.0"
+        )
+
+        with self.assertRaisesRegex(ArtifactValidationError, "frontmatter version"):
             validate_artifacts(artifacts)
 
     def test_rejects_level_two_project_heading(self) -> None:
@@ -124,8 +146,82 @@ class MarkdownSectionTests(unittest.TestCase):
             {"added": ["Fallbacks"], "changed": ["Quotes"], "removed": ["Legacy"]},
         )
 
+    def test_ignores_headings_inside_backtick_fences(self) -> None:
+        markdown = (
+            "# Root\n"
+            "## Parent\n"
+            "before\n"
+            "   ````python\n"
+            "## Fake Backtick\n"
+            "inside\n"
+            "```\n"
+            "## Still Fake Backtick\n"
+            " `````\n"
+            "after\n"
+            "## Real\n"
+            "body\n"
+        )
+
+        self.assertEqual(
+            parse_markdown_sections(markdown),
+            {
+                "Parent": (
+                    "## Parent\n"
+                    "before\n"
+                    "   ````python\n"
+                    "## Fake Backtick\n"
+                    "inside\n"
+                    "```\n"
+                    "## Still Fake Backtick\n"
+                    " `````\n"
+                    "after\n"
+                ),
+                "Real": "## Real\nbody\n",
+            },
+        )
+
+    def test_ignores_headings_inside_tilde_fences(self) -> None:
+        markdown = (
+            "# Root\n"
+            "## Parent\n"
+            "before\n"
+            "  ~~~text\n"
+            "## Fake Tilde\n"
+            "inside\n"
+            "````\n"
+            "## Still Fake Tilde\n"
+            "   ~~~~\n"
+            "after\n"
+            "## Real\n"
+            "body\n"
+        )
+
+        self.assertEqual(
+            parse_markdown_sections(markdown),
+            {
+                "Parent": (
+                    "## Parent\n"
+                    "before\n"
+                    "  ~~~text\n"
+                    "## Fake Tilde\n"
+                    "inside\n"
+                    "````\n"
+                    "## Still Fake Tilde\n"
+                    "   ~~~~\n"
+                    "after\n"
+                ),
+                "Real": "## Real\nbody\n",
+            },
+        )
+
 
 class MetadataTests(unittest.TestCase):
+    def test_build_metadata_returns_typed_schema(self) -> None:
+        return_type = get_type_hints(build_metadata)["return"]
+
+        self.assertTrue(is_typeddict(return_type))
+        self.assertEqual(return_type.__name__, "SyncMetadata")
+
     def test_hashes_exact_bytes_and_uses_commit_pinned_urls(self) -> None:
         artifacts = valid_artifacts()
         commit = "a" * 40

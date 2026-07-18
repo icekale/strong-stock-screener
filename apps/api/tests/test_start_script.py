@@ -6,7 +6,7 @@ def test_single_container_starts_web_after_api_healthcheck() -> None:
     script = (repo_root / "scripts" / "start-single-container.sh").read_text(encoding="utf-8")
 
     wait_pos = script.find("wait_for_api_ready")
-    web_pos = script.find("node server.js")
+    web_pos = script.find("node server.mjs")
 
     assert wait_pos != -1
     assert web_pos != -1

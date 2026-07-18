@@ -247,7 +247,7 @@ test("standalone strong stock workbench is wired without daily-report modules", 
   assert.match(dockerignoreSource, /apps\/web\/node_modules/);
   assert.match(dockerignoreSource, /apps\/web\/\.next/);
   assert.match(singleStartSource, /uvicorn app\.main:app/);
-  assert.match(singleStartSource, /node server\.js/);
+  assert.match(singleStartSource, /node server\.mjs/);
   assert.doesNotMatch(singleStartSource, /next.*start/);
   assert.match(nextConfigSource, /\/api\/:path\*/);
   assert.match(nextConfigSource, /http:\/\/127\.0\.0\.1:8010\/api\/:path\*/);

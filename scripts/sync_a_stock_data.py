@@ -529,6 +529,29 @@ def _load_existing_snapshot(destination: Path) -> _ExistingSnapshot | None:
 
 def verify_snapshot(destination: Path) -> SyncMetadata:
     metadata = _load_metadata(destination)
+    try:
+        entries = {entry.name: entry for entry in destination.iterdir()}
+    except OSError as error:
+        raise ArtifactValidationError(
+            f"could not enumerate snapshot destination: {destination}"
+        ) from error
+
+    expected_names = {"metadata.json", *REQUIRED_FILES}
+    unexpected_names = sorted(set(entries) - expected_names)
+    if unexpected_names:
+        raise ArtifactValidationError(
+            f"unexpected snapshot entries: {', '.join(unexpected_names)}"
+        )
+    missing_names = sorted(expected_names - set(entries))
+    if missing_names:
+        raise ArtifactValidationError(
+            f"missing snapshot entries: {', '.join(missing_names)}"
+        )
+    for name in sorted(expected_names):
+        entry = entries[name]
+        if entry.is_symlink() or not entry.is_file():
+            raise ArtifactValidationError(f"snapshot entry {name} is not a regular file")
+
     artifacts: dict[str, bytes] = {}
     for name in REQUIRED_FILES:
         try:
@@ -880,7 +903,10 @@ def main(
     argv: list[str] | None = None,
     client_factory: Callable[[str | None], UpstreamClient] = GitHubClient,
 ) -> int:
-    parser = argparse.ArgumentParser(description="Synchronize the a-stock-data snapshot")
+    parser = argparse.ArgumentParser(
+        description="Synchronize the a-stock-data snapshot",
+        allow_abbrev=False,
+    )
     parser.add_argument("--destination", type=Path, default=DEFAULT_DESTINATION)
     parser.add_argument("--summary-path", type=Path)
     parser.add_argument("--check", action="store_true")

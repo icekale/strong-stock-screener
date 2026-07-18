@@ -390,6 +390,40 @@ class SnapshotVerificationTests(unittest.TestCase):
             self.assertEqual(metadata["upstream"]["version"], "3.4.0")
             self.assertEqual(metadata["upstream"]["commit"], "b" * 40)
 
+    def test_rejects_unexpected_file_and_directory_entries(self) -> None:
+        for entry_type in ("file", "directory"):
+            with self.subTest(entry_type=entry_type), tempfile.TemporaryDirectory() as directory:
+                destination = Path(directory) / "a-stock-data"
+                sync_module.sync_snapshot(FakeGitHubClient(), destination)
+                unexpected = destination / f"unexpected-{entry_type}"
+                if entry_type == "file":
+                    unexpected.write_text("extra", encoding="utf-8")
+                else:
+                    unexpected.mkdir()
+
+                with self.assertRaisesRegex(
+                    ArtifactValidationError,
+                    f"unexpected.*{unexpected.name}",
+                ):
+                    sync_module.verify_snapshot(destination)
+
+    def test_rejects_symlinked_required_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(), destination)
+            license_path = destination / "LICENSE"
+            external_license = root / "external-license"
+            external_license.write_bytes(license_path.read_bytes())
+            license_path.unlink()
+            license_path.symlink_to(external_license)
+
+            with self.assertRaisesRegex(
+                ArtifactValidationError,
+                "LICENSE.*regular file",
+            ):
+                sync_module.verify_snapshot(destination)
+
     def test_rejects_changed_artifact_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory) / "a-stock-data"
@@ -1061,6 +1095,26 @@ New 备用源 data details.
 
 
 class CliTests(unittest.TestCase):
+    def test_rejects_abbreviated_long_options(self) -> None:
+        abbreviated_arguments = (["--dest", "ignored"], ["--chec"])
+
+        def fail_factory(token: str | None) -> FakeGitHubClient:
+            self.fail(f"client factory called with {token!r}")
+
+        for argv in abbreviated_arguments:
+            with self.subTest(argv=argv):
+                stderr = io.StringIO()
+                with patch.object(
+                    sync_module,
+                    "verify_snapshot",
+                    side_effect=AssertionError("verification path reached"),
+                ), redirect_stderr(stderr), self.assertRaises(SystemExit) as raised:
+                    sync_module.main(argv, client_factory=fail_factory)
+
+                self.assertEqual(raised.exception.code, 2)
+                self.assertIn("unrecognized arguments", stderr.getvalue())
+                self.assertIn(argv[0], stderr.getvalue())
+
     def test_check_verifies_locally_without_factory_or_network_calls(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory) / "a-stock-data"

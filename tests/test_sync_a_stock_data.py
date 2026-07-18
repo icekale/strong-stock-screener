@@ -42,7 +42,38 @@ Tencent quote details.
 Eastmoney signal details.
 """.encode()
 VALID_CHANGELOG = b"# Changelog\n\n## 3.4.0\n\n- Updated providers.\n"
-VALID_LICENSE = b"Apache License\nVersion 2.0, January 2004\n"
+
+
+def complete_apache_license_fixture() -> bytes:
+    operative_terms = "\n".join(
+        "      Complete synthetic license term "
+        f"{index:03d} preserves the operative Apache 2.0 grant language."
+        for index in range(120)
+    )
+    return (
+        "Apache License\n"
+        "Version 2.0, January 2004\n"
+        "http://www.apache.org/licenses/\n\n"
+        "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION\n\n"
+        "1. Definitions.\n\n"
+        "2. Grant of Copyright License.\n\n"
+        "3. Grant of Patent License.\n\n"
+        "4. Redistribution.\n\n"
+        "5. Submission of Contributions.\n\n"
+        "6. Trademarks.\n\n"
+        "7. Disclaimer of Warranty.\n\n"
+        "8. Limitation of Liability.\n\n"
+        "9. Accepting Warranty or Additional Liability.\n\n"
+        f"{operative_terms}\n\n"
+        "END OF TERMS AND CONDITIONS\n\n"
+        "APPENDIX: How to apply the Apache License to your work.\n\n"
+        "Copyright 2026 Example Copyright Owner\n\n"
+        "Licensed under the Apache License, Version 2.0 (the \"License\");\n"
+        "you may not use this file except in compliance with the License.\n"
+    ).encode()
+
+
+VALID_LICENSE = complete_apache_license_fixture()
 
 
 def valid_artifacts() -> dict[str, bytes]:
@@ -200,6 +231,64 @@ class ArtifactValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ArtifactValidationError, "Apache License 2.0"):
             validate_artifacts(artifacts)
 
+    def test_rejects_truncated_apache_license_stub(self) -> None:
+        artifacts = valid_artifacts()
+        artifacts["LICENSE"] = b"Apache License\nVersion 2.0, January 2004\n"
+
+        with self.assertRaisesRegex(ArtifactValidationError, "complete Apache"):
+            validate_artifacts(artifacts)
+
+    def test_rejects_apache_license_with_missing_major_section(self) -> None:
+        artifacts = valid_artifacts()
+        artifacts["LICENSE"] = VALID_LICENSE.replace(
+            b"3. Grant of Patent License.", b"3. Patent terms removed."
+        )
+
+        with self.assertRaisesRegex(ArtifactValidationError, "Patent License"):
+            validate_artifacts(artifacts)
+
+    def test_rejects_duplicate_frontmatter_name_or_version_declarations(self) -> None:
+        replacements = {
+            "duplicate name": (
+                b"name: a-stock-data",
+                b"name: a-stock-data\nname: a-stock-data",
+            ),
+            "conflicting name": (
+                b"name: a-stock-data",
+                b"name: a-stock-data\nname: another-project",
+            ),
+            "duplicate version": (
+                b"version: 3.4.0",
+                b"version: 3.4.0\nversion: 3.4.0",
+            ),
+            "conflicting version": (
+                b"version: 3.4.0",
+                b"version: 3.4.0\nversion: 9.9.9",
+            ),
+        }
+
+        for name, (old, new) in replacements.items():
+            with self.subTest(name=name), self.assertRaisesRegex(
+                ArtifactValidationError, "exactly one"
+            ):
+                artifacts = valid_artifacts()
+                artifacts["SKILL.md"] = VALID_SKILL.replace(old, new)
+                validate_artifacts(artifacts)
+
+    def test_rejects_project_heading_version_mismatch(self) -> None:
+        artifacts = valid_artifacts()
+        artifacts["SKILL.md"] = VALID_SKILL.replace(b"V3.4.0", b"V3.5.0")
+
+        with self.assertRaisesRegex(ArtifactValidationError, "project heading version"):
+            validate_artifacts(artifacts)
+
+    def test_rejects_first_changelog_release_version_mismatch(self) -> None:
+        artifacts = valid_artifacts()
+        artifacts["CHANGELOG.md"] = VALID_CHANGELOG.replace(b"## 3.4.0", b"## v3.5.0")
+
+        with self.assertRaisesRegex(ArtifactValidationError, "changelog version"):
+            validate_artifacts(artifacts)
+
     def test_rejects_missing_empty_oversized_and_non_utf8_files(self) -> None:
         invalid_cases = {
             "missing": {"SKILL.md": VALID_SKILL, "CHANGELOG.md": VALID_CHANGELOG},
@@ -312,6 +401,26 @@ class MarkdownSectionTests(unittest.TestCase):
                 "Real": "## Real\nbody\n",
             },
         )
+
+    def test_rejects_duplicate_level_two_sections_instead_of_hiding_earlier_text(
+        self,
+    ) -> None:
+        markdown = "# Root\n## Repeated\nearlier\n## Repeated\nlater\n"
+
+        with self.assertRaisesRegex(ArtifactValidationError, "duplicate.*Repeated"):
+            parse_markdown_sections(markdown)
+
+    def test_artifact_validation_rejects_duplicate_level_two_skill_sections(
+        self,
+    ) -> None:
+        artifacts = valid_artifacts()
+        artifacts["SKILL.md"] = VALID_SKILL.replace(
+            b"## \xe8\xa1\x8c\xe6\x83\x85\xe5\xb1\x82\n",
+            b"## \xe8\xa1\x8c\xe6\x83\x85\xe5\xb1\x82\nearlier\n## \xe8\xa1\x8c\xe6\x83\x85\xe5\xb1\x82\n",
+        )
+
+        with self.assertRaisesRegex(ArtifactValidationError, "duplicate"):
+            validate_artifacts(artifacts)
 
 
 class MetadataTests(unittest.TestCase):
@@ -888,6 +997,9 @@ Updated quote details.
 ## 数据层
 New 备用源 data details.
 """.encode()
+            updated_artifacts["CHANGELOG.md"] = (
+                b"# Changelog\n\n## v3.5.0\n\n- Updated providers.\n"
+            )
 
             result = sync_module.sync_snapshot(
                 FakeGitHubClient(commit="b" * 40, artifacts=updated_artifacts),
@@ -954,6 +1066,9 @@ version: 3.5.0
 ## {malicious_heading}
 Changed provider details.
 """.encode()
+        artifacts["CHANGELOG.md"] = (
+            b"# Changelog\n\n## v3.5.0\n\n- Updated providers.\n"
+        )
 
         with tempfile.TemporaryDirectory() as directory:
             result = sync_module.sync_snapshot(
@@ -965,6 +1080,71 @@ Changed provider details.
         self.assertEqual(result.summary.count(safe_span), 2)
         self.assertNotIn(f"`{malicious_heading}`", result.summary)
         self.assertIn(f"- Added: {safe_span}", result.summary)
+
+    def test_report_bounds_many_long_malicious_headings_without_cutting_fields(
+        self,
+    ) -> None:
+        headings = [
+            f"{index:04d} Risk `code` " + ("x" * 680)
+            for index in range(500)
+        ]
+        skill_sections = "".join(
+            f"## {heading}\nTencent provider details.\n" for heading in headings
+        )
+        artifacts = valid_artifacts()
+        artifacts["SKILL.md"] = (
+            "---\n"
+            "name: a-stock-data\n"
+            "version: 3.5.0\n"
+            "---\n"
+            "# A股全栈数据工具包 V3.5.0\n"
+            f"{skill_sections}"
+        ).encode()
+        artifacts["CHANGELOG.md"] = (
+            b"# Changelog\n\n## v3.5.0 - 2026-07-19\n\n- Stress fixture.\n"
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(commit="a" * 40), destination)
+            result = sync_module.sync_snapshot(
+                FakeGitHubClient(commit="b" * 40, artifacts=artifacts),
+                destination,
+            )
+
+        self.assertLessEqual(len(result.summary), sync_module.MAX_SUMMARY_CHARS)
+        self.assertLessEqual(
+            len(result.summary.encode("utf-8")), sync_module.MAX_SUMMARY_CHARS
+        )
+        self.assertIn("# Upstream a-stock-data", result.summary)
+        self.assertIn("Previous version: `3.4.0`", result.summary)
+        self.assertIn("Current version: `3.5.0`", result.summary)
+        self.assertIn(
+            f"https://github.com/simonlin1212/a-stock-data/commit/{'b' * 40}",
+            result.summary,
+        )
+        self.assertIn(
+            "https://github.com/simonlin1212/a-stock-data/compare/"
+            f"{'a' * 40}...{'b' * 40}",
+            result.summary,
+        )
+        self.assertIn("| File | Size (bytes) | SHA256 |", result.summary)
+        for name in REQUIRED_FILES:
+            self.assertIn(f"`{name}`", result.summary)
+        self.assertIn("WARNING", result.summary)
+        self.assertIn("Tracked provider or source terms", result.summary)
+        self.assertRegex(result.summary, r"\.\.\. [0-9]+ more")
+        self.assertIn("more chars", result.summary)
+        self.assertIn("Upstream Markdown is not executed", result.summary)
+        self.assertIn("runtime providers are unchanged", result.summary)
+
+        untrusted_lines = [
+            line for line in result.summary.splitlines() if "Risk `code`" in line
+        ]
+        self.assertTrue(untrusted_lines)
+        for line in untrusted_lines:
+            self.assertGreater(line.count("`` "), 0)
+            self.assertEqual(line.count("`` "), line.count(" ``"))
 
     def test_download_failure_preserves_previous_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

@@ -91,9 +91,16 @@ jobs:
             git push origin "HEAD:refs/heads/${branch}"
           fi
 
-          mapfile -t pr_numbers < <(
-            gh pr list --state open --head "${branch}" --base main --limit 2 --json number --jq '.[].number'
-          )
+          if ! PR_NUMBERS="$(gh pr list --state open --head "${branch}" --base main --limit 2 --json number --jq '.[].number')"; then
+            echo "Failed to list open synchronization PRs." >&2
+            exit 1
+          fi
+          pr_numbers=()
+          if [[ -n "${PR_NUMBERS}" ]]; then
+            while IFS= read -r pr_number; do
+              pr_numbers+=("${pr_number}")
+            done <<< "${PR_NUMBERS}"
+          fi
           if (( ${#pr_numbers[@]} > 1 )); then
             echo "More than one open synchronization PR exists." >&2
             exit 1

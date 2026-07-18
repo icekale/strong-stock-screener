@@ -1,12 +1,41 @@
 from __future__ import annotations
 
+import json
+import os
 import re
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = ROOT / ".github" / "workflows" / "sync-a-stock-data.yml"
+RUBY_EXTRACT_RUN_BLOCKS = r"""
+workflow = YAML.load_file(ARGV.fetch(0))
+run_blocks = workflow.fetch("jobs").values.flat_map do |job|
+  job.fetch("steps", []).map { |step| step["run"] }.compact
+end
+STDOUT.write(JSON.generate(run_blocks))
+"""
+FAKE_GH = """#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\n' "$*" >> "${GH_LOG}"
+
+if [[ "$1" == "pr" && "$2" == "list" ]]; then
+  case "${GH_LIST_RESULT}" in
+    failure) exit 42 ;;
+    empty) exit 0 ;;
+    one) printf '17\\n'; exit 0 ;;
+    many) printf '17\\n18\\n'; exit 0 ;;
+  esac
+fi
+
+if [[ "$1" == "pr" && ( "$2" == "create" || "$2" == "edit" ) ]]; then
+  exit 0
+fi
+exit 64
+"""
 
 
 def top_level_block(source: str, key: str) -> str:
@@ -36,6 +65,50 @@ def step_containing(source: str, marker: str) -> str:
         return next(step for step in steps if marker in step)
     except StopIteration as error:
         raise AssertionError(f"missing workflow step containing {marker!r}") from error
+
+
+def workflow_run_blocks() -> list[str]:
+    try:
+        result = subprocess.run(
+            [
+                "ruby",
+                "-ryaml",
+                "-rjson",
+                "-e",
+                RUBY_EXTRACT_RUN_BLOCKS,
+                str(WORKFLOW_PATH),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError as error:
+        raise AssertionError("ruby is required to parse the workflow YAML") from error
+    if result.returncode != 0:
+        raise AssertionError(f"workflow YAML parsing failed:\n{result.stderr}")
+
+    run_blocks = json.loads(result.stdout)
+    if not isinstance(run_blocks, list) or not all(
+        isinstance(block, str) for block in run_blocks
+    ):
+        raise AssertionError("workflow run blocks did not decode as strings")
+    return run_blocks
+
+
+def pr_shell_block() -> str:
+    sync_block = next(
+        block
+        for block in workflow_run_blocks()
+        if "gh pr list --state open" in block
+    )
+    markers = ('if ! PR_NUMBERS="$(gh pr list', "mapfile -t pr_numbers < <(")
+    start = next(
+        (sync_block.find(marker) for marker in markers if marker in sync_block),
+        -1,
+    )
+    if start < 0:
+        raise AssertionError("missing PR lookup shell block")
+    return sync_block[start:]
 
 
 class AStockDataWorkflowContractTests(unittest.TestCase):
@@ -129,6 +202,23 @@ class AStockDataWorkflowContractTests(unittest.TestCase):
             )
             self.assertEqual(first_command, "set -euo pipefail")
 
+    def test_workflow_yaml_and_every_run_block_have_valid_syntax(self) -> None:
+        run_blocks = workflow_run_blocks()
+        self.assertGreaterEqual(len(run_blocks), 2)
+        for index, block in enumerate(run_blocks):
+            with self.subTest(run_block=index):
+                try:
+                    result = subprocess.run(
+                        ["bash", "-n"],
+                        input=block,
+                        check=False,
+                        capture_output=True,
+                        text=True,
+                    )
+                except OSError as error:
+                    self.fail(f"bash is required to parse workflow run blocks: {error}")
+                self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_unchanged_snapshot_exits_before_branch_git_or_gh_commands(self) -> None:
         sync_step = step_containing(
             self.source,
@@ -209,6 +299,14 @@ class AStockDataWorkflowContractTests(unittest.TestCase):
             'gh pr list --state open --head "${branch}" --base main',
             sync_step,
         )
+        self.assertIn(
+            'if ! PR_NUMBERS="$(gh pr list --state open --head "${branch}" '
+            "--base main --limit 2 --json number --jq '.[].number')\"; then",
+            sync_step,
+        )
+        self.assertNotRegex(sync_step, r"mapfile[^\n]*<\s*<\(")
+        self.assertIn("pr_numbers=()", sync_step)
+        self.assertIn('if [[ -n "${PR_NUMBERS}" ]]; then', sync_step)
         self.assertIn("--limit 2", sync_step)
         self.assertRegex(sync_step, r"\$\{#pr_numbers\[@\]\}\s*>\s*1")
         self.assertRegex(sync_step, r"(?m)^\s+gh pr create\s")
@@ -224,6 +322,60 @@ class AStockDataWorkflowContractTests(unittest.TestCase):
             self.source.lower(),
             r"gh pr merge|auto-merge|--auto(?:\s|$)",
         )
+
+    def test_pr_lookup_failure_and_result_cardinality_are_enforced(self) -> None:
+        shell_block = pr_shell_block()
+        cases = {
+            "failure": (1, None, "Failed to list open synchronization PRs."),
+            "empty": (0, "pr create", None),
+            "one": (0, "pr edit 17", None),
+            "many": (1, None, "More than one open synchronization PR exists."),
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            bin_path = temp_path / "bin"
+            bin_path.mkdir()
+            fake_gh = bin_path / "gh"
+            fake_gh.write_text(FAKE_GH, encoding="utf-8")
+            fake_gh.chmod(0o755)
+
+            for mode, (returncode, action, error_message) in cases.items():
+                with self.subTest(mode=mode):
+                    log_path = temp_path / f"{mode}.log"
+                    environment = os.environ.copy()
+                    environment.update(
+                        {
+                            "GH_LIST_RESULT": mode,
+                            "GH_LOG": str(log_path),
+                            "PATH": f"{bin_path}:{environment.get('PATH', '')}",
+                            "RUNNER_TEMP": str(temp_path),
+                        }
+                    )
+                    script = (
+                        "set -euo pipefail\n"
+                        'branch="automation/a-stock-data-sync"\n'
+                        'upstream_version="3.5.0"\n'
+                        f"{shell_block}"
+                    )
+                    result = subprocess.run(
+                        ["bash", "-c", script],
+                        check=False,
+                        capture_output=True,
+                        env=environment,
+                        text=True,
+                    )
+                    commands = log_path.read_text(encoding="utf-8").splitlines()
+
+                    self.assertEqual(result.returncode, returncode, result.stderr)
+                    self.assertTrue(commands[0].startswith("pr list "), commands)
+                    if action is None:
+                        self.assertEqual(len(commands), 1, commands)
+                    else:
+                        self.assertEqual(len(commands), 2, commands)
+                        self.assertTrue(commands[1].startswith(action), commands)
+                    if error_message is not None:
+                        self.assertIn(error_message, result.stderr)
 
     def test_workflow_contains_no_execution_or_deployment_paths(self) -> None:
         lowered = self.source.lower()

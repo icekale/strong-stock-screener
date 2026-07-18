@@ -30,7 +30,6 @@ MAX_FILE_BYTES = {"SKILL.md": 512_000, "CHANGELOG.md": 256_000, "LICENSE": 64_00
 MAX_SUMMARY_CHARS = 60_000
 MAX_SECTION_ITEMS = 20
 MAX_SECTION_HEADING_CHARS = 120
-MIN_APACHE_LICENSE_BYTES = 8_000
 NAME_RE = re.compile(r"^name:[ \t]*a-stock-data[ \t]*$")
 VERSION_RE = re.compile(r"^version:[ \t]*([0-9]+\.[0-9]+\.[0-9]+)[ \t]*$")
 FRONTMATTER_KEY_RE = re.compile(
@@ -87,6 +86,13 @@ _APACHE_LICENSE_HEADER_RE = re.compile(
     r"\A[ \t]*Apache License[ \t]*\r?\n"
     r"[ \t]*Version 2\.0, January 2004[ \t]*(?:\r?\n|\Z)"
 )
+_APACHE_END_MARKER = "END OF TERMS AND CONDITIONS"
+_APPROVED_APACHE_TERMS_SHA256 = frozenset(
+    {
+        "59d8f0ba87ad9a2f1a431123c8d16646e5b89ba53653e818f16d136d77263c99",
+        "a14c5bd2f88659c252bbac195ceb4c19e26f829132b552ffbddd26cb8b41a7d8",
+    }
+)
 _APACHE_LICENSE_SECTION_MARKERS = (
     "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION",
     "1. Definitions.",
@@ -98,11 +104,20 @@ _APACHE_LICENSE_SECTION_MARKERS = (
     "7. Disclaimer of Warranty.",
     "8. Limitation of Liability.",
     "9. Accepting Warranty or Additional Liability.",
-    "END OF TERMS AND CONDITIONS",
 )
-_APACHE_APPLICATION_NOTICE_RE = re.compile(
-    r"Copyright[^\r\n]*.*?Licensed under the Apache License, Version 2\.0",
-    re.DOTALL,
+_APACHE_COPYRIGHT_RE = re.compile(
+    r"Copyright [0-9]{4}(?:-[0-9]{4})? [^\r\n]{1,200}"
+)
+_APACHE_APPLICATION_NOTICE = (
+    'Licensed under the Apache License, Version 2.0 (the "License"); '
+    "you may not use this file except in compliance with the License. "
+    "You may obtain a copy of the License at "
+    "http://www.apache.org/licenses/LICENSE-2.0 "
+    "Unless required by applicable law or agreed to in writing, software "
+    'distributed under the License is distributed on an "AS IS" BASIS, '
+    "WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. "
+    "See the License for the specific language governing permissions and "
+    "limitations under the License."
 )
 _FENCE_OPEN_RE = re.compile(
     r"^ {0,3}((?:`{3,})(?=[^`]*$)|(?:~{3,})).*$"
@@ -133,6 +148,9 @@ _HTML_COMPLETE_TAG_RE = re.compile(
     r"(?:[ \t]*=[ \t]*(?:[^\"'=<>` \t]+|'[^']*'|\"[^\"]*\"))?)*"
     r"[ \t]*/?>"
     r")[ \t]*$"
+)
+_LIST_ITEM_RE = re.compile(
+    r"^ {0,3}(?:[-+*]|[0-9]{1,9}[.)])[ \t]+(?P<content>.*)$"
 )
 
 
@@ -455,7 +473,7 @@ def validate_artifacts(artifacts: Mapping[str, bytes]) -> str:
         )
     version = version_match.group(1)
     skill_body = "\n".join(lines[frontmatter_end + 1 :])
-    if _contains_unsupported_html_outside_fences(skill_body):
+    if _contains_unsupported_markup_outside_fences(skill_body):
         raise ArtifactValidationError(
             "SKILL.md project heading validation does not support HTML markup"
         )
@@ -477,7 +495,7 @@ def validate_artifacts(artifacts: Mapping[str, bytes]) -> str:
     changelog_lines = decoded["CHANGELOG.md"].splitlines()
     if not changelog_lines or changelog_lines[0] != "# Changelog":
         raise ArtifactValidationError("CHANGELOG.md must start with # Changelog")
-    if _contains_unsupported_html_outside_fences(decoded["CHANGELOG.md"]):
+    if _contains_unsupported_markup_outside_fences(decoded["CHANGELOG.md"]):
         raise ArtifactValidationError(
             "CHANGELOG.md changelog version validation does not support HTML markup"
         )
@@ -506,23 +524,34 @@ def validate_artifacts(artifacts: Mapping[str, bytes]) -> str:
     license_text = decoded["LICENSE"]
     if _APACHE_LICENSE_HEADER_RE.match(license_text) is None:
         raise ArtifactValidationError("LICENSE must contain Apache License 2.0")
-    if len(artifacts["LICENSE"]) < MIN_APACHE_LICENSE_BYTES:
-        raise ArtifactValidationError("LICENSE must contain a complete Apache License 2.0")
+    terms, separator, notice = license_text.partition(_APACHE_END_MARKER)
+    if not separator or _APACHE_END_MARKER in notice:
+        raise ArtifactValidationError(
+            "LICENSE must contain complete Apache License 2.0 terms from a "
+            "reviewed Apache text"
+        )
     marker_position = 0
     for marker in _APACHE_LICENSE_SECTION_MARKERS:
-        marker_position = license_text.find(marker, marker_position)
+        marker_position = terms.find(marker, marker_position)
         if marker_position < 0:
             raise ArtifactValidationError(
                 f"LICENSE is missing Apache License 2.0 section: {marker}"
             )
         marker_position += len(marker)
-    appendix_text = license_text[marker_position:]
+    normalized_terms = " ".join((terms + separator).split())
+    terms_sha256 = hashlib.sha256(normalized_terms.encode("utf-8")).hexdigest()
+    if terms_sha256 not in _APPROVED_APACHE_TERMS_SHA256:
+        raise ArtifactValidationError(
+            "LICENSE must contain reviewed Apache License 2.0 terms"
+        )
+    notice_lines = [line.strip() for line in notice.splitlines() if line.strip()]
     if (
-        "APPENDIX: How to apply the Apache License to your work." not in appendix_text
-        and _APACHE_APPLICATION_NOTICE_RE.search(appendix_text) is None
+        not notice_lines
+        or _APACHE_COPYRIGHT_RE.fullmatch(notice_lines[0]) is None
+        or " ".join(notice_lines[1:]) != _APACHE_APPLICATION_NOTICE
     ):
         raise ArtifactValidationError(
-            "LICENSE is missing the Apache License 2.0 appendix application notice"
+            "LICENSE must contain a bounded Apache License 2.0 application notice"
         )
 
     return version
@@ -551,7 +580,7 @@ def _is_unsupported_html_markup(line: str) -> bool:
     )
 
 
-def _contains_unsupported_html_outside_fences(markdown: str) -> bool:
+def _contains_unsupported_markup_outside_fences(markdown: str) -> bool:
     fence_marker: str | None = None
     fence_length = 0
     for line in markdown.splitlines():
@@ -566,6 +595,15 @@ def _contains_unsupported_html_outside_fences(markdown: str) -> bool:
                     fence_marker = None
                     fence_length = 0
             continue
+
+        list_item_match = _LIST_ITEM_RE.match(line)
+        if list_item_match is not None:
+            content = list_item_match.group("content").lstrip(" ")
+            if (
+                _FENCE_OPEN_RE.match(content) is not None
+                or _is_unsupported_html_markup(content)
+            ):
+                return True
 
         opening_match = _FENCE_OPEN_RE.match(line)
         if opening_match is not None:

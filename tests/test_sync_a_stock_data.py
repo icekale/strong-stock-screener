@@ -33,6 +33,7 @@ from scripts.sync_a_stock_data import (
 )
 
 
+ROOT = Path(__file__).resolve().parents[1]
 VALID_SKILL = """---
 name: a-stock-data
 version: 3.4.0
@@ -75,7 +76,7 @@ def complete_apache_license_fixture() -> bytes:
     ).encode()
 
 
-VALID_LICENSE = complete_apache_license_fixture()
+VALID_LICENSE = (ROOT / "third_party" / "a-stock-data" / "LICENSE").read_bytes()
 
 
 def valid_artifacts() -> dict[str, bytes]:
@@ -415,6 +416,39 @@ class ArtifactValidationTests(unittest.TestCase):
         )
 
         with self.assertRaisesRegex(ArtifactValidationError, "changelog version"):
+            validate_artifacts(artifacts)
+
+    def test_list_fence_cannot_hide_project_or_release_heading(self) -> None:
+        skill_artifacts = valid_artifacts()
+        skill_artifacts["SKILL.md"] = (
+            b"---\nname: a-stock-data\nversion: 3.4.0\n---\n"
+            b"- ```text\n  # A\xe8\x82\xa1\xe5\x85\xa8\xe6\xa0\x88\xe6\x95\xb0\xe6\x8d\xae\xe5\xb7\xa5\xe5\x85\xb7\xe5\x8c\x85 V3.4.0\n  ```\n"
+            b"## Market\nProvider details.\n"
+        )
+        with self.assertRaisesRegex(ArtifactValidationError, "project heading"):
+            validate_artifacts(skill_artifacts)
+
+        changelog_artifacts = valid_artifacts()
+        changelog_artifacts["CHANGELOG.md"] = (
+            b"# Changelog\n\n- ```text\n  ## 3.4.0\n  ```\n\n## 9.9.9\n"
+        )
+        with self.assertRaisesRegex(ArtifactValidationError, "changelog version"):
+            validate_artifacts(changelog_artifacts)
+
+    def test_list_html_cannot_hide_release_heading(self) -> None:
+        artifacts = valid_artifacts()
+        artifacts["CHANGELOG.md"] = (
+            b"# Changelog\n\n- <div>\n  ## 3.4.0\n\n## 9.9.9\n"
+        )
+
+        with self.assertRaisesRegex(ArtifactValidationError, "changelog version"):
+            validate_artifacts(artifacts)
+
+    def test_rejects_synthetic_filler_instead_of_apache_terms(self) -> None:
+        artifacts = valid_artifacts()
+        artifacts["LICENSE"] = complete_apache_license_fixture()
+
+        with self.assertRaisesRegex(ArtifactValidationError, "reviewed Apache"):
             validate_artifacts(artifacts)
 
     def test_rejects_missing_empty_oversized_and_non_utf8_files(self) -> None:

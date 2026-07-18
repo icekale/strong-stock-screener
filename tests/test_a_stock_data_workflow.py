@@ -54,35 +54,6 @@ BRANCH = "automation/a-stock-data-sync"
 REPOSITORY_OWNER = "acme"
 
 
-def complete_apache_license_fixture() -> bytes:
-    operative_terms = "\n".join(
-        "      Complete synthetic license term "
-        f"{index:03d} preserves the operative Apache 2.0 grant language."
-        for index in range(120)
-    )
-    return (
-        "Apache License\n"
-        "Version 2.0, January 2004\n"
-        "http://www.apache.org/licenses/\n\n"
-        "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION\n\n"
-        "1. Definitions.\n\n"
-        "2. Grant of Copyright License.\n\n"
-        "3. Grant of Patent License.\n\n"
-        "4. Redistribution.\n\n"
-        "5. Submission of Contributions.\n\n"
-        "6. Trademarks.\n\n"
-        "7. Disclaimer of Warranty.\n\n"
-        "8. Limitation of Liability.\n\n"
-        "9. Accepting Warranty or Additional Liability.\n\n"
-        f"{operative_terms}\n\n"
-        "END OF TERMS AND CONDITIONS\n\n"
-        "APPENDIX: How to apply the Apache License to your work.\n\n"
-        "Copyright 2026 Example Copyright Owner\n\n"
-        "Licensed under the Apache License, Version 2.0 (the \"License\");\n"
-        "you may not use this file except in compliance with the License.\n"
-    ).encode()
-
-
 def top_level_block(source: str, key: str) -> str:
     lines = source.splitlines()
     start = next(
@@ -171,7 +142,7 @@ def proposal_snapshot(
         "CHANGELOG.md": (
             f"# Changelog\n\n## {version}\n\n- Workflow test snapshot.\n"
         ).encode(),
-        "LICENSE": complete_apache_license_fixture(),
+        "LICENSE": (ROOT / "third_party" / "a-stock-data" / "LICENSE").read_bytes(),
     }
     metadata = {
         "schema_version": 1,

@@ -28,6 +28,11 @@ VERSION_RE = re.compile(
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SEMANTIC_VERSION_RE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+RFC3339_RE = re.compile(
+    r"\A[0-9]{4}-[0-9]{2}-[0-9]{2}T"
+    r"[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?"
+    r"(?:Z|[+-][0-9]{2}:[0-9]{2})\Z"
+)
 REPOSITORY_IDENTITY = f"{OWNER}/{REPOSITORY}"
 JSON_MAX_BYTES = 1_000_000
 GITHUB_ACCEPT = "application/vnd.github+json"
@@ -102,6 +107,7 @@ class _SnapshotTransactionState:
     backup: Path | None = None
     previous_backed_up: bool = False
     candidate_installed: bool = False
+    preserve_candidate: bool = False
 
 
 class GitHubClient:
@@ -432,14 +438,19 @@ def _load_existing_snapshot(destination: Path) -> _ExistingSnapshot | None:
 def _normalize_committed_at(value: object) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ArtifactValidationError("resolved commit timestamp must be nonempty")
+    if RFC3339_RE.fullmatch(value) is None:
+        raise ArtifactValidationError("resolved commit timestamp is invalid")
     iso_value = value[:-1] + "+00:00" if value.endswith("Z") else value
     try:
         committed_at = datetime.fromisoformat(iso_value)
-    except ValueError as error:
+        if committed_at.tzinfo is None or committed_at.utcoffset() is None:
+            raise ArtifactValidationError(
+                "resolved commit timestamp must include a timezone"
+            )
+        normalized = committed_at.astimezone(timezone.utc).isoformat()
+    except (OverflowError, ValueError) as error:
         raise ArtifactValidationError("resolved commit timestamp is invalid") from error
-    if committed_at.tzinfo is None or committed_at.utcoffset() is None:
-        raise ArtifactValidationError("resolved commit timestamp must include a timezone")
-    return committed_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return normalized.replace("+00:00", "Z")
 
 
 def _format_synced_at(now: Callable[[], datetime]) -> str:
@@ -534,42 +545,36 @@ def _write_snapshot(
             _replace_path(candidate, destination)
         except OSError as error:
             if state.previous_backed_up and state.backup is not None:
-                try:
-                    _replace_path(state.backup, destination)
-                except OSError as restore_error:
+                restore_error: OSError | None = None
+                for _attempt in range(2):
+                    try:
+                        _replace_path(state.backup, destination)
+                    except OSError as current_restore_error:
+                        restore_error = current_restore_error
+                        if destination.exists():
+                            break
+                    else:
+                        state.previous_backed_up = False
+                        break
+                if state.previous_backed_up:
+                    state.preserve_candidate = True
                     raise SyncError(
-                        "failed to replace snapshot and restore previous snapshot"
+                        "failed to replace snapshot and restore previous snapshot; "
+                        "recovery artifacts preserved"
                     ) from restore_error
-                state.previous_backed_up = False
             raise SyncError("failed to replace snapshot") from error
         state.candidate_installed = True
 
         if state.candidate_installed and state.backup is not None:
             try:
                 _remove_directory(state.backup)
-            except OSError as error:
-                try:
-                    _replace_path(destination, candidate)
-                    state.candidate_installed = False
-                    _replace_path(state.backup, destination)
-                    state.previous_backed_up = False
-                except OSError as rollback_error:
-                    if not destination.exists() and candidate.exists():
-                        try:
-                            _replace_path(candidate, destination)
-                            state.candidate_installed = True
-                        except OSError:
-                            pass
-                    raise SyncError(
-                        "failed to remove snapshot backup and roll back"
-                    ) from rollback_error
-                raise SyncError(
-                    "failed to remove snapshot backup; restored previous snapshot"
-                ) from error
-            state.backup = None
-            state.previous_backed_up = False
+            except OSError:
+                pass
+            else:
+                state.backup = None
+                state.previous_backed_up = False
     finally:
-        if candidate.exists():
+        if candidate.exists() and not state.preserve_candidate:
             try:
                 _remove_directory(candidate)
             except OSError:

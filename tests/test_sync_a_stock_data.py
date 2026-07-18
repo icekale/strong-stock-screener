@@ -428,17 +428,56 @@ class SnapshotSyncTests(unittest.TestCase):
                     self.assertEqual(client.downloads, [])
                     self.assertFalse(destination.exists())
 
+    def test_rejects_non_rfc3339_commit_timestamp_syntax_without_downloads(self) -> None:
+        invalid_timestamps = (
+            "20260711T08:00:00Z",
+            "2026-07-11 08:00:00Z",
+            "2026-07-11t08:00:00Z",
+            "2026-07-11T08:00:00+0800",
+        )
+
+        for committed_at in invalid_timestamps:
+            with self.subTest(committed_at=committed_at):
+                with tempfile.TemporaryDirectory() as directory:
+                    destination = Path(directory) / "a-stock-data"
+                    client = FakeGitHubClient(committed_at=committed_at)
+
+                    with self.assertRaisesRegex(
+                        ArtifactValidationError,
+                        "commit timestamp",
+                    ):
+                        sync_module.sync_snapshot(client, destination)
+
+                    self.assertEqual(client.downloads, [])
+                    self.assertFalse(destination.exists())
+
+    def test_converts_commit_timestamp_utc_overflow_to_validation_error(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            client = FakeGitHubClient(committed_at="0001-01-01T00:00:00+23:59")
+
+            with self.assertRaisesRegex(
+                ArtifactValidationError,
+                "commit timestamp",
+            ):
+                sync_module.sync_snapshot(client, destination)
+
+            self.assertEqual(client.downloads, [])
+            self.assertFalse(destination.exists())
+
     def test_normalizes_commit_timestamp_to_utc_in_metadata(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory) / "a-stock-data"
-            client = FakeGitHubClient(committed_at="2026-07-11T16:00:00+08:00")
+            client = FakeGitHubClient(
+                committed_at="2026-07-11T16:00:00.123456+08:00"
+            )
 
             sync_module.sync_snapshot(client, destination)
 
             metadata = json.loads((destination / "metadata.json").read_bytes())
             self.assertEqual(
                 metadata["upstream"]["committed_at"],
-                "2026-07-11T08:00:00Z",
+                "2026-07-11T08:00:00.123456Z",
             )
 
     def test_same_commit_is_a_no_op_without_downloads(self) -> None:
@@ -668,68 +707,140 @@ New data details.
             self.assertEqual(snapshot_bytes(destination), before)
             self.assertEqual([path.name for path in root.iterdir()], ["a-stock-data"])
 
-    def test_transient_backup_cleanup_failure_rolls_back_previous_snapshot(self) -> None:
+    def test_transient_restore_failure_retries_and_restores_previous_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             destination = root / "a-stock-data"
             sync_module.sync_snapshot(FakeGitHubClient(commit="a" * 40), destination)
             before = snapshot_bytes(destination)
-            real_remove = sync_module._remove_directory
-            backup_attempts = 0
+            real_replace = sync_module._replace_path
+            restore_attempts = 0
 
-            def fail_backup_once(path: Path) -> None:
-                nonlocal backup_attempts
-                if path.name.startswith(f".{destination.name}.backup-"):
-                    backup_attempts += 1
-                    if backup_attempts == 1:
-                        raise OSError("simulated transient cleanup failure")
-                real_remove(path)
+            def fail_install_and_first_restore(source: Path, target: Path) -> None:
+                nonlocal restore_attempts
+                if target == destination and source.name.startswith(
+                    f".{destination.name}.tmp-"
+                ):
+                    raise OSError("simulated candidate installation failure")
+                if target == destination and source.name.startswith(
+                    f".{destination.name}.backup-"
+                ):
+                    restore_attempts += 1
+                    if restore_attempts == 1:
+                        raise OSError("simulated transient restoration failure")
+                real_replace(source, target)
 
             with patch.object(
                 sync_module,
-                "_remove_directory",
-                side_effect=fail_backup_once,
+                "_replace_path",
+                side_effect=fail_install_and_first_restore,
             ):
-                with self.assertRaisesRegex(SyncError, "backup"):
+                with self.assertRaisesRegex(SyncError, "replace snapshot"):
                     sync_module.sync_snapshot(
                         FakeGitHubClient(commit="b" * 40),
                         destination,
                     )
 
-            self.assertEqual(backup_attempts, 1)
+            self.assertEqual(restore_attempts, 2)
             self.assertEqual(snapshot_bytes(destination), before)
             self.assertEqual([path.name for path in root.iterdir()], ["a-stock-data"])
 
-    def test_persistent_backup_cleanup_failure_rolls_back_previous_snapshot(self) -> None:
+    def test_persistent_restore_failure_preserves_recovery_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             destination = root / "a-stock-data"
             sync_module.sync_snapshot(FakeGitHubClient(commit="a" * 40), destination)
             before = snapshot_bytes(destination)
-            real_remove = sync_module._remove_directory
-            backup_attempts = 0
+            real_replace = sync_module._replace_path
+            restore_attempts = 0
 
-            def always_fail_backup(path: Path) -> None:
-                nonlocal backup_attempts
-                if path.name.startswith(f".{destination.name}.backup-"):
-                    backup_attempts += 1
-                    raise OSError("simulated persistent cleanup failure")
-                real_remove(path)
+            def fail_install_and_restore(source: Path, target: Path) -> None:
+                nonlocal restore_attempts
+                if target == destination and source.name.startswith(
+                    f".{destination.name}.tmp-"
+                ):
+                    raise OSError("simulated candidate installation failure")
+                if target == destination and source.name.startswith(
+                    f".{destination.name}.backup-"
+                ):
+                    restore_attempts += 1
+                    raise OSError("simulated persistent restoration failure")
+                real_replace(source, target)
 
             with patch.object(
                 sync_module,
-                "_remove_directory",
-                side_effect=always_fail_backup,
+                "_replace_path",
+                side_effect=fail_install_and_restore,
             ):
-                with self.assertRaisesRegex(SyncError, "backup"):
+                with self.assertRaisesRegex(SyncError, "restore previous snapshot"):
                     sync_module.sync_snapshot(
                         FakeGitHubClient(commit="b" * 40),
                         destination,
                     )
 
-            self.assertEqual(backup_attempts, 1)
-            self.assertEqual(snapshot_bytes(destination), before)
-            self.assertEqual([path.name for path in root.iterdir()], ["a-stock-data"])
+            backups = [
+                path
+                for path in root.iterdir()
+                if path.name.startswith(f".{destination.name}.backup-")
+            ]
+            candidates = [
+                path
+                for path in root.iterdir()
+                if path.name.startswith(f".{destination.name}.tmp-")
+            ]
+            self.assertEqual(restore_attempts, 2)
+            self.assertFalse(destination.exists())
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(len(candidates), 1)
+            self.assertEqual(snapshot_bytes(backups[0]), before)
+            for name, content in valid_artifacts().items():
+                self.assertEqual((candidates[0] / name).read_bytes(), content)
+            candidate_metadata = json.loads(
+                (candidates[0] / "metadata.json").read_bytes()
+            )
+            self.assertEqual(candidate_metadata["upstream"]["commit"], "b" * 40)
+
+    def test_partial_backup_cleanup_failure_keeps_complete_new_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(commit="a" * 40), destination)
+            real_remove = sync_module._remove_directory
+
+            def partially_remove_backup(path: Path) -> None:
+                if path.name.startswith(f".{destination.name}.backup-"):
+                    (path / "CHANGELOG.md").unlink()
+                    raise OSError("simulated partial backup cleanup failure")
+                real_remove(path)
+
+            with patch.object(
+                sync_module,
+                "_remove_directory",
+                side_effect=partially_remove_backup,
+            ):
+                result = sync_module.sync_snapshot(
+                    FakeGitHubClient(commit="b" * 40),
+                    destination,
+                )
+
+            backups = [
+                path
+                for path in root.iterdir()
+                if path.name.startswith(f".{destination.name}.backup-")
+            ]
+            candidates = [
+                path
+                for path in root.iterdir()
+                if path.name.startswith(f".{destination.name}.tmp-")
+            ]
+            self.assertTrue(result.changed)
+            for name, content in valid_artifacts().items():
+                self.assertEqual((destination / name).read_bytes(), content)
+            metadata = json.loads((destination / "metadata.json").read_bytes())
+            self.assertEqual(metadata["upstream"]["commit"], "b" * 40)
+            self.assertEqual(len(backups), 1)
+            self.assertFalse((backups[0] / "CHANGELOG.md").exists())
+            self.assertEqual(candidates, [])
 
 
 class GitHubClientTests(unittest.TestCase):

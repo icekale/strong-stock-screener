@@ -377,6 +377,16 @@ class ArtifactValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ArtifactValidationError, "changelog version"):
             validate_artifacts(artifacts)
 
+    def test_autolink_does_not_hide_first_changelog_release(self) -> None:
+        artifacts = valid_artifacts()
+        artifacts["CHANGELOG.md"] = (
+            b"# Changelog\n\n<https://example.invalid/release-notes>\n"
+            b"## 9.9.9\n\n## 3.4.0\n"
+        )
+
+        with self.assertRaisesRegex(ArtifactValidationError, "changelog version"):
+            validate_artifacts(artifacts)
+
     def test_rejects_missing_empty_oversized_and_non_utf8_files(self) -> None:
         invalid_cases = {
             "missing": {"SKILL.md": VALID_SKILL, "CHANGELOG.md": VALID_CHANGELOG},

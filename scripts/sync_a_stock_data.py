@@ -113,6 +113,25 @@ _ATX_CLOSING_RE = re.compile(r"[ \t]+#+[ \t]*$")
 _RAW_HTML_TAG_RE = re.compile(
     r"<(script|pre|style|textarea)(?:[ \t>]|$)", re.IGNORECASE
 )
+_HTML_DECLARATION_RE = re.compile(r"<![A-Z]")
+_HTML_BLOCK_TAG_RE = re.compile(
+    r"</?(?:address|article|aside|base|basefont|blockquote|body|caption|center|"
+    r"col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|figcaption|figure|"
+    r"footer|form|frame|frameset|h[1-6]|head|header|hr|html|iframe|legend|li|"
+    r"link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|"
+    r"section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)"
+    r"(?:[ \t]+|/?>|$)",
+    re.IGNORECASE,
+)
+_HTML_COMPLETE_TAG_RE = re.compile(
+    r"(?:"
+    r"</[A-Za-z][A-Za-z0-9-]*[ \t]*>"
+    r"|<[A-Za-z][A-Za-z0-9-]*"
+    r"(?:[ \t]+[A-Za-z_:][A-Za-z0-9_.:-]*"
+    r"(?:[ \t]*=[ \t]*(?:[^\"'=<>` \t]+|'[^']*'|\"[^\"]*\"))?)*"
+    r"[ \t]*/?>"
+    r")[ \t]*$"
+)
 
 
 class SyncError(RuntimeError):
@@ -555,6 +574,7 @@ def _markdown_lines_with_headings(
         stripped = line_text.lstrip(" ")
         indent = len(line_text) - len(stripped)
         if indent <= 3 and stripped.startswith("<"):
+            is_html_block = True
             raw_tag_match = _RAW_HTML_TAG_RE.match(stripped)
             if stripped.startswith("<!--"):
                 if "-->" not in stripped[4:]:
@@ -565,14 +585,23 @@ def _markdown_lines_with_headings(
             elif stripped.casefold().startswith("<![cdata["):
                 if "]]>" not in stripped[9:]:
                     html_end_marker = "]]>"
+            elif _HTML_DECLARATION_RE.match(stripped) is not None:
+                if ">" not in stripped[2:]:
+                    html_end_marker = ">"
             elif raw_tag_match is not None:
                 closing_tag = f"</{raw_tag_match.group(1)}>"
                 if closing_tag.casefold() not in stripped.casefold():
                     html_end_marker = closing_tag
-            else:
+            elif (
+                _HTML_BLOCK_TAG_RE.match(stripped) is not None
+                or _HTML_COMPLETE_TAG_RE.fullmatch(stripped) is not None
+            ):
                 html_until_blank = True
-            lines_with_headings.append((line, None))
-            continue
+            else:
+                is_html_block = False
+            if is_html_block:
+                lines_with_headings.append((line, None))
+                continue
 
         lines_with_headings.append((line, _parse_atx_heading(line_text)))
     return lines_with_headings

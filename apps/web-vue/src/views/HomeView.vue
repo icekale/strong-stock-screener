@@ -136,9 +136,10 @@ const sectorFlowOption = computed<EChartsOption>(() => {
     },
     xAxis: {
       type: 'value',
+      splitNumber: 4,
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: '#697991', fontSize: 11, formatter: formatMoney },
+      axisLabel: { color: '#697991', fontSize: 11, formatter: formatMoney, hideOverlap: true },
       splitLine: { lineStyle: { color: '#d9e2ed' } }
     },
     yAxis: {

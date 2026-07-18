@@ -400,4 +400,26 @@ describe('HomeView dashboard', () => {
 
     wrapper.unmount();
   });
+
+  it('limits sector flow value-axis labels for narrow dashboard panels', async () => {
+    api.getMarketOverview.mockResolvedValueOnce(overviewFixture());
+    api.getMarketRankings.mockResolvedValueOnce(rankingsFixture());
+    api.getSectorRadar.mockResolvedValueOnce(sectorFlowFixture());
+    api.getSectorReplicaRadar.mockResolvedValueOnce(sectorTrendFixture());
+
+    const { renderCharts, wrapper } = await mountDashboard();
+    await flushPromises();
+    renderCharts();
+    await flushPromises();
+
+    const chart = wrapper.findAllComponents(ChartStub)[0];
+    const option = chart?.props('option') as {
+      xAxis: { splitNumber?: number; axisLabel: { hideOverlap?: boolean } };
+    };
+
+    expect(option.xAxis.splitNumber).toBe(4);
+    expect(option.xAxis.axisLabel.hideOverlap).toBe(true);
+
+    wrapper.unmount();
+  });
 });

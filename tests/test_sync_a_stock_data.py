@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import tempfile
+import time
 import unittest
 import urllib.error
 from contextlib import redirect_stderr, redirect_stdout
@@ -390,6 +391,20 @@ class SnapshotVerificationTests(unittest.TestCase):
             self.assertEqual(metadata["upstream"]["version"], "3.4.0")
             self.assertEqual(metadata["upstream"]["commit"], "b" * 40)
 
+    def test_rejects_symlinked_destination(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            real_destination = root / "real-snapshot"
+            sync_module.sync_snapshot(FakeGitHubClient(), real_destination)
+            destination = root / "snapshot-link"
+            destination.symlink_to(real_destination, target_is_directory=True)
+
+            with self.assertRaisesRegex(
+                ArtifactValidationError,
+                "destination.*(directory|symlink)",
+            ):
+                sync_module.verify_snapshot(destination)
+
     def test_rejects_unexpected_file_and_directory_entries(self) -> None:
         for entry_type in ("file", "directory"):
             with self.subTest(entry_type=entry_type), tempfile.TemporaryDirectory() as directory:
@@ -407,7 +422,58 @@ class SnapshotVerificationTests(unittest.TestCase):
                 ):
                     sync_module.verify_snapshot(destination)
 
-    def test_rejects_symlinked_required_file(self) -> None:
+    def test_rejects_symlinked_metadata_and_artifact_files(self) -> None:
+        for name in ("metadata.json", "LICENSE"):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                destination = root / "a-stock-data"
+                sync_module.sync_snapshot(FakeGitHubClient(), destination)
+                entry = destination / name
+                external = root / f"external-{name}"
+                external.write_bytes(entry.read_bytes())
+                entry.unlink()
+                entry.symlink_to(external)
+
+                with self.assertRaisesRegex(
+                    ArtifactValidationError,
+                    f"{name}.*(regular file|symlink)",
+                ):
+                    sync_module.verify_snapshot(destination)
+
+    def test_rejects_fifo_without_blocking(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(), destination)
+            license_path = destination / "LICENSE"
+            license_path.unlink()
+            os.mkfifo(license_path)
+
+            started_at = time.monotonic()
+            with self.assertRaisesRegex(
+                ArtifactValidationError,
+                "LICENSE.*regular file",
+            ):
+                sync_module.verify_snapshot(destination)
+
+            self.assertLess(time.monotonic() - started_at, 1.0)
+
+    def test_rejects_metadata_larger_than_local_read_limit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(), destination)
+            metadata_path = destination / "metadata.json"
+            metadata_path.write_bytes(
+                metadata_path.read_bytes()
+                + b" " * (sync_module.JSON_MAX_BYTES + 1)
+            )
+
+            with self.assertRaisesRegex(
+                ArtifactValidationError,
+                "metadata.json.*size limit",
+            ):
+                sync_module.verify_snapshot(destination)
+
+    def test_rejects_entry_swapped_to_symlink_before_relative_open(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             destination = root / "a-stock-data"
@@ -415,14 +481,34 @@ class SnapshotVerificationTests(unittest.TestCase):
             license_path = destination / "LICENSE"
             external_license = root / "external-license"
             external_license.write_bytes(license_path.read_bytes())
-            license_path.unlink()
-            license_path.symlink_to(external_license)
+            real_open = sync_module.os.open
+            swapped = False
 
-            with self.assertRaisesRegex(
+            def swap_before_open(
+                path: str | bytes | os.PathLike[str] | os.PathLike[bytes],
+                flags: int,
+                mode: int = 0o777,
+                *,
+                dir_fd: int | None = None,
+            ) -> int:
+                nonlocal swapped
+                if path == "LICENSE" and dir_fd is not None and not swapped:
+                    swapped = True
+                    license_path.unlink()
+                    license_path.symlink_to(external_license)
+                return real_open(path, flags, mode, dir_fd=dir_fd)
+
+            with patch.object(
+                sync_module.os,
+                "open",
+                side_effect=swap_before_open,
+            ), self.assertRaisesRegex(
                 ArtifactValidationError,
-                "LICENSE.*regular file",
+                "LICENSE.*(changed|open|symlink)",
             ):
                 sync_module.verify_snapshot(destination)
+
+            self.assertTrue(swapped)
 
     def test_rejects_changed_artifact_bytes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -711,6 +797,23 @@ class SnapshotSyncTests(unittest.TestCase):
             )
             self.assertEqual(client.downloads, [])
 
+    def test_same_commit_rejects_tampered_existing_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(), destination)
+            changelog = destination / "CHANGELOG.md"
+            changelog.write_bytes(changelog.read_bytes().replace(b"Updated", b"Changed"))
+            client = FakeGitHubClient()
+
+            with self.assertRaisesRegex(
+                ArtifactValidationError,
+                "CHANGELOG.md.*SHA256",
+            ):
+                sync_module.sync_snapshot(client, destination)
+
+            self.assertEqual(client.resolve_calls, 0)
+            self.assertEqual(client.downloads, [])
+
     def test_first_sync_writes_exact_bytes_metadata_and_result(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory) / "a-stock-data"
@@ -748,7 +851,7 @@ class SnapshotSyncTests(unittest.TestCase):
                 result.summary,
             )
             self.assertNotIn("/compare/", result.summary)
-            self.assertIn("Added: `信号层`, `行情层`", result.summary)
+            self.assertIn("Added: ` 信号层 `, ` 行情层 `", result.summary)
             with self.assertRaises(FrozenInstanceError):
                 result.changed = False
 
@@ -813,9 +916,9 @@ New 备用源 data details.
                 f"{'a' * 40}...{'b' * 40}",
                 result.summary,
             )
-            self.assertIn("Added: `数据层`", result.summary)
-            self.assertIn("Changed: `行情层`", result.summary)
-            self.assertIn("Removed: `信号层`", result.summary)
+            self.assertIn("Added: ` 数据层 `", result.summary)
+            self.assertIn("Changed: ` 行情层 `", result.summary)
+            self.assertIn("Removed: ` 信号层 `", result.summary)
             for name, content in sorted(updated_artifacts.items()):
                 self.assertIn(
                     f"| `{name}` | {len(content)} | "
@@ -836,6 +939,32 @@ New 备用源 data details.
             self.assertIn("备用源", result.summary)
             self.assertIn("Upstream Markdown is not executed", result.summary)
             self.assertIn("runtime providers are unchanged", result.summary)
+
+    def test_report_uses_injection_safe_code_spans_for_section_headings(self) -> None:
+        malicious_heading = (
+            "Risk ```` ![pixel](https://example.invalid/image) "
+            "[link](https://example.invalid) Tencent"
+        )
+        artifacts = valid_artifacts()
+        artifacts["SKILL.md"] = f"""---
+name: a-stock-data
+version: 3.5.0
+---
+# A股全栈数据工具包 V3.5.0
+## {malicious_heading}
+Changed provider details.
+""".encode()
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = sync_module.sync_snapshot(
+                FakeGitHubClient(commit="b" * 40, artifacts=artifacts),
+                Path(directory) / "a-stock-data",
+            )
+
+        safe_span = f"````` {malicious_heading} `````"
+        self.assertEqual(result.summary.count(safe_span), 2)
+        self.assertNotIn(f"`{malicious_heading}`", result.summary)
+        self.assertIn(f"- Added: {safe_span}", result.summary)
 
     def test_download_failure_preserves_previous_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1217,6 +1346,83 @@ class CliTests(unittest.TestCase):
 
             self.assertEqual(status, 0)
             self.assertEqual(summary_path.read_bytes(), result.summary.encode("utf-8"))
+
+    def test_summary_write_failure_reports_updated_snapshot(self) -> None:
+        commit = "f" * 40
+        token = "secret-summary-token"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / "a-stock-data"
+            summary_parent = root / token
+            summary_parent.write_text("not a directory", encoding="utf-8")
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": token},
+                clear=True,
+            ), redirect_stdout(stdout), redirect_stderr(stderr):
+                status = sync_module.main(
+                    [
+                        "--destination",
+                        str(destination),
+                        "--summary-path",
+                        str(summary_parent / "summary.md"),
+                    ],
+                    client_factory=lambda received_token: FakeGitHubClient(
+                        commit=commit
+                    ),
+                )
+
+            metadata = sync_module.verify_snapshot(destination)
+
+        self.assertEqual(status, 1)
+        self.assertEqual(metadata["upstream"]["commit"], commit)
+        self.assertIn(f"updated none -> {commit}", stdout.getvalue())
+        self.assertIn("snapshot was updated", stderr.getvalue())
+        self.assertIn("summary writing failed", stderr.getvalue())
+        self.assertIn(commit, stderr.getvalue())
+        self.assertNotIn(token, stdout.getvalue() + stderr.getvalue())
+
+    def test_summary_write_failure_reports_unchanged_snapshot(self) -> None:
+        commit = "f" * 40
+        token = "secret-summary-token"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(commit=commit), destination)
+            summary_parent = root / token
+            summary_parent.write_text("not a directory", encoding="utf-8")
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+
+            with patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": token},
+                clear=True,
+            ), redirect_stdout(stdout), redirect_stderr(stderr):
+                status = sync_module.main(
+                    [
+                        "--destination",
+                        str(destination),
+                        "--summary-path",
+                        str(summary_parent / "summary.md"),
+                    ],
+                    client_factory=lambda received_token: FakeGitHubClient(
+                        commit=commit
+                    ),
+                )
+
+            metadata = sync_module.verify_snapshot(destination)
+
+        self.assertEqual(status, 1)
+        self.assertEqual(metadata["upstream"]["commit"], commit)
+        self.assertIn(f"unchanged {commit}", stdout.getvalue())
+        self.assertIn("snapshot is unchanged", stderr.getvalue())
+        self.assertIn("summary writing failed", stderr.getvalue())
+        self.assertIn(commit, stderr.getvalue())
+        self.assertNotIn(token, stdout.getvalue() + stderr.getvalue())
 
     def test_errors_are_concise_redacted_and_have_no_traceback(self) -> None:
         error_types = (SyncError, ArtifactValidationError)

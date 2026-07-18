@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import http.client
 import json
 import os
 import re
 import shutil
+import stat
 import sys
 import tempfile
 import urllib.error
@@ -66,6 +68,9 @@ _UPSTREAM_FIELDS = {
     "commit_url",
 }
 _ARTIFACT_FIELDS = {"raw_url", "size", "sha256"}
+_DIRECTORY_OPEN_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+_FILE_OPEN_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+_READ_CHUNK_BYTES = 64 * 1024
 _APACHE_LICENSE_HEADER_RE = re.compile(
     r"\A[ \t]*Apache License[ \t]*\r?\n"
     r"[ \t]*Version 2\.0, January 2004[ \t]*(?:\r?\n|\Z)"
@@ -79,6 +84,10 @@ class SyncError(RuntimeError):
 
 
 class ArtifactValidationError(SyncError):
+    pass
+
+
+class _SnapshotMissingError(SyncError):
     pass
 
 
@@ -426,144 +435,179 @@ def _parse_rfc3339(
     return parsed
 
 
-def _load_metadata(destination: Path) -> SyncMetadata:
-    if not destination.exists():
-        raise SyncError(f"snapshot destination does not exist: {destination}")
-    if not destination.is_dir():
-        raise SyncError(f"snapshot destination is not a directory: {destination}")
-
-    metadata_path = destination / "metadata.json"
+def _parse_metadata(content: bytes) -> SyncMetadata:
+    metadata_name = "metadata.json"
     try:
-        payload = json.loads(metadata_path.read_bytes())
-    except FileNotFoundError as error:
-        raise SyncError(f"snapshot is missing {metadata_path.name}") from error
+        payload = json.loads(content)
     except (json.JSONDecodeError, RecursionError, UnicodeDecodeError) as error:
-        raise SyncError(f"{metadata_path.name} contains malformed JSON") from error
-    except OSError as error:
-        raise SyncError(f"could not read {metadata_path.name}") from error
+        raise SyncError(f"{metadata_name} contains malformed JSON") from error
 
     if _json_nesting_exceeds_limit(payload):
-        raise SyncError(f"{metadata_path.name} contains malformed JSON")
+        raise SyncError(f"{metadata_name} contains malformed JSON")
     if not isinstance(payload, dict) or set(payload) != _METADATA_FIELDS:
-        raise SyncError(f"{metadata_path.name} has invalid top-level fields")
+        raise SyncError(f"{metadata_name} has invalid top-level fields")
     if type(payload.get("schema_version")) is not int or payload["schema_version"] != 1:
-        raise SyncError(f"{metadata_path.name} field schema_version must equal 1")
+        raise SyncError(f"{metadata_name} field schema_version must equal 1")
 
     upstream = payload.get("upstream")
     artifacts = payload.get("artifacts")
     if not isinstance(upstream, dict) or not isinstance(artifacts, dict):
-        raise SyncError(f"{metadata_path.name} fields upstream and artifacts are invalid")
+        raise SyncError(f"{metadata_name} fields upstream and artifacts are invalid")
     if set(upstream) != _UPSTREAM_FIELDS:
-        raise SyncError(f"{metadata_path.name} upstream fields are invalid")
+        raise SyncError(f"{metadata_name} upstream fields are invalid")
     if set(artifacts) != set(REQUIRED_FILES):
         raise SyncError(
-            f"{metadata_path.name} field artifacts must contain exactly: "
+            f"{metadata_name} field artifacts must contain exactly: "
             f"{', '.join(REQUIRED_FILES)}"
         )
 
     for field in _UPSTREAM_FIELDS:
         if not isinstance(upstream.get(field), str):
-            raise SyncError(f"{metadata_path.name} field upstream.{field} must be a string")
+            raise SyncError(f"{metadata_name} field upstream.{field} must be a string")
     if upstream["owner"] != OWNER:
-        raise SyncError(f"{metadata_path.name} field upstream.owner is invalid")
+        raise SyncError(f"{metadata_name} field upstream.owner is invalid")
     if upstream["repository"] != REPOSITORY:
-        raise SyncError(f"{metadata_path.name} field upstream.repository is invalid")
+        raise SyncError(f"{metadata_name} field upstream.repository is invalid")
     if upstream["branch"] != BRANCH:
-        raise SyncError(f"{metadata_path.name} field upstream.branch is invalid")
+        raise SyncError(f"{metadata_name} field upstream.branch is invalid")
 
     commit = upstream["commit"]
     version = upstream["version"]
     if SHA_RE.fullmatch(commit) is None:
-        raise SyncError(f"{metadata_path.name} field upstream.commit is invalid")
+        raise SyncError(f"{metadata_name} field upstream.commit is invalid")
     if SEMANTIC_VERSION_RE.fullmatch(version) is None:
-        raise SyncError(f"{metadata_path.name} field upstream.version is invalid")
+        raise SyncError(f"{metadata_name} field upstream.version is invalid")
     _parse_rfc3339(
         upstream["committed_at"],
-        f"{metadata_path.name} field upstream.committed_at",
+        f"{metadata_name} field upstream.committed_at",
         SyncError,
     )
     _parse_rfc3339(
         upstream["synced_at"],
-        f"{metadata_path.name} field upstream.synced_at",
+        f"{metadata_name} field upstream.synced_at",
         SyncError,
     )
     expected_commit_url = f"https://github.com/{REPOSITORY_IDENTITY}/commit/{commit}"
     if upstream["commit_url"] != expected_commit_url:
-        raise SyncError(f"{metadata_path.name} field upstream.commit_url is invalid")
+        raise SyncError(f"{metadata_name} field upstream.commit_url is invalid")
 
     for name in REQUIRED_FILES:
         artifact = artifacts[name]
         if not isinstance(artifact, dict):
-            raise SyncError(f"{metadata_path.name} artifact {name} must be an object")
+            raise SyncError(f"{metadata_name} artifact {name} must be an object")
         if set(artifact) != _ARTIFACT_FIELDS:
-            raise SyncError(f"{metadata_path.name} artifact {name} fields are invalid")
+            raise SyncError(f"{metadata_name} artifact {name} fields are invalid")
         raw_url = artifact.get("raw_url")
         size = artifact.get("size")
         sha256 = artifact.get("sha256")
         if not isinstance(raw_url, str):
-            raise SyncError(f"{metadata_path.name} artifact {name} raw_url is invalid")
+            raise SyncError(f"{metadata_name} artifact {name} raw_url is invalid")
         if type(size) is not int or size < 0:
-            raise SyncError(f"{metadata_path.name} artifact {name} size is invalid")
+            raise SyncError(f"{metadata_name} artifact {name} size is invalid")
         if not isinstance(sha256, str) or SHA256_RE.fullmatch(sha256) is None:
-            raise SyncError(f"{metadata_path.name} artifact {name} sha256 is invalid")
+            raise SyncError(f"{metadata_name} artifact {name} sha256 is invalid")
 
     return cast(SyncMetadata, payload)
 
 
-def _load_existing_snapshot(destination: Path) -> _ExistingSnapshot | None:
-    if not destination.exists():
-        return None
-    metadata = _load_metadata(destination)
-    skill_path = destination / "SKILL.md"
+def _open_snapshot_directory(destination: Path) -> int:
     try:
-        skill = skill_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError) as error:
-        raise SyncError("could not read existing SKILL.md") from error
-    return _ExistingSnapshot(
-        commit=metadata["upstream"]["commit"],
-        version=metadata["upstream"]["version"],
-        skill=skill,
-        metadata=metadata,
-    )
-
-
-def verify_snapshot(destination: Path) -> SyncMetadata:
-    metadata = _load_metadata(destination)
-    try:
-        entries = {entry.name: entry for entry in destination.iterdir()}
+        return os.open(destination, _DIRECTORY_OPEN_FLAGS)
+    except FileNotFoundError:
+        raise _SnapshotMissingError(
+            f"snapshot destination does not exist: {destination}"
+        ) from None
     except OSError as error:
-        raise ArtifactValidationError(
-            f"could not enumerate snapshot destination: {destination}"
-        ) from error
+        if error.errno in (errno.ELOOP, errno.ENOTDIR):
+            raise ArtifactValidationError(
+                f"snapshot destination is not a non-symlink directory: {destination}"
+            ) from None
+        raise SyncError(f"could not open snapshot destination: {destination}") from None
 
-    expected_names = {"metadata.json", *REQUIRED_FILES}
-    unexpected_names = sorted(set(entries) - expected_names)
-    if unexpected_names:
-        raise ArtifactValidationError(
-            f"unexpected snapshot entries: {', '.join(unexpected_names)}"
-        )
-    missing_names = sorted(expected_names - set(entries))
-    if missing_names:
-        raise ArtifactValidationError(
-            f"missing snapshot entries: {', '.join(missing_names)}"
-        )
-    for name in sorted(expected_names):
-        entry = entries[name]
-        if entry.is_symlink() or not entry.is_file():
+
+def _read_bounded_entry(
+    directory_fd: int,
+    name: str,
+    max_bytes: int,
+) -> bytes:
+    try:
+        entry_fd = os.open(name, _FILE_OPEN_FLAGS, dir_fd=directory_fd)
+    except OSError as error:
+        if error.errno == errno.ELOOP:
+            raise ArtifactValidationError(f"snapshot entry {name} is a symlink") from None
+        if error.errno in (errno.ENOENT, errno.ENOTDIR, getattr(errno, "ESTALE", -1)):
+            raise ArtifactValidationError(
+                f"snapshot entry {name} changed while being verified"
+            ) from None
+        raise ArtifactValidationError(f"could not open snapshot entry {name}") from None
+
+    try:
+        try:
+            entry_stat = os.fstat(entry_fd)
+        except OSError:
+            raise ArtifactValidationError(f"could not inspect snapshot entry {name}") from None
+        if not stat.S_ISREG(entry_stat.st_mode):
             raise ArtifactValidationError(f"snapshot entry {name} is not a regular file")
 
-    artifacts: dict[str, bytes] = {}
-    for name in REQUIRED_FILES:
-        try:
-            artifacts[name] = (destination / name).read_bytes()
-        except FileNotFoundError as error:
-            raise ArtifactValidationError(f"local artifact {name} is missing") from error
-        except OSError as error:
-            raise ArtifactValidationError(f"could not read local artifact {name}") from error
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            read_size = min(_READ_CHUNK_BYTES, max_bytes - total + 1)
+            try:
+                chunk = os.read(entry_fd, read_size)
+            except OSError:
+                raise ArtifactValidationError(
+                    f"could not read snapshot entry {name}"
+                ) from None
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+            total += len(chunk)
+            if total > max_bytes:
+                raise ArtifactValidationError(f"{name} exceeds its size limit")
+    finally:
+        os.close(entry_fd)
 
+
+def _read_verified_snapshot(
+    destination: Path,
+) -> tuple[SyncMetadata, dict[str, bytes]]:
+    directory_fd = _open_snapshot_directory(destination)
+    try:
+        try:
+            entry_names = os.listdir(directory_fd)
+        except OSError:
+            raise ArtifactValidationError(
+                f"could not enumerate snapshot destination: {destination}"
+            ) from None
+
+        expected_names = {"metadata.json", *REQUIRED_FILES}
+        unexpected_names = sorted(set(entry_names) - expected_names)
+        if unexpected_names:
+            raise ArtifactValidationError(
+                f"unexpected snapshot entries: {', '.join(unexpected_names)}"
+            )
+        missing_names = sorted(expected_names - set(entry_names))
+        if missing_names:
+            raise ArtifactValidationError(
+                f"missing snapshot entries: {', '.join(missing_names)}"
+            )
+
+        metadata_bytes = _read_bounded_entry(
+            directory_fd,
+            "metadata.json",
+            JSON_MAX_BYTES,
+        )
+        artifacts = {
+            name: _read_bounded_entry(directory_fd, name, MAX_FILE_BYTES[name])
+            for name in REQUIRED_FILES
+        }
+    finally:
+        os.close(directory_fd)
+
+    metadata = _parse_metadata(metadata_bytes)
     version = validate_artifacts(artifacts)
-    metadata_version = metadata["upstream"]["version"]
-    if version != metadata_version:
+    if version != metadata["upstream"]["version"]:
         raise ArtifactValidationError(
             "metadata version does not match SKILL.md frontmatter version"
         )
@@ -583,6 +627,24 @@ def verify_snapshot(destination: Path) -> SyncMetadata:
         if artifact_metadata["sha256"] != hashlib.sha256(content).hexdigest():
             raise ArtifactValidationError(f"{name} SHA256 does not match local bytes")
 
+    return metadata, artifacts
+
+
+def _load_existing_snapshot(destination: Path) -> _ExistingSnapshot | None:
+    try:
+        metadata, artifacts = _read_verified_snapshot(destination)
+    except _SnapshotMissingError:
+        return None
+    return _ExistingSnapshot(
+        commit=metadata["upstream"]["commit"],
+        version=metadata["upstream"]["version"],
+        skill=artifacts["SKILL.md"].decode("utf-8"),
+        metadata=metadata,
+    )
+
+
+def verify_snapshot(destination: Path) -> SyncMetadata:
+    metadata, _artifacts = _read_verified_snapshot(destination)
     return metadata
 
 
@@ -606,10 +668,16 @@ def _format_synced_at(now: Callable[[], datetime]) -> str:
     return current.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _markdown_code_span(value: str) -> str:
+    longest_run = max((len(run) for run in re.findall(r"`+", value)), default=0)
+    delimiter = "`" * (longest_run + 1)
+    return f"{delimiter} {value} {delimiter}"
+
+
 def _format_section_list(names: list[str]) -> str:
     if not names:
         return "None"
-    return ", ".join(f"`{name}`" for name in sorted(names))
+    return ", ".join(_markdown_code_span(name) for name in sorted(names))
 
 
 def _tracked_section_terms(
@@ -686,7 +754,8 @@ def _build_summary(
     )
     if tracked_matches:
         match_text = "; ".join(
-            f"`{name}` ({', '.join(f'`{term}`' for term in terms)})"
+            f"{_markdown_code_span(name)} "
+            f"({', '.join(f'`{term}`' for term in terms)})"
             for name, terms in tracked_matches
         )
         lines.extend(
@@ -925,13 +994,25 @@ def main(
 
         token = os.environ.get("GITHUB_TOKEN")
         result = sync_snapshot(client_factory(token), args.destination)
-        if args.summary_path is not None:
-            _write_summary(args.summary_path, result.summary)
         if result.changed:
             previous = result.previous_commit or "none"
             print(f"updated {previous} -> {result.current_commit}")
+            snapshot_status = "snapshot was updated"
         else:
             print(f"unchanged {result.current_commit}")
+            snapshot_status = "snapshot is unchanged"
+        if args.summary_path is not None:
+            try:
+                _write_summary(args.summary_path, result.summary)
+            except SyncError as error:
+                message = (
+                    f"{snapshot_status} at {result.current_commit}, but summary "
+                    f"writing failed: {error}"
+                )
+                if token:
+                    message = message.replace(token, "[redacted]")
+                print(f"error: {message}", file=sys.stderr)
+                return 1
         return 0
     except SyncError as error:
         message = str(error)

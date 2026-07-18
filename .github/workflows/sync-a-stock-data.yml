@@ -64,10 +64,16 @@ jobs:
 
             merge_base="$(git merge-base main "${remote_ref}")"
             if git diff --quiet "${merge_base}" "${remote_ref}" -- . ":(exclude)third_party/a-stock-data"; then
-              remote_snapshot_root="$(mktemp -d "${RUNNER_TEMP}/a-stock-data-remote.XXXXXX")"
-              if git archive "${remote_ref}" -- "third_party/a-stock-data" | tar -x -C "${remote_snapshot_root}" && \
-                python scripts/sync_a_stock_data.py --check --destination "${remote_snapshot_root}/third_party/a-stock-data" && \
-                python - "third_party/a-stock-data" "${remote_snapshot_root}/third_party/a-stock-data" <<'PY'
+              expected_remote_modes=$'100644\n100644\n100644\n100644'
+              remote_modes="$(
+                git ls-tree -r "${remote_ref}" -- "third_party/a-stock-data" | \
+                  awk '{print $1}'
+              )"
+              if [[ "${remote_modes}" == "${expected_remote_modes}" ]]; then
+                remote_snapshot_root="$(mktemp -d "${RUNNER_TEMP}/a-stock-data-remote.XXXXXX")"
+                if git archive "${remote_ref}" -- "third_party/a-stock-data" | tar -x -C "${remote_snapshot_root}" && \
+                  python scripts/sync_a_stock_data.py --check --destination "${remote_snapshot_root}/third_party/a-stock-data" && \
+                  python - "third_party/a-stock-data" "${remote_snapshot_root}/third_party/a-stock-data" <<'PY'
           import json
           import sys
           from pathlib import Path
@@ -90,11 +96,12 @@ jobs:
           if proposal_identity(local_root) != proposal_identity(remote_root):
               raise SystemExit(1)
           PY
-              then
-                proposal_changed=false
-                echo "The remote synchronization branch already proposes this upstream content."
+                then
+                  proposal_changed=false
+                  echo "The remote synchronization branch already proposes this upstream content."
+                fi
+                rm -rf -- "${remote_snapshot_root}"
               fi
-              rm -rf -- "${remote_snapshot_root}"
             fi
           else
             ls_remote_status="$?"
@@ -127,6 +134,8 @@ jobs:
             else
               git push origin "HEAD:refs/heads/${branch}"
             fi
+          else
+            git push --force-with-lease="refs/heads/${branch}:${remote_sha}" origin "${remote_sha}:refs/heads/${branch}"
           fi
 
           desired_title="chore: review a-stock-data ${upstream_version}"

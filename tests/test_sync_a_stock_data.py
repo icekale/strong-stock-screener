@@ -5,11 +5,13 @@ import http.client
 import io
 import json
 import os
+import re
 import socket
 import tempfile
 import time
 import unittest
 import urllib.error
+import urllib.request
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timedelta, timezone
@@ -119,8 +121,9 @@ class FakeGitHubClient:
 
 
 class FakeResponse:
-    def __init__(self, content: bytes) -> None:
+    def __init__(self, content: bytes, response_url: str | None = None) -> None:
         self.content = content
+        self.response_url = response_url
         self.read_limits: list[int] = []
 
     def __enter__(self) -> FakeResponse:
@@ -133,6 +136,9 @@ class FakeResponse:
         self.read_limits.append(amount)
         return self.content[:amount]
 
+    def geturl(self) -> str | None:
+        return self.response_url
+
 
 class HeaderResponse(FakeResponse):
     def __init__(self, content: bytes, content_length: int) -> None:
@@ -144,6 +150,26 @@ class IncompleteResponse(FakeResponse):
     def read(self, amount: int) -> bytes:
         self.read_limits.append(amount)
         raise http.client.IncompleteRead(self.content, amount)
+
+
+class FakeOpener:
+    def __init__(self, *effects: FakeResponse | BaseException) -> None:
+        self.effects = list(effects)
+        self.calls: list[tuple[urllib.request.Request, float]] = []
+
+    def open(
+        self,
+        request: urllib.request.Request,
+        *,
+        timeout: float,
+    ) -> FakeResponse:
+        self.calls.append((request, timeout))
+        effect = self.effects.pop(0)
+        if isinstance(effect, BaseException):
+            raise effect
+        if effect.response_url is None:
+            effect.response_url = request.full_url
+        return effect
 
 
 def snapshot_bytes(destination: Path) -> dict[str, bytes]:
@@ -1112,10 +1138,9 @@ Changed provider details.
                 destination,
             )
 
-        self.assertLessEqual(len(result.summary), sync_module.MAX_SUMMARY_CHARS)
-        self.assertLessEqual(
-            len(result.summary.encode("utf-8")), sync_module.MAX_SUMMARY_CHARS
-        )
+        self.assertEqual(sync_module.MAX_SUMMARY_CHARS, 60_000)
+        self.assertLessEqual(len(result.summary), 60_000)
+        self.assertLessEqual(len(result.summary.encode("utf-8")), 60_000)
         self.assertIn("# Upstream a-stock-data", result.summary)
         self.assertIn("Previous version: `3.4.0`", result.summary)
         self.assertIn("Current version: `3.5.0`", result.summary)
@@ -1143,8 +1168,9 @@ Changed provider details.
         ]
         self.assertTrue(untrusted_lines)
         for line in untrusted_lines:
-            self.assertGreater(line.count("`` "), 0)
-            self.assertEqual(line.count("`` "), line.count(" ``"))
+            code_span_delimiters = re.findall(r"(?<!`)``(?!`)", line)
+            self.assertGreater(len(code_span_delimiters), 0)
+            self.assertEqual(len(code_span_delimiters) % 2, 0)
 
     def test_download_failure_preserves_previous_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -1675,6 +1701,75 @@ class CliTests(unittest.TestCase):
 
 
 class GitHubClientTests(unittest.TestCase):
+    def test_redirect_handler_accepts_only_the_same_https_origin(self) -> None:
+        handler_class = getattr(
+            sync_module,
+            "_SameOriginHTTPSRedirectHandler",
+            None,
+        )
+        self.assertIsNotNone(handler_class)
+        handler = handler_class()
+        token = "secret-redirect-token"
+        request = urllib.request.Request(
+            "https://api.github.com/source",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+
+        redirected = handler.redirect_request(
+            request,
+            None,
+            302,
+            "Found",
+            {},
+            "https://api.github.com/target",
+        )
+        self.assertEqual(redirected.full_url, "https://api.github.com/target")
+
+        for target in (
+            "http://api.github.com/target",
+            "https://raw.githubusercontent.com/target",
+        ):
+            with self.subTest(target=target), self.assertRaises(
+                urllib.error.URLError
+            ) as raised:
+                handler.redirect_request(
+                    request,
+                    None,
+                    302,
+                    "Found",
+                    {},
+                    target,
+                )
+            message = str(raised.exception)
+            self.assertNotIn(token, message)
+            self.assertNotIn("Authorization", message)
+
+    def test_rejects_final_response_url_origin_mismatch(self) -> None:
+        requested_url = (
+            "https://raw.githubusercontent.com/simonlin1212/a-stock-data/"
+            f"{'a' * 40}/SKILL.md"
+        )
+        response = FakeResponse(b"raw", "https://example.invalid/escaped")
+
+        with patch.object(
+            sync_module.urllib.request,
+            "build_opener",
+        ) as build_opener, patch.object(
+            sync_module.urllib.request,
+            "urlopen",
+            return_value=response,
+        ):
+            build_opener.return_value.open.return_value = response
+            with self.assertRaisesRegex(SyncError, "origin mismatch") as raised:
+                sync_module.GitHubClient(token="secret-token").download_file(
+                    "a" * 40,
+                    "SKILL.md",
+                    3,
+                )
+
+        self.assertIn(requested_url, str(raised.exception))
+        self.assertNotIn("secret-token", str(raised.exception))
+
     def test_reads_api_endpoints_and_raw_file_with_expected_requests(self) -> None:
         commit = "b" * 40
         responses = [
@@ -1690,11 +1785,12 @@ class GitHubClientTests(unittest.TestCase):
             FakeResponse(b"raw"),
         ]
 
+        opener = FakeOpener(*responses)
         with patch.object(
             sync_module.urllib.request,
-            "urlopen",
-            side_effect=responses,
-        ) as urlopen:
+            "build_opener",
+            return_value=opener,
+        ):
             client = sync_module.GitHubClient(token="secret-token", timeout=7)
             self.assertEqual(client.repository_identity(), "simonlin1212/a-stock-data")
             self.assertEqual(
@@ -1703,7 +1799,7 @@ class GitHubClientTests(unittest.TestCase):
             )
             self.assertEqual(client.download_file(commit, "SKILL.md", 3), b"raw")
 
-        requests = [call.args[0] for call in urlopen.call_args_list]
+        requests = [request for request, _timeout in opener.calls]
         self.assertEqual(
             [request.full_url for request in requests],
             [
@@ -1716,34 +1812,42 @@ class GitHubClientTests(unittest.TestCase):
             ],
         )
         self.assertEqual(
-            [call.kwargs["timeout"] for call in urlopen.call_args_list],
+            [timeout for _request, timeout in opener.calls],
             [7, 7, 7],
         )
-        for request in requests:
+        for request in requests[:2]:
             headers = {name.lower(): value for name, value in request.header_items()}
             self.assertEqual(headers["accept"], "application/vnd.github+json")
             self.assertEqual(headers["authorization"], "Bearer secret-token")
             self.assertIn("StockMaster", headers["user-agent"])
+        raw_headers = {
+            name.lower(): value for name, value in requests[2].header_items()
+        }
+        self.assertEqual(raw_headers["accept"], "application/vnd.github+json")
+        self.assertNotIn("authorization", raw_headers)
+        self.assertIn("StockMaster", raw_headers["user-agent"])
         self.assertEqual(responses[0].read_limits, [1_000_001])
         self.assertEqual(responses[1].read_limits, [1_000_001])
         self.assertEqual(responses[2].read_limits, [4])
 
     def test_rejects_oversized_json_and_raw_responses(self) -> None:
         oversized_json = FakeResponse(b" " * 1_000_001)
+        json_opener = FakeOpener(oversized_json)
         with patch.object(
             sync_module.urllib.request,
-            "urlopen",
-            return_value=oversized_json,
+            "build_opener",
+            return_value=json_opener,
         ):
             with self.assertRaisesRegex(ArtifactValidationError, "JSON response"):
                 sync_module.GitHubClient().repository_identity()
         self.assertEqual(oversized_json.read_limits, [1_000_001])
 
         oversized_raw = FakeResponse(b"1234")
+        raw_opener = FakeOpener(oversized_raw)
         with patch.object(
             sync_module.urllib.request,
-            "urlopen",
-            return_value=oversized_raw,
+            "build_opener",
+            return_value=raw_opener,
         ):
             with self.assertRaisesRegex(ArtifactValidationError, "SKILL.md"):
                 sync_module.GitHubClient().download_file("a" * 40, "SKILL.md", 3)
@@ -1756,10 +1860,11 @@ class GitHubClientTests(unittest.TestCase):
             f"{'a' * 40}/SKILL.md"
         )
 
+        opener = FakeOpener(response)
         with patch.object(
             sync_module.urllib.request,
-            "urlopen",
-            return_value=response,
+            "build_opener",
+            return_value=opener,
         ):
             with self.assertRaisesRegex(SyncError, "truncated") as raised:
                 sync_module.GitHubClient().download_file("a" * 40, "SKILL.md", 4)
@@ -1769,11 +1874,12 @@ class GitHubClientTests(unittest.TestCase):
 
     def test_rejects_content_length_over_limit_before_read(self) -> None:
         response = HeaderResponse(b"raw", content_length=4)
+        opener = FakeOpener(response)
 
         with patch.object(
             sync_module.urllib.request,
-            "urlopen",
-            return_value=response,
+            "build_opener",
+            return_value=opener,
         ):
             with self.assertRaisesRegex(SyncError, "size limit"):
                 sync_module.GitHubClient().download_file("a" * 40, "SKILL.md", 3)
@@ -1787,10 +1893,11 @@ class GitHubClientTests(unittest.TestCase):
             f"{'a' * 40}/SKILL.md"
         )
 
+        opener = FakeOpener(response)
         with patch.object(
             sync_module.urllib.request,
-            "urlopen",
-            return_value=response,
+            "build_opener",
+            return_value=opener,
         ):
             with self.assertRaises(SyncError) as raised:
                 sync_module.GitHubClient(token="secret-token").download_file(
@@ -1806,10 +1913,11 @@ class GitHubClientTests(unittest.TestCase):
 
     def test_rejects_malformed_json_and_non_object_responses(self) -> None:
         for content in (b"{", b"[]"):
+            opener = FakeOpener(FakeResponse(content))
             with self.subTest(content=content), patch.object(
                 sync_module.urllib.request,
-                "urlopen",
-                return_value=FakeResponse(content),
+                "build_opener",
+                return_value=opener,
             ):
                 with self.assertRaises(ArtifactValidationError):
                     sync_module.GitHubClient().repository_identity()
@@ -1818,10 +1926,11 @@ class GitHubClientTests(unittest.TestCase):
         deeply_nested_json = b"[" * 10_000 + b"0" + b"]" * 10_000
         self.assertLess(len(deeply_nested_json), 1_000_000)
 
+        opener = FakeOpener(FakeResponse(deeply_nested_json))
         with patch.object(
             sync_module.urllib.request,
-            "urlopen",
-            return_value=FakeResponse(deeply_nested_json),
+            "build_opener",
+            return_value=opener,
         ):
             with self.assertRaisesRegex(ArtifactValidationError, "malformed JSON"):
                 sync_module.GitHubClient().repository_identity()
@@ -1835,19 +1944,26 @@ class GitHubClientTests(unittest.TestCase):
         )
 
         for failure in failures:
-            with self.subTest(failure=failure), patch.object(
-                sync_module.urllib.request,
-                "urlopen",
-                side_effect=failure,
-            ):
-                with self.assertRaises(SyncError) as raised:
-                    sync_module.GitHubClient(token="secret-token").repository_identity()
-                self.assertIn(
-                    "https://api.github.com/repos/simonlin1212/a-stock-data",
-                    str(raised.exception),
-                )
-                self.assertNotIn("secret-token", str(raised.exception))
-                self.assertIsNone(raised.exception.__cause__)
+            opener = FakeOpener(failure)
+            try:
+                with self.subTest(failure=failure), patch.object(
+                    sync_module.urllib.request,
+                    "build_opener",
+                    return_value=opener,
+                ):
+                    with self.assertRaises(SyncError) as raised:
+                        sync_module.GitHubClient(
+                            token="secret-token"
+                        ).repository_identity()
+                    self.assertIn(
+                        "https://api.github.com/repos/simonlin1212/a-stock-data",
+                        str(raised.exception),
+                    )
+                    self.assertNotIn("secret-token", str(raised.exception))
+                    self.assertIsNone(raised.exception.__cause__)
+            finally:
+                if isinstance(failure, urllib.error.HTTPError):
+                    failure.close()
 
 
 if __name__ == "__main__":

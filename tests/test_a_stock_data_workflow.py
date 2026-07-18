@@ -54,6 +54,35 @@ BRANCH = "automation/a-stock-data-sync"
 REPOSITORY_OWNER = "acme"
 
 
+def complete_apache_license_fixture() -> bytes:
+    operative_terms = "\n".join(
+        "      Complete synthetic license term "
+        f"{index:03d} preserves the operative Apache 2.0 grant language."
+        for index in range(120)
+    )
+    return (
+        "Apache License\n"
+        "Version 2.0, January 2004\n"
+        "http://www.apache.org/licenses/\n\n"
+        "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION\n\n"
+        "1. Definitions.\n\n"
+        "2. Grant of Copyright License.\n\n"
+        "3. Grant of Patent License.\n\n"
+        "4. Redistribution.\n\n"
+        "5. Submission of Contributions.\n\n"
+        "6. Trademarks.\n\n"
+        "7. Disclaimer of Warranty.\n\n"
+        "8. Limitation of Liability.\n\n"
+        "9. Accepting Warranty or Additional Liability.\n\n"
+        f"{operative_terms}\n\n"
+        "END OF TERMS AND CONDITIONS\n\n"
+        "APPENDIX: How to apply the Apache License to your work.\n\n"
+        "Copyright 2026 Example Copyright Owner\n\n"
+        "Licensed under the Apache License, Version 2.0 (the \"License\");\n"
+        "you may not use this file except in compliance with the License.\n"
+    ).encode()
+
+
 def top_level_block(source: str, key: str) -> str:
     lines = source.splitlines()
     start = next(
@@ -142,7 +171,7 @@ def proposal_snapshot(
         "CHANGELOG.md": (
             f"# Changelog\n\n## {version}\n\n- Workflow test snapshot.\n"
         ).encode(),
-        "LICENSE": b"Apache License\nVersion 2.0, January 2004\n",
+        "LICENSE": complete_apache_license_fixture(),
     }
     metadata = {
         "schema_version": 1,
@@ -298,9 +327,12 @@ class WorkflowShellHarness:
         snapshot: dict[str, bytes],
         *,
         extra_files: dict[str, bytes] | None = None,
+        executable_snapshot_file: str | None = None,
     ) -> str:
         self.git("switch", "-C", BRANCH, "main")
         self.write_snapshot(snapshot)
+        if executable_snapshot_file is not None:
+            (self.snapshot_directory / executable_snapshot_file).chmod(0o755)
         for relative_path, content in (extra_files or {}).items():
             path = self.repository / relative_path
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -341,6 +373,20 @@ class WorkflowShellHarness:
             ],
             cwd=self.root,
         ).stdout
+
+    def remote_file_mode(self, relative_path: str) -> str:
+        result = self._run(
+            [
+                "git",
+                f"--git-dir={self.origin}",
+                "ls-tree",
+                f"refs/heads/{BRANCH}",
+                "--",
+                relative_path,
+            ],
+            cwd=self.root,
+        )
+        return result.stdout.split()[0]
 
     def run_publish_pr_shell(
         self,
@@ -553,6 +599,15 @@ class AStockDataWorkflowContractTests(unittest.TestCase):
         )
         self.assertIn('git archive "${remote_ref}" -- "third_party/a-stock-data"', sync_step)
         self.assertIn(
+            'expected_remote_modes=$\'100644\\n100644\\n100644\\n100644\'',
+            sync_step,
+        )
+        self.assertIn(
+            'git ls-tree -r "${remote_ref}" -- "third_party/a-stock-data"',
+            sync_step,
+        )
+        self.assertIn("awk '{print $1}'", sync_step)
+        self.assertIn(
             'python scripts/sync_a_stock_data.py --check --destination '
             '"${remote_snapshot_root}/third_party/a-stock-data"',
             sync_step,
@@ -572,6 +627,12 @@ class AStockDataWorkflowContractTests(unittest.TestCase):
             '--force-with-lease="refs/heads/${branch}:${remote_sha}"',
             sync_step,
         )
+        reuse_push = (
+            'git push --force-with-lease="refs/heads/${branch}:${remote_sha}" '
+            'origin "${remote_sha}:refs/heads/${branch}"'
+        )
+        self.assertIn(reuse_push, sync_step)
+        self.assertLess(sync_step.index(reuse_push), sync_step.index("desired_title="))
         self.assertIn('git push origin "HEAD:refs/heads/${branch}"', sync_step)
         for line in sync_step.splitlines():
             if "git push" in line:
@@ -766,6 +827,92 @@ class AStockDataWorkflowContractTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(harness.remote_branch_sha(), concurrent_sha)
             self.assertEqual(commands, [])
+
+    def test_reusable_proposal_lease_failure_stops_before_pr_reconciliation(
+        self,
+    ) -> None:
+        remote_snapshot = proposal_snapshot(
+            synced_at="2026-07-18T00:00:00Z",
+        )
+        generated_snapshot = proposal_snapshot(
+            synced_at="2026-07-19T00:00:00Z",
+        )
+
+        with WorkflowShellHarness() as harness:
+            expected_remote_sha = harness.push_remote_proposal(remote_snapshot)
+            harness.git("switch", "-c", "concurrent-update", "main")
+            concurrent_path = harness.repository / "concurrent-update.txt"
+            concurrent_path.write_text("new remote state\n", encoding="utf-8")
+            harness.git("add", "concurrent-update.txt")
+            harness.git("commit", "-m", "concurrent update")
+            concurrent_sha = harness.git("rev-parse", "HEAD").stdout.strip()
+            harness.git("push", "origin", "HEAD:refs/heads/concurrent-update")
+            harness.git("switch", "main")
+            harness.git("branch", "-D", "concurrent-update")
+            harness.write_snapshot(generated_snapshot)
+
+            real_git = shutil.which("git")
+            self.assertIsNotNone(real_git)
+            fake_git = harness.bin_path / "git"
+            fake_git.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                'if [[ "${GIT_INJECT_NOOP_LEASE_RACE:-false}" == true '
+                '&& "${1:-}" == push '
+                '&& "$*" == *"${EXPECTED_REMOTE_SHA}:refs/heads/'
+                f'{BRANCH}"* ]]; then\n'
+                '  "${REAL_GIT}" --git-dir="${ORIGIN_PATH}" update-ref '
+                f'"refs/heads/{BRANCH}" "${{CONCURRENT_SHA}}" '
+                '"${EXPECTED_REMOTE_SHA}"\n'
+                "fi\n"
+                'exec "${REAL_GIT}" "$@"\n',
+                encoding="utf-8",
+            )
+            fake_git.chmod(0o755)
+
+            result, commands = harness.run_publish_pr_shell(
+                [],
+                extra_environment={
+                    "CONCURRENT_SHA": concurrent_sha,
+                    "EXPECTED_REMOTE_SHA": expected_remote_sha,
+                    "GIT_INJECT_NOOP_LEASE_RACE": "true",
+                    "ORIGIN_PATH": str(harness.origin),
+                    "REAL_GIT": real_git,
+                },
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(harness.remote_branch_sha(), concurrent_sha)
+            self.assertEqual(commands, [])
+
+    def test_remote_proposal_with_executable_snapshot_file_is_replaced(self) -> None:
+        remote_snapshot = proposal_snapshot(
+            synced_at="2026-07-18T00:00:00Z",
+        )
+        generated_snapshot = proposal_snapshot(
+            synced_at="2026-07-19T00:00:00Z",
+        )
+
+        with WorkflowShellHarness() as harness:
+            original_remote_sha = harness.push_remote_proposal(
+                remote_snapshot,
+                executable_snapshot_file="SKILL.md",
+            )
+            self.assertEqual(
+                harness.remote_file_mode("third_party/a-stock-data/SKILL.md"),
+                "100755",
+            )
+            harness.write_snapshot(generated_snapshot)
+
+            result, commands = harness.run_publish_pr_shell([pull_request(17)])
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotEqual(harness.remote_branch_sha(), original_remote_sha)
+            self.assertEqual(
+                harness.remote_file_mode("third_party/a-stock-data/SKILL.md"),
+                "100644",
+            )
+            self.assertEqual(len(commands), 1, commands)
 
     def test_remote_branch_with_unrelated_change_is_replaced(self) -> None:
         remote_snapshot = proposal_snapshot(

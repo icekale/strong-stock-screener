@@ -12,6 +12,7 @@ import stat
 import sys
 import tempfile
 import urllib.error
+import urllib.parse
 import urllib.request
 import uuid
 from collections.abc import Callable, Mapping
@@ -26,9 +27,19 @@ REPOSITORY = "a-stock-data"
 BRANCH = "main"
 REQUIRED_FILES = ("SKILL.md", "CHANGELOG.md", "LICENSE")
 MAX_FILE_BYTES = {"SKILL.md": 512_000, "CHANGELOG.md": 256_000, "LICENSE": 64_000}
-NAME_RE = re.compile(r"(?m)^name:[ \t]*a-stock-data[ \t]*$")
-VERSION_RE = re.compile(
-    r"(?m)^version:[ \t]*([0-9]+\.[0-9]+\.[0-9]+)[ \t]*$"
+MAX_SUMMARY_CHARS = 60_000
+MAX_SECTION_ITEMS = 20
+MAX_SECTION_HEADING_CHARS = 120
+MIN_APACHE_LICENSE_BYTES = 8_000
+NAME_RE = re.compile(r"^name:[ \t]*a-stock-data[ \t]*$")
+VERSION_RE = re.compile(r"^version:[ \t]*([0-9]+\.[0-9]+\.[0-9]+)[ \t]*$")
+NAME_DECLARATION_RE = re.compile(r"^name[ \t]*:")
+VERSION_DECLARATION_RE = re.compile(r"^version[ \t]*:")
+PROJECT_HEADING_RE = re.compile(
+    r"^# A股全栈数据工具包 V([0-9]+\.[0-9]+\.[0-9]+)[ \t]*$"
+)
+CHANGELOG_RELEASE_RE = re.compile(
+    r"^##[ \t]+[vV]?([0-9]+\.[0-9]+\.[0-9]+)(?:[ \t]+.*)?$"
 )
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -74,6 +85,23 @@ _READ_CHUNK_BYTES = 64 * 1024
 _APACHE_LICENSE_HEADER_RE = re.compile(
     r"\A[ \t]*Apache License[ \t]*\r?\n"
     r"[ \t]*Version 2\.0, January 2004[ \t]*(?:\r?\n|\Z)"
+)
+_APACHE_LICENSE_SECTION_MARKERS = (
+    "TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION",
+    "1. Definitions.",
+    "2. Grant of Copyright License.",
+    "3. Grant of Patent License.",
+    "4. Redistribution.",
+    "5. Submission of Contributions.",
+    "6. Trademarks.",
+    "7. Disclaimer of Warranty.",
+    "8. Limitation of Liability.",
+    "9. Accepting Warranty or Additional Liability.",
+    "END OF TERMS AND CONDITIONS",
+)
+_APACHE_APPLICATION_NOTICE_RE = re.compile(
+    r"Copyright[^\r\n]*.*?Licensed under the Apache License, Version 2\.0",
+    re.DOTALL,
 )
 _FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _FENCE_CLOSE_RE = re.compile(r"^ {0,3}([`~]+)[ \t]*$")
@@ -162,10 +190,55 @@ def _json_nesting_exceeds_limit(value: object, limit: int = 100) -> bool:
     return False
 
 
+def _https_origin(url: object) -> tuple[str, str, int]:
+    if not isinstance(url, str):
+        raise ValueError("URL must be text")
+    parsed = urllib.parse.urlsplit(url)
+    if (
+        parsed.scheme.lower() != "https"
+        or parsed.hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise ValueError("URL must use an HTTPS origin")
+    try:
+        port = parsed.port or 443
+    except ValueError:
+        raise ValueError("URL has an invalid port") from None
+    return "https", parsed.hostname.lower(), port
+
+
+class _SameOriginHTTPSRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        req: urllib.request.Request,
+        fp: object,
+        code: int,
+        msg: str,
+        headers: Mapping[str, str],
+        newurl: str,
+    ) -> urllib.request.Request | None:
+        try:
+            source_origin = _https_origin(req.full_url)
+            target_origin = _https_origin(newurl)
+        except ValueError:
+            raise urllib.error.URLError(
+                "GitHub redirect must preserve the same HTTPS origin"
+            ) from None
+        if source_origin != target_origin:
+            raise urllib.error.URLError(
+                "GitHub redirect must preserve the same HTTPS origin"
+            )
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 class GitHubClient:
     def __init__(self, token: str | None = None, timeout: float = 20) -> None:
         self._token = token
         self._timeout = timeout
+        self._opener = urllib.request.build_opener(
+            _SameOriginHTTPSRedirectHandler()
+        )
 
     def repository_identity(self) -> str:
         payload = self._read_json_object(
@@ -223,11 +296,24 @@ class GitHubClient:
 
     def _read(self, url: str, max_bytes: int, description: str) -> bytes:
         headers = {"Accept": GITHUB_ACCEPT, "User-Agent": USER_AGENT}
-        if self._token:
+        request_origin = _https_origin(url)
+        if self._token and request_origin == ("https", "api.github.com", 443):
             headers["Authorization"] = f"Bearer {self._token}"
         request = urllib.request.Request(url, headers=headers)
         try:
-            with urllib.request.urlopen(request, timeout=self._timeout) as response:
+            with self._opener.open(request, timeout=self._timeout) as response:
+                try:
+                    response_origin = _https_origin(response.geturl())
+                except ValueError:
+                    raise SyncError(
+                        f"GitHub response origin mismatch for {url} "
+                        f"while reading {description}"
+                    ) from None
+                if response_origin != request_origin:
+                    raise SyncError(
+                        f"GitHub response origin mismatch for {url} "
+                        f"while reading {description}"
+                    )
                 response_headers = getattr(response, "headers", None)
                 content_length_header = (
                     response_headers.get("Content-Length")
@@ -300,22 +386,89 @@ def validate_artifacts(artifacts: Mapping[str, bytes]) -> str:
         raise ArtifactValidationError(
             "SKILL.md is missing a semantic frontmatter version"
         ) from error
-    frontmatter = "\n".join(lines[1:frontmatter_end])
-    if NAME_RE.search(frontmatter) is None:
+    frontmatter_lines = lines[1:frontmatter_end]
+    name_declarations = [
+        line for line in frontmatter_lines if NAME_DECLARATION_RE.match(line)
+    ]
+    if not name_declarations:
         raise ArtifactValidationError("SKILL.md is missing name: a-stock-data")
-    version_match = VERSION_RE.search(frontmatter)
+    if len(name_declarations) != 1:
+        raise ArtifactValidationError(
+            "SKILL.md frontmatter must contain exactly one name scalar"
+        )
+    if NAME_RE.fullmatch(name_declarations[0]) is None:
+        raise ArtifactValidationError("SKILL.md is missing name: a-stock-data")
+    version_declarations = [
+        line for line in frontmatter_lines if VERSION_DECLARATION_RE.match(line)
+    ]
+    if not version_declarations:
+        raise ArtifactValidationError("SKILL.md is missing a semantic frontmatter version")
+    if len(version_declarations) != 1:
+        raise ArtifactValidationError(
+            "SKILL.md frontmatter must contain exactly one version scalar"
+        )
+    version_match = VERSION_RE.fullmatch(version_declarations[0])
     if version_match is None:
         raise ArtifactValidationError("SKILL.md is missing a semantic frontmatter version")
-    if not any(line.startswith("# A股全栈数据工具包") for line in lines):
+    version = version_match.group(1)
+    project_heading_versions = [
+        match.group(1)
+        for line in lines[frontmatter_end + 1 :]
+        if (match := PROJECT_HEADING_RE.fullmatch(line)) is not None
+    ]
+    if not project_heading_versions:
         raise ArtifactValidationError("SKILL.md is missing the project heading")
+    if len(project_heading_versions) != 1 or project_heading_versions[0] != version:
+        raise ArtifactValidationError(
+            "SKILL.md project heading version must match frontmatter version"
+        )
 
-    if not decoded["CHANGELOG.md"].startswith("# Changelog"):
+    parse_markdown_sections(skill)
+
+    changelog_lines = decoded["CHANGELOG.md"].splitlines()
+    if not changelog_lines or changelog_lines[0] != "# Changelog":
         raise ArtifactValidationError("CHANGELOG.md must start with # Changelog")
+    first_release_heading = next(
+        (line for line in changelog_lines[1:] if line.startswith("## ")),
+        None,
+    )
+    changelog_match = (
+        CHANGELOG_RELEASE_RE.fullmatch(first_release_heading)
+        if first_release_heading is not None
+        else None
+    )
+    if changelog_match is None:
+        raise ArtifactValidationError(
+            "CHANGELOG.md first release heading must contain a semantic version"
+        )
+    if changelog_match.group(1) != version:
+        raise ArtifactValidationError(
+            "CHANGELOG.md changelog version must match SKILL.md frontmatter version"
+        )
 
-    if _APACHE_LICENSE_HEADER_RE.match(decoded["LICENSE"]) is None:
+    license_text = decoded["LICENSE"]
+    if _APACHE_LICENSE_HEADER_RE.match(license_text) is None:
         raise ArtifactValidationError("LICENSE must contain Apache License 2.0")
+    if len(artifacts["LICENSE"]) < MIN_APACHE_LICENSE_BYTES:
+        raise ArtifactValidationError("LICENSE must contain a complete Apache License 2.0")
+    marker_position = 0
+    for marker in _APACHE_LICENSE_SECTION_MARKERS:
+        marker_position = license_text.find(marker, marker_position)
+        if marker_position < 0:
+            raise ArtifactValidationError(
+                f"LICENSE is missing Apache License 2.0 section: {marker}"
+            )
+        marker_position += len(marker)
+    appendix_text = license_text[marker_position:]
+    if (
+        "APPENDIX: How to apply the Apache License to your work." not in appendix_text
+        and _APACHE_APPLICATION_NOTICE_RE.search(appendix_text) is None
+    ):
+        raise ArtifactValidationError(
+            "LICENSE is missing the Apache License 2.0 appendix application notice"
+        )
 
-    return version_match.group(1)
+    return version
 
 
 def parse_markdown_sections(markdown: str) -> dict[str, str]:
@@ -353,7 +506,12 @@ def parse_markdown_sections(markdown: str) -> dict[str, str]:
         if line.startswith("## "):
             if heading is not None:
                 sections[heading] = "".join(section_lines)
-            heading = line[3:].strip()
+            next_heading = line[3:].strip()
+            if next_heading in sections:
+                raise ArtifactValidationError(
+                    f"SKILL.md contains duplicate level-two section: {next_heading}"
+                )
+            heading = next_heading
             section_lines = [line]
         elif heading is not None:
             section_lines.append(line)
@@ -674,10 +832,29 @@ def _markdown_code_span(value: str) -> str:
     return f"{delimiter} {value} {delimiter}"
 
 
+def _truncate_section_heading(value: str) -> str:
+    if len(value) <= MAX_SECTION_HEADING_CHARS:
+        return value
+    for prefix_length in range(MAX_SECTION_HEADING_CHARS, -1, -1):
+        omitted = len(value) - prefix_length
+        marker = f"... {omitted} more chars"
+        if prefix_length + len(marker) <= MAX_SECTION_HEADING_CHARS:
+            return value[:prefix_length] + marker
+    raise SyncError("could not bound section heading for summary")
+
+
 def _format_section_list(names: list[str]) -> str:
     if not names:
         return "None"
-    return ", ".join(_markdown_code_span(name) for name in sorted(names))
+    sorted_names = sorted(names)
+    displayed = [
+        _markdown_code_span(_truncate_section_heading(name))
+        for name in sorted_names[:MAX_SECTION_ITEMS]
+    ]
+    omitted = len(sorted_names) - len(displayed)
+    if omitted:
+        displayed.append(f"... {omitted} more")
+    return ", ".join(displayed)
 
 
 def _tracked_section_terms(
@@ -753,11 +930,16 @@ def _build_summary(
         current_sections,
     )
     if tracked_matches:
-        match_text = "; ".join(
-            f"{_markdown_code_span(name)} "
+        displayed_matches = tracked_matches[:MAX_SECTION_ITEMS]
+        match_parts = [
+            f"{_markdown_code_span(_truncate_section_heading(name))} "
             f"({', '.join(f'`{term}`' for term in terms)})"
-            for name, terms in tracked_matches
-        )
+            for name, terms in displayed_matches
+        ]
+        omitted_matches = len(tracked_matches) - len(displayed_matches)
+        if omitted_matches:
+            match_parts.append(f"... {omitted_matches} more affected sections")
+        match_text = "; ".join(match_parts)
         lines.extend(
             (
                 "",
@@ -782,7 +964,13 @@ def _build_summary(
             "by this sync.",
         )
     )
-    return "\n".join(lines) + "\n"
+    summary = "\n".join(lines) + "\n"
+    if (
+        len(summary) > MAX_SUMMARY_CHARS
+        or len(summary.encode("utf-8")) > MAX_SUMMARY_CHARS
+    ):
+        raise SyncError("generated summary exceeds its UTF-8 size limit")
+    return summary
 
 
 def _replace_path(source: Path, destination: Path) -> None:

@@ -1,11 +1,24 @@
 from __future__ import annotations
 
 import hashlib
+import json
+import socket
+import tempfile
 import unittest
+import urllib.error
+from dataclasses import FrozenInstanceError
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import get_type_hints, is_typeddict
+from unittest.mock import patch
+
+import scripts.sync_a_stock_data as sync_module
 
 from scripts.sync_a_stock_data import (
     ArtifactValidationError,
+    MAX_FILE_BYTES,
+    REQUIRED_FILES,
+    SyncError,
     build_metadata,
     compare_sections,
     parse_markdown_sections,
@@ -32,6 +45,64 @@ def valid_artifacts() -> dict[str, bytes]:
         "SKILL.md": VALID_SKILL,
         "CHANGELOG.md": VALID_CHANGELOG,
         "LICENSE": VALID_LICENSE,
+    }
+
+
+class FakeGitHubClient:
+    def __init__(
+        self,
+        *,
+        identity: str = "simonlin1212/a-stock-data",
+        commit: str = "a" * 40,
+        committed_at: str = "2026-07-11T08:00:00Z",
+        artifacts: dict[str, bytes] | None = None,
+        fail_file: str | None = None,
+    ) -> None:
+        self.identity = identity
+        self.commit = commit
+        self.committed_at = committed_at
+        self.artifacts = artifacts or valid_artifacts()
+        self.fail_file = fail_file
+        self.identity_calls = 0
+        self.resolve_calls = 0
+        self.downloads: list[tuple[str, str, int]] = []
+
+    def repository_identity(self) -> str:
+        self.identity_calls += 1
+        return self.identity
+
+    def resolve_commit(self) -> tuple[str, str]:
+        self.resolve_calls += 1
+        return self.commit, self.committed_at
+
+    def download_file(self, commit: str, name: str, max_bytes: int) -> bytes:
+        self.downloads.append((commit, name, max_bytes))
+        if name == self.fail_file:
+            raise SyncError(f"failed to download {name}")
+        return self.artifacts[name]
+
+
+class FakeResponse:
+    def __init__(self, content: bytes) -> None:
+        self.content = content
+        self.read_limits: list[int] = []
+
+    def __enter__(self) -> FakeResponse:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        return None
+
+    def read(self, amount: int) -> bytes:
+        self.read_limits.append(amount)
+        return self.content[:amount]
+
+
+def snapshot_bytes(destination: Path) -> dict[str, bytes]:
+    return {
+        path.name: path.read_bytes()
+        for path in sorted(destination.iterdir())
+        if path.is_file()
     }
 
 
@@ -278,6 +349,371 @@ class MetadataTests(unittest.TestCase):
                     version="3.4.0",
                     artifacts=valid_artifacts(),
                 )
+
+
+class SnapshotSyncTests(unittest.TestCase):
+    def test_requires_the_exact_repository_identity_before_resolving(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            client = FakeGitHubClient(identity="SimonLin1212/a-stock-data")
+
+            with self.assertRaisesRegex(SyncError, "unexpected upstream repository"):
+                sync_module.sync_snapshot(client, destination)
+
+            self.assertEqual(client.identity_calls, 1)
+            self.assertEqual(client.resolve_calls, 0)
+            self.assertEqual(client.downloads, [])
+            self.assertFalse(destination.exists())
+
+    def test_downloads_required_files_once_in_order_from_one_commit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            commit = "b" * 40
+            client = FakeGitHubClient(commit=commit)
+
+            sync_module.sync_snapshot(client, destination)
+
+            self.assertEqual(
+                client.downloads,
+                [
+                    (commit, name, MAX_FILE_BYTES[name])
+                    for name in REQUIRED_FILES
+                ],
+            )
+
+    def test_rejects_invalid_resolved_commit_metadata_without_downloads(self) -> None:
+        invalid_cases = (("A" * 40, "timestamp"), ("a" * 40, ""))
+
+        for commit, committed_at in invalid_cases:
+            with self.subTest(commit=commit, committed_at=committed_at):
+                with tempfile.TemporaryDirectory() as directory:
+                    destination = Path(directory) / "a-stock-data"
+                    client = FakeGitHubClient(
+                        commit=commit,
+                        committed_at=committed_at,
+                    )
+
+                    with self.assertRaises(ArtifactValidationError):
+                        sync_module.sync_snapshot(client, destination)
+
+                    self.assertEqual(client.downloads, [])
+                    self.assertFalse(destination.exists())
+
+    def test_same_commit_is_a_no_op_without_downloads(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(), destination)
+            client = FakeGitHubClient()
+
+            result = sync_module.sync_snapshot(client, destination)
+
+            self.assertFalse(result.changed)
+            self.assertEqual(result.previous_commit, "a" * 40)
+            self.assertEqual(result.current_commit, "a" * 40)
+            self.assertEqual(result.previous_version, "3.4.0")
+            self.assertEqual(result.current_version, "3.4.0")
+            self.assertEqual(
+                result.section_diff,
+                {"added": [], "changed": [], "removed": []},
+            )
+            self.assertEqual(client.downloads, [])
+
+    def test_first_sync_writes_exact_bytes_metadata_and_result(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            commit = "b" * 40
+            artifacts = valid_artifacts()
+            client = FakeGitHubClient(commit=commit, artifacts=artifacts)
+            china_standard_time = timezone(timedelta(hours=8))
+
+            result = sync_module.sync_snapshot(
+                client,
+                destination,
+                now=lambda: datetime(
+                    2026,
+                    7,
+                    18,
+                    14,
+                    30,
+                    tzinfo=china_standard_time,
+                ),
+            )
+
+            self.assertTrue(result.changed)
+            self.assertIsNone(result.previous_commit)
+            self.assertEqual(result.current_commit, commit)
+            self.assertIsNone(result.previous_version)
+            self.assertEqual(result.current_version, "3.4.0")
+            self.assertEqual(
+                result.section_diff,
+                {"added": ["信号层", "行情层"], "changed": [], "removed": []},
+            )
+            self.assertIn("`simonlin1212/a-stock-data`", result.summary)
+            self.assertIn(f"`none` -> `{commit}`", result.summary)
+            self.assertIn("Added: `信号层`, `行情层`", result.summary)
+            with self.assertRaises(FrozenInstanceError):
+                result.changed = False
+
+            for name, content in artifacts.items():
+                self.assertEqual((destination / name).read_bytes(), content)
+
+            expected_metadata = build_metadata(
+                commit=commit,
+                committed_at="2026-07-11T08:00:00Z",
+                synced_at="2026-07-18T06:30:00Z",
+                version="3.4.0",
+                artifacts=artifacts,
+            )
+            expected_json = (
+                json.dumps(expected_metadata, sort_keys=True, indent=2) + "\n"
+            ).encode()
+            self.assertEqual(
+                (destination / "metadata.json").read_bytes(),
+                expected_json,
+            )
+
+    def test_update_reports_previous_and_current_version_and_sections(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(commit="a" * 40), destination)
+            updated_artifacts = valid_artifacts()
+            updated_artifacts["SKILL.md"] = """---
+name: a-stock-data
+version: 3.5.0
+---
+# A股全栈数据工具包 V3.5.0
+## 行情层
+Updated quote details.
+## 数据层
+New data details.
+""".encode()
+
+            result = sync_module.sync_snapshot(
+                FakeGitHubClient(commit="b" * 40, artifacts=updated_artifacts),
+                destination,
+            )
+
+            self.assertTrue(result.changed)
+            self.assertEqual(result.previous_commit, "a" * 40)
+            self.assertEqual(result.current_commit, "b" * 40)
+            self.assertEqual(result.previous_version, "3.4.0")
+            self.assertEqual(result.current_version, "3.5.0")
+            self.assertEqual(
+                result.section_diff,
+                {"added": ["数据层"], "changed": ["行情层"], "removed": ["信号层"]},
+            )
+            self.assertIn("`3.4.0` -> `3.5.0`", result.summary)
+            self.assertIn("Changed: `行情层`", result.summary)
+
+    def test_download_failure_preserves_previous_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(commit="a" * 40), destination)
+            before = snapshot_bytes(destination)
+
+            with self.assertRaisesRegex(SyncError, "CHANGELOG.md"):
+                sync_module.sync_snapshot(
+                    FakeGitHubClient(commit="b" * 40, fail_file="CHANGELOG.md"),
+                    destination,
+                )
+
+            self.assertEqual(snapshot_bytes(destination), before)
+
+    def test_validation_failure_preserves_previous_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(commit="a" * 40), destination)
+            before = snapshot_bytes(destination)
+            invalid_artifacts = valid_artifacts()
+            invalid_artifacts["LICENSE"] = b"not the expected license"
+
+            with self.assertRaises(ArtifactValidationError):
+                sync_module.sync_snapshot(
+                    FakeGitHubClient(commit="b" * 40, artifacts=invalid_artifacts),
+                    destination,
+                )
+
+            self.assertEqual(snapshot_bytes(destination), before)
+
+    def test_malformed_existing_metadata_fails_without_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(commit="a" * 40), destination)
+            (destination / "metadata.json").write_text(
+                '{"schema_version": 1, "upstream": []}\n',
+                encoding="utf-8",
+            )
+            before = snapshot_bytes(destination)
+            client = FakeGitHubClient(commit="b" * 40)
+
+            with self.assertRaisesRegex(SyncError, "metadata.json"):
+                sync_module.sync_snapshot(client, destination)
+
+            self.assertEqual(client.resolve_calls, 0)
+            self.assertEqual(client.downloads, [])
+            self.assertEqual(snapshot_bytes(destination), before)
+
+    def test_malformed_existing_metadata_schema_fails_without_overwrite(self) -> None:
+        for mutation in (
+            lambda metadata: metadata.update(schema_version=True),
+            lambda metadata: metadata.update(artifacts={}),
+        ):
+            with self.subTest(mutation=mutation):
+                with tempfile.TemporaryDirectory() as directory:
+                    destination = Path(directory) / "a-stock-data"
+                    sync_module.sync_snapshot(
+                        FakeGitHubClient(commit="a" * 40),
+                        destination,
+                    )
+                    metadata_path = destination / "metadata.json"
+                    metadata = json.loads(metadata_path.read_bytes())
+                    mutation(metadata)
+                    metadata_path.write_text(
+                        json.dumps(metadata),
+                        encoding="utf-8",
+                    )
+                    before = snapshot_bytes(destination)
+                    client = FakeGitHubClient(commit="b" * 40)
+
+                    with self.assertRaisesRegex(SyncError, "metadata.json"):
+                        sync_module.sync_snapshot(client, destination)
+
+                    self.assertEqual(client.resolve_calls, 0)
+                    self.assertEqual(snapshot_bytes(destination), before)
+
+    def test_final_directory_replace_failure_restores_previous_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(commit="a" * 40), destination)
+            before = snapshot_bytes(destination)
+            real_replace = sync_module._replace_path
+
+            def fail_candidate_replace(source: Path, target: Path) -> None:
+                if (
+                    target == destination
+                    and source.name.startswith(f".{destination.name}.tmp-")
+                ):
+                    raise OSError("simulated final rename failure")
+                real_replace(source, target)
+
+            with patch.object(
+                sync_module,
+                "_replace_path",
+                side_effect=fail_candidate_replace,
+            ):
+                with self.assertRaisesRegex(SyncError, "replace snapshot"):
+                    sync_module.sync_snapshot(
+                        FakeGitHubClient(commit="b" * 40),
+                        destination,
+                    )
+
+            self.assertEqual(snapshot_bytes(destination), before)
+            self.assertEqual([path.name for path in root.iterdir()], ["a-stock-data"])
+
+
+class GitHubClientTests(unittest.TestCase):
+    def test_reads_api_endpoints_and_raw_file_with_expected_requests(self) -> None:
+        commit = "b" * 40
+        responses = [
+            FakeResponse(b'{"full_name": "simonlin1212/a-stock-data"}'),
+            FakeResponse(
+                (
+                    '{"sha": "'
+                    + commit
+                    + '", "commit": {"committer": '
+                    '{"date": "2026-07-11T08:00:00Z"}}}'
+                ).encode()
+            ),
+            FakeResponse(b"raw"),
+        ]
+
+        with patch.object(
+            sync_module.urllib.request,
+            "urlopen",
+            side_effect=responses,
+        ) as urlopen:
+            client = sync_module.GitHubClient(token="secret-token", timeout=7)
+            self.assertEqual(client.repository_identity(), "simonlin1212/a-stock-data")
+            self.assertEqual(
+                client.resolve_commit(),
+                (commit, "2026-07-11T08:00:00Z"),
+            )
+            self.assertEqual(client.download_file(commit, "SKILL.md", 3), b"raw")
+
+        requests = [call.args[0] for call in urlopen.call_args_list]
+        self.assertEqual(
+            [request.full_url for request in requests],
+            [
+                "https://api.github.com/repos/simonlin1212/a-stock-data",
+                "https://api.github.com/repos/simonlin1212/a-stock-data/commits/main",
+                (
+                    "https://raw.githubusercontent.com/simonlin1212/a-stock-data/"
+                    f"{commit}/SKILL.md"
+                ),
+            ],
+        )
+        self.assertEqual(
+            [call.kwargs["timeout"] for call in urlopen.call_args_list],
+            [7, 7, 7],
+        )
+        for request in requests:
+            headers = {name.lower(): value for name, value in request.header_items()}
+            self.assertEqual(headers["accept"], "application/vnd.github+json")
+            self.assertEqual(headers["authorization"], "Bearer secret-token")
+            self.assertIn("StockMaster", headers["user-agent"])
+        self.assertEqual(responses[0].read_limits, [1_000_001])
+        self.assertEqual(responses[1].read_limits, [1_000_001])
+        self.assertEqual(responses[2].read_limits, [4])
+
+    def test_rejects_oversized_json_and_raw_responses(self) -> None:
+        oversized_json = FakeResponse(b" " * 1_000_001)
+        with patch.object(
+            sync_module.urllib.request,
+            "urlopen",
+            return_value=oversized_json,
+        ):
+            with self.assertRaisesRegex(ArtifactValidationError, "JSON response"):
+                sync_module.GitHubClient().repository_identity()
+        self.assertEqual(oversized_json.read_limits, [1_000_001])
+
+        oversized_raw = FakeResponse(b"1234")
+        with patch.object(
+            sync_module.urllib.request,
+            "urlopen",
+            return_value=oversized_raw,
+        ):
+            with self.assertRaisesRegex(ArtifactValidationError, "SKILL.md"):
+                sync_module.GitHubClient().download_file("a" * 40, "SKILL.md", 3)
+        self.assertEqual(oversized_raw.read_limits, [4])
+
+    def test_rejects_malformed_json_and_non_object_responses(self) -> None:
+        for content in (b"{", b"[]"):
+            with self.subTest(content=content), patch.object(
+                sync_module.urllib.request,
+                "urlopen",
+                return_value=FakeResponse(content),
+            ):
+                with self.assertRaises(ArtifactValidationError):
+                    sync_module.GitHubClient().repository_identity()
+
+    def test_converts_network_errors_without_leaking_token(self) -> None:
+        failures = (
+            urllib.error.HTTPError("https://api.github.com", 500, "error", {}, None),
+            urllib.error.URLError("Authorization: Bearer secret-token"),
+            socket.timeout("timed out"),
+        )
+
+        for failure in failures:
+            with self.subTest(failure=failure), patch.object(
+                sync_module.urllib.request,
+                "urlopen",
+                side_effect=failure,
+            ):
+                with self.assertRaises(SyncError) as raised:
+                    sync_module.GitHubClient(token="secret-token").repository_identity()
+                self.assertNotIn("secret-token", str(raised.exception))
+                self.assertIsNone(raised.exception.__cause__)
 
 
 if __name__ == "__main__":

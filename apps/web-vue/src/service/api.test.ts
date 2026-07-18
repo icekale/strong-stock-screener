@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { getAuctionModelTop3, getStockKline } from './product-api';
-import { ApiRequestError, apiRequest } from './product-request';
+import { getAuctionModelTop3, getSectorReplicaRadar, getStockKline } from './product-api';
+import type { ApiRequestError } from './product-request';
+import { apiRequest } from './product-request';
 
 describe('apiRequest', () => {
   beforeEach(() => {
@@ -56,5 +57,21 @@ describe('apiRequest', () => {
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain(
       '/api/stocks/600000.SH/kline?count=120&period=30m'
     );
+  });
+
+  it('builds the sector replica radar request with dashboard defaults', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(JSON.stringify({}), { status: 200 }));
+
+    await getSectorReplicaRadar({ mode: 'strength', limit: 5, stockLimit: 1 });
+
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(requestUrl.pathname).toBe('/api/sectors/replica/radar');
+    expect(Array.from(requestUrl.searchParams.entries())).toEqual([
+      ['mode', 'strength'],
+      ['limit', '5'],
+      ['stock_limit', '1']
+    ]);
   });
 });

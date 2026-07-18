@@ -62,39 +62,39 @@ jobs:
             remote_sha="$(git rev-parse "${remote_ref}")"
             remote_exists=true
 
-            remote_metadata_path="${RUNNER_TEMP}/a-stock-data-remote-metadata.json"
-            if git show "${remote_ref}:third_party/a-stock-data/metadata.json" > "${remote_metadata_path}" && \
-              python - "${remote_metadata_path}" <<'PY'
+            merge_base="$(git merge-base main "${remote_ref}")"
+            if git diff --quiet "${merge_base}" "${remote_ref}" -- . ":(exclude)third_party/a-stock-data"; then
+              remote_snapshot_root="$(mktemp -d "${RUNNER_TEMP}/a-stock-data-remote.XXXXXX")"
+              if git archive "${remote_ref}" -- "third_party/a-stock-data" | tar -x -C "${remote_snapshot_root}" && \
+                python scripts/sync_a_stock_data.py --check --destination "${remote_snapshot_root}/third_party/a-stock-data" && \
+                python - "third_party/a-stock-data" "${remote_snapshot_root}/third_party/a-stock-data" <<'PY'
           import json
           import sys
           from pathlib import Path
 
 
-          def proposal_identity(metadata):
-              upstream = metadata["upstream"]
-              return {
-                  "upstream": {
-                      "commit": upstream["commit"],
-                      "version": upstream["version"],
-                  },
-                  "artifacts": metadata["artifacts"],
-              }
-
-
-          local_metadata = json.loads(
-              Path("third_party/a-stock-data/metadata.json").read_text(
-                  encoding="utf-8"
+          def proposal_identity(root):
+              metadata = json.loads(
+                  (root / "metadata.json").read_text(encoding="utf-8")
               )
-          )
-          remote_metadata = json.loads(
-              Path(sys.argv[1]).read_text(encoding="utf-8")
-          )
-          if proposal_identity(local_metadata) != proposal_identity(remote_metadata):
+              metadata["upstream"].pop("synced_at")
+              content = {
+                  path.name: path.read_bytes()
+                  for path in sorted(root.iterdir())
+                  if path.name != "metadata.json"
+              }
+              return metadata, content
+
+
+          local_root, remote_root = map(Path, sys.argv[1:])
+          if proposal_identity(local_root) != proposal_identity(remote_root):
               raise SystemExit(1)
           PY
-            then
-              proposal_changed=false
-              echo "The remote synchronization branch already proposes this upstream content."
+              then
+                proposal_changed=false
+                echo "The remote synchronization branch already proposes this upstream content."
+              fi
+              rm -rf -- "${remote_snapshot_root}"
             fi
           else
             ls_remote_status="$?"
@@ -129,55 +129,59 @@ jobs:
             fi
           fi
 
-          repository_owner="${GITHUB_REPOSITORY%%/*}"
-          if ! PR_JSON="$(gh pr list --state open --head "${branch}" --base main --limit 100 --json number,headRefName,isCrossRepository,headRepositoryOwner)"; then
+          desired_title="chore: review a-stock-data ${upstream_version}"
+          if ! PR_JSON="$(gh api --method GET "repos/${GITHUB_REPOSITORY}/pulls" -f "head=${GITHUB_REPOSITORY_OWNER}:${branch}" -f "base=main" -f "state=open")"; then
             echo "Failed to list open synchronization PRs." >&2
             exit 1
           fi
-          if ! PR_NUMBERS="$(
-            PR_JSON="${PR_JSON}" python - "${branch}" "${repository_owner}" <<'PY'
+          if ! PR_DECISION="$(
+            PR_JSON="${PR_JSON}" python - "${desired_title}" "${RUNNER_TEMP}/a-stock-data-sync-summary.md" <<'PY'
           import json
           import os
           import sys
+          from pathlib import Path
 
 
-          branch, repository_owner = sys.argv[1:]
-          for pr in json.loads(os.environ["PR_JSON"]):
-              owner = pr["headRepositoryOwner"]
-              owner_login = owner.get("login") if isinstance(owner, dict) else owner
-              if (
-                  pr["headRefName"] == branch
-                  and pr["isCrossRepository"] is False
-                  and owner_login == repository_owner
-              ):
-                  print(pr["number"])
+          desired_title = sys.argv[1]
+          desired_body = Path(sys.argv[2]).read_text(encoding="utf-8")
+          pull_requests = json.loads(os.environ["PR_JSON"])
+          if len(pull_requests) > 1:
+              print("multiple")
+          elif not pull_requests:
+              print("create")
+          else:
+              pr = pull_requests[0]
+              is_current = (
+                  pr["title"] == desired_title
+                  and pr["body"] == desired_body
+                  and pr["base"]["ref"] == "main"
+              )
+              action = "current" if is_current else "edit"
+              print(action, pr["number"])
           PY
           )"; then
             echo "Failed to parse open synchronization PRs." >&2
             exit 1
           fi
-          pr_numbers=()
-          if [[ -n "${PR_NUMBERS}" ]]; then
-            while IFS= read -r pr_number; do
-              pr_numbers+=("${pr_number}")
-            done <<< "${PR_NUMBERS}"
-          fi
-          if (( ${#pr_numbers[@]} > 1 )); then
+          read -r pr_action pr_number <<< "${PR_DECISION}"
+
+          if [[ "${pr_action}" == multiple ]]; then
             echo "More than one open synchronization PR exists." >&2
             exit 1
-          fi
-
-          if (( ${#pr_numbers[@]} == 0 )); then
+          elif [[ "${pr_action}" == create ]]; then
             gh pr create \
               --base main \
               --head "${branch}" \
-              --title "chore: review a-stock-data ${upstream_version}" \
+              --title "${desired_title}" \
               --body-file "${RUNNER_TEMP}/a-stock-data-sync-summary.md"
-          elif (( ${#pr_numbers[@]} == 1 )) && [[ "${proposal_changed}" == true ]]; then
-            gh pr edit "${pr_numbers[0]}" \
+          elif [[ "${pr_action}" == edit ]]; then
+            gh pr edit "${pr_number}" \
               --base main \
-              --title "chore: review a-stock-data ${upstream_version}" \
+              --title "${desired_title}" \
               --body-file "${RUNNER_TEMP}/a-stock-data-sync-summary.md"
-          else
+          elif [[ "${pr_action}" == current ]]; then
             echo "The existing synchronization PR already proposes this upstream content."
+          else
+            echo "Unexpected synchronization PR decision." >&2
+            exit 1
           fi

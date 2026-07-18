@@ -1,0 +1,113 @@
+name: Sync a-stock-data
+
+on:
+  schedule:
+    - cron: '30 22 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: sync-a-stock-data
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run synchronization tests
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s tests -p 'test_*a_stock_data*.py' -v
+
+      - name: Synchronize and open review PR
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          python scripts/sync_a_stock_data.py --destination "third_party/a-stock-data" --summary-path "${RUNNER_TEMP}/a-stock-data-sync-summary.md"
+          cat "${RUNNER_TEMP}/a-stock-data-sync-summary.md" >> "${GITHUB_STEP_SUMMARY}"
+
+          if git diff --quiet -- "third_party/a-stock-data"; then
+            echo "The a-stock-data snapshot is already current."
+            exit 0
+          fi
+
+          branch="automation/a-stock-data-sync"
+          remote_exists=false
+          remote_sha=""
+          remote_ref="refs/remotes/origin/${branch}"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git ls-remote --exit-code --heads origin "refs/heads/${branch}" > /dev/null; then
+            git fetch --no-tags origin "refs/heads/${branch}:refs/remotes/origin/${branch}"
+            remote_sha="$(git rev-parse "${remote_ref}")"
+            remote_exists=true
+          else
+            ls_remote_status="$?"
+            if [[ "${ls_remote_status}" -ne 2 ]]; then
+              echo "Failed to inspect the remote synchronization branch." >&2
+              exit "${ls_remote_status}"
+            fi
+          fi
+
+          git switch -C "${branch}" main
+          git add -- "third_party/a-stock-data"
+
+          read -r upstream_version upstream_short_sha < <(
+            python - <<'PY'
+          import json
+          from pathlib import Path
+
+          metadata = json.loads(
+              Path("third_party/a-stock-data/metadata.json").read_text(encoding="utf-8")
+          )
+          upstream = metadata["upstream"]
+          print(upstream["version"], upstream["commit"][:7])
+          PY
+          )
+          git commit -m "chore: sync a-stock-data ${upstream_version} (${upstream_short_sha})"
+
+          if [[ "${remote_exists}" == true ]]; then
+            git push --force-with-lease="refs/heads/${branch}:${remote_sha}" origin "HEAD:refs/heads/${branch}"
+          else
+            git push origin "HEAD:refs/heads/${branch}"
+          fi
+
+          mapfile -t pr_numbers < <(
+            gh pr list --state open --head "${branch}" --base main --limit 2 --json number --jq '.[].number'
+          )
+          if (( ${#pr_numbers[@]} > 1 )); then
+            echo "More than one open synchronization PR exists." >&2
+            exit 1
+          fi
+
+          if (( ${#pr_numbers[@]} == 0 )); then
+            gh pr create \
+              --base main \
+              --head "${branch}" \
+              --title "chore: review a-stock-data ${upstream_version}" \
+              --body-file "${RUNNER_TEMP}/a-stock-data-sync-summary.md"
+          else
+            gh pr edit "${pr_numbers[0]}" \
+              --base main \
+              --title "chore: review a-stock-data ${upstream_version}" \
+              --body-file "${RUNNER_TEMP}/a-stock-data-sync-summary.md"
+          fi

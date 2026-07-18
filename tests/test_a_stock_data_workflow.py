@@ -4,6 +4,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -23,12 +24,11 @@ set -euo pipefail
 printf '%s\\n' "$*" >> "${GH_LOG}"
 
 if [[ "$1" == "pr" && "$2" == "list" ]]; then
-  case "${GH_LIST_RESULT}" in
-    failure) exit 42 ;;
-    empty) exit 0 ;;
-    one) printf '17\\n'; exit 0 ;;
-    many) printf '17\\n18\\n'; exit 0 ;;
-  esac
+  if [[ "${GH_LIST_FAILURE:-false}" == true ]]; then
+    exit 42
+  fi
+  printf '%s\\n' "${GH_LIST_JSON}"
+  exit 0
 fi
 
 if [[ "$1" == "pr" && ( "$2" == "create" || "$2" == "edit" ) ]]; then
@@ -36,6 +36,8 @@ if [[ "$1" == "pr" && ( "$2" == "create" || "$2" == "edit" ) ]]; then
 fi
 exit 64
 """
+BRANCH = "automation/a-stock-data-sync"
+REPOSITORY_OWNER = "acme"
 
 
 def top_level_block(source: str, key: str) -> str:
@@ -95,20 +97,194 @@ def workflow_run_blocks() -> list[str]:
     return run_blocks
 
 
-def pr_shell_block() -> str:
+def publish_pr_shell_block() -> str:
     sync_block = next(
         block
         for block in workflow_run_blocks()
-        if "gh pr list --state open" in block
+        if 'branch="automation/a-stock-data-sync"' in block
     )
-    markers = ('if ! PR_NUMBERS="$(gh pr list', "mapfile -t pr_numbers < <(")
-    start = next(
-        (sync_block.find(marker) for marker in markers if marker in sync_block),
-        -1,
-    )
+    start = sync_block.find('branch="automation/a-stock-data-sync"')
     if start < 0:
-        raise AssertionError("missing PR lookup shell block")
+        raise AssertionError("missing publish/PR shell block")
     return sync_block[start:]
+
+
+def proposal_metadata(
+    *,
+    synced_at: str,
+    commit: str = "2" * 40,
+    version: str = "3.5.0",
+    artifact_hash: str = "b" * 64,
+) -> dict[str, object]:
+    return {
+        "artifacts": {
+            "SKILL.md": {
+                "raw_url": f"https://example.invalid/{commit}/SKILL.md",
+                "sha256": artifact_hash,
+                "size": 123,
+            }
+        },
+        "schema_version": 1,
+        "upstream": {
+            "commit": commit,
+            "synced_at": synced_at,
+            "version": version,
+        },
+    }
+
+
+def pull_request(
+    number: int,
+    *,
+    branch: str = BRANCH,
+    owner: str = REPOSITORY_OWNER,
+    cross_repository: bool = False,
+) -> dict[str, object]:
+    return {
+        "number": number,
+        "headRefName": branch,
+        "isCrossRepository": cross_repository,
+        "headRepositoryOwner": {"login": owner},
+    }
+
+
+class WorkflowShellHarness:
+    def __init__(self) -> None:
+        self._temporary_directory = tempfile.TemporaryDirectory()
+        self.root = Path(self._temporary_directory.name)
+        self.repository = self.root / "repository"
+        self.origin = self.root / "origin.git"
+        self.bin_path = self.root / "bin"
+        self.gh_log = self.root / "gh.log"
+
+        self._run(["git", "init", "--bare", str(self.origin)], cwd=self.root)
+        self.repository.mkdir()
+        self._run(["git", "init", "-b", "main"], cwd=self.repository)
+        self.git("config", "user.name", "Workflow Test")
+        self.git("config", "user.email", "workflow-test@example.invalid")
+        self.git("remote", "add", "origin", str(self.origin))
+
+        self.snapshot_path = (
+            self.repository / "third_party" / "a-stock-data" / "metadata.json"
+        )
+        self.snapshot_path.parent.mkdir(parents=True)
+        self.write_metadata(
+            proposal_metadata(
+                commit="1" * 40,
+                version="3.4.0",
+                synced_at="2026-07-17T00:00:00Z",
+                artifact_hash="a" * 64,
+            )
+        )
+        self.git("add", "third_party/a-stock-data/metadata.json")
+        self.git("commit", "-m", "baseline")
+        self.git("push", "-u", "origin", "main")
+
+        self.bin_path.mkdir()
+        (self.bin_path / "python").symlink_to(sys.executable)
+        fake_gh = self.bin_path / "gh"
+        fake_gh.write_text(FAKE_GH, encoding="utf-8")
+        fake_gh.chmod(0o755)
+        (self.root / "a-stock-data-sync-summary.md").write_text(
+            "sync summary\n",
+            encoding="utf-8",
+        )
+
+    def __enter__(self) -> WorkflowShellHarness:
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        self._temporary_directory.cleanup()
+
+    def _run(
+        self,
+        command: list[str],
+        *,
+        cwd: Path,
+        check: bool = True,
+        environment: dict[str, str] | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        result = subprocess.run(
+            command,
+            cwd=cwd,
+            check=False,
+            capture_output=True,
+            env=environment,
+            text=True,
+        )
+        if check and result.returncode != 0:
+            raise AssertionError(
+                f"command failed: {' '.join(command)}\n"
+                f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
+            )
+        return result
+
+    def git(
+        self,
+        *arguments: str,
+        check: bool = True,
+    ) -> subprocess.CompletedProcess[str]:
+        return self._run(
+            ["git", *arguments],
+            cwd=self.repository,
+            check=check,
+        )
+
+    def write_metadata(self, metadata: dict[str, object]) -> None:
+        self.snapshot_path.write_text(
+            json.dumps(metadata, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    def push_remote_proposal(self, metadata: dict[str, object]) -> str:
+        self.git("switch", "-C", BRANCH, "main")
+        self.write_metadata(metadata)
+        self.git("add", "third_party/a-stock-data/metadata.json")
+        self.git("commit", "-m", "remote proposal")
+        self.git("push", "origin", f"HEAD:refs/heads/{BRANCH}")
+        remote_sha = self.git("rev-parse", "HEAD").stdout.strip()
+        self.git("switch", "main")
+        self.git("branch", "-D", BRANCH)
+        return remote_sha
+
+    def remote_branch_sha(self) -> str:
+        result = self.git("ls-remote", "origin", f"refs/heads/{BRANCH}")
+        return result.stdout.split()[0]
+
+    def run_publish_pr_shell(
+        self,
+        pull_requests: list[dict[str, object]],
+        *,
+        list_failure: bool = False,
+        extra_environment: dict[str, str] | None = None,
+    ) -> tuple[subprocess.CompletedProcess[str], list[str]]:
+        self.gh_log.unlink(missing_ok=True)
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "GITHUB_REPOSITORY": f"{REPOSITORY_OWNER}/strong-stock-screener",
+                "GH_LIST_FAILURE": "true" if list_failure else "false",
+                "GH_LIST_JSON": json.dumps(pull_requests),
+                "GH_LOG": str(self.gh_log),
+                "PATH": f"{self.bin_path}:{environment.get('PATH', '')}",
+                "RUNNER_TEMP": str(self.root),
+            }
+        )
+        if extra_environment:
+            environment.update(extra_environment)
+        script = "set -euo pipefail\n" + publish_pr_shell_block()
+        result = self._run(
+            ["bash", "-c", script],
+            cwd=self.repository,
+            check=False,
+            environment=environment,
+        )
+        commands = (
+            self.gh_log.read_text(encoding="utf-8").splitlines()
+            if self.gh_log.exists()
+            else []
+        )
+        return result, commands
 
 
 class AStockDataWorkflowContractTests(unittest.TestCase):
@@ -149,18 +325,25 @@ class AStockDataWorkflowContractTests(unittest.TestCase):
         self.assertEqual(re.findall(r"(?m)^  ([a-zA-Z0-9_-]+):\s*$", jobs), ["sync"])
         self.assertRegex(jobs, r"(?m)^    runs-on:\s*ubuntu-latest\s*$")
 
-        checkout = step_containing(self.source, "uses: actions/checkout@v4")
+        checkout_pin = (
+            "uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4"
+        )
+        checkout = step_containing(self.source, checkout_pin)
         self.assertRegex(checkout, r"(?m)^\s+ref:\s*main\s*$")
         self.assertRegex(checkout, r"(?m)^\s+fetch-depth:\s*0\s*$")
 
-        setup_python = step_containing(self.source, "uses: actions/setup-python@v5")
+        setup_python_pin = (
+            "uses: actions/setup-python@"
+            "a26af69be951a213d495a4c3e4e4022e16d87065 # v5"
+        )
+        setup_python = step_containing(self.source, setup_python_pin)
         self.assertRegex(
             setup_python,
             r"(?m)^\s+python-version:\s*['\"]3\.12['\"]\s*$",
         )
         self.assertEqual(
-            re.findall(r"(?m)^\s*uses:\s*(\S+)\s*$", self.source),
-            ["actions/checkout@v4", "actions/setup-python@v5"],
+            re.findall(r"(?m)^\s*(uses:\s*\S+\s+#\s+v\d+)\s*$", self.source),
+            [checkout_pin, setup_python_pin],
         )
 
     def test_runs_dependency_free_tests_and_sync_with_expected_tokens(self) -> None:
@@ -261,6 +444,22 @@ class AStockDataWorkflowContractTests(unittest.TestCase):
             'refs/remotes/origin/${branch}"',
             sync_step,
         )
+        self.assertIn(
+            'git show "${remote_ref}:third_party/a-stock-data/metadata.json"',
+            sync_step,
+        )
+        self.assertIn('"commit": upstream["commit"]', sync_step)
+        self.assertIn('"version": upstream["version"]', sync_step)
+        self.assertIn('"artifacts": metadata["artifacts"]', sync_step)
+        self.assertNotIn('metadata["upstream"]["synced_at"]', sync_step)
+        self.assertLess(
+            sync_step.index("git fetch --no-tags origin"),
+            sync_step.index('git show "${remote_ref}:'),
+        )
+        self.assertLess(
+            sync_step.index('git show "${remote_ref}:'),
+            sync_step.index('git switch -C "${branch}" main'),
+        )
         self.assertIn('git switch -C "${branch}" main', sync_step)
         self.assertIn(
             '--force-with-lease="refs/heads/${branch}:${remote_sha}"',
@@ -284,9 +483,18 @@ class AStockDataWorkflowContractTests(unittest.TestCase):
         self.assertIn('Path("third_party/a-stock-data/metadata.json")', sync_step)
         self.assertIn('upstream["version"]', sync_step)
         self.assertIn('upstream["commit"][:7]', sync_step)
-        self.assertRegex(
+        commit_command = re.search(
+            r"git commit(?P<arguments>.*?)(?=\n\s*(?:if|git push))",
             sync_step,
-            r'git commit -m "[^"]*\$\{upstream_version\}'
+            re.DOTALL,
+        )
+        self.assertIsNotNone(commit_command)
+        commit_arguments = commit_command.group("arguments")
+        self.assertIn("--only", commit_arguments)
+        self.assertIn('"third_party/a-stock-data"', commit_arguments)
+        self.assertRegex(
+            commit_arguments,
+            r'-m "[^"]*\$\{upstream_version\}'
             r"[^\"]*\$\{upstream_short_sha\}[^\"]*\"",
         )
 
@@ -300,17 +508,22 @@ class AStockDataWorkflowContractTests(unittest.TestCase):
             sync_step,
         )
         self.assertIn(
-            'if ! PR_NUMBERS="$(gh pr list --state open --head "${branch}" '
-            "--base main --limit 2 --json number --jq '.[].number')\"; then",
+            "--json number,headRefName,isCrossRepository,headRepositoryOwner",
             sync_step,
         )
+        self.assertIn('pr["headRefName"] == branch', sync_step)
+        self.assertIn('pr["isCrossRepository"] is False', sync_step)
+        self.assertIn("owner_login == repository_owner", sync_step)
         self.assertNotRegex(sync_step, r"mapfile[^\n]*<\s*<\(")
         self.assertIn("pr_numbers=()", sync_step)
         self.assertIn('if [[ -n "${PR_NUMBERS}" ]]; then', sync_step)
-        self.assertIn("--limit 2", sync_step)
         self.assertRegex(sync_step, r"\$\{#pr_numbers\[@\]\}\s*>\s*1")
         self.assertRegex(sync_step, r"(?m)^\s+gh pr create\s")
         self.assertRegex(sync_step, r"(?m)^\s+gh pr edit \"\$\{pr_numbers\[0\]\}\"\s")
+        self.assertRegex(
+            sync_step,
+            r"\$\{#pr_numbers\[@\]\}\s*==\s*1[^}]*proposal_changed",
+        )
         self.assertIn("--base main", sync_step)
         self.assertIn('--head "${branch}"', sync_step)
         self.assertIn('--title "chore: review a-stock-data ${upstream_version}"', sync_step)
@@ -323,59 +536,227 @@ class AStockDataWorkflowContractTests(unittest.TestCase):
             r"gh pr merge|auto-merge|--auto(?:\s|$)",
         )
 
-    def test_pr_lookup_failure_and_result_cardinality_are_enforced(self) -> None:
-        shell_block = pr_shell_block()
-        cases = {
-            "failure": (1, None, "Failed to list open synchronization PRs."),
-            "empty": (0, "pr create", None),
-            "one": (0, "pr edit 17", None),
-            "many": (1, None, "More than one open synchronization PR exists."),
-        }
+    def test_matching_remote_proposal_and_internal_pr_are_not_republished(self) -> None:
+        remote_metadata = proposal_metadata(
+            synced_at="2026-07-18T00:00:00Z",
+        )
+        generated_metadata = proposal_metadata(
+            synced_at="2026-07-19T00:00:00Z",
+        )
 
-        with tempfile.TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir)
-            bin_path = temp_path / "bin"
-            bin_path.mkdir()
-            fake_gh = bin_path / "gh"
-            fake_gh.write_text(FAKE_GH, encoding="utf-8")
-            fake_gh.chmod(0o755)
+        with WorkflowShellHarness() as harness:
+            original_remote_sha = harness.push_remote_proposal(remote_metadata)
+            original_local_sha = harness.git("rev-parse", "HEAD").stdout.strip()
+            harness.write_metadata(generated_metadata)
 
-            for mode, (returncode, action, error_message) in cases.items():
-                with self.subTest(mode=mode):
-                    log_path = temp_path / f"{mode}.log"
-                    environment = os.environ.copy()
-                    environment.update(
-                        {
-                            "GH_LIST_RESULT": mode,
-                            "GH_LOG": str(log_path),
-                            "PATH": f"{bin_path}:{environment.get('PATH', '')}",
-                            "RUNNER_TEMP": str(temp_path),
-                        }
-                    )
-                    script = (
-                        "set -euo pipefail\n"
-                        'branch="automation/a-stock-data-sync"\n'
-                        'upstream_version="3.5.0"\n'
-                        f"{shell_block}"
-                    )
-                    result = subprocess.run(
-                        ["bash", "-c", script],
-                        check=False,
-                        capture_output=True,
-                        env=environment,
-                        text=True,
-                    )
-                    commands = log_path.read_text(encoding="utf-8").splitlines()
+            result, commands = harness.run_publish_pr_shell([pull_request(17)])
 
-                    self.assertEqual(result.returncode, returncode, result.stderr)
-                    self.assertTrue(commands[0].startswith("pr list "), commands)
-                    if action is None:
-                        self.assertEqual(len(commands), 1, commands)
-                    else:
-                        self.assertEqual(len(commands), 2, commands)
-                        self.assertTrue(commands[1].startswith(action), commands)
-                    if error_message is not None:
-                        self.assertIn(error_message, result.stderr)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                harness.git("rev-parse", "HEAD").stdout.strip(),
+                original_local_sha,
+            )
+            self.assertEqual(harness.remote_branch_sha(), original_remote_sha)
+            self.assertEqual(len(commands), 1, commands)
+            self.assertTrue(commands[0].startswith("pr list "), commands)
+
+    def test_matching_remote_proposal_without_pr_only_creates_pr(self) -> None:
+        remote_metadata = proposal_metadata(
+            synced_at="2026-07-18T00:00:00Z",
+        )
+        generated_metadata = proposal_metadata(
+            synced_at="2026-07-19T00:00:00Z",
+        )
+
+        with WorkflowShellHarness() as harness:
+            original_remote_sha = harness.push_remote_proposal(remote_metadata)
+            original_local_sha = harness.git("rev-parse", "HEAD").stdout.strip()
+            harness.write_metadata(generated_metadata)
+
+            result, commands = harness.run_publish_pr_shell([])
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                harness.git("rev-parse", "HEAD").stdout.strip(),
+                original_local_sha,
+            )
+            self.assertEqual(harness.remote_branch_sha(), original_remote_sha)
+            self.assertEqual(len(commands), 2, commands)
+            self.assertTrue(commands[0].startswith("pr list "), commands)
+            self.assertTrue(commands[1].startswith("pr create "), commands)
+
+    def test_commit_only_excludes_an_unrelated_staged_file(self) -> None:
+        generated_metadata = proposal_metadata(
+            synced_at="2026-07-19T00:00:00Z",
+        )
+
+        with WorkflowShellHarness() as harness:
+            harness.write_metadata(generated_metadata)
+            unrelated_path = harness.repository / "unrelated-staged.txt"
+            unrelated_path.write_text("must not be committed\n", encoding="utf-8")
+            harness.git("add", "unrelated-staged.txt")
+
+            result, commands = harness.run_publish_pr_shell([])
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            committed_unrelated = harness.git(
+                "cat-file",
+                "-e",
+                f"refs/remotes/origin/{BRANCH}:unrelated-staged.txt",
+                check=False,
+            )
+            self.assertNotEqual(committed_unrelated.returncode, 0)
+            self.assertEqual(len(commands), 2, commands)
+            self.assertTrue(commands[1].startswith("pr create "), commands)
+
+    def test_force_with_lease_rejection_does_not_overwrite_remote_branch(self) -> None:
+        remote_metadata = proposal_metadata(
+            synced_at="2026-07-18T00:00:00Z",
+        )
+        generated_metadata = proposal_metadata(
+            commit="3" * 40,
+            version="3.6.0",
+            synced_at="2026-07-19T00:00:00Z",
+            artifact_hash="c" * 64,
+        )
+
+        with WorkflowShellHarness() as harness:
+            expected_remote_sha = harness.push_remote_proposal(remote_metadata)
+            harness.git("switch", "-c", "concurrent-update", "main")
+            concurrent_path = harness.repository / "concurrent-update.txt"
+            concurrent_path.write_text("new remote state\n", encoding="utf-8")
+            harness.git("add", "concurrent-update.txt")
+            harness.git("commit", "-m", "concurrent update")
+            concurrent_sha = harness.git("rev-parse", "HEAD").stdout.strip()
+            harness.git(
+                "push",
+                "origin",
+                "HEAD:refs/heads/concurrent-update",
+            )
+            harness.git("switch", "main")
+            harness.git("branch", "-D", "concurrent-update")
+            harness.write_metadata(generated_metadata)
+
+            hook = harness.repository / ".git" / "hooks" / "pre-push"
+            hook.write_text(
+                "#!/usr/bin/env bash\n"
+                "set -euo pipefail\n"
+                'git --git-dir="${ORIGIN_PATH}" update-ref '
+                f'"refs/heads/{BRANCH}" "${{CONCURRENT_SHA}}" '
+                '"${EXPECTED_REMOTE_SHA}"\n',
+                encoding="utf-8",
+            )
+            hook.chmod(0o755)
+
+            result, commands = harness.run_publish_pr_shell(
+                [],
+                extra_environment={
+                    "CONCURRENT_SHA": concurrent_sha,
+                    "EXPECTED_REMOTE_SHA": expected_remote_sha,
+                    "ORIGIN_PATH": str(harness.origin),
+                },
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(harness.remote_branch_sha(), concurrent_sha)
+            self.assertEqual(commands, [])
+
+    def test_fork_and_owner_mismatch_prs_are_ignored_when_creating(self) -> None:
+        metadata = proposal_metadata(
+            synced_at="2026-07-18T00:00:00Z",
+        )
+        generated_metadata = proposal_metadata(
+            synced_at="2026-07-19T00:00:00Z",
+        )
+        candidates = [
+            pull_request(91, owner="fork-owner", cross_repository=True),
+            pull_request(92, owner="different-owner"),
+            pull_request(93, branch="different-branch"),
+        ]
+
+        with WorkflowShellHarness() as harness:
+            original_remote_sha = harness.push_remote_proposal(metadata)
+            harness.write_metadata(generated_metadata)
+
+            result, commands = harness.run_publish_pr_shell(candidates)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(harness.remote_branch_sha(), original_remote_sha)
+            self.assertEqual(len(commands), 2, commands)
+            self.assertTrue(commands[1].startswith("pr create "), commands)
+
+    def test_one_internal_pr_is_edited_when_proposal_changes(self) -> None:
+        remote_metadata = proposal_metadata(
+            synced_at="2026-07-18T00:00:00Z",
+        )
+        generated_metadata = proposal_metadata(
+            commit="3" * 40,
+            version="3.6.0",
+            synced_at="2026-07-19T00:00:00Z",
+            artifact_hash="c" * 64,
+        )
+        candidates = [
+            pull_request(91, owner="fork-owner", cross_repository=True),
+            pull_request(17),
+        ]
+
+        with WorkflowShellHarness() as harness:
+            original_remote_sha = harness.push_remote_proposal(remote_metadata)
+            harness.write_metadata(generated_metadata)
+
+            result, commands = harness.run_publish_pr_shell(candidates)
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertNotEqual(harness.remote_branch_sha(), original_remote_sha)
+            self.assertEqual(len(commands), 2, commands)
+            self.assertTrue(commands[1].startswith("pr edit 17 "), commands)
+
+    def test_multiple_internal_prs_fail_without_pr_mutation(self) -> None:
+        remote_metadata = proposal_metadata(
+            synced_at="2026-07-18T00:00:00Z",
+        )
+        generated_metadata = proposal_metadata(
+            synced_at="2026-07-19T00:00:00Z",
+        )
+        candidates = [
+            pull_request(91, owner="fork-owner", cross_repository=True),
+            pull_request(17),
+            pull_request(18),
+        ]
+
+        with WorkflowShellHarness() as harness:
+            original_remote_sha = harness.push_remote_proposal(remote_metadata)
+            harness.write_metadata(generated_metadata)
+
+            result, commands = harness.run_publish_pr_shell(candidates)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(
+                "More than one open synchronization PR exists.",
+                result.stderr,
+            )
+            self.assertEqual(harness.remote_branch_sha(), original_remote_sha)
+            self.assertEqual(len(commands), 1, commands)
+            self.assertTrue(commands[0].startswith("pr list "), commands)
+
+    def test_pr_lookup_failure_stops_without_pr_mutation(self) -> None:
+        remote_metadata = proposal_metadata(
+            synced_at="2026-07-18T00:00:00Z",
+        )
+        generated_metadata = proposal_metadata(
+            synced_at="2026-07-19T00:00:00Z",
+        )
+
+        with WorkflowShellHarness() as harness:
+            harness.push_remote_proposal(remote_metadata)
+            harness.write_metadata(generated_metadata)
+
+            result, commands = harness.run_publish_pr_shell([], list_failure=True)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Failed to list open synchronization PRs.", result.stderr)
+            self.assertEqual(len(commands), 1, commands)
+            self.assertTrue(commands[0].startswith("pr list "), commands)
 
     def test_workflow_contains_no_execution_or_deployment_paths(self) -> None:
         lowered = self.source.lower()

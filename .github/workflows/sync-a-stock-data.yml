@@ -18,13 +18,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out main
-        uses: actions/checkout@v4
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: main
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
 
@@ -52,6 +52,7 @@ jobs:
           remote_exists=false
           remote_sha=""
           remote_ref="refs/remotes/origin/${branch}"
+          proposal_changed=true
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -60,6 +61,41 @@ jobs:
             git fetch --no-tags origin "refs/heads/${branch}:refs/remotes/origin/${branch}"
             remote_sha="$(git rev-parse "${remote_ref}")"
             remote_exists=true
+
+            remote_metadata_path="${RUNNER_TEMP}/a-stock-data-remote-metadata.json"
+            if git show "${remote_ref}:third_party/a-stock-data/metadata.json" > "${remote_metadata_path}" && \
+              python - "${remote_metadata_path}" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+
+          def proposal_identity(metadata):
+              upstream = metadata["upstream"]
+              return {
+                  "upstream": {
+                      "commit": upstream["commit"],
+                      "version": upstream["version"],
+                  },
+                  "artifacts": metadata["artifacts"],
+              }
+
+
+          local_metadata = json.loads(
+              Path("third_party/a-stock-data/metadata.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          remote_metadata = json.loads(
+              Path(sys.argv[1]).read_text(encoding="utf-8")
+          )
+          if proposal_identity(local_metadata) != proposal_identity(remote_metadata):
+              raise SystemExit(1)
+          PY
+            then
+              proposal_changed=false
+              echo "The remote synchronization branch already proposes this upstream content."
+            fi
           else
             ls_remote_status="$?"
             if [[ "${ls_remote_status}" -ne 2 ]]; then
@@ -67,9 +103,6 @@ jobs:
               exit "${ls_remote_status}"
             fi
           fi
-
-          git switch -C "${branch}" main
-          git add -- "third_party/a-stock-data"
 
           read -r upstream_version upstream_short_sha < <(
             python - <<'PY'
@@ -83,16 +116,44 @@ jobs:
           print(upstream["version"], upstream["commit"][:7])
           PY
           )
-          git commit -m "chore: sync a-stock-data ${upstream_version} (${upstream_short_sha})"
 
-          if [[ "${remote_exists}" == true ]]; then
-            git push --force-with-lease="refs/heads/${branch}:${remote_sha}" origin "HEAD:refs/heads/${branch}"
-          else
-            git push origin "HEAD:refs/heads/${branch}"
+          if [[ "${proposal_changed}" == true ]]; then
+            git switch -C "${branch}" main
+            git add -- "third_party/a-stock-data"
+            git commit --only -m "chore: sync a-stock-data ${upstream_version} (${upstream_short_sha})" -- "third_party/a-stock-data"
+
+            if [[ "${remote_exists}" == true ]]; then
+              git push --force-with-lease="refs/heads/${branch}:${remote_sha}" origin "HEAD:refs/heads/${branch}"
+            else
+              git push origin "HEAD:refs/heads/${branch}"
+            fi
           fi
 
-          if ! PR_NUMBERS="$(gh pr list --state open --head "${branch}" --base main --limit 2 --json number --jq '.[].number')"; then
+          repository_owner="${GITHUB_REPOSITORY%%/*}"
+          if ! PR_JSON="$(gh pr list --state open --head "${branch}" --base main --limit 100 --json number,headRefName,isCrossRepository,headRepositoryOwner)"; then
             echo "Failed to list open synchronization PRs." >&2
+            exit 1
+          fi
+          if ! PR_NUMBERS="$(
+            PR_JSON="${PR_JSON}" python - "${branch}" "${repository_owner}" <<'PY'
+          import json
+          import os
+          import sys
+
+
+          branch, repository_owner = sys.argv[1:]
+          for pr in json.loads(os.environ["PR_JSON"]):
+              owner = pr["headRepositoryOwner"]
+              owner_login = owner.get("login") if isinstance(owner, dict) else owner
+              if (
+                  pr["headRefName"] == branch
+                  and pr["isCrossRepository"] is False
+                  and owner_login == repository_owner
+              ):
+                  print(pr["number"])
+          PY
+          )"; then
+            echo "Failed to parse open synchronization PRs." >&2
             exit 1
           fi
           pr_numbers=()
@@ -112,9 +173,11 @@ jobs:
               --head "${branch}" \
               --title "chore: review a-stock-data ${upstream_version}" \
               --body-file "${RUNNER_TEMP}/a-stock-data-sync-summary.md"
-          else
+          elif (( ${#pr_numbers[@]} == 1 )) && [[ "${proposal_changed}" == true ]]; then
             gh pr edit "${pr_numbers[0]}" \
               --base main \
               --title "chore: review a-stock-data ${upstream_version}" \
               --body-file "${RUNNER_TEMP}/a-stock-data-sync-summary.md"
+          else
+            echo "The existing synchronization PR already proposes this upstream content."
           fi

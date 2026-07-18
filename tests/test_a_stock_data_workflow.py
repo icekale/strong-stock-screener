@@ -676,7 +676,7 @@ class AStockDataWorkflowContractTests(unittest.TestCase):
             '-f "head=${GITHUB_REPOSITORY_OWNER}:${branch}"',
             sync_step,
         )
-        self.assertIn('-f "base=main"', sync_step)
+        self.assertNotIn('-f "base=main"', sync_step)
         self.assertIn('-f "state=open"', sync_step)
         self.assertNotIn("--limit", sync_step)
         self.assertNotIn("gh pr list", sync_step)
@@ -752,6 +752,29 @@ class AStockDataWorkflowContractTests(unittest.TestCase):
             self.assertEqual(len(commands), 2, commands)
             self.assertTrue(commands[0].startswith("api "), commands)
             self.assertTrue(commands[1].startswith("pr create "), commands)
+
+    def test_existing_internal_pr_with_wrong_base_is_repaired_not_duplicated(
+        self,
+    ) -> None:
+        remote_snapshot = proposal_snapshot(
+            synced_at="2026-07-18T00:00:00Z",
+        )
+        generated_snapshot = proposal_snapshot(
+            synced_at="2026-07-19T00:00:00Z",
+        )
+        wrong_base_pr = pull_request(17, base="release")
+
+        with WorkflowShellHarness() as harness:
+            original_remote_sha = harness.push_remote_proposal(remote_snapshot)
+            harness.write_snapshot(generated_snapshot)
+
+            result, commands = harness.run_publish_pr_shell([wrong_base_pr])
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(harness.remote_branch_sha(), original_remote_sha)
+            self.assertEqual(len(commands), 2, commands)
+            self.assertNotIn("base=main", commands[0])
+            self.assertTrue(commands[1].startswith("pr edit 17 "), commands)
 
     def test_commit_only_excludes_an_unrelated_staged_file(self) -> None:
         generated_snapshot = proposal_snapshot(

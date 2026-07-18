@@ -301,6 +301,26 @@ class ArtifactValidationTests(unittest.TestCase):
                 artifacts["SKILL.md"] = VALID_SKILL.replace(old, new)
                 validate_artifacts(artifacts)
 
+    def test_rejects_quoted_frontmatter_keys_that_hide_duplicate_fields(self) -> None:
+        replacements = {
+            "double-quoted name": (
+                b"name: a-stock-data",
+                b'name: a-stock-data\n"name": another-project',
+            ),
+            "single-quoted version": (
+                b"version: 3.4.0",
+                b"version: 3.4.0\n'version': 9.9.9",
+            ),
+        }
+
+        for name, (old, new) in replacements.items():
+            with self.subTest(name=name), self.assertRaisesRegex(
+                ArtifactValidationError, "frontmatter"
+            ):
+                artifacts = valid_artifacts()
+                artifacts["SKILL.md"] = VALID_SKILL.replace(old, new)
+                validate_artifacts(artifacts)
+
     def test_rejects_project_heading_version_mismatch(self) -> None:
         artifacts = valid_artifacts()
         artifacts["SKILL.md"] = VALID_SKILL.replace(b"V3.4.0", b"V3.5.0")
@@ -311,6 +331,27 @@ class ArtifactValidationTests(unittest.TestCase):
     def test_rejects_first_changelog_release_version_mismatch(self) -> None:
         artifacts = valid_artifacts()
         artifacts["CHANGELOG.md"] = VALID_CHANGELOG.replace(b"## 3.4.0", b"## v3.5.0")
+
+        with self.assertRaisesRegex(ArtifactValidationError, "changelog version"):
+            validate_artifacts(artifacts)
+
+    def test_rejects_project_heading_found_only_inside_code_fence(self) -> None:
+        artifacts = valid_artifacts()
+        artifacts["SKILL.md"] = (
+            b"---\nname: a-stock-data\nversion: 3.4.0\n---\n"
+            b"```text\n# A\xe8\x82\xa1\xe5\x85\xa8\xe6\xa0\x88\xe6\x95\xb0\xe6\x8d\xae\xe5\xb7\xa5\xe5\x85\xb7\xe5\x8c\x85 V3.4.0\n```\n"
+            b"## Market\nProvider details.\n"
+        )
+
+        with self.assertRaisesRegex(ArtifactValidationError, "project heading"):
+            validate_artifacts(artifacts)
+
+    def test_uses_first_changelog_release_outside_code_fences(self) -> None:
+        artifacts = valid_artifacts()
+        artifacts["CHANGELOG.md"] = (
+            b"# Changelog\n\n```text\n## 3.4.0\n```\n\n"
+            b"## 9.9.9\n\n- Actual first release.\n"
+        )
 
         with self.assertRaisesRegex(ArtifactValidationError, "changelog version"):
             validate_artifacts(artifacts)
@@ -435,6 +476,18 @@ class MarkdownSectionTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ArtifactValidationError, "duplicate.*Repeated"):
             parse_markdown_sections(markdown)
+
+    def test_rejects_render_equivalent_duplicate_level_two_sections(self) -> None:
+        variants = (
+            "# Root\n## Repeated\nearlier\n## Repeated ##\nlater\n",
+            "# Root\n## Repeated\nearlier\n  ##\tRepeated\nlater\n",
+        )
+
+        for markdown in variants:
+            with self.subTest(markdown=markdown), self.assertRaisesRegex(
+                ArtifactValidationError, "duplicate.*Repeated"
+            ):
+                parse_markdown_sections(markdown)
 
     def test_artifact_validation_rejects_duplicate_level_two_skill_sections(
         self,

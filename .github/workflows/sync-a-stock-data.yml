@@ -139,7 +139,7 @@ jobs:
           fi
 
           desired_title="chore: review a-stock-data ${upstream_version}"
-          if ! PR_JSON="$(gh api --method GET "repos/${GITHUB_REPOSITORY}/pulls" -f "head=${GITHUB_REPOSITORY_OWNER}:${branch}" -f "base=main" -f "state=open")"; then
+          if ! PR_JSON="$(gh api --method GET "repos/${GITHUB_REPOSITORY}/pulls" -f "head=${GITHUB_REPOSITORY_OWNER}:${branch}" -f "state=open")"; then
             echo "Failed to list open synchronization PRs." >&2
             exit 1
           fi

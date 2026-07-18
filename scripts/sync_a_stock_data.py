@@ -33,13 +33,14 @@ MAX_SECTION_HEADING_CHARS = 120
 MIN_APACHE_LICENSE_BYTES = 8_000
 NAME_RE = re.compile(r"^name:[ \t]*a-stock-data[ \t]*$")
 VERSION_RE = re.compile(r"^version:[ \t]*([0-9]+\.[0-9]+\.[0-9]+)[ \t]*$")
-NAME_DECLARATION_RE = re.compile(r"^name[ \t]*:")
-VERSION_DECLARATION_RE = re.compile(r"^version[ \t]*:")
+FRONTMATTER_KEY_RE = re.compile(
+    r"^(?P<key>[A-Za-z_][A-Za-z0-9_-]*)[ \t]*:"
+)
 PROJECT_HEADING_RE = re.compile(
-    r"^# A股全栈数据工具包 V([0-9]+\.[0-9]+\.[0-9]+)[ \t]*$"
+    r"^A股全栈数据工具包 V([0-9]+\.[0-9]+\.[0-9]+)[ \t]*$"
 )
 CHANGELOG_RELEASE_RE = re.compile(
-    r"^##[ \t]+[vV]?([0-9]+\.[0-9]+\.[0-9]+)(?:[ \t]+.*)?$"
+    r"^[vV]?([0-9]+\.[0-9]+\.[0-9]+)(?:[ \t]+.*)?$"
 )
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -105,6 +106,10 @@ _APACHE_APPLICATION_NOTICE_RE = re.compile(
 )
 _FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 _FENCE_CLOSE_RE = re.compile(r"^ {0,3}([`~]+)[ \t]*$")
+_ATX_HEADING_RE = re.compile(
+    r"^ {0,3}(?P<marks>#{1,6})(?:[ \t]+(?P<title>.*)|[ \t]*)$"
+)
+_ATX_CLOSING_RE = re.compile(r"[ \t]+#+[ \t]*$")
 
 
 class SyncError(RuntimeError):
@@ -387,8 +392,18 @@ def validate_artifacts(artifacts: Mapping[str, bytes]) -> str:
             "SKILL.md is missing a semantic frontmatter version"
         ) from error
     frontmatter_lines = lines[1:frontmatter_end]
+    frontmatter_fields: list[tuple[str, str]] = []
+    unsupported_frontmatter_syntax = False
+    for line in frontmatter_lines:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        field_match = FRONTMATTER_KEY_RE.match(line)
+        if field_match is None:
+            unsupported_frontmatter_syntax = True
+            continue
+        frontmatter_fields.append((field_match.group("key"), line))
     name_declarations = [
-        line for line in frontmatter_lines if NAME_DECLARATION_RE.match(line)
+        line for key, line in frontmatter_fields if key == "name"
     ]
     if not name_declarations:
         raise ArtifactValidationError("SKILL.md is missing name: a-stock-data")
@@ -399,7 +414,7 @@ def validate_artifacts(artifacts: Mapping[str, bytes]) -> str:
     if NAME_RE.fullmatch(name_declarations[0]) is None:
         raise ArtifactValidationError("SKILL.md is missing name: a-stock-data")
     version_declarations = [
-        line for line in frontmatter_lines if VERSION_DECLARATION_RE.match(line)
+        line for key, line in frontmatter_fields if key == "version"
     ]
     if not version_declarations:
         raise ArtifactValidationError("SKILL.md is missing a semantic frontmatter version")
@@ -410,11 +425,18 @@ def validate_artifacts(artifacts: Mapping[str, bytes]) -> str:
     version_match = VERSION_RE.fullmatch(version_declarations[0])
     if version_match is None:
         raise ArtifactValidationError("SKILL.md is missing a semantic frontmatter version")
+    if unsupported_frontmatter_syntax:
+        raise ArtifactValidationError(
+            "SKILL.md frontmatter uses unsupported key syntax"
+        )
     version = version_match.group(1)
     project_heading_versions = [
         match.group(1)
-        for line in lines[frontmatter_end + 1 :]
-        if (match := PROJECT_HEADING_RE.fullmatch(line)) is not None
+        for level, title in _markdown_headings(
+            "\n".join(lines[frontmatter_end + 1 :])
+        )
+        if level == 1
+        and (match := PROJECT_HEADING_RE.fullmatch(title)) is not None
     ]
     if not project_heading_versions:
         raise ArtifactValidationError("SKILL.md is missing the project heading")
@@ -429,7 +451,11 @@ def validate_artifacts(artifacts: Mapping[str, bytes]) -> str:
     if not changelog_lines or changelog_lines[0] != "# Changelog":
         raise ArtifactValidationError("CHANGELOG.md must start with # Changelog")
     first_release_heading = next(
-        (line for line in changelog_lines[1:] if line.startswith("## ")),
+        (
+            title
+            for level, title in _markdown_headings(decoded["CHANGELOG.md"])
+            if level == 2
+        ),
         None,
     )
     changelog_match = (
@@ -471,6 +497,45 @@ def validate_artifacts(artifacts: Mapping[str, bytes]) -> str:
     return version
 
 
+def _parse_atx_heading(line: str) -> tuple[int, str] | None:
+    match = _ATX_HEADING_RE.fullmatch(line)
+    if match is None:
+        return None
+    title = match.group("title") or ""
+    title = _ATX_CLOSING_RE.sub("", title).strip()
+    return len(match.group("marks")), title
+
+
+def _markdown_headings(markdown: str) -> list[tuple[int, str]]:
+    headings: list[tuple[int, str]] = []
+    fence_marker: str | None = None
+    fence_length = 0
+    for line in markdown.splitlines():
+        if fence_marker is not None:
+            closing_match = _FENCE_CLOSE_RE.fullmatch(line)
+            if closing_match is not None:
+                closing_run = closing_match.group(1)
+                if (
+                    len(closing_run) >= fence_length
+                    and all(marker == fence_marker for marker in closing_run)
+                ):
+                    fence_marker = None
+                    fence_length = 0
+            continue
+
+        opening_match = _FENCE_OPEN_RE.match(line)
+        if opening_match is not None:
+            opening_run = opening_match.group(1)
+            fence_marker = opening_run[0]
+            fence_length = len(opening_run)
+            continue
+
+        heading = _parse_atx_heading(line)
+        if heading is not None:
+            headings.append(heading)
+    return headings
+
+
 def parse_markdown_sections(markdown: str) -> dict[str, str]:
     sections: dict[str, str] = {}
     heading: str | None = None
@@ -503,10 +568,11 @@ def parse_markdown_sections(markdown: str) -> dict[str, str]:
             fence_length = len(opening_run)
             continue
 
-        if line.startswith("## "):
+        parsed_heading = _parse_atx_heading(line_text)
+        if parsed_heading is not None and parsed_heading[0] == 2:
             if heading is not None:
                 sections[heading] = "".join(section_lines)
-            next_heading = line[3:].strip()
+            next_heading = parsed_heading[1]
             if next_heading in sections:
                 raise ArtifactValidationError(
                     f"SKILL.md contains duplicate level-two section: {next_heading}"

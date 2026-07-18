@@ -401,7 +401,7 @@ concurrency:
 
 Add one Ubuntu job that checks out `main` with full history, sets up Python 3.12, runs `python -m unittest discover -s tests -p 'test_*a_stock_data*.py' -v`, and executes the sync script with `GITHUB_TOKEN`, `third_party/a-stock-data`, and `$RUNNER_TEMP/a-stock-data-summary.md`.
 
-If `git diff --quiet -- third_party/a-stock-data` is true, exit without Git operations. Otherwise configure `github-actions[bot]`, fetch the existing `automation/a-stock-data-sync` branch when present, create/reset that branch from the checked-out `main`, commit only `third_party/a-stock-data`, and push with `--force-with-lease`. With `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}`, find an open PR using `gh pr list --head automation/a-stock-data-sync --base main --state open --json number --jq '.[0].number'`; call `gh pr create` when absent or `gh pr edit` when present. Use the generated summary as the PR body. Do not invoke Docker, SSH, Unraid, or deployment workflows.
+If `git diff --quiet -- third_party/a-stock-data` is true, exit without Git operations. Otherwise configure `github-actions[bot]`, fetch the existing `automation/a-stock-data-sync` branch when present, create/reset that branch from the checked-out `main`, commit only `third_party/a-stock-data`, and push with `--force-with-lease`. With `GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}`, query all open PRs whose owner-qualified head is `${GITHUB_REPOSITORY_OWNER}:automation/a-stock-data-sync`, without filtering by base: create when none exist, edit the sole PR back to `main` when one exists, and fail when more than one exists. Use the generated summary as the PR body. Do not invoke Docker, SSH, Unraid, or deployment workflows.
 
 - [ ] **Step 4: Run both root test modules**
 

@@ -38,6 +38,24 @@ class ArtifactValidationTests(unittest.TestCase):
     def test_validates_required_files_and_extracts_version(self) -> None:
         self.assertEqual(validate_artifacts(valid_artifacts()), "3.4.0")
 
+    def test_rejects_prefixed_name_key(self) -> None:
+        artifacts = valid_artifacts()
+        artifacts["SKILL.md"] = VALID_SKILL.replace(
+            b"name: a-stock-data", b"not-name: a-stock-data"
+        )
+
+        with self.assertRaisesRegex(ArtifactValidationError, "name: a-stock-data"):
+            validate_artifacts(artifacts)
+
+    def test_rejects_level_two_project_heading(self) -> None:
+        artifacts = valid_artifacts()
+        artifacts["SKILL.md"] = VALID_SKILL.replace(
+            "# A股全栈数据工具包".encode(), "## A股全栈数据工具包".encode()
+        )
+
+        with self.assertRaisesRegex(ArtifactValidationError, "project heading"):
+            validate_artifacts(artifacts)
+
     def test_rejects_leading_html(self) -> None:
         for html in (b"<!doctype html><title>404</title>", b"  <HTML>not found</HTML>"):
             with self.subTest(html=html), self.assertRaisesRegex(
@@ -50,6 +68,13 @@ class ArtifactValidationTests(unittest.TestCase):
     def test_rejects_invalid_license(self) -> None:
         artifacts = valid_artifacts()
         artifacts["LICENSE"] = b"Unknown license"
+
+        with self.assertRaisesRegex(ArtifactValidationError, "Apache License 2.0"):
+            validate_artifacts(artifacts)
+
+    def test_rejects_negated_apache_license_header(self) -> None:
+        artifacts = valid_artifacts()
+        artifacts["LICENSE"] = b"Not the Apache License\nNot Version 2.0\n"
 
         with self.assertRaisesRegex(ArtifactValidationError, "Apache License 2.0"):
             validate_artifacts(artifacts)

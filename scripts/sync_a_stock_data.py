@@ -12,6 +12,10 @@ REQUIRED_FILES = ("SKILL.md", "CHANGELOG.md", "LICENSE")
 MAX_FILE_BYTES = {"SKILL.md": 512_000, "CHANGELOG.md": 256_000, "LICENSE": 64_000}
 VERSION_RE = re.compile(r"(?m)^version:\s*([0-9]+\.[0-9]+\.[0-9]+)\s*$")
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
+_APACHE_LICENSE_HEADER_RE = re.compile(
+    r"\A[ \t]*Apache License[ \t]*\r?\n"
+    r"[ \t]*Version 2\.0, January 2004[ \t]*(?:\r?\n|\Z)"
+)
 
 
 class SyncError(RuntimeError):
@@ -44,12 +48,12 @@ def validate_artifacts(artifacts: Mapping[str, bytes]) -> str:
         decoded[name] = text
 
     skill = decoded["SKILL.md"]
-    if "name: a-stock-data" not in skill:
+    lines = skill.splitlines()
+    if "name: a-stock-data" not in lines:
         raise ArtifactValidationError("SKILL.md is missing name: a-stock-data")
-    if "# A股全栈数据工具包" not in skill:
+    if not any(line.startswith("# A股全栈数据工具包") for line in lines):
         raise ArtifactValidationError("SKILL.md is missing the project heading")
 
-    lines = skill.splitlines()
     if not lines or lines[0] != "---":
         raise ArtifactValidationError("SKILL.md is missing a semantic frontmatter version")
     try:
@@ -65,8 +69,7 @@ def validate_artifacts(artifacts: Mapping[str, bytes]) -> str:
     if not decoded["CHANGELOG.md"].startswith("# Changelog"):
         raise ArtifactValidationError("CHANGELOG.md must start with # Changelog")
 
-    license_text = decoded["LICENSE"]
-    if "Apache License" not in license_text or "Version 2.0" not in license_text:
+    if _APACHE_LICENSE_HEADER_RE.match(decoded["LICENSE"]) is None:
         raise ArtifactValidationError("LICENSE must contain Apache License 2.0")
 
     return version_match.group(1)

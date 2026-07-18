@@ -104,7 +104,9 @@ _APACHE_APPLICATION_NOTICE_RE = re.compile(
     r"Copyright[^\r\n]*.*?Licensed under the Apache License, Version 2\.0",
     re.DOTALL,
 )
-_FENCE_OPEN_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+_FENCE_OPEN_RE = re.compile(
+    r"^ {0,3}((?:`{3,})(?=[^`]*$)|(?:~{3,})).*$"
+)
 _FENCE_CLOSE_RE = re.compile(r"^ {0,3}([`~]+)[ \t]*$")
 _ATX_HEADING_RE = re.compile(
     r"^ {0,3}(?P<marks>#{1,6})(?:[ \t]+(?P<title>.*)|[ \t]*)$"

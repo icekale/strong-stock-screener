@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import http.client
+import io
 import json
+import os
 import socket
 import tempfile
 import unittest
 import urllib.error
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import FrozenInstanceError
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -117,6 +120,17 @@ def snapshot_bytes(destination: Path) -> dict[str, bytes]:
         for path in sorted(destination.iterdir())
         if path.is_file()
     }
+
+
+def load_snapshot_metadata(destination: Path) -> dict[str, object]:
+    return json.loads((destination / "metadata.json").read_bytes())
+
+
+def write_snapshot_metadata(destination: Path, metadata: object) -> None:
+    (destination / "metadata.json").write_text(
+        json.dumps(metadata, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
 
 class ArtifactValidationTests(unittest.TestCase):
@@ -364,6 +378,170 @@ class MetadataTests(unittest.TestCase):
                 )
 
 
+class SnapshotVerificationTests(unittest.TestCase):
+    def test_verifies_valid_local_snapshot_and_returns_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(commit="b" * 40), destination)
+
+            metadata = sync_module.verify_snapshot(destination)
+
+            self.assertEqual(metadata, load_snapshot_metadata(destination))
+            self.assertEqual(metadata["upstream"]["version"], "3.4.0")
+            self.assertEqual(metadata["upstream"]["commit"], "b" * 40)
+
+    def test_rejects_changed_artifact_bytes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(), destination)
+            changelog = destination / "CHANGELOG.md"
+            changelog.write_bytes(changelog.read_bytes().replace(b"Updated", b"Changed"))
+
+            with self.assertRaisesRegex(
+                ArtifactValidationError,
+                "CHANGELOG.md.*SHA256",
+            ):
+                sync_module.verify_snapshot(destination)
+
+    def test_rejects_wrong_artifact_size(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(), destination)
+            metadata = load_snapshot_metadata(destination)
+            metadata["artifacts"]["LICENSE"]["size"] += 1
+            write_snapshot_metadata(destination, metadata)
+
+            with self.assertRaisesRegex(ArtifactValidationError, "LICENSE.*size"):
+                sync_module.verify_snapshot(destination)
+
+    def test_rejects_wrong_artifact_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(), destination)
+            metadata = load_snapshot_metadata(destination)
+            metadata["artifacts"]["SKILL.md"]["sha256"] = "0" * 64
+            write_snapshot_metadata(destination, metadata)
+
+            with self.assertRaisesRegex(ArtifactValidationError, "SKILL.md.*SHA256"):
+                sync_module.verify_snapshot(destination)
+
+    def test_rejects_wrong_artifact_raw_url(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(), destination)
+            metadata = load_snapshot_metadata(destination)
+            metadata["artifacts"]["LICENSE"]["raw_url"] = (
+                "https://example.invalid/LICENSE"
+            )
+            write_snapshot_metadata(destination, metadata)
+
+            with self.assertRaisesRegex(ArtifactValidationError, "LICENSE.*raw_url"):
+                sync_module.verify_snapshot(destination)
+
+    def test_rejects_metadata_version_different_from_skill(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(), destination)
+            metadata = load_snapshot_metadata(destination)
+            metadata["upstream"]["version"] = "3.5.0"
+            write_snapshot_metadata(destination, metadata)
+
+            with self.assertRaisesRegex(ArtifactValidationError, "version.*SKILL.md"):
+                sync_module.verify_snapshot(destination)
+
+    def test_rejects_wrong_upstream_identity_commit_and_version_fields(self) -> None:
+        invalid_fields = {
+            "owner": "someone-else",
+            "repository": "another-repository",
+            "branch": "develop",
+            "commit": "A" * 40,
+            "version": "3.4",
+        }
+
+        for field, value in invalid_fields.items():
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                destination = Path(directory) / "a-stock-data"
+                sync_module.sync_snapshot(FakeGitHubClient(), destination)
+                metadata = load_snapshot_metadata(destination)
+                metadata["upstream"][field] = value
+                write_snapshot_metadata(destination, metadata)
+
+                with self.assertRaisesRegex(SyncError, field):
+                    sync_module.verify_snapshot(destination)
+
+    def test_rejects_wrong_schema_and_artifact_metadata_fields(self) -> None:
+        invalid_mutations = {
+            "schema_version": lambda metadata: metadata.update(schema_version=2),
+            "SKILL.md fields": lambda metadata: metadata["artifacts"][
+                "SKILL.md"
+            ].update(unexpected=True),
+        }
+
+        for field, mutate in invalid_mutations.items():
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                destination = Path(directory) / "a-stock-data"
+                sync_module.sync_snapshot(FakeGitHubClient(), destination)
+                metadata = load_snapshot_metadata(destination)
+                mutate(metadata)
+                write_snapshot_metadata(destination, metadata)
+
+                with self.assertRaisesRegex(SyncError, field):
+                    sync_module.verify_snapshot(destination)
+
+    def test_rejects_malformed_or_naive_metadata_timestamps(self) -> None:
+        invalid_timestamps = {
+            "committed_at": "not-a-timestamp",
+            "synced_at": "2026-07-18T06:30:00",
+        }
+
+        for field, value in invalid_timestamps.items():
+            with self.subTest(field=field), tempfile.TemporaryDirectory() as directory:
+                destination = Path(directory) / "a-stock-data"
+                sync_module.sync_snapshot(FakeGitHubClient(), destination)
+                metadata = load_snapshot_metadata(destination)
+                metadata["upstream"][field] = value
+                write_snapshot_metadata(destination, metadata)
+
+                with self.assertRaisesRegex(SyncError, field):
+                    sync_module.verify_snapshot(destination)
+
+    def test_rejects_wrong_artifact_set_and_missing_local_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(), destination)
+            metadata = load_snapshot_metadata(destination)
+            del metadata["artifacts"]["LICENSE"]
+            write_snapshot_metadata(destination, metadata)
+
+            with self.assertRaisesRegex(SyncError, "artifacts"):
+                sync_module.verify_snapshot(destination)
+
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(), destination)
+            (destination / "CHANGELOG.md").unlink()
+
+            with self.assertRaisesRegex(ArtifactValidationError, "CHANGELOG.md"):
+                sync_module.verify_snapshot(destination)
+
+    def test_requires_destination_directory_and_metadata_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+
+            with self.assertRaisesRegex(SyncError, "destination"):
+                sync_module.verify_snapshot(root / "missing")
+
+            snapshot_file = root / "snapshot-file"
+            snapshot_file.write_text("not a directory", encoding="utf-8")
+            with self.assertRaisesRegex(SyncError, "directory"):
+                sync_module.verify_snapshot(snapshot_file)
+
+            destination = root / "a-stock-data"
+            destination.mkdir()
+            with self.assertRaisesRegex(SyncError, "metadata.json"):
+                sync_module.verify_snapshot(destination)
+
+
 class SnapshotSyncTests(unittest.TestCase):
     def test_requires_the_exact_repository_identity_before_resolving(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -530,7 +708,12 @@ class SnapshotSyncTests(unittest.TestCase):
                 {"added": ["信号层", "行情层"], "changed": [], "removed": []},
             )
             self.assertIn("`simonlin1212/a-stock-data`", result.summary)
-            self.assertIn(f"`none` -> `{commit}`", result.summary)
+            self.assertIn("none (first sync)", result.summary)
+            self.assertIn(
+                f"https://github.com/simonlin1212/a-stock-data/commit/{commit}",
+                result.summary,
+            )
+            self.assertNotIn("/compare/", result.summary)
             self.assertIn("Added: `信号层`, `行情层`", result.summary)
             with self.assertRaises(FrozenInstanceError):
                 result.changed = False
@@ -566,7 +749,7 @@ version: 3.5.0
 ## 行情层
 Updated quote details.
 ## 数据层
-New data details.
+New 备用源 data details.
 """.encode()
 
             result = sync_module.sync_snapshot(
@@ -583,8 +766,42 @@ New data details.
                 result.section_diff,
                 {"added": ["数据层"], "changed": ["行情层"], "removed": ["信号层"]},
             )
-            self.assertIn("`3.4.0` -> `3.5.0`", result.summary)
+            self.assertIn("# Upstream a-stock-data", result.summary)
+            self.assertIn("Previous version: `3.4.0`", result.summary)
+            self.assertIn("Current version: `3.5.0`", result.summary)
+            self.assertIn(f"Previous commit: `{'a' * 40}`", result.summary)
+            self.assertIn(
+                f"https://github.com/simonlin1212/a-stock-data/commit/{'b' * 40}",
+                result.summary,
+            )
+            self.assertIn(
+                "https://github.com/simonlin1212/a-stock-data/compare/"
+                f"{'a' * 40}...{'b' * 40}",
+                result.summary,
+            )
+            self.assertIn("Added: `数据层`", result.summary)
             self.assertIn("Changed: `行情层`", result.summary)
+            self.assertIn("Removed: `信号层`", result.summary)
+            for name, content in sorted(updated_artifacts.items()):
+                self.assertIn(
+                    f"| `{name}` | {len(content)} | "
+                    f"`{hashlib.sha256(content).hexdigest()}` |",
+                    result.summary,
+                )
+            self.assertLess(
+                result.summary.index("`CHANGELOG.md`"),
+                result.summary.index("`LICENSE`"),
+            )
+            self.assertLess(
+                result.summary.index("`LICENSE`"),
+                result.summary.index("`SKILL.md`"),
+            )
+            self.assertIn("WARNING", result.summary)
+            self.assertIn("Tencent", result.summary)
+            self.assertIn("Eastmoney", result.summary)
+            self.assertIn("备用源", result.summary)
+            self.assertIn("Upstream Markdown is not executed", result.summary)
+            self.assertIn("runtime providers are unchanged", result.summary)
 
     def test_download_failure_preserves_previous_snapshot(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -841,6 +1058,180 @@ New data details.
             self.assertEqual(len(backups), 1)
             self.assertFalse((backups[0] / "CHANGELOG.md").exists())
             self.assertEqual(candidates, [])
+
+
+class CliTests(unittest.TestCase):
+    def test_check_verifies_locally_without_factory_or_network_calls(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(), destination)
+
+            def fail_factory(token: str | None) -> FakeGitHubClient:
+                self.fail(f"client factory called with {token!r}")
+
+            stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "must-not-be-read"},
+            ), patch.object(
+                sync_module.urllib.request,
+                "urlopen",
+                side_effect=AssertionError("network call attempted"),
+            ) as urlopen, redirect_stdout(stdout), redirect_stderr(stderr):
+                status = sync_module.main(
+                    ["--check", "--destination", str(destination)],
+                    client_factory=fail_factory,
+                )
+
+            self.assertEqual(status, 0)
+            self.assertEqual(urlopen.call_count, 0)
+            self.assertIn(f"verified a-stock-data 3.4.0 at {'a' * 40}", stdout.getvalue())
+            self.assertEqual(stderr.getvalue(), "")
+
+    def test_normal_mode_passes_token_and_reports_updated_then_unchanged(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            commit = "c" * 40
+            factory_tokens: list[str | None] = []
+            clients: list[FakeGitHubClient] = []
+
+            def factory(token: str | None) -> FakeGitHubClient:
+                factory_tokens.append(token)
+                client = FakeGitHubClient(commit=commit)
+                clients.append(client)
+                return client
+
+            first_stdout = io.StringIO()
+            second_stdout = io.StringIO()
+            stderr = io.StringIO()
+            with patch.dict(
+                os.environ,
+                {"GITHUB_TOKEN": "secret-cli-token"},
+                clear=True,
+            ), redirect_stderr(stderr):
+                with redirect_stdout(first_stdout):
+                    first_status = sync_module.main(
+                        ["--destination", str(destination)],
+                        client_factory=factory,
+                    )
+                with redirect_stdout(second_stdout):
+                    second_status = sync_module.main(
+                        ["--destination", str(destination)],
+                        client_factory=factory,
+                    )
+
+            self.assertEqual(first_status, 0)
+            self.assertEqual(second_status, 0)
+            self.assertEqual(factory_tokens, ["secret-cli-token", "secret-cli-token"])
+            self.assertIn(f"updated none -> {commit}", first_stdout.getvalue())
+            self.assertIn(f"unchanged {commit}", second_stdout.getvalue())
+            self.assertEqual(clients[1].downloads, [])
+            combined_output = first_stdout.getvalue() + second_stdout.getvalue()
+            self.assertNotIn("secret-cli-token", combined_output)
+            self.assertEqual(stderr.getvalue(), "")
+
+    def test_summary_path_creates_parents_and_writes_exact_utf8_content(self) -> None:
+        result = sync_module.SyncResult(
+            changed=True,
+            previous_commit=None,
+            current_commit="d" * 40,
+            previous_version=None,
+            current_version="3.4.0",
+            section_diff={"added": [], "changed": [], "removed": []},
+            summary="# Upstream a-stock-data\n\n中文 summary\n",
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / "snapshot"
+            summary_path = root / "nested" / "reports" / "summary.md"
+            stdout = io.StringIO()
+            with patch.object(
+                sync_module,
+                "sync_snapshot",
+                return_value=result,
+            ), patch.dict(os.environ, {}, clear=True), redirect_stdout(stdout):
+                status = sync_module.main(
+                    [
+                        "--destination",
+                        str(destination),
+                        "--summary-path",
+                        str(summary_path),
+                    ],
+                    client_factory=lambda token: FakeGitHubClient(),
+                )
+
+            self.assertEqual(status, 0)
+            self.assertEqual(summary_path.read_bytes(), result.summary.encode("utf-8"))
+
+    def test_errors_are_concise_redacted_and_have_no_traceback(self) -> None:
+        error_types = (SyncError, ArtifactValidationError)
+
+        for error_type in error_types:
+            with self.subTest(error_type=error_type), tempfile.TemporaryDirectory() as directory:
+                destination = Path(directory) / "snapshot"
+
+                def failing_factory(token: str | None) -> FakeGitHubClient:
+                    raise error_type(f"failure for {token}: metadata.json")
+
+                stdout = io.StringIO()
+                stderr = io.StringIO()
+                with patch.dict(
+                    os.environ,
+                    {"GITHUB_TOKEN": "secret-error-token"},
+                    clear=True,
+                ), redirect_stdout(stdout), redirect_stderr(stderr):
+                    status = sync_module.main(
+                        ["--destination", str(destination)],
+                        client_factory=failing_factory,
+                    )
+
+                self.assertEqual(status, 1)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertEqual(stderr.getvalue().count("\n"), 1)
+                self.assertIn("error:", stderr.getvalue())
+                self.assertIn("metadata.json", stderr.getvalue())
+                self.assertNotIn("Traceback", stderr.getvalue())
+                self.assertNotIn("secret-error-token", stderr.getvalue())
+
+    def test_default_destination_is_resolved_from_repository_not_cwd(self) -> None:
+        result = sync_module.SyncResult(
+            changed=False,
+            previous_commit="e" * 40,
+            current_commit="e" * 40,
+            previous_version="3.4.0",
+            current_version="3.4.0",
+            section_diff={"added": [], "changed": [], "removed": []},
+            summary="summary\n",
+        )
+        expected = (
+            Path(sync_module.__file__).resolve().parents[1]
+            / "third_party"
+            / "a-stock-data"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            previous_cwd = Path.cwd()
+            stdout = io.StringIO()
+            try:
+                os.chdir(directory)
+                with patch.object(
+                    sync_module,
+                    "sync_snapshot",
+                    return_value=result,
+                ) as sync_snapshot, patch.dict(
+                    os.environ,
+                    {},
+                    clear=True,
+                ), redirect_stdout(stdout):
+                    status = sync_module.main(
+                        [],
+                        client_factory=lambda token: FakeGitHubClient(),
+                    )
+            finally:
+                os.chdir(previous_cwd)
+
+        self.assertEqual(status, 0)
+        self.assertEqual(sync_snapshot.call_args.args[1], expected)
 
 
 class GitHubClientTests(unittest.TestCase):

@@ -536,6 +536,7 @@ def _markdown_lines_with_headings(
     fence_length = 0
     html_end_marker: str | None = None
     html_until_blank = False
+    paragraph_open = False
     for line in markdown.splitlines(keepends=True):
         line_text = line.rstrip("\r\n")
         if fence_marker is not None:
@@ -568,6 +569,7 @@ def _markdown_lines_with_headings(
             opening_run = opening_match.group(1)
             fence_marker = opening_run[0]
             fence_length = len(opening_run)
+            paragraph_open = False
             lines_with_headings.append((line, None))
             continue
 
@@ -592,18 +594,26 @@ def _markdown_lines_with_headings(
                 closing_tag = f"</{raw_tag_match.group(1)}>"
                 if closing_tag.casefold() not in stripped.casefold():
                     html_end_marker = closing_tag
+            elif _HTML_BLOCK_TAG_RE.match(stripped) is not None:
+                html_until_blank = True
             elif (
-                _HTML_BLOCK_TAG_RE.match(stripped) is not None
-                or _HTML_COMPLETE_TAG_RE.fullmatch(stripped) is not None
+                not paragraph_open
+                and _HTML_COMPLETE_TAG_RE.fullmatch(stripped) is not None
             ):
                 html_until_blank = True
             else:
                 is_html_block = False
             if is_html_block:
+                paragraph_open = False
                 lines_with_headings.append((line, None))
                 continue
 
-        lines_with_headings.append((line, _parse_atx_heading(line_text)))
+        heading = _parse_atx_heading(line_text)
+        lines_with_headings.append((line, heading))
+        if heading is not None or not line_text.strip():
+            paragraph_open = False
+        else:
+            paragraph_open = True
     return lines_with_headings
 
 

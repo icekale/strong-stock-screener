@@ -387,6 +387,16 @@ class ArtifactValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ArtifactValidationError, "changelog version"):
             validate_artifacts(artifacts)
 
+    def test_inline_html_in_paragraph_does_not_hide_release_heading(self) -> None:
+        artifacts = valid_artifacts()
+        artifacts["CHANGELOG.md"] = (
+            b"# Changelog\n\nParagraph text.\n<x>\n"
+            b"## 9.9.9\n\n## 3.4.0\n"
+        )
+
+        with self.assertRaisesRegex(ArtifactValidationError, "changelog version"):
+            validate_artifacts(artifacts)
+
     def test_rejects_missing_empty_oversized_and_non_utf8_files(self) -> None:
         invalid_cases = {
             "missing": {"SKILL.md": VALID_SKILL, "CHANGELOG.md": VALID_CHANGELOG},

@@ -452,11 +452,14 @@ def validate_artifacts(artifacts: Mapping[str, bytes]) -> str:
             "SKILL.md frontmatter uses unsupported key syntax"
         )
     version = version_match.group(1)
+    skill_body = "\n".join(lines[frontmatter_end + 1 :])
+    if _contains_unsupported_html_outside_fences(skill_body):
+        raise ArtifactValidationError(
+            "SKILL.md project heading validation does not support HTML markup"
+        )
     project_heading_versions = [
         match.group(1)
-        for level, title in _markdown_headings(
-            "\n".join(lines[frontmatter_end + 1 :])
-        )
+        for level, title in _markdown_headings(skill_body)
         if level == 1
         and (match := PROJECT_HEADING_RE.fullmatch(title)) is not None
     ]
@@ -472,6 +475,10 @@ def validate_artifacts(artifacts: Mapping[str, bytes]) -> str:
     changelog_lines = decoded["CHANGELOG.md"].splitlines()
     if not changelog_lines or changelog_lines[0] != "# Changelog":
         raise ArtifactValidationError("CHANGELOG.md must start with # Changelog")
+    if _contains_unsupported_html_outside_fences(decoded["CHANGELOG.md"]):
+        raise ArtifactValidationError(
+            "CHANGELOG.md changelog version validation does not support HTML markup"
+        )
     first_release_heading = next(
         (
             title
@@ -528,15 +535,54 @@ def _parse_atx_heading(line: str) -> tuple[int, str] | None:
     return len(match.group("marks")), title
 
 
+def _is_unsupported_html_markup(line: str) -> bool:
+    stripped = line.lstrip(" ")
+    if len(line) - len(stripped) > 3 or not stripped.startswith("<"):
+        return False
+    return bool(
+        stripped.startswith(("<!--", "<?"))
+        or stripped.casefold().startswith("<![cdata[")
+        or _HTML_DECLARATION_RE.match(stripped)
+        or _RAW_HTML_TAG_RE.match(stripped)
+        or _HTML_BLOCK_TAG_RE.match(stripped)
+        or _HTML_COMPLETE_TAG_RE.fullmatch(stripped)
+    )
+
+
+def _contains_unsupported_html_outside_fences(markdown: str) -> bool:
+    fence_marker: str | None = None
+    fence_length = 0
+    for line in markdown.splitlines():
+        if fence_marker is not None:
+            closing_match = _FENCE_CLOSE_RE.fullmatch(line)
+            if closing_match is not None:
+                closing_run = closing_match.group(1)
+                if (
+                    len(closing_run) >= fence_length
+                    and all(marker == fence_marker for marker in closing_run)
+                ):
+                    fence_marker = None
+                    fence_length = 0
+            continue
+
+        opening_match = _FENCE_OPEN_RE.match(line)
+        if opening_match is not None:
+            opening_run = opening_match.group(1)
+            fence_marker = opening_run[0]
+            fence_length = len(opening_run)
+            continue
+
+        if _is_unsupported_html_markup(line):
+            return True
+    return False
+
+
 def _markdown_lines_with_headings(
     markdown: str,
 ) -> list[tuple[str, tuple[int, str] | None]]:
     lines_with_headings: list[tuple[str, tuple[int, str] | None]] = []
     fence_marker: str | None = None
     fence_length = 0
-    html_end_marker: str | None = None
-    html_until_blank = False
-    paragraph_open = False
     for line in markdown.splitlines(keepends=True):
         line_text = line.rstrip("\r\n")
         if fence_marker is not None:
@@ -552,68 +598,16 @@ def _markdown_lines_with_headings(
             lines_with_headings.append((line, None))
             continue
 
-        if html_end_marker is not None:
-            if html_end_marker.casefold() in line_text.casefold():
-                html_end_marker = None
-            lines_with_headings.append((line, None))
-            continue
-
-        if html_until_blank:
-            if not line_text.strip():
-                html_until_blank = False
-            lines_with_headings.append((line, None))
-            continue
-
         opening_match = _FENCE_OPEN_RE.match(line_text)
         if opening_match is not None:
             opening_run = opening_match.group(1)
             fence_marker = opening_run[0]
             fence_length = len(opening_run)
-            paragraph_open = False
             lines_with_headings.append((line, None))
             continue
 
-        stripped = line_text.lstrip(" ")
-        indent = len(line_text) - len(stripped)
-        if indent <= 3 and stripped.startswith("<"):
-            is_html_block = True
-            raw_tag_match = _RAW_HTML_TAG_RE.match(stripped)
-            if stripped.startswith("<!--"):
-                if "-->" not in stripped[4:]:
-                    html_end_marker = "-->"
-            elif stripped.startswith("<?"):
-                if "?>" not in stripped[2:]:
-                    html_end_marker = "?>"
-            elif stripped.casefold().startswith("<![cdata["):
-                if "]]>" not in stripped[9:]:
-                    html_end_marker = "]]>"
-            elif _HTML_DECLARATION_RE.match(stripped) is not None:
-                if ">" not in stripped[2:]:
-                    html_end_marker = ">"
-            elif raw_tag_match is not None:
-                closing_tag = f"</{raw_tag_match.group(1)}>"
-                if closing_tag.casefold() not in stripped.casefold():
-                    html_end_marker = closing_tag
-            elif _HTML_BLOCK_TAG_RE.match(stripped) is not None:
-                html_until_blank = True
-            elif (
-                not paragraph_open
-                and _HTML_COMPLETE_TAG_RE.fullmatch(stripped) is not None
-            ):
-                html_until_blank = True
-            else:
-                is_html_block = False
-            if is_html_block:
-                paragraph_open = False
-                lines_with_headings.append((line, None))
-                continue
-
         heading = _parse_atx_heading(line_text)
         lines_with_headings.append((line, heading))
-        if heading is not None or not line_text.strip():
-            paragraph_open = False
-        else:
-            paragraph_open = True
     return lines_with_headings
 
 

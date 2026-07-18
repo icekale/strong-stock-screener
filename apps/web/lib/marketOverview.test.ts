@@ -99,10 +99,39 @@ test("homepage applies core panels as each request settles", () => {
   const source = readFileSync(new URL("../app/MarketOverviewWorkbench.tsx", import.meta.url), "utf8");
 
   assert.match(source, /runCorePanelRequest/);
-  assert.match(source, /runCorePanelRequest\(getMarketOverview/);
-  assert.match(source, /runCorePanelRequest\(\(\) => getSectorRadar\(12\)/);
-  assert.match(source, /runCorePanelRequest\(\(\) => getSentimentSummary/);
+  assert.match(source, /runCorePanelRequest\(\s*\(\) => getHomepagePanel\("market"[\s\S]*?getMarketOverview/);
+  assert.match(source, /runCorePanelRequest\(\s*\(\) => getHomepagePanel\("sector-radar"[\s\S]*?getSectorRadar\(12\)/);
+  assert.match(source, /runCorePanelRequest\([\s\S]*?getHomepagePanel\("sentiment-summary"[\s\S]*?getSentimentSummary/);
   assert.doesNotMatch(source, /Promise\.allSettled\(\[[\s\S]*?getMarketOverview\(\)/);
+});
+
+test("homepage treats market overview as the critical refresh request", () => {
+  const source = readFileSync(new URL("../app/MarketOverviewWorkbench.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /createMemoryRequestCache/);
+  assert.match(source, /getMarketOverview/);
+  assert.match(source, /getHomepagePanel/);
+  assert.match(source, /refresh\(true\)/);
+  assert.match(source, /IntersectionObserver/);
+});
+
+test("homepage keeps the intraday emotion curve sampled while visible", () => {
+  const source = readFileSync(new URL("../app/MarketOverviewWorkbench.tsx", import.meta.url), "utf8");
+
+  assert.match(source, /document\.visibilityState/);
+  assert.match(source, /setInterval\([\s\S]*?180_000/);
+  assert.match(source, /refreshEmotion/);
+});
+
+test("homepage caches activated trend requests without coupling them to core refresh", () => {
+  const source = readFileSync(new URL("../app/MarketOverviewWorkbench.tsx", import.meta.url), "utf8");
+  const sampleBlock = source.slice(source.indexOf("const sampleEmotion"), source.indexOf("const interval"));
+
+  assert.match(source, /getHomepagePanel\([\s\S]*?"sector-trend"/);
+  assert.match(source, /getHomepagePanel\("emotion-trend"/);
+  assert.match(source, /refreshEmotion/);
+  assert.match(sampleBlock, /void refreshEmotion\(true\)/);
+  assert.doesNotMatch(source, /onRefreshEmotion=\{\(\) => void refreshTrends\(\)\}/);
 });
 
 test("homepage loading placeholder matches the focused composition", () => {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import re
 import shutil
@@ -96,6 +97,13 @@ class _ExistingSnapshot:
     skill: str
 
 
+@dataclass
+class _SnapshotTransactionState:
+    backup: Path | None = None
+    previous_backed_up: bool = False
+    candidate_installed: bool = False
+
+
 class GitHubClient:
     def __init__(self, token: str | None = None, timeout: float = 20) -> None:
         self._token = token
@@ -141,7 +149,7 @@ class GitHubClient:
         content = self._read(url, JSON_MAX_BYTES, "JSON response")
         try:
             payload = json.loads(content)
-        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        except (json.JSONDecodeError, RecursionError, UnicodeDecodeError) as error:
             raise ArtifactValidationError(
                 f"GitHub {description} contains malformed JSON"
             ) from error
@@ -158,13 +166,44 @@ class GitHubClient:
         request = urllib.request.Request(url, headers=headers)
         try:
             with urllib.request.urlopen(request, timeout=self._timeout) as response:
+                response_headers = getattr(response, "headers", None)
+                content_length_header = (
+                    response_headers.get("Content-Length")
+                    if response_headers is not None
+                    else None
+                )
+                content_length: int | None = None
+                if content_length_header is not None:
+                    try:
+                        content_length = int(content_length_header)
+                    except (TypeError, ValueError):
+                        raise SyncError(
+                            f"GitHub response from {url} has invalid Content-Length"
+                        ) from None
+                    if content_length < 0:
+                        raise SyncError(
+                            f"GitHub response from {url} has invalid Content-Length"
+                        )
+                    if content_length > max_bytes:
+                        raise ArtifactValidationError(
+                            f"{description} exceeds its size limit at {url}"
+                        )
                 content = response.read(max_bytes + 1)
-        except (urllib.error.HTTPError, urllib.error.URLError, OSError):
+        except (
+            http.client.HTTPException,
+            urllib.error.HTTPError,
+            urllib.error.URLError,
+            OSError,
+        ):
             raise SyncError(
-                f"GitHub request failed while reading {description}"
+                f"GitHub request failed for {url} while reading {description}"
             ) from None
         if len(content) > max_bytes:
             raise ArtifactValidationError(f"{description} exceeds its size limit")
+        if content_length is not None and len(content) < content_length:
+            raise SyncError(f"GitHub response from {url} was truncated")
+        if content_length is not None and len(content) > content_length:
+            raise SyncError(f"GitHub response from {url} has invalid framing")
         return content
 
 
@@ -326,7 +365,7 @@ def _load_existing_snapshot(destination: Path) -> _ExistingSnapshot | None:
         payload = json.loads(metadata_path.read_bytes())
     except FileNotFoundError as error:
         raise SyncError(f"existing snapshot is missing {metadata_path.name}") from error
-    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+    except (json.JSONDecodeError, RecursionError, UnicodeDecodeError) as error:
         raise SyncError(f"existing {metadata_path.name} contains malformed JSON") from error
     except OSError as error:
         raise SyncError(f"could not read existing {metadata_path.name}") from error
@@ -388,6 +427,19 @@ def _load_existing_snapshot(destination: Path) -> _ExistingSnapshot | None:
     except (OSError, UnicodeDecodeError) as error:
         raise SyncError("could not read existing SKILL.md") from error
     return _ExistingSnapshot(commit=commit, version=version, skill=skill)
+
+
+def _normalize_committed_at(value: object) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise ArtifactValidationError("resolved commit timestamp must be nonempty")
+    iso_value = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        committed_at = datetime.fromisoformat(iso_value)
+    except ValueError as error:
+        raise ArtifactValidationError("resolved commit timestamp is invalid") from error
+    if committed_at.tzinfo is None or committed_at.utcoffset() is None:
+        raise ArtifactValidationError("resolved commit timestamp must include a timezone")
+    return committed_at.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _format_synced_at(now: Callable[[], datetime]) -> str:
@@ -456,8 +508,7 @@ def _write_snapshot(
     except OSError as error:
         raise SyncError("failed to prepare snapshot transaction") from error
 
-    backup: Path | None = None
-    previous_moved = False
+    state = _SnapshotTransactionState()
     try:
         try:
             for name in REQUIRED_FILES:
@@ -470,44 +521,59 @@ def _write_snapshot(
             raise SyncError("failed to prepare snapshot transaction") from error
 
         if destination.exists():
-            backup = destination.parent / (
+            state.backup = destination.parent / (
                 f".{destination.name}.backup-{uuid.uuid4().hex}"
             )
             try:
-                _replace_path(destination, backup)
+                _replace_path(destination, state.backup)
             except OSError as error:
                 raise SyncError("failed to move previous snapshot to backup") from error
-            previous_moved = True
+            state.previous_backed_up = True
 
         try:
             _replace_path(candidate, destination)
         except OSError as error:
-            if previous_moved and backup is not None:
+            if state.previous_backed_up and state.backup is not None:
                 try:
-                    _replace_path(backup, destination)
+                    _replace_path(state.backup, destination)
                 except OSError as restore_error:
                     raise SyncError(
                         "failed to replace snapshot and restore previous snapshot"
                     ) from restore_error
-                previous_moved = False
+                state.previous_backed_up = False
             raise SyncError("failed to replace snapshot") from error
+        state.candidate_installed = True
 
-        if backup is not None:
+        if state.candidate_installed and state.backup is not None:
             try:
-                _remove_directory(backup)
+                _remove_directory(state.backup)
             except OSError as error:
-                raise SyncError("failed to remove snapshot backup") from error
-            backup = None
-    finally:
-        _remove_directory(candidate)
-        if backup is not None and backup.exists():
-            if previous_moved and not destination.exists():
                 try:
-                    _replace_path(backup, destination)
-                except OSError:
-                    pass
-            if backup.exists() and destination.exists():
-                _remove_directory(backup)
+                    _replace_path(destination, candidate)
+                    state.candidate_installed = False
+                    _replace_path(state.backup, destination)
+                    state.previous_backed_up = False
+                except OSError as rollback_error:
+                    if not destination.exists() and candidate.exists():
+                        try:
+                            _replace_path(candidate, destination)
+                            state.candidate_installed = True
+                        except OSError:
+                            pass
+                    raise SyncError(
+                        "failed to remove snapshot backup and roll back"
+                    ) from rollback_error
+                raise SyncError(
+                    "failed to remove snapshot backup; restored previous snapshot"
+                ) from error
+            state.backup = None
+            state.previous_backed_up = False
+    finally:
+        if candidate.exists():
+            try:
+                _remove_directory(candidate)
+            except OSError:
+                pass
 
 
 def _utc_now() -> datetime:
@@ -529,8 +595,7 @@ def sync_snapshot(
         raise ArtifactValidationError(
             "resolved commit SHA must be 40 lowercase hexadecimal characters"
         )
-    if not isinstance(committed_at, str) or not committed_at.strip():
-        raise ArtifactValidationError("resolved commit timestamp must be nonempty")
+    normalized_committed_at = _normalize_committed_at(committed_at)
 
     previous_commit = existing.commit if existing is not None else None
     previous_version = existing.version if existing is not None else None
@@ -568,7 +633,7 @@ def sync_snapshot(
     section_diff = compare_sections(previous_sections, current_sections)
     metadata = build_metadata(
         commit=commit,
-        committed_at=committed_at,
+        committed_at=normalized_committed_at,
         synced_at=_format_synced_at(now),
         version=current_version,
         artifacts=artifacts,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import http.client
 import json
 import socket
 import tempfile
@@ -96,6 +97,18 @@ class FakeResponse:
     def read(self, amount: int) -> bytes:
         self.read_limits.append(amount)
         return self.content[:amount]
+
+
+class HeaderResponse(FakeResponse):
+    def __init__(self, content: bytes, content_length: int) -> None:
+        super().__init__(content)
+        self.headers = {"Content-Length": str(content_length)}
+
+
+class IncompleteResponse(FakeResponse):
+    def read(self, amount: int) -> bytes:
+        self.read_limits.append(amount)
+        raise http.client.IncompleteRead(self.content, amount)
 
 
 def snapshot_bytes(destination: Path) -> dict[str, bytes]:
@@ -399,6 +412,35 @@ class SnapshotSyncTests(unittest.TestCase):
                     self.assertEqual(client.downloads, [])
                     self.assertFalse(destination.exists())
 
+    def test_rejects_malformed_and_naive_commit_timestamps_without_downloads(self) -> None:
+        for committed_at in ("not-a-timestamp", "2026-07-11T08:00:00"):
+            with self.subTest(committed_at=committed_at):
+                with tempfile.TemporaryDirectory() as directory:
+                    destination = Path(directory) / "a-stock-data"
+                    client = FakeGitHubClient(committed_at=committed_at)
+
+                    with self.assertRaisesRegex(
+                        ArtifactValidationError,
+                        "commit timestamp",
+                    ):
+                        sync_module.sync_snapshot(client, destination)
+
+                    self.assertEqual(client.downloads, [])
+                    self.assertFalse(destination.exists())
+
+    def test_normalizes_commit_timestamp_to_utc_in_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            client = FakeGitHubClient(committed_at="2026-07-11T16:00:00+08:00")
+
+            sync_module.sync_snapshot(client, destination)
+
+            metadata = json.loads((destination / "metadata.json").read_bytes())
+            self.assertEqual(
+                metadata["upstream"]["committed_at"],
+                "2026-07-11T08:00:00Z",
+            )
+
     def test_same_commit_is_a_no_op_without_downloads(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory) / "a-stock-data"
@@ -553,6 +595,21 @@ New data details.
             self.assertEqual(client.downloads, [])
             self.assertEqual(snapshot_bytes(destination), before)
 
+    def test_deeply_nested_existing_metadata_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(commit="a" * 40), destination)
+            deeply_nested_json = b"[" * 10_000 + b"0" + b"]" * 10_000
+            (destination / "metadata.json").write_bytes(deeply_nested_json)
+            before = snapshot_bytes(destination)
+            client = FakeGitHubClient(commit="b" * 40)
+
+            with self.assertRaisesRegex(SyncError, "malformed JSON"):
+                sync_module.sync_snapshot(client, destination)
+
+            self.assertEqual(client.resolve_calls, 0)
+            self.assertEqual(snapshot_bytes(destination), before)
+
     def test_malformed_existing_metadata_schema_fails_without_overwrite(self) -> None:
         for mutation in (
             lambda metadata: metadata.update(schema_version=True),
@@ -608,6 +665,69 @@ New data details.
                         destination,
                     )
 
+            self.assertEqual(snapshot_bytes(destination), before)
+            self.assertEqual([path.name for path in root.iterdir()], ["a-stock-data"])
+
+    def test_transient_backup_cleanup_failure_rolls_back_previous_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(commit="a" * 40), destination)
+            before = snapshot_bytes(destination)
+            real_remove = sync_module._remove_directory
+            backup_attempts = 0
+
+            def fail_backup_once(path: Path) -> None:
+                nonlocal backup_attempts
+                if path.name.startswith(f".{destination.name}.backup-"):
+                    backup_attempts += 1
+                    if backup_attempts == 1:
+                        raise OSError("simulated transient cleanup failure")
+                real_remove(path)
+
+            with patch.object(
+                sync_module,
+                "_remove_directory",
+                side_effect=fail_backup_once,
+            ):
+                with self.assertRaisesRegex(SyncError, "backup"):
+                    sync_module.sync_snapshot(
+                        FakeGitHubClient(commit="b" * 40),
+                        destination,
+                    )
+
+            self.assertEqual(backup_attempts, 1)
+            self.assertEqual(snapshot_bytes(destination), before)
+            self.assertEqual([path.name for path in root.iterdir()], ["a-stock-data"])
+
+    def test_persistent_backup_cleanup_failure_rolls_back_previous_snapshot(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            destination = root / "a-stock-data"
+            sync_module.sync_snapshot(FakeGitHubClient(commit="a" * 40), destination)
+            before = snapshot_bytes(destination)
+            real_remove = sync_module._remove_directory
+            backup_attempts = 0
+
+            def always_fail_backup(path: Path) -> None:
+                nonlocal backup_attempts
+                if path.name.startswith(f".{destination.name}.backup-"):
+                    backup_attempts += 1
+                    raise OSError("simulated persistent cleanup failure")
+                real_remove(path)
+
+            with patch.object(
+                sync_module,
+                "_remove_directory",
+                side_effect=always_fail_backup,
+            ):
+                with self.assertRaisesRegex(SyncError, "backup"):
+                    sync_module.sync_snapshot(
+                        FakeGitHubClient(commit="b" * 40),
+                        destination,
+                    )
+
+            self.assertEqual(backup_attempts, 1)
             self.assertEqual(snapshot_bytes(destination), before)
             self.assertEqual([path.name for path in root.iterdir()], ["a-stock-data"])
 
@@ -687,6 +807,61 @@ class GitHubClientTests(unittest.TestCase):
                 sync_module.GitHubClient().download_file("a" * 40, "SKILL.md", 3)
         self.assertEqual(oversized_raw.read_limits, [4])
 
+    def test_rejects_truncated_content_length_response(self) -> None:
+        response = HeaderResponse(b"raw", content_length=4)
+        url = (
+            "https://raw.githubusercontent.com/simonlin1212/a-stock-data/"
+            f"{'a' * 40}/SKILL.md"
+        )
+
+        with patch.object(
+            sync_module.urllib.request,
+            "urlopen",
+            return_value=response,
+        ):
+            with self.assertRaisesRegex(SyncError, "truncated") as raised:
+                sync_module.GitHubClient().download_file("a" * 40, "SKILL.md", 4)
+
+        self.assertIn(url, str(raised.exception))
+        self.assertEqual(response.read_limits, [5])
+
+    def test_rejects_content_length_over_limit_before_read(self) -> None:
+        response = HeaderResponse(b"raw", content_length=4)
+
+        with patch.object(
+            sync_module.urllib.request,
+            "urlopen",
+            return_value=response,
+        ):
+            with self.assertRaisesRegex(SyncError, "size limit"):
+                sync_module.GitHubClient().download_file("a" * 40, "SKILL.md", 3)
+
+        self.assertEqual(response.read_limits, [])
+
+    def test_converts_incomplete_read_to_sync_error_with_safe_url(self) -> None:
+        response = IncompleteResponse(b"partial")
+        url = (
+            "https://raw.githubusercontent.com/simonlin1212/a-stock-data/"
+            f"{'a' * 40}/SKILL.md"
+        )
+
+        with patch.object(
+            sync_module.urllib.request,
+            "urlopen",
+            return_value=response,
+        ):
+            with self.assertRaises(SyncError) as raised:
+                sync_module.GitHubClient(token="secret-token").download_file(
+                    "a" * 40,
+                    "SKILL.md",
+                    10,
+                )
+
+        self.assertIn(url, str(raised.exception))
+        self.assertNotIn("secret-token", str(raised.exception))
+        self.assertIsNone(raised.exception.__cause__)
+        self.assertEqual(response.read_limits, [11])
+
     def test_rejects_malformed_json_and_non_object_responses(self) -> None:
         for content in (b"{", b"[]"):
             with self.subTest(content=content), patch.object(
@@ -697,11 +872,24 @@ class GitHubClientTests(unittest.TestCase):
                 with self.assertRaises(ArtifactValidationError):
                     sync_module.GitHubClient().repository_identity()
 
+    def test_rejects_deeply_nested_json_response(self) -> None:
+        deeply_nested_json = b"[" * 10_000 + b"0" + b"]" * 10_000
+        self.assertLess(len(deeply_nested_json), 1_000_000)
+
+        with patch.object(
+            sync_module.urllib.request,
+            "urlopen",
+            return_value=FakeResponse(deeply_nested_json),
+        ):
+            with self.assertRaisesRegex(ArtifactValidationError, "malformed JSON"):
+                sync_module.GitHubClient().repository_identity()
+
     def test_converts_network_errors_without_leaking_token(self) -> None:
         failures = (
             urllib.error.HTTPError("https://api.github.com", 500, "error", {}, None),
             urllib.error.URLError("Authorization: Bearer secret-token"),
             socket.timeout("timed out"),
+            http.client.HTTPException("Authorization: Bearer secret-token"),
         )
 
         for failure in failures:
@@ -712,6 +900,10 @@ class GitHubClientTests(unittest.TestCase):
             ):
                 with self.assertRaises(SyncError) as raised:
                     sync_module.GitHubClient(token="secret-token").repository_identity()
+                self.assertIn(
+                    "https://api.github.com/repos/simonlin1212/a-stock-data",
+                    str(raised.exception),
+                )
                 self.assertNotIn("secret-token", str(raised.exception))
                 self.assertIsNone(raised.exception.__cause__)
 

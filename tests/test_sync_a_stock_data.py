@@ -356,6 +356,27 @@ class ArtifactValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ArtifactValidationError, "changelog version"):
             validate_artifacts(artifacts)
 
+    def test_rejects_project_heading_found_only_inside_html_comment(self) -> None:
+        artifacts = valid_artifacts()
+        artifacts["SKILL.md"] = (
+            b"---\nname: a-stock-data\nversion: 3.4.0\n---\n"
+            b"<!--\n# A\xe8\x82\xa1\xe5\x85\xa8\xe6\xa0\x88\xe6\x95\xb0\xe6\x8d\xae\xe5\xb7\xa5\xe5\x85\xb7\xe5\x8c\x85 V3.4.0\n-->\n"
+            b"## Market\nProvider details.\n"
+        )
+
+        with self.assertRaisesRegex(ArtifactValidationError, "project heading"):
+            validate_artifacts(artifacts)
+
+    def test_uses_first_changelog_release_outside_html_blocks(self) -> None:
+        artifacts = valid_artifacts()
+        artifacts["CHANGELOG.md"] = (
+            b"# Changelog\n\n<!--\n## 3.4.0\n-->\n\n"
+            b"## 9.9.9\n\n- Actual first release.\n"
+        )
+
+        with self.assertRaisesRegex(ArtifactValidationError, "changelog version"):
+            validate_artifacts(artifacts)
+
     def test_rejects_missing_empty_oversized_and_non_utf8_files(self) -> None:
         invalid_cases = {
             "missing": {"SKILL.md": VALID_SKILL, "CHANGELOG.md": VALID_CHANGELOG},

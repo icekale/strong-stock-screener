@@ -110,6 +110,9 @@ _ATX_HEADING_RE = re.compile(
     r"^ {0,3}(?P<marks>#{1,6})(?:[ \t]+(?P<title>.*)|[ \t]*)$"
 )
 _ATX_CLOSING_RE = re.compile(r"[ \t]+#+[ \t]*$")
+_RAW_HTML_TAG_RE = re.compile(
+    r"<(script|pre|style|textarea)(?:[ \t>]|$)", re.IGNORECASE
+)
 
 
 class SyncError(RuntimeError):
@@ -506,48 +509,17 @@ def _parse_atx_heading(line: str) -> tuple[int, str] | None:
     return len(match.group("marks")), title
 
 
-def _markdown_headings(markdown: str) -> list[tuple[int, str]]:
-    headings: list[tuple[int, str]] = []
+def _markdown_lines_with_headings(
+    markdown: str,
+) -> list[tuple[str, tuple[int, str] | None]]:
+    lines_with_headings: list[tuple[str, tuple[int, str] | None]] = []
     fence_marker: str | None = None
     fence_length = 0
-    for line in markdown.splitlines():
-        if fence_marker is not None:
-            closing_match = _FENCE_CLOSE_RE.fullmatch(line)
-            if closing_match is not None:
-                closing_run = closing_match.group(1)
-                if (
-                    len(closing_run) >= fence_length
-                    and all(marker == fence_marker for marker in closing_run)
-                ):
-                    fence_marker = None
-                    fence_length = 0
-            continue
-
-        opening_match = _FENCE_OPEN_RE.match(line)
-        if opening_match is not None:
-            opening_run = opening_match.group(1)
-            fence_marker = opening_run[0]
-            fence_length = len(opening_run)
-            continue
-
-        heading = _parse_atx_heading(line)
-        if heading is not None:
-            headings.append(heading)
-    return headings
-
-
-def parse_markdown_sections(markdown: str) -> dict[str, str]:
-    sections: dict[str, str] = {}
-    heading: str | None = None
-    section_lines: list[str] = []
-    fence_marker: str | None = None
-    fence_length = 0
-
+    html_end_marker: str | None = None
+    html_until_blank = False
     for line in markdown.splitlines(keepends=True):
         line_text = line.rstrip("\r\n")
         if fence_marker is not None:
-            if heading is not None:
-                section_lines.append(line)
             closing_match = _FENCE_CLOSE_RE.fullmatch(line_text)
             if closing_match is not None:
                 closing_run = closing_match.group(1)
@@ -557,18 +529,69 @@ def parse_markdown_sections(markdown: str) -> dict[str, str]:
                 ):
                     fence_marker = None
                     fence_length = 0
+            lines_with_headings.append((line, None))
+            continue
+
+        if html_end_marker is not None:
+            if html_end_marker.casefold() in line_text.casefold():
+                html_end_marker = None
+            lines_with_headings.append((line, None))
+            continue
+
+        if html_until_blank:
+            if not line_text.strip():
+                html_until_blank = False
+            lines_with_headings.append((line, None))
             continue
 
         opening_match = _FENCE_OPEN_RE.match(line_text)
         if opening_match is not None:
-            if heading is not None:
-                section_lines.append(line)
             opening_run = opening_match.group(1)
             fence_marker = opening_run[0]
             fence_length = len(opening_run)
+            lines_with_headings.append((line, None))
             continue
 
-        parsed_heading = _parse_atx_heading(line_text)
+        stripped = line_text.lstrip(" ")
+        indent = len(line_text) - len(stripped)
+        if indent <= 3 and stripped.startswith("<"):
+            raw_tag_match = _RAW_HTML_TAG_RE.match(stripped)
+            if stripped.startswith("<!--"):
+                if "-->" not in stripped[4:]:
+                    html_end_marker = "-->"
+            elif stripped.startswith("<?"):
+                if "?>" not in stripped[2:]:
+                    html_end_marker = "?>"
+            elif stripped.casefold().startswith("<![cdata["):
+                if "]]>" not in stripped[9:]:
+                    html_end_marker = "]]>"
+            elif raw_tag_match is not None:
+                closing_tag = f"</{raw_tag_match.group(1)}>"
+                if closing_tag.casefold() not in stripped.casefold():
+                    html_end_marker = closing_tag
+            else:
+                html_until_blank = True
+            lines_with_headings.append((line, None))
+            continue
+
+        lines_with_headings.append((line, _parse_atx_heading(line_text)))
+    return lines_with_headings
+
+
+def _markdown_headings(markdown: str) -> list[tuple[int, str]]:
+    return [
+        heading
+        for _line, heading in _markdown_lines_with_headings(markdown)
+        if heading is not None
+    ]
+
+
+def parse_markdown_sections(markdown: str) -> dict[str, str]:
+    sections: dict[str, str] = {}
+    heading: str | None = None
+    section_lines: list[str] = []
+
+    for line, parsed_heading in _markdown_lines_with_headings(markdown):
         if parsed_heading is not None and parsed_heading[0] == 2:
             if heading is not None:
                 sections[heading] = "".join(section_lines)

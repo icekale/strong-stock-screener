@@ -104,6 +104,7 @@ const ButtonStub = defineComponent({
 });
 
 const source = readFileSync(resolvePath(process.cwd(), 'src/views/EtfRadarView.vue'), 'utf8');
+const BASELINE_FINGERPRINT = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
 function metadata() {
   return {
@@ -169,7 +170,7 @@ function overviewFixture(): EtfRadarOverviewResponse {
     items: [],
     pool_version: 'huijin-public-v1',
     baseline_version: '2025-12-31:huijin-public-v1',
-    baseline_fingerprint: 'sha256:fixture',
+    baseline_fingerprint: BASELINE_FINGERPRINT,
     activity: {
       core_count: 7,
       available_core_count: 6,
@@ -294,8 +295,68 @@ describe('EtfRadarView', () => {
     expect(wrapper.text()).toContain('▲ +10.50%');
     expect(wrapper.text()).toContain('▼ -9.25%');
     expect(wrapper.text()).toContain('10.5倍');
+    const fingerprint = wrapper.get('[data-testid="baseline-fingerprint"]');
+    expect(fingerprint.text()).toContain('基线指纹 0123456789...');
+    expect(fingerprint.attributes('title')).toBe(BASELINE_FINGERPRINT);
+    expect(wrapper.text()).not.toContain(BASELINE_FINGERPRINT);
+    const coreRegion = wrapper.get('[aria-label="核心 ETF 今日活动表"]');
+    expect(coreRegion.attributes()).toMatchObject({ role: 'region', tabindex: '0' });
+    const validationRegion = wrapper.get('[aria-label="ETF 配对交叉验证"]');
+    expect(validationRegion.attributes()).toMatchObject({ role: 'region', tabindex: '0' });
+    expect(wrapper.get('[data-testid="core-etf-row"] strong').attributes('title')).toBe('华夏上证50ETF');
     expect(wrapper.text()).not.toContain('OLD_GENERIC_SENTINEL');
     expect(wrapper.text()).not.toMatch(/证据强度|稳健分|同时间成交|相对指数|估算申购/);
+    wrapper.unmount();
+  });
+
+  it('shows backend stale source status as partial and preserves its detail', async () => {
+    setDefaultApiResponses();
+    api.getEtfRadarOverview.mockResolvedValueOnce({
+      ...overviewFixture(),
+      source_status: [
+        { source: '交易所ETF份额', status: 'stale' as const, detail: '上游不可用，沿用 2026-07-17 归档快照' }
+      ]
+    });
+
+    const wrapper = await mountView();
+
+    expect(wrapper.get('.wb-section-header .wb-status-tag').text()).toBe('部分');
+    expect(wrapper.text()).toContain('上游不可用，沿用 2026-07-17 归档快照');
+    expect(wrapper.findAll('.wb-status-tag').some(tag => tag.text() === '部分')).toBe(true);
+    wrapper.unmount();
+  });
+
+  it('keeps divergent and incomplete validation states visually neutral and distinguishable', async () => {
+    setDefaultApiResponses();
+    const fixture = overviewFixture();
+    fixture.activity = { ...fixture.activity, divergent_group_count: 1, incomplete_group_count: 1 };
+    fixture.validation_groups = [
+      fixture.validation_groups[1]!,
+      {
+        index_name: '科创50',
+        core_symbol: '588080.SH',
+        validator_symbol: '159845.SZ',
+        state: 'incomplete',
+        conservative_daily_change_pct: null,
+        conservative_baseline_change_pct: null,
+        conservative_multiple: null
+      }
+    ];
+    api.getEtfRadarOverview.mockResolvedValueOnce(fixture);
+
+    const wrapper = await mountView();
+    const divergenceMetric = wrapper.findAll('.etf-metric').find(metric => metric.text().includes('方向分歧'))!;
+    expect(divergenceMetric.get('strong').classes()).not.toContain('etf-value--warning');
+
+    for (const label of ['方向分歧', '数据不全']) {
+      const row = wrapper.findAll('[data-testid="validation-row"]').find(item => item.text().includes(label))!;
+      const state = row.get('.etf-validation-state');
+      const conservative = row.get('[data-testid="validation-conservative"]');
+      for (const tone of ['etf-value--positive', 'etf-value--negative', 'etf-value--warning']) {
+        expect(state.classes()).not.toContain(tone);
+        expect(conservative.classes()).not.toContain(tone);
+      }
+    }
     wrapper.unmount();
   });
 
@@ -407,13 +468,18 @@ describe('EtfRadarView', () => {
     expect(wrapper.text()).toContain('华夏上证50ETF');
     expect(wrapper.get('[data-testid="etf-panel-error"]').text()).toContain('刷新失败：上游不可用');
     expect(wrapper.get('[data-testid="etf-panel-error"]').text()).toContain('当前显示上次成功数据');
+    expect(wrapper.get('.wb-section-header .wb-status-tag').text()).toBe('部分');
     wrapper.unmount();
   });
 
   it('keeps implementation contracts accessible, token-based, and free of old generic fields', () => {
     expect(source).toContain('icon-ic-round-refresh');
+    expect(source).toContain("defineAsyncComponent(() => import('@/components/charts/EChart.vue'))");
+    expect(source).not.toContain("import EChart from '@/components/charts/EChart.vue'");
     expect(source).toMatch(/overflow-x\s*:\s*auto/);
     expect(source).toMatch(/min-width\s*:\s*0/);
+    expect(source).toMatch(/\.etf-panel\s+:deep\(\.wb-section-header\)\s*\{[^}]*padding:\s*12px 16px/s);
+    expect(source).toMatch(/\.etf-panel\s*>\s*:deep\(\.ant-alert\)\s*\{[^}]*margin:\s*0 16px 12px/s);
     expect(source).toMatch(/aria:\s*\{\s*enabled:\s*true/);
     expect(source).toContain('connectNulls: false');
     expect(source).not.toMatch(/evidence_strength|robust_score|same_time_turnover_ratio|relative_index_return_pct|estimated_subscription_cny/);

@@ -2,9 +2,8 @@
 import type { EChartsOption } from 'echarts';
 import { Skeleton as ASkeleton } from 'ant-design-vue';
 import dayjs from 'dayjs';
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, defineAsyncComponent, onMounted, reactive, ref } from 'vue';
 import IconIcRoundRefresh from '~icons/ic/round-refresh';
-import EChart from '@/components/charts/EChart.vue';
 import PageHeader from '@/components/common/workbench/page-header.vue';
 import SectionHeader from '@/components/common/workbench/section-header.vue';
 import StatusTag from '@/components/common/workbench/status-tag.vue';
@@ -43,6 +42,8 @@ import {
 } from '@/utils/domain/capitalSignals';
 
 defineOptions({ name: 'EtfRadarView' });
+
+const EChart = defineAsyncComponent(() => import('@/components/charts/EChart.vue'));
 
 type EtfTab = 'overview' | 'history' | 'holders' | 'methodology';
 type EtfResponse =
@@ -123,7 +124,7 @@ const overviewMetrics = computed(() => {
       helper: activity ? `增加 ${activity.confirmed_increase_group_count} / 减少 ${activity.confirmed_decrease_group_count}` : '增加 -- / 减少 --',
       className: ''
     },
-    { label: '方向分歧', value: activity?.divergent_group_count ?? '--', helper: '配对方向不一致', className: 'etf-value--warning' }
+    { label: '方向分歧', value: activity?.divergent_group_count ?? '--', helper: '配对方向不一致', className: '' }
   ];
 });
 
@@ -196,7 +197,7 @@ const historyOption = computed<EChartsOption>(() => ({
 }));
 
 function sourceStatusTone(status: SourceStatusValue) {
-  return status === 'success' ? 'success' : status === 'stale' ? 'warning' : status === 'failed' ? 'failed' : 'unknown';
+  return status === 'success' ? 'success' : status === 'stale' ? 'partial' : status === 'failed' ? 'failed' : 'unknown';
 }
 
 function errorMessage(error: unknown, fallback: string) {
@@ -214,7 +215,7 @@ function valueTone(value: number | null | undefined) {
 
 function validationTone(state: EtfValidationState) {
   const tone = validationStateTone(state);
-  return tone === 'rise' ? 'etf-value--positive' : tone === 'fall' ? 'etf-value--negative' : 'etf-value--warning';
+  return tone === 'rise' ? 'etf-value--positive' : tone === 'fall' ? 'etf-value--negative' : '';
 }
 
 function formatPercent(value: number | null | undefined) {
@@ -223,6 +224,11 @@ function formatPercent(value: number | null | undefined) {
 
 function formatHoldingPct(value: number | null | undefined) {
   return value == null ? '--' : `${value.toFixed(2)}%`;
+}
+
+function formatFingerprint(value: string | null | undefined) {
+  if (!value) return '--';
+  return value.length > 10 ? `${value.slice(0, 10)}...` : value;
 }
 
 function coreDataState(item: HuijinEtfActivityItem) {
@@ -332,8 +338,11 @@ function activeErrorMessage() {
 
 function activeStatus() {
   if (loading[activeTab.value]) return 'running';
-  if (errors[activeTab.value] && activeData.value) return 'warning';
+  if (errors[activeTab.value] && activeData.value) return 'partial';
   if (errors[activeTab.value]) return 'failed';
+  if (activeData.value?.source_status.some(source => source.status === 'stale' || source.status === 'failed')) {
+    return 'partial';
+  }
   return activeData.value ? 'success' : 'unknown';
 }
 
@@ -420,17 +429,30 @@ onMounted(() => void loadTab('overview'));
         <div class="etf-compact-meta">
           <span>核心池 {{ overview.pool_version || '--' }}</span>
           <span>报告基线 {{ overview.baseline_version || '--' }}</span>
-          <span>基线校验 {{ overview.baseline_fingerprint || '--' }}</span>
+          <span
+            data-testid="baseline-fingerprint"
+            class="etf-fingerprint"
+            :title="overview.baseline_fingerprint || undefined"
+          >基线指纹 {{ formatFingerprint(overview.baseline_fingerprint) }}</span>
           <span>模型 {{ overview.model_version || '--' }}</span>
         </div>
 
         <div class="etf-source-statuses">
-          <span v-for="source in activeSources()" :key="source.source" class="etf-source-status">
-            {{ source.source }} <StatusTag :status="sourceStatusTone(source.status)" />
-          </span>
+          <div v-for="source in activeSources()" :key="source.source" class="etf-source-status">
+            <span class="etf-source-status__summary">
+              {{ source.source }} <StatusTag :status="sourceStatusTone(source.status)" />
+            </span>
+            <span class="etf-source-status__detail">{{ source.detail || '--' }}</span>
+          </div>
         </div>
 
-        <div v-if="overview.core_items.length" class="etf-table-scroll">
+        <div
+          v-if="overview.core_items.length"
+          class="etf-table-scroll"
+          tabindex="0"
+          role="region"
+          aria-label="核心 ETF 今日活动表"
+        >
           <a-table
             data-testid="core-table"
             :columns="coreColumns"
@@ -442,7 +464,7 @@ onMounted(() => void loadTab('overview'));
           >
             <template #bodyCell="{ column, record }">
               <div v-if="columnKey(column.key) === 'etf'" data-testid="core-etf-row" class="etf-name-cell">
-                <strong>{{ record.name }}</strong>
+                <strong :title="record.name">{{ record.name }}</strong>
                 <span>{{ record.symbol }}</span>
               </div>
               <div v-else-if="columnKey(column.key) === 'holding'" class="etf-holding-cell">
@@ -465,14 +487,20 @@ onMounted(() => void loadTab('overview'));
 
         <div class="etf-divider" />
         <h3 class="etf-subheading">交叉验证</h3>
-        <div v-if="overview.validation_groups.length" class="etf-validation-list">
+        <div
+          v-if="overview.validation_groups.length"
+          class="etf-validation-list"
+          tabindex="0"
+          role="region"
+          aria-label="ETF 配对交叉验证"
+        >
           <div v-for="group in overview.validation_groups" :key="group.index_name" data-testid="validation-row" class="etf-validation-row">
             <strong>{{ group.index_name }}</strong>
             <div class="etf-validation-pair">
               <span>{{ group.core_symbol }} <b :class="valueTone(validationItem(group.core_symbol)?.baseline_change_pct)">{{ validationBaseline(group.core_symbol) }}</b></span>
               <span>{{ group.validator_symbol }} <b :class="valueTone(validationItem(group.validator_symbol)?.baseline_change_pct)">{{ validationBaseline(group.validator_symbol) }}</b></span>
             </div>
-            <span>保守结果 <b :class="validationTone(group.state)">{{ conservativeResult(group) }}</b></span>
+            <span>保守结果 <b data-testid="validation-conservative" :class="validationTone(group.state)">{{ conservativeResult(group) }}</b></span>
             <span>保守倍数 <b>{{ conservativeMultiple(group) }}</b></span>
             <span class="etf-validation-state" :class="validationTone(group.state)">{{ validationStateLabel(group.state) }}</span>
           </div>
@@ -502,16 +530,24 @@ onMounted(() => void loadTab('overview'));
           <span>缺失交易日不插值、不前向填充</span>
         </div>
         <div class="etf-source-statuses">
-          <span v-for="source in activeSources()" :key="source.source" class="etf-source-status">
-            {{ source.source }} <StatusTag :status="sourceStatusTone(source.status)" />
-          </span>
+          <div v-for="source in activeSources()" :key="source.source" class="etf-source-status">
+            <span class="etf-source-status__summary">
+              {{ source.source }} <StatusTag :status="sourceStatusTone(source.status)" />
+            </span>
+            <span class="etf-source-status__detail">{{ source.detail || '--' }}</span>
+          </div>
         </div>
         <template v-if="history.points.length">
           <EChart v-if="hasCumulativeHistory" :height="304" :loading="loading.history" :option="historyOption" />
           <div v-else data-testid="history-chart-empty" class="etf-chart-empty">
             {{ selectedHistoryName }} 暂无报告基线累计值
           </div>
-          <div class="etf-table-scroll etf-history-table">
+          <div
+            class="etf-table-scroll etf-history-table"
+            tabindex="0"
+            role="region"
+            aria-label="所选 ETF 累计轨迹明细"
+          >
             <a-table
               data-testid="history-table"
               :columns="historyColumns"
@@ -545,13 +581,22 @@ onMounted(() => void loadTab('overview'));
       <div v-else-if="holders" class="etf-panel-content">
         <p class="etf-disclosure-note">报告期确认的法律实体持仓，不是实时资金流。</p>
         <div class="etf-source-statuses">
-          <span v-for="source in activeSources()" :key="source.source" class="etf-source-status">
-            {{ source.source }} <StatusTag :status="sourceStatusTone(source.status)" />
-          </span>
+          <div v-for="source in activeSources()" :key="source.source" class="etf-source-status">
+            <span class="etf-source-status__summary">
+              {{ source.source }} <StatusTag :status="sourceStatusTone(source.status)" />
+            </span>
+            <span class="etf-source-status__detail">{{ source.detail || '--' }}</span>
+          </div>
         </div>
 
         <h3 class="etf-subheading">确认基线</h3>
-        <div v-if="holders.baselines.length" class="etf-table-scroll">
+        <div
+          v-if="holders.baselines.length"
+          class="etf-table-scroll"
+          tabindex="0"
+          role="region"
+          aria-label="确认持仓基线表"
+        >
           <a-table
             data-testid="holder-baseline-table"
             :columns="baselineColumns"
@@ -563,7 +608,7 @@ onMounted(() => void loadTab('overview'));
           >
             <template #bodyCell="{ column, record }">
               <div v-if="columnKey(column.key) === 'etf'" class="etf-name-cell">
-                <strong>{{ record.name }}</strong><span>{{ record.symbol }}</span>
+                <strong :title="record.name">{{ record.name }}</strong><span>{{ record.symbol }}</span>
               </div>
               <span v-else-if="columnKey(column.key) === 'report_period'">报告期 {{ record.report_period }}</span>
               <span v-else>{{ baselineCell(columnKey(column.key), record) }}</span>
@@ -574,7 +619,13 @@ onMounted(() => void loadTab('overview'));
 
         <div class="etf-divider" />
         <h3 class="etf-subheading">精确实体持仓</h3>
-        <div v-if="holders.positions.length" class="etf-table-scroll">
+        <div
+          v-if="holders.positions.length"
+          class="etf-table-scroll"
+          tabindex="0"
+          role="region"
+          aria-label="精确实体持仓表"
+        >
           <a-table
             data-testid="holder-position-table"
             :columns="holderColumns"
@@ -586,7 +637,7 @@ onMounted(() => void loadTab('overview'));
           >
             <template #bodyCell="{ column, record }">
               <div v-if="columnKey(column.key) === 'etf'" class="etf-name-cell">
-                <strong>{{ record.name }}</strong><span>{{ record.symbol }}</span>
+                <strong :title="record.name">{{ record.name }}</strong><span>{{ record.symbol }}</span>
               </div>
               <span v-else-if="columnKey(column.key) === 'report_period'">报告期 {{ record.report_period }}</span>
               <span v-else :class="columnKey(column.key) === 'change_shares' ? valueTone(record.change_shares) : ''">
@@ -610,9 +661,12 @@ onMounted(() => void loadTab('overview'));
       </div>
       <div v-else-if="methodology" class="etf-panel-content etf-methodology">
         <div class="etf-source-statuses">
-          <span v-for="source in activeSources()" :key="source.source" class="etf-source-status">
-            {{ source.source }} <StatusTag :status="sourceStatusTone(source.status)" />
-          </span>
+          <div v-for="source in activeSources()" :key="source.source" class="etf-source-status">
+            <span class="etf-source-status__summary">
+              {{ source.source }} <StatusTag :status="sourceStatusTone(source.status)" />
+            </span>
+            <span class="etf-source-status__detail">{{ source.detail || '--' }}</span>
+          </div>
         </div>
         <div class="etf-compact-meta">
           <span>交易日 {{ methodology.trade_date || '--' }}</span>
@@ -700,6 +754,14 @@ onMounted(() => void loadTab('overview'));
   background: var(--wb-surface);
 }
 
+.etf-panel :deep(.wb-section-header) {
+  padding: 12px 16px;
+}
+
+.etf-panel > :deep(.ant-alert) {
+  margin: 0 16px 12px;
+}
+
 .etf-panel-content {
   min-width: 0;
   padding: 0 16px 16px;
@@ -748,9 +810,27 @@ onMounted(() => void loadTab('overview'));
 }
 
 .etf-source-status {
+  display: flex;
+  flex: 1 1 260px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.etf-source-status__summary {
   display: inline-flex;
   gap: 5px;
   align-items: center;
+}
+
+.etf-source-status__detail,
+.etf-fingerprint {
+  overflow-wrap: anywhere;
+}
+
+.etf-source-status__detail {
+  color: var(--wb-muted);
+  line-height: 1.4;
 }
 
 .etf-table-scroll {
@@ -777,10 +857,6 @@ onMounted(() => void loadTab('overview'));
 
 .etf-value--negative {
   color: var(--wb-negative);
-}
-
-.etf-value--warning {
-  color: var(--wb-warning);
 }
 
 .etf-state,

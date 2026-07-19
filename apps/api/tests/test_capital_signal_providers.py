@@ -116,6 +116,43 @@ def test_szse_current_share_parser_does_not_invent_history() -> None:
     assert rows[0].total_shares == 4_812_345_600
 
 
+def test_szse_current_share_parser_rejects_a_different_exchange_date() -> None:
+    rows = parse_szse_etf_share_payload(
+        SZSE_SHARE_FIXTURE,
+        trade_date="2026-07-16",
+        symbols=["159915.SZ"],
+    )
+
+    assert rows == []
+
+
+def test_szse_current_share_parser_rejects_missing_or_invalid_exchange_date() -> None:
+    missing_date = [{"metadata": {}, "data": SZSE_SHARE_FIXTURE[0]["data"]}]
+    invalid_date = [
+        {
+            "metadata": {"subname": "2026年7月17日"},
+            "data": SZSE_SHARE_FIXTURE[0]["data"],
+        }
+    ]
+
+    assert (
+        parse_szse_etf_share_payload(
+            missing_date,
+            trade_date="2026-07-17",
+            symbols=["159915.SZ"],
+        )
+        == []
+    )
+    assert (
+        parse_szse_etf_share_payload(
+            invalid_date,
+            trade_date="2026-07-17",
+            symbols=["159915.SZ"],
+        )
+        == []
+    )
+
+
 def test_share_parsers_skip_missing_or_non_positive_sizes() -> None:
     sse = {"result": [{"STAT_DATE": "2026-07-17", "SEC_CODE": "510300", "TOT_VOL": "-"}]}
     szse = [{"metadata": {"subname": "2026-07-17"}, "data": [{"sys_key": "159915", "dqgm": "0"}]}]
@@ -162,6 +199,79 @@ def test_share_provider_fetches_only_requested_exchange_symbols() -> None:
     assert requests[0].url.host == "query.sse.com.cn"
     assert requests[0].url.params["STAT_DATE"] == "2026-07-17"
     assert result.source_status[0].status == "success"
+
+
+def test_share_provider_collects_the_ten_etf_universe_without_live_calls() -> None:
+    symbols = [
+        "510050.SH",
+        "510300.SH",
+        "510500.SH",
+        "512100.SH",
+        "510230.SH",
+        "588080.SH",
+        "159915.SZ",
+        "159919.SZ",
+        "159922.SZ",
+        "159845.SZ",
+    ]
+    sse_codes = [symbol.split(".", 1)[0] for symbol in symbols[:6]]
+    szse_codes = [symbol.split(".", 1)[0] for symbol in symbols[6:]]
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.host == "query.sse.com.cn":
+            return httpx.Response(
+                200,
+                json={
+                    "result": [
+                        {
+                            "STAT_DATE": "2026-07-17",
+                            "SEC_CODE": code,
+                            "SEC_NAME": f"ETF {code}",
+                            "TOT_VOL": "100",
+                        }
+                        for code in [*sse_codes, "999999"]
+                    ]
+                },
+            )
+        if request.url.host == "www.szse.cn":
+            code = request.url.params["txtQueryKeyAndJC"]
+            assert code in szse_codes
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "metadata": {"subname": "2026-07-17"},
+                        "data": [
+                            {
+                                "sys_key": code,
+                                "kzjcurl": f"ETF {code}",
+                                "dqgm": "100",
+                            }
+                        ],
+                    }
+                ],
+            )
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    provider = OfficialCapitalDataProvider(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+    result = provider.get_etf_share_rows("2026-07-17", symbols)
+
+    sse_requests = [request for request in requests if request.url.host == "query.sse.com.cn"]
+    szse_requests = [request for request in requests if request.url.host == "www.szse.cn"]
+    assert len(sse_requests) == 1
+    assert sse_requests[0].url.params["STAT_DATE"] == "2026-07-17"
+    assert "SEC_CODE" not in sse_requests[0].url.params
+    assert [request.url.params["txtQueryKeyAndJC"] for request in szse_requests] == szse_codes
+    assert [row.symbol for row in result.rows] == symbols
+    assert [(status.source, status.status) for status in result.source_status] == [
+        ("上交所ETF份额", "success"),
+        ("深交所ETF份额", "success"),
+    ]
 
 
 def test_sina_report_dates_parser_reads_only_holder_period_options() -> None:

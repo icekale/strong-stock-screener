@@ -330,6 +330,10 @@ def parse_szse_etf_share_payload(
 ) -> list[EtfSharePoint]:
     allowed = set(symbols)
     section = _first_section(payload)
+    metadata = section.get("metadata") if isinstance(section, dict) else None
+    exchange_date = _date_text(metadata.get("subname")) if isinstance(metadata, dict) else None
+    if not exchange_date or exchange_date != _date_text(trade_date):
+        return []
     rows = section.get("data") if isinstance(section, dict) else None
     if not isinstance(rows, list):
         return []
@@ -344,7 +348,7 @@ def parse_szse_etf_share_payload(
             continue
         output.append(
             EtfSharePoint(
-                trade_date=_date_text(trade_date) or trade_date,
+                trade_date=exchange_date,
                 symbol=symbol,
                 name=_plain_text(row.get("kzjcurl")) or None,
                 total_shares=total_shares,

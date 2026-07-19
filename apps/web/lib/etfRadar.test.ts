@@ -21,6 +21,16 @@ test("ETF radar workspace exposes four independently loaded evidence views", () 
   assert.match(source, /getEtfRadarHistory/);
   assert.match(source, /getEtfRadarHolders/);
   assert.match(source, /getEtfRadarMethodology/);
+  assert.match(source, /createMemoryRequestCache/);
+  assert.match(source, /etfRadarRequestCache\.get/);
   assert.match(source, /证据强度/);
   assert.doesNotMatch(source, /概率/);
+});
+
+test("ETF radar keeps wide tables inside the workspace on mobile", () => {
+  const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
+
+  assert.match(styles, /\.etf-radar-workspace\s*\{[\s\S]*?min-width:\s*0/);
+  assert.match(styles, /\.etf-radar-view\s*\{[\s\S]*?min-width:\s*0/);
+  assert.match(styles, /\.etf-radar-view > \.compact-panel\s*\{[\s\S]*?overflow:\s*hidden/);
 });

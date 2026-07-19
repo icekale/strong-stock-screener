@@ -5,12 +5,13 @@ from threading import RLock
 
 from pydantic import TypeAdapter
 
-from app.models import EtfRadarOverviewResponse, EtfSharePoint, MarginMarketPoint
+from app.models import EtfHolderPosition, EtfRadarOverviewResponse, EtfSharePoint, MarginMarketPoint
 
 
 _STORE_LOCK = RLock()
 _MARGIN_LIST = TypeAdapter(list[MarginMarketPoint])
 _SHARE_LIST = TypeAdapter(list[EtfSharePoint])
+_HOLDER_LIST = TypeAdapter(list[EtfHolderPosition])
 
 
 class CapitalSignalStore:
@@ -42,6 +43,14 @@ class CapitalSignalStore:
             retained_dates = set(ordered_dates[-400:])
             retained = [row for row in rows if row.trade_date in retained_dates]
             self._write_bytes(self.share_history_path, _SHARE_LIST.dump_json(retained, indent=2))
+
+    def load_holder_reports(self) -> list[EtfHolderPosition]:
+        with _STORE_LOCK:
+            return self._load_list(self.holder_reports_path, _HOLDER_LIST)
+
+    def save_holder_reports(self, rows: list[EtfHolderPosition]) -> None:
+        with _STORE_LOCK:
+            self._write_bytes(self.holder_reports_path, _HOLDER_LIST.dump_json(rows, indent=2))
 
     def load_snapshot(self) -> EtfRadarOverviewResponse | None:
         with _STORE_LOCK:

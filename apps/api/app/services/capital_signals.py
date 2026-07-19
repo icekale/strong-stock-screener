@@ -53,6 +53,12 @@ class QuoteProvider(Protocol):
     def get_quotes(self, symbols: list[str]) -> list[object]: ...
 
 
+class HolderProvider(Protocol):
+    def get_holder_positions(
+        self, symbols: dict[str, str]
+    ) -> CapitalProviderResult: ...
+
+
 class CapitalSignalService:
     def __init__(
         self,
@@ -60,12 +66,14 @@ class CapitalSignalService:
         provider: CapitalDataProvider,
         store: CapitalSignalStore,
         quote_provider: QuoteProvider | None = None,
+        holder_provider: HolderProvider | None = None,
         clock=None,
         ttl_seconds: int = 60,
     ) -> None:
         self.provider = provider
         self.store = store
         self.quote_provider = quote_provider
+        self.holder_provider = holder_provider
         self.clock = clock or (lambda: datetime.now(ZoneInfo("Asia/Shanghai")))
         self.ttl_seconds = ttl_seconds
         self._lock = RLock()
@@ -99,6 +107,22 @@ class CapitalSignalService:
 
             previous_date = _previous_weekday(trade_date)
             history = self.store.load_share_history()
+            stored_current_rows = [
+                row
+                for row in history
+                if row.trade_date == trade_date and row.symbol in CORE_ETF_POOL
+            ]
+            current_rows = _merge_share_history(stored_current_rows, current_result.rows)
+            retained_count = len(current_rows) - len(current_result.rows)
+            current_status = list(current_result.source_status)
+            if retained_count > 0:
+                current_status.append(
+                    StrongStockSourceStatus(
+                        source="ETF份额缓存",
+                        status="stale",
+                        detail=f"本次部分刷新，保留 {retained_count} 只同日缓存记录",
+                    )
+                )
             previous_by_symbol = _latest_share_before(history, trade_date)
             missing_sse = [
                 symbol
@@ -115,7 +139,7 @@ class CapitalSignalService:
             close_by_symbol = self._quote_closes(symbols)
             enriched: list[EtfSharePoint] = []
             items: list[EtfRadarItem] = []
-            for row in current_result.rows:
+            for row in current_rows:
                 previous = previous_by_symbol.get(row.symbol)
                 close = close_by_symbol.get(row.symbol, row.close)
                 change = build_share_change(
@@ -152,7 +176,7 @@ class CapitalSignalService:
                 as_of=generated_at,
                 signal_stage=_signal_stage(now, trade_date),
                 model_version=MODEL_VERSION,
-                source_status=[*current_result.source_status, *previous_status],
+                source_status=[*current_status, *previous_status],
                 evidence_strength=summary.evidence_strength,
                 evidence_level=summary.evidence_level,
                 valid_etf_count=summary.valid_etf_count,
@@ -232,6 +256,59 @@ class CapitalSignalService:
     def holders(self) -> EtfRadarHoldersResponse:
         now = self.clock()
         generated_at = now.isoformat(timespec="seconds")
+        expected_period = _expected_holder_period(now)
+        cached = self.store.load_holder_reports()
+        cached_period = max((item.report_period for item in cached), default=None)
+        if cached and cached_period is not None and cached_period >= expected_period:
+            return EtfRadarHoldersResponse(
+                generated_at=generated_at,
+                trade_date=_latest_weekday(now),
+                as_of=generated_at,
+                signal_stage="disclosure",
+                model_version=MODEL_VERSION,
+                source_status=[
+                    StrongStockSourceStatus(
+                        source="基金持有人披露缓存",
+                        status="success",
+                        detail=f"最新报告期 {cached_period}",
+                    )
+                ],
+                positions=cached,
+            )
+
+        if self.holder_provider is not None:
+            result = self.holder_provider.get_holder_positions(
+                {symbol: details[0] for symbol, details in CORE_ETF_POOL.items()}
+            )
+            if result.rows:
+                self.store.save_holder_reports(result.rows)
+                return EtfRadarHoldersResponse(
+                    generated_at=generated_at,
+                    trade_date=_latest_weekday(now),
+                    as_of=generated_at,
+                    signal_stage="disclosure",
+                    model_version=MODEL_VERSION,
+                    source_status=result.source_status,
+                    positions=result.rows,
+                )
+            if cached:
+                return EtfRadarHoldersResponse(
+                    generated_at=generated_at,
+                    trade_date=_latest_weekday(now),
+                    as_of=generated_at,
+                    signal_stage="disclosure",
+                    model_version=MODEL_VERSION,
+                    source_status=[
+                        *result.source_status,
+                        StrongStockSourceStatus(
+                            source="基金持有人披露缓存",
+                            status="stale",
+                            detail=f"刷新失败，保留报告期 {cached_period}",
+                        ),
+                    ],
+                    positions=cached,
+                )
+
         return EtfRadarHoldersResponse(
             generated_at=generated_at,
             trade_date=_latest_weekday(now),
@@ -242,7 +319,7 @@ class CapitalSignalService:
                 StrongStockSourceStatus(
                     source="基金定期报告",
                     status="stale",
-                    detail="尚无已确认的精确实体持有人记录",
+                    detail=f"尚无已确认的精确实体持有人记录，应有报告期 {expected_period}",
                 )
             ],
         )
@@ -322,15 +399,23 @@ class CapitalSignalService:
         self.store.save_margin_history(history)
 
         current_balance = _sum_optional(row.margin_balance_cny for row in current_rows)
-        previous_balance = _sum_optional(row.margin_balance_cny for row in previous_rows)
+        comparable_markets = {row.market for row in current_rows} & {
+            row.market for row in previous_rows
+        }
+        comparable_current_balance = _sum_optional(
+            row.margin_balance_cny for row in current_rows if row.market in comparable_markets
+        )
+        comparable_previous_balance = _sum_optional(
+            row.margin_balance_cny for row in previous_rows if row.market in comparable_markets
+        )
         change = (
-            current_balance - previous_balance
-            if current_balance is not None and previous_balance is not None
+            comparable_current_balance - comparable_previous_balance
+            if comparable_current_balance is not None and comparable_previous_balance is not None
             else None
         )
         change_pct = (
-            change / previous_balance * 100
-            if change is not None and previous_balance not in {None, 0}
+            change / comparable_previous_balance * 100
+            if change is not None and comparable_previous_balance not in {None, 0}
             else None
         )
         return (
@@ -422,6 +507,15 @@ def _latest_weekday(now: datetime) -> str:
     while value.weekday() >= 5:
         value -= timedelta(days=1)
     return value.isoformat()
+
+
+def _expected_holder_period(now: datetime) -> str:
+    year = now.year
+    if now.month >= 9:
+        return f"{year}-06-30"
+    if now.month >= 4:
+        return f"{year - 1}-12-31"
+    return f"{year - 1}-06-30"
 
 
 def _previous_weekday(trade_date: str) -> str:

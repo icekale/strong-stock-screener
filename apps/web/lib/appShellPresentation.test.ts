@@ -61,6 +61,15 @@ test("workspace tabs retain home and cap recent workspaces", () => {
   assert.equal(tabs.at(-1)?.key, "/stock/600013.SH");
 });
 
+test("hidden ETF radar route keeps a product workspace label", () => {
+  assert.deepEqual(buildWorkspaceTab("/etf-radar", ""), {
+    closable: true,
+    href: "/etf-radar",
+    key: "/etf-radar",
+    label: "ETF资金雷达",
+  });
+});
+
 test("workspace tab restoration rebuilds only safe internal routes", () => {
   const restored = restoreWorkspaceTabs(JSON.stringify([
     { closable: false, href: "/market?view=heatmap", key: "tampered", label: "tampered" },

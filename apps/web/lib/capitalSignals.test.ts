@@ -5,7 +5,9 @@ const {
   directionTone,
   formatDirectionalCny,
   formatDirectionalPercent,
+  formatDirectionalShares,
   formatEvidenceStrength,
+  formatPlainShares,
 } = (await import(new URL("./capitalSignals.ts", import.meta.url).href)) as typeof import("./capitalSignals");
 
 test("positive A-share values are red and retain an upward marker and plus sign", () => {
@@ -32,4 +34,11 @@ test("zero values stay neutral and missing values stay visibly missing", () => {
 test("evidence strength is a score rather than a probability", () => {
   assert.equal(formatEvidenceStrength(72.25), "72.3");
   assert.equal(formatEvidenceStrength(null), "--");
+});
+
+test("share stock values stay unsigned while share changes keep direction", () => {
+  assert.equal(formatPlainShares(37_425_000_000), "374.25亿份");
+  assert.equal(formatDirectionalShares(2_778_000_000), "▲ +27.78亿份");
+  assert.equal(formatDirectionalShares(-2_778_000_000), "▼ -27.78亿份");
+  assert.equal(formatPlainShares(null), "--");
 });

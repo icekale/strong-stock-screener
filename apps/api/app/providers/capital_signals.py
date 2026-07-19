@@ -1,13 +1,20 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from collections.abc import Mapping
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any, Generic, TypeVar
 
 import httpx
 
-from app.models import EtfSharePoint, MarginMarketPoint, StrongStockSourceStatus
+from app.models import (
+    EtfHolderPosition,
+    EtfSharePoint,
+    MarginMarketPoint,
+    StrongStockSourceStatus,
+)
 
 
 T = TypeVar("T")
@@ -17,6 +24,18 @@ _HEADERS = {
     "Referer": "https://www.sse.com.cn/",
     "User-Agent": "Mozilla/5.0 (compatible; StrongStockWorkbench/1.0)",
 }
+_SINA_HOLDER_URL = (
+    "https://stock.finance.sina.com.cn/fundInfo/api/openapi.php/"
+    "CaihuiFundInfoService.getFundHolder"
+)
+_HOLDER_ENTITIES = frozenset(
+    {
+        "中央汇金投资有限责任公司",
+        "中央汇金资产管理有限责任公司",
+        "中国证券金融股份有限公司",
+        "国新投资有限公司",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -80,6 +99,7 @@ class OfficialCapitalDataProvider:
             statuses.append(_failure_status("深交所两融", exc))
 
         return CapitalProviderResult(rows=rows, source_status=statuses)
+
 
     def get_etf_share_rows(
         self,
@@ -148,6 +168,99 @@ class OfficialCapitalDataProvider:
                 statuses.append(_status("深交所ETF份额", bool(szse_rows), detail))
 
         return CapitalProviderResult(rows=rows, source_status=statuses)
+
+
+class SinaEtfHolderProvider:
+    def __init__(
+        self,
+        http_client: httpx.Client | None = None,
+        timeout_seconds: float = 12,
+        workers: int = 4,
+    ) -> None:
+        self.http_client = http_client or httpx.Client(timeout=timeout_seconds)
+        self.workers = workers
+
+    def get_holder_positions(
+        self,
+        symbols: Mapping[str, str],
+    ) -> CapitalProviderResult[EtfHolderPosition]:
+        positions: list[EtfHolderPosition] = []
+        failures = 0
+        with ThreadPoolExecutor(max_workers=min(self.workers, max(1, len(symbols)))) as executor:
+            futures = {
+                executor.submit(self._fetch_symbol, symbol, name): symbol
+                for symbol, name in symbols.items()
+            }
+            for future in as_completed(futures):
+                try:
+                    positions.extend(future.result())
+                except Exception:
+                    failures += 1
+
+        positions.sort(key=lambda item: (item.report_period, item.symbol, item.entity_name), reverse=True)
+        latest_period = max((item.report_period for item in positions), default=None)
+        if positions:
+            status = "stale" if failures else "success"
+            detail = f"最新报告期 {latest_period}，精确实体 {len(positions)} 条"
+            if failures:
+                detail += f"；{failures} 只ETF请求失败"
+        else:
+            status = "failed" if failures else "stale"
+            detail = "未读取到核心ETF的精确实体持有人记录"
+        return CapitalProviderResult(
+            rows=positions,
+            source_status=[
+                StrongStockSourceStatus(source="新浪基金持有人", status=status, detail=detail)
+            ],
+        )
+
+    def _fetch_symbol(self, symbol: str, name: str) -> list[EtfHolderPosition]:
+        code = symbol.split(".", 1)[0]
+        page_url = (
+            "https://stock.finance.sina.com.cn/fundInfo/view/"
+            f"FundInfo_JJCYR.php?symbol={code}"
+        )
+        response = self.http_client.get(page_url, headers=_HEADERS)
+        response.raise_for_status()
+        report_dates = parse_sina_report_dates(response.content.decode("gb18030", errors="replace"))
+        if not report_dates:
+            return []
+
+        reports: dict[str, list[EtfHolderPosition]] = {}
+        for report_period in report_dates[:2]:
+            holder_response = self.http_client.get(
+                _SINA_HOLDER_URL,
+                params={"symbol": code, "date": report_period},
+                headers={**_HEADERS, "Referer": page_url},
+            )
+            holder_response.raise_for_status()
+            reports[report_period] = parse_sina_holder_payload(
+                holder_response.json(),
+                symbol=symbol,
+                name=name,
+                report_period=report_period,
+            )
+
+        latest_period = report_dates[0]
+        previous_period = report_dates[1] if len(report_dates) > 1 else None
+        previous_by_entity = {
+            item.entity_name: item
+            for item in reports.get(previous_period, [])
+        }
+        return [
+            item.model_copy(
+                update={
+                    "change_shares": (
+                        item.shares - previous_by_entity[item.entity_name].shares
+                        if item.shares is not None
+                        and previous_by_entity.get(item.entity_name) is not None
+                        and previous_by_entity[item.entity_name].shares is not None
+                        else None
+                    )
+                }
+            )
+            for item in reports.get(latest_period, [])
+        ]
 
 
 def parse_sse_margin_payload(payload: Any) -> list[MarginMarketPoint]:
@@ -240,6 +353,44 @@ def parse_szse_etf_share_payload(
     return output
 
 
+def parse_sina_report_dates(html: str) -> list[str]:
+    parser = _SinaReportDateParser()
+    parser.feed(html)
+    return parser.dates
+
+
+def parse_sina_holder_payload(
+    payload: Any,
+    *,
+    symbol: str,
+    name: str,
+    report_period: str,
+) -> list[EtfHolderPosition]:
+    result = payload.get("result") if isinstance(payload, dict) else None
+    rows = result.get("data") if isinstance(result, dict) else None
+    if not isinstance(rows, list):
+        return []
+    positions: list[EtfHolderPosition] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        entity_name = str(row.get("cyrmc") or "").strip()
+        if entity_name not in _HOLDER_ENTITIES:
+            continue
+        positions.append(
+            EtfHolderPosition(
+                symbol=symbol,
+                name=name,
+                report_period=report_period,
+                entity_name=entity_name,
+                shares=_number(row.get("cyfe")),
+                holding_pct=_number(row.get("zfeb")),
+                source="新浪财经基金持有人",
+            )
+        )
+    return positions
+
+
 def _payload_rows(payload: Any) -> list[dict[str, Any]]:
     if not isinstance(payload, dict):
         return []
@@ -294,6 +445,26 @@ class _TextExtractor(HTMLParser):
 
     def handle_data(self, data: str) -> None:
         self.parts.append(data)
+
+
+class _SinaReportDateParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.inside_report_select = False
+        self.dates: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        attributes = dict(attrs)
+        if tag == "select" and attributes.get("id") == "tc_slt":
+            self.inside_report_select = True
+            return
+        value = attributes.get("value")
+        if tag == "option" and self.inside_report_select and _date_text(value):
+            self.dates.append(str(value))
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "select" and self.inside_report_select:
+            self.inside_report_select = False
 
 
 def _plain_text(value: Any) -> str:

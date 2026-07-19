@@ -33,7 +33,8 @@ test("decision queue keeps a missing Top3 cache recoverable", () => {
 test("sector flow preview uses normalized rows and a mobile direction switch", () => {
   const source = readFileSync(new URL("../components/overview/SectorHeatmapPreview.tsx", import.meta.url), "utf8");
 
-  assert.match(source, /buildSectorFlowRows/);
+  assert.match(source, /buildSectorFlowRows\(data\?\.inflow \?\? \[\], 6\)/);
+  assert.match(source, /buildSectorFlowRows\(data\?\.outflow \?\? \[\], 6\)/);
   assert.match(source, /aria-pressed/);
   assert.match(source, /sector-flow-chart/);
   assert.match(source, /sector-flow-heading/);

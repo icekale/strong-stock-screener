@@ -10,7 +10,9 @@ import {
   directionTone,
   formatDirectionalCny,
   formatDirectionalPercent,
+  formatDirectionalShares,
   formatEvidenceStrength,
+  formatPlainShares,
 } from "../../lib/capitalSignals";
 import {
   getEtfRadarHistory,
@@ -28,8 +30,10 @@ import type {
   EtfRadarMethodologyResponse,
   EtfRadarOverviewResponse,
 } from "../../lib/types";
+import { createMemoryRequestCache } from "../../lib/marketOverviewCache";
 
 type RadarView = "overview" | "shares" | "holders" | "methodology";
+const etfRadarRequestCache = createMemoryRequestCache({ ttlMs: 15_000 });
 
 export function EtfRadarWorkspace() {
   const [activeView, setActiveView] = useState<RadarView>("overview");
@@ -46,10 +50,18 @@ export function EtfRadarWorkspace() {
     setLoading((current) => new Set(current).add(view));
     setErrors((current) => without(current, view));
     try {
-      if (view === "overview") setOverview(await getEtfRadarOverview());
-      if (view === "shares") setHistory(await getEtfRadarHistory(120));
-      if (view === "holders") setHolders(await getEtfRadarHolders());
-      if (view === "methodology") setMethodology(await getEtfRadarMethodology());
+      if (view === "overview") {
+        setOverview(await etfRadarRequestCache.get("etf-radar:overview", getEtfRadarOverview, { force }));
+      }
+      if (view === "shares") {
+        setHistory(await etfRadarRequestCache.get("etf-radar:history", () => getEtfRadarHistory(120), { force }));
+      }
+      if (view === "holders") {
+        setHolders(await etfRadarRequestCache.get("etf-radar:holders", getEtfRadarHolders, { force }));
+      }
+      if (view === "methodology") {
+        setMethodology(await etfRadarRequestCache.get("etf-radar:methodology", getEtfRadarMethodology, { force }));
+      }
     } catch {
       setErrors((current) => new Set(current).add(view));
     } finally {
@@ -179,7 +191,7 @@ const overviewColumns = [
   { title: "ETF", key: "etf", fixed: "left" as const, width: 150, render: (_: unknown, row: EtfRadarItem) => <div className="etf-symbol-cell"><strong>{row.name}</strong><span>{row.symbol}</span></div> },
   { title: "跟踪指数", dataIndex: "index_name", width: 110 },
   { title: "证据强度", dataIndex: "evidence_strength", width: 100, render: (value: number | null) => formatEvidenceStrength(value) },
-  { title: "份额变化", dataIndex: "share_change", align: "right" as const, width: 120, render: (value: number | null) => <DirectionValue value={value} formatter={formatShares} /> },
+  { title: "份额变化", dataIndex: "share_change", align: "right" as const, width: 120, render: (value: number | null) => <DirectionValue value={value} formatter={formatDirectionalShares} /> },
   { title: "估算净申购", dataIndex: "estimated_subscription_cny", align: "right" as const, width: 130, render: (value: number | null) => <DirectionValue value={value} formatter={formatDirectionalCny} /> },
   { title: "稳健标准分", dataIndex: "robust_score", align: "right" as const, width: 110, render: (value: number | null) => value === null ? "--" : value.toFixed(2) },
   { title: "同刻成交", dataIndex: "same_time_turnover_ratio", align: "right" as const, width: 100, render: (value: number | null) => value === null ? "--" : `${value.toFixed(2)}x` },
@@ -189,8 +201,8 @@ const overviewColumns = [
 const historyColumns = [
   { title: "交易日", dataIndex: "trade_date", width: 110 },
   { title: "ETF", key: "etf", width: 160, render: (_: unknown, row: EtfRadarHistoryPoint) => `${row.name} · ${row.symbol}` },
-  { title: "总份额", dataIndex: "total_shares", align: "right" as const, width: 130, render: formatShares },
-  { title: "份额变化", dataIndex: "share_change", align: "right" as const, width: 130, render: (value: number | null) => <DirectionValue value={value} formatter={formatShares} /> },
+  { title: "总份额", dataIndex: "total_shares", align: "right" as const, width: 130, render: formatPlainShares },
+  { title: "份额变化", dataIndex: "share_change", align: "right" as const, width: 130, render: (value: number | null) => <DirectionValue value={value} formatter={formatDirectionalShares} /> },
   { title: "估算净申购", dataIndex: "estimated_subscription_cny", align: "right" as const, width: 140, render: (value: number | null) => <DirectionValue value={value} formatter={formatDirectionalCny} /> },
   { title: "稳健标准分", dataIndex: "robust_score", align: "right" as const, width: 110, render: (value: number | null) => value === null ? "--" : value.toFixed(2) },
 ];
@@ -199,9 +211,9 @@ const holderColumns = [
   { title: "报告期", dataIndex: "report_period", width: 110 },
   { title: "ETF", key: "etf", width: 160, render: (_: unknown, row: EtfHolderPosition) => `${row.name} · ${row.symbol}` },
   { title: "披露实体", dataIndex: "entity_name", width: 220 },
-  { title: "持有份额", dataIndex: "shares", align: "right" as const, width: 120, render: formatShares },
+  { title: "持有份额", dataIndex: "shares", align: "right" as const, width: 120, render: formatPlainShares },
   { title: "持有比例", dataIndex: "holding_pct", align: "right" as const, width: 100, render: (value: number | null) => value === null ? "--" : `${value.toFixed(2)}%` },
-  { title: "较上期", dataIndex: "change_shares", align: "right" as const, width: 120, render: (value: number | null) => <DirectionValue value={value} formatter={formatShares} /> },
+  { title: "较上期", dataIndex: "change_shares", align: "right" as const, width: 120, render: (value: number | null) => <DirectionValue value={value} formatter={formatDirectionalShares} /> },
   { title: "来源", dataIndex: "source", width: 120 },
 ];
 
@@ -250,5 +262,4 @@ function without<T>(values: Set<T>, value: T): Set<T> { const next = new Set(val
 function stageLabel(stage: CapitalSignalMetadata["signal_stage"]): string { return stage === "intraday" ? "盘中代理" : stage === "disclosure" ? "定期披露" : "盘后确认"; }
 function metadataTone(metadata: CapitalSignalMetadata): string { return metadata.source_status.some((item) => item.status !== "success") ? "gold" : "blue"; }
 function formatTime(value: string): string { return value.replace("T", " ").slice(0, 16); }
-function formatShares(value: number | null): string { if (value === null) return "--"; const prefix = value > 0 ? "+" : ""; const absolute = Math.abs(value); if (absolute >= 100_000_000) return `${prefix}${(value / 100_000_000).toFixed(2)}亿份`; if (absolute >= 10_000) return `${prefix}${(value / 10_000).toFixed(0)}万份`; return `${prefix}${value.toFixed(0)}份`; }
 function toneClass(tone: "fall" | "neutral" | "rise"): string { return tone === "rise" ? "market-rise-text" : tone === "fall" ? "market-fall-text" : ""; }

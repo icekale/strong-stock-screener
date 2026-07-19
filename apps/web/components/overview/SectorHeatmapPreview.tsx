@@ -16,8 +16,8 @@ type FlowDirection = "inflow" | "outflow";
 export function SectorHeatmapPreview({ onRefresh, sectorRadar }: SectorHeatmapPreviewProps) {
   const data = sectorRadar && sectorRadar.kind !== "error" ? sectorRadar.value : null;
   const [mobileDirection, setMobileDirection] = useState<FlowDirection>("inflow");
-  const inflowRows = buildSectorFlowRows(data?.inflow ?? []);
-  const outflowRows = buildSectorFlowRows(data?.outflow ?? []);
+  const inflowRows = buildSectorFlowRows(data?.inflow ?? [], 6);
+  const outflowRows = buildSectorFlowRows(data?.outflow ?? [], 6);
   const mobileRows = mobileDirection === "inflow" ? inflowRows : outflowRows;
 
   return (

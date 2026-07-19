@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.models import EtfRadarOverviewResponse, EtfSharePoint, MarginMarketPoint
+from app.models import EtfHolderPosition, EtfRadarOverviewResponse, EtfSharePoint, MarginMarketPoint
 from app.services.capital_signal_store import CapitalSignalStore
 
 
@@ -87,3 +87,23 @@ def test_store_ignores_corrupt_snapshot(tmp_path: Path) -> None:
     store.snapshot_path.write_text("[]", encoding="utf-8")
 
     assert store.load_snapshot() is None
+
+
+def test_store_round_trips_holder_reports(tmp_path: Path) -> None:
+    store = CapitalSignalStore(tmp_path)
+    positions = [
+        EtfHolderPosition(
+            symbol="510300.SH",
+            name="300ETF",
+            report_period="2025-12-31",
+            entity_name="中央汇金投资有限责任公司",
+            shares=35_654_600_000,
+            holding_pct=40.14,
+            change_shares=1_000_000,
+            source="新浪财经基金持有人",
+        )
+    ]
+
+    store.save_holder_reports(positions)
+
+    assert store.load_holder_reports() == positions

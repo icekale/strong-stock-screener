@@ -7,6 +7,7 @@ const WORKSPACE_LABELS: Record<string, string> = {
   "/screener": "强势选股",
   "/auction": "竞价雷达",
   "/market": "板块与热图",
+  "/etf-radar": "ETF资金雷达",
   "/watchlist": "自选与风险",
   "/sentiment": "情绪与复盘",
   "/chanlun": "缠论工作台",

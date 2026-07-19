@@ -87,7 +87,7 @@ from app.models import (
 )
 from app.gsgf_rules import analyze_gsgf, build_gsgf_chart_annotations
 from app.providers.ifind import IfindMcpProvider
-from app.providers.capital_signals import OfficialCapitalDataProvider
+from app.providers.capital_signals import OfficialCapitalDataProvider, SinaEtfHolderProvider
 from app.providers.market_overview import EastmoneyMarketOverviewProvider
 from app.providers.concept_blocks import EastmoneyConceptBlockProvider
 from app.providers.heatmap import HeatmapProvider
@@ -3400,6 +3400,9 @@ def _capital_signal_service() -> CapitalSignalService:
             ),
             store=CapitalSignalStore(settings.data_dir),
             quote_provider=_quote_provider(),
+            holder_provider=SinaEtfHolderProvider(
+                timeout_seconds=settings.provider_timeout_seconds
+            ),
         )
         app.state.default_capital_signal_service = cached
     return cached

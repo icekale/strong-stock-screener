@@ -6,6 +6,8 @@ from app.providers.capital_signals import (
     OfficialCapitalDataProvider,
     parse_sse_etf_share_payload,
     parse_sse_margin_payload,
+    parse_sina_holder_payload,
+    parse_sina_report_dates,
     parse_szse_etf_share_payload,
     parse_szse_margin_payload,
 )
@@ -160,3 +162,42 @@ def test_share_provider_fetches_only_requested_exchange_symbols() -> None:
     assert requests[0].url.host == "query.sse.com.cn"
     assert requests[0].url.params["STAT_DATE"] == "2026-07-17"
     assert result.source_status[0].status == "success"
+
+
+def test_sina_report_dates_parser_reads_only_holder_period_options() -> None:
+    html = """
+    <select id="other"><option value="ignore">ignore</option></select>
+    <select id="tc_slt">
+      <option value="2025-12-31">2025-12-31</option>
+      <option value="2025-06-30">2025-06-30</option>
+    </select>
+    """
+
+    assert parse_sina_report_dates(html) == ["2025-12-31", "2025-06-30"]
+
+
+def test_sina_holder_parser_uses_exact_entity_whitelist() -> None:
+    payload = {
+        "result": {
+            "data": [
+                {"cyrmc": "中央汇金资产管理有限责任公司", "cyfe": "37858500000", "zfeb": "42.62"},
+                {"cyrmc": "中国证券金融股份有限公司", "cyfe": "1000000", "zfeb": "0.10"},
+                {"cyrmc": "深圳证金投资管理有限公司", "cyfe": "900000", "zfeb": "0.09"},
+                {"cyrmc": "普通联接基金", "cyfe": "800000", "zfeb": "0.08"},
+            ]
+        }
+    }
+
+    positions = parse_sina_holder_payload(
+        payload,
+        symbol="510300.SH",
+        name="300ETF",
+        report_period="2025-12-31",
+    )
+
+    assert [item.entity_name for item in positions] == [
+        "中央汇金资产管理有限责任公司",
+        "中国证券金融股份有限公司",
+    ]
+    assert positions[0].shares == 37_858_500_000
+    assert positions[0].holding_pct == 42.62

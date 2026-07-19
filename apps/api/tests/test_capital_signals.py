@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.models import EtfSharePoint, MarginMarketPoint, StrongStockSourceStatus
+from app.models import EtfHolderPosition, EtfSharePoint, MarginMarketPoint, StrongStockSourceStatus
 from app.providers.capital_signals import CapitalProviderResult
 from app.services.capital_signal_store import CapitalSignalStore
 from app.services.capital_signals import (
@@ -211,6 +211,32 @@ def test_homepage_summary_combines_markets_and_reuses_hot_cache(tmp_path: Path) 
     assert len(provider.share_calls) == 2
 
 
+def test_margin_change_compares_only_markets_available_on_both_dates(tmp_path: Path) -> None:
+    class CurrentSseOnlyProvider(FakeCapitalProvider):
+        def get_margin_rows(self, trade_date: str) -> CapitalProviderResult[MarginMarketPoint]:
+            result = super().get_margin_rows(trade_date)
+            if trade_date == "2026-07-17":
+                return CapitalProviderResult(
+                    rows=[row for row in result.rows if row.market == "SSE"],
+                    source_status=result.source_status,
+                )
+            return result
+
+    service = CapitalSignalService(
+        provider=CurrentSseOnlyProvider(),
+        store=CapitalSignalStore(tmp_path),
+        quote_provider=FakeQuoteProvider(),
+        clock=_clock,
+    )
+
+    summary = service.homepage_summary()
+
+    assert summary.margin.balance_cny == 1_100_000_000
+    assert summary.margin.available_markets == 1
+    assert summary.margin.change_cny == 100_000_000
+    assert summary.margin.change_pct == pytest.approx(10)
+
+
 def test_service_returns_cached_snapshot_as_stale_when_refresh_fails(tmp_path: Path) -> None:
     store = CapitalSignalStore(tmp_path)
     fresh_service = CapitalSignalService(
@@ -233,6 +259,45 @@ def test_service_returns_cached_snapshot_as_stale_when_refresh_fails(tmp_path: P
     assert stale.generated_at == fresh.generated_at
     assert stale.source_status[-1].status == "stale"
     assert "缓存" in stale.source_status[-1].detail
+
+
+def test_service_merges_partial_refresh_with_same_day_persisted_rows(tmp_path: Path) -> None:
+    store = CapitalSignalStore(tmp_path)
+    initial_service = CapitalSignalService(
+        provider=FakeCapitalProvider(),
+        store=store,
+        quote_provider=FakeQuoteProvider(),
+        clock=_clock,
+    )
+    initial = initial_service.overview(force=True)
+
+    class SzseOnlyRefreshProvider(FakeCapitalProvider):
+        def get_etf_share_rows(
+            self,
+            trade_date: str,
+            symbols: list[str] | tuple[str, ...],
+        ) -> CapitalProviderResult[EtfSharePoint]:
+            result = super().get_etf_share_rows(trade_date, symbols)
+            return CapitalProviderResult(
+                rows=[row for row in result.rows if row.symbol.endswith(".SZ")],
+                source_status=[
+                    StrongStockSourceStatus(source="上交所ETF份额", status="failed", detail="timeout"),
+                    StrongStockSourceStatus(source="深交所ETF份额", status="success", detail="fresh"),
+                ],
+            )
+
+    partial_service = CapitalSignalService(
+        provider=SzseOnlyRefreshProvider(),
+        store=store,
+        quote_provider=FakeQuoteProvider(),
+        clock=_clock,
+    )
+
+    refreshed = partial_service.overview(force=True)
+
+    assert {item.symbol for item in initial.items} == {"510300.SH", "159915.SZ"}
+    assert {item.symbol for item in refreshed.items} == {"510300.SH", "159915.SZ"}
+    assert any(item.source == "上交所ETF份额" and item.status == "failed" for item in refreshed.source_status)
 
 
 def test_service_returns_unavailable_snapshot_without_cache(tmp_path: Path) -> None:
@@ -266,3 +331,46 @@ def test_methodology_calls_no_remote_provider(tmp_path: Path) -> None:
     assert result.thresholds["strong"] == 70
     assert provider.margin_calls == []
     assert provider.share_calls == []
+
+
+def test_holders_fetches_exact_positions_once_then_reuses_store(tmp_path: Path) -> None:
+    class FakeHolderProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def get_holder_positions(self, symbols: dict[str, str]):
+            self.calls += 1
+            assert symbols["510300.SH"] == "沪深300ETF"
+            return CapitalProviderResult(
+                rows=[
+                    EtfHolderPosition(
+                        symbol="510300.SH",
+                        name="沪深300ETF",
+                        report_period="2025-12-31",
+                        entity_name="中央汇金投资有限责任公司",
+                        shares=35_654_600_000,
+                        holding_pct=40.14,
+                        change_shares=1_000_000,
+                        source="新浪财经基金持有人",
+                    )
+                ],
+                source_status=[
+                    StrongStockSourceStatus(source="新浪基金持有人", status="success", detail="fake")
+                ],
+            )
+
+    holder_provider = FakeHolderProvider()
+    service = CapitalSignalService(
+        provider=FakeCapitalProvider(),
+        holder_provider=holder_provider,
+        store=CapitalSignalStore(tmp_path),
+        clock=_clock,
+    )
+
+    first = service.holders()
+    second = service.holders()
+
+    assert first.positions == second.positions
+    assert first.positions[0].report_period == "2025-12-31"
+    assert first.signal_stage == "disclosure"
+    assert holder_provider.calls == 1

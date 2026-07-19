@@ -1,11 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type {
-  MarketOverviewResponse,
-  MarketRankingsResponse,
-  SectorRadarResponse,
-  SectorReplicaMode,
-  SectorReplicaRadarResponse
-} from '@/service/types';
+import type { CapitalSummaryResponse, MarketOverviewResponse, SectorRadarResponse } from '@/service/types';
 import { createMemoryRequestCache } from '@/utils/requestCache';
 import { type HomeDashboardDependencies, useHomeDashboard } from './useHomeDashboard';
 
@@ -36,24 +30,19 @@ function overview(value: string): MarketOverviewResponse {
   return { generated_at: value } as MarketOverviewResponse;
 }
 
-function rankings(value: string): MarketRankingsResponse {
-  return { generated_at: value } as MarketRankingsResponse;
-}
-
 function sectorFlow(value: string): SectorRadarResponse {
   return { generated_at: value } as SectorRadarResponse;
 }
 
-function sectorTrend(value: string, mode: SectorReplicaMode = 'strength'): SectorReplicaRadarResponse {
-  return { generated_at: value, mode } as SectorReplicaRadarResponse;
+function capital(value: string): CapitalSummaryResponse {
+  return { generated_at: value } as CapitalSummaryResponse;
 }
 
 function dependencies(overrides: Partial<HomeDashboardDependencies> = {}): HomeDashboardDependencies {
   return {
     getMarketOverview: vi.fn(() => Promise.resolve(overview('overview'))),
-    getMarketRankings: vi.fn(() => Promise.resolve(rankings('rankings'))),
     getSectorRadar: vi.fn(() => Promise.resolve(sectorFlow('sector-flow'))),
-    getSectorReplicaRadar: vi.fn(() => Promise.resolve(sectorTrend('sector-trend'))),
+    getCapitalSummary: vi.fn(() => Promise.resolve(capital('capital'))),
     ...overrides
   };
 }
@@ -65,14 +54,12 @@ function cache() {
 describe('useHomeDashboard', () => {
   it('starts every initial request together and commits each result independently', async () => {
     const overviewRequest = deferred<MarketOverviewResponse>();
-    const rankingsRequest = deferred<MarketRankingsResponse>();
     const sectorFlowRequest = deferred<SectorRadarResponse>();
-    const sectorTrendRequest = deferred<SectorReplicaRadarResponse>();
+    const capitalRequest = deferred<CapitalSummaryResponse>();
     const api = dependencies({
       getMarketOverview: vi.fn(() => overviewRequest.promise),
-      getMarketRankings: vi.fn(() => rankingsRequest.promise),
       getSectorRadar: vi.fn(() => sectorFlowRequest.promise),
-      getSectorReplicaRadar: vi.fn(() => sectorTrendRequest.promise)
+      getCapitalSummary: vi.fn(() => capitalRequest.promise)
     });
     const dashboard = useHomeDashboard({ dependencies: api, cache: cache() });
 
@@ -83,177 +70,77 @@ describe('useHomeDashboard', () => {
     await flushMicrotasks();
 
     expect(api.getMarketOverview).toHaveBeenCalledTimes(1);
-    expect(api.getMarketRankings).toHaveBeenCalledWith(12);
     expect(api.getSectorRadar).toHaveBeenCalledWith(12);
-    expect(api.getSectorReplicaRadar).toHaveBeenCalledWith({ mode: 'strength', limit: 5, stockLimit: 1 });
+    expect(api.getCapitalSummary).toHaveBeenCalledTimes(1);
 
     const overviewResult = overview('first');
     overviewRequest.resolve(overviewResult);
     await flushMicrotasks();
 
     expect(dashboard.overview.data.value).toBe(overviewResult);
-    expect(dashboard.rankings.data.value).toBeUndefined();
     expect(dashboard.sectorFlow.data.value).toBeUndefined();
-    expect(dashboard.sectorTrend.data.value).toBeUndefined();
+    expect(dashboard.capital.data.value).toBeUndefined();
     expect(settled).toBe(false);
 
-    rankingsRequest.resolve(rankings('first'));
+    const capitalResult = capital('first');
+    capitalRequest.resolve(capitalResult);
+    await flushMicrotasks();
+
+    expect(dashboard.capital.data.value).toBe(capitalResult);
+    expect(dashboard.sectorFlow.data.value).toBeUndefined();
+    expect(settled).toBe(false);
+
     sectorFlowRequest.resolve(sectorFlow('first'));
-    sectorTrendRequest.resolve(sectorTrend('first'));
     await loading;
   });
 
-  it('isolates secondary failures from successful initial resources', async () => {
-    const failure = new Error('sector flow failed');
+  it('uses only the three dashboard resources and their exact cache keys', async () => {
+    const requestKeys: string[] = [];
+    const requestCache = {
+      get<T>(key: string, loader: () => Promise<T>): Promise<T> {
+        requestKeys.push(key);
+        return loader();
+      }
+    };
+    const dashboard = useHomeDashboard({ dependencies: dependencies(), cache: requestCache });
+
+    await dashboard.loadInitial();
+
+    expect(requestKeys).toEqual(['home:overview', 'home:sector-flow:12', 'home:capital-summary']);
+    expect(dashboard).not.toHaveProperty('rankings');
+    expect(dashboard).not.toHaveProperty('sectorTrend');
+    expect(dashboard).not.toHaveProperty('sectorMode');
+    expect(dashboard).not.toHaveProperty('setSectorMode');
+  });
+
+  it('isolates a secondary failure from successful initial resources', async () => {
+    const failure = new Error('capital summary failed');
     const api = dependencies({
-      getSectorRadar: vi.fn(() => Promise.reject(failure))
+      getCapitalSummary: vi.fn(() => Promise.reject(failure))
     });
     const dashboard = useHomeDashboard({ dependencies: api, cache: cache() });
 
     await dashboard.loadInitial();
 
     expect(dashboard.overview.data.value).toEqual(overview('overview'));
-    expect(dashboard.rankings.data.value).toEqual(rankings('rankings'));
-    expect(dashboard.sectorTrend.data.value).toEqual(sectorTrend('sector-trend'));
-    expect(dashboard.sectorFlow.data.value).toBeUndefined();
-    expect(dashboard.sectorFlow.error.value).toBe(failure);
+    expect(dashboard.sectorFlow.data.value).toEqual(sectorFlow('sector-flow'));
+    expect(dashboard.capital.data.value).toBeUndefined();
+    expect(dashboard.capital.error.value).toBe(failure);
   });
 
   it('preserves successful data and marks it stale after a forced refresh failure', async () => {
-    const first = overview('first');
+    const first = capital('first');
     const api = dependencies({
-      getMarketOverview: vi.fn().mockResolvedValueOnce(first).mockRejectedValueOnce('forced failure')
+      getCapitalSummary: vi.fn().mockResolvedValueOnce(first).mockRejectedValueOnce('forced failure')
     });
     const dashboard = useHomeDashboard({ dependencies: api, cache: cache() });
 
-    await dashboard.overview.refresh();
-    await expect(dashboard.overview.refresh({ force: true })).rejects.toThrow('forced failure');
+    await dashboard.capital.refresh();
+    await expect(dashboard.capital.refresh({ force: true })).rejects.toThrow('forced failure');
 
-    expect(dashboard.overview.data.value).toBe(first);
-    expect(dashboard.overview.isStale.value).toBe(true);
-    expect(dashboard.overview.error.value?.message).toBe('forced failure');
-  });
-
-  it('refreshes only the trend when the sector mode changes', async () => {
-    const api = dependencies();
-    const dashboard = useHomeDashboard({ dependencies: api, cache: cache() });
-
-    await dashboard.loadInitial();
-    await dashboard.setSectorMode('main_flow');
-
-    expect(api.getMarketOverview).toHaveBeenCalledTimes(1);
-    expect(api.getMarketRankings).toHaveBeenCalledTimes(1);
-    expect(api.getSectorRadar).toHaveBeenCalledTimes(1);
-    expect(api.getSectorReplicaRadar).toHaveBeenCalledTimes(2);
-    expect(api.getSectorReplicaRadar).toHaveBeenLastCalledWith({ mode: 'main_flow', limit: 5, stockLimit: 1 });
-  });
-
-  it('does not refetch the sector trend when its mode is unchanged', async () => {
-    const api = dependencies();
-    const dashboard = useHomeDashboard({ dependencies: api, cache: cache() });
-
-    await dashboard.loadInitial();
-    await dashboard.setSectorMode('strength');
-
-    expect(api.getSectorReplicaRadar).toHaveBeenCalledTimes(1);
-  });
-
-  it('captures the sector mode before the cache defers each trend loader', async () => {
-    const strength = deferred<SectorReplicaRadarResponse>();
-    const mainFlow = deferred<SectorReplicaRadarResponse>();
-    const getSectorReplicaRadar = vi.fn((options: { mode?: SectorReplicaMode } = {}) =>
-      options.mode === 'strength' ? strength.promise : mainFlow.promise
-    );
-    const api = dependencies({
-      getSectorReplicaRadar
-    });
-    const dashboard = useHomeDashboard({ dependencies: api, cache: cache() });
-
-    const initial = dashboard.loadInitial();
-    const changed = dashboard.setSectorMode('main_flow');
-    await flushMicrotasks();
-
-    expect(getSectorReplicaRadar).toHaveBeenCalledTimes(2);
-    expect(getSectorReplicaRadar.mock.calls.map(([options]) => options?.mode)).toEqual(['strength', 'main_flow']);
-
-    strength.resolve(sectorTrend('strength', 'strength'));
-    mainFlow.resolve(sectorTrend('main-flow', 'main_flow'));
-    await Promise.all([initial, changed]);
-  });
-
-  it('keeps trend busy and unpublished while the latest mode request is pending', async () => {
-    const strength = deferred<SectorReplicaRadarResponse>();
-    const mainFlow = deferred<SectorReplicaRadarResponse>();
-    const api = dependencies({
-      getSectorReplicaRadar: vi.fn(({ mode }) => (mode === 'strength' ? strength.promise : mainFlow.promise))
-    });
-    const dashboard = useHomeDashboard({ dependencies: api, cache: cache() });
-
-    const oldRequest = dashboard.sectorTrend.refresh();
-    await flushMicrotasks();
-    const currentRequest = dashboard.setSectorMode('main_flow');
-    await flushMicrotasks();
-
-    strength.resolve(sectorTrend('strength', 'strength'));
-    await oldRequest;
-    await flushMicrotasks();
-
-    expect(dashboard.sectorTrend.data.value).toBeUndefined();
-    expect(dashboard.busy.value).toBe(true);
-
-    const current = sectorTrend('main-flow', 'main_flow');
-    mainFlow.resolve(current);
-    await currentRequest;
-
-    expect(dashboard.sectorTrend.data.value).toBe(current);
-    expect(dashboard.busy.value).toBe(false);
-  });
-
-  it('does not let a late strength success replace the latest trend result', async () => {
-    const strength = deferred<SectorReplicaRadarResponse>();
-    const mainFlow = deferred<SectorReplicaRadarResponse>();
-    const api = dependencies({
-      getSectorReplicaRadar: vi.fn(({ mode }) => (mode === 'strength' ? strength.promise : mainFlow.promise))
-    });
-    const dashboard = useHomeDashboard({ dependencies: api, cache: cache() });
-
-    const oldRequest = dashboard.sectorTrend.refresh();
-    await flushMicrotasks();
-    const currentRequest = dashboard.setSectorMode('main_flow');
-    await flushMicrotasks();
-    const current = sectorTrend('main-flow', 'main_flow');
-    mainFlow.resolve(current);
-    await currentRequest;
-
-    strength.resolve(sectorTrend('strength', 'strength'));
-    await oldRequest;
-
-    expect(dashboard.sectorTrend.data.value).toBe(current);
-  });
-
-  it('does not let a late strength failure overwrite the latest trend state', async () => {
-    const strength = deferred<SectorReplicaRadarResponse>();
-    const mainFlow = deferred<SectorReplicaRadarResponse>();
-    const api = dependencies({
-      getSectorReplicaRadar: vi.fn(({ mode }) => (mode === 'strength' ? strength.promise : mainFlow.promise))
-    });
-    const dashboard = useHomeDashboard({ dependencies: api, cache: cache() });
-
-    const oldRequest = dashboard.sectorTrend.refresh();
-    await flushMicrotasks();
-    const currentRequest = dashboard.setSectorMode('main_flow');
-    await flushMicrotasks();
-    const current = sectorTrend('main-flow', 'main_flow');
-    mainFlow.resolve(current);
-    await currentRequest;
-
-    strength.reject(new Error('strength failed'));
-    await expect(oldRequest).rejects.toThrow('strength failed');
-
-    expect(dashboard.sectorTrend.data.value).toBe(current);
-    expect(dashboard.sectorTrend.error.value).toBeUndefined();
-    expect(dashboard.sectorTrend.isStale.value).toBe(false);
-    expect(dashboard.busy.value).toBe(false);
+    expect(dashboard.capital.data.value).toBe(first);
+    expect(dashboard.capital.isStale.value).toBe(true);
+    expect(dashboard.capital.error.value?.message).toBe('forced failure');
   });
 
   it('shares completed cached results and forces every loader through refreshAll', async () => {
@@ -266,16 +153,14 @@ describe('useHomeDashboard', () => {
     await secondDashboard.loadInitial();
 
     expect(api.getMarketOverview).toHaveBeenCalledTimes(1);
-    expect(api.getMarketRankings).toHaveBeenCalledTimes(1);
     expect(api.getSectorRadar).toHaveBeenCalledTimes(1);
-    expect(api.getSectorReplicaRadar).toHaveBeenCalledTimes(1);
+    expect(api.getCapitalSummary).toHaveBeenCalledTimes(1);
 
     await secondDashboard.refreshAll();
 
     expect(api.getMarketOverview).toHaveBeenCalledTimes(2);
-    expect(api.getMarketRankings).toHaveBeenCalledTimes(2);
     expect(api.getSectorRadar).toHaveBeenCalledTimes(2);
-    expect(api.getSectorReplicaRadar).toHaveBeenCalledTimes(2);
+    expect(api.getCapitalSummary).toHaveBeenCalledTimes(2);
   });
 
   it('isolates caches for composables with custom dependencies', async () => {
@@ -287,32 +172,43 @@ describe('useHomeDashboard', () => {
     await secondDashboard.loadInitial();
 
     expect(api.getMarketOverview).toHaveBeenCalledTimes(2);
-    expect(api.getMarketRankings).toHaveBeenCalledTimes(2);
     expect(api.getSectorRadar).toHaveBeenCalledTimes(2);
-    expect(api.getSectorReplicaRadar).toHaveBeenCalledTimes(2);
+    expect(api.getCapitalSummary).toHaveBeenCalledTimes(2);
   });
 
-  it('tracks busy through initial loading and refreshing existing data', async () => {
-    const initial = deferred<MarketOverviewResponse>();
-    const refreshed = deferred<MarketOverviewResponse>();
+  it('tracks busy through loading and refreshing across the three resources', async () => {
+    const overviewRequest = deferred<MarketOverviewResponse>();
+    const sectorFlowRequest = deferred<SectorRadarResponse>();
+    const initialCapitalRequest = deferred<CapitalSummaryResponse>();
+    const refreshedCapitalRequest = deferred<CapitalSummaryResponse>();
     const api = dependencies({
-      getMarketOverview: vi.fn().mockReturnValueOnce(initial.promise).mockReturnValueOnce(refreshed.promise)
+      getMarketOverview: vi.fn(() => overviewRequest.promise),
+      getSectorRadar: vi.fn(() => sectorFlowRequest.promise),
+      getCapitalSummary: vi
+        .fn()
+        .mockReturnValueOnce(initialCapitalRequest.promise)
+        .mockReturnValueOnce(refreshedCapitalRequest.promise)
     });
     const dashboard = useHomeDashboard({ dependencies: api, cache: cache() });
 
-    const initialLoad = dashboard.overview.refresh();
+    const initialLoad = dashboard.loadInitial();
     expect(dashboard.busy.value).toBe(true);
-    expect(dashboard.overview.loading.value).toBe(true);
-    initial.resolve(overview('initial'));
+
+    overviewRequest.resolve(overview('initial'));
+    sectorFlowRequest.resolve(sectorFlow('initial'));
+    await flushMicrotasks();
+    expect(dashboard.busy.value).toBe(true);
+
+    initialCapitalRequest.resolve(capital('initial'));
     await initialLoad;
-
     expect(dashboard.busy.value).toBe(false);
-    const refresh = dashboard.overview.refresh({ force: true });
-    expect(dashboard.busy.value).toBe(true);
-    expect(dashboard.overview.refreshing.value).toBe(true);
-    refreshed.resolve(overview('refreshed'));
-    await refresh;
 
+    const refresh = dashboard.capital.refresh({ force: true });
+    expect(dashboard.busy.value).toBe(true);
+    expect(dashboard.capital.refreshing.value).toBe(true);
+
+    refreshedCapitalRequest.resolve(capital('refreshed'));
+    await refresh;
     expect(dashboard.busy.value).toBe(false);
   });
 });

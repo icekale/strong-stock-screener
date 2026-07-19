@@ -26,6 +26,7 @@ from app.main import (
     startup_sector_workbench_sampler,
 )
 from app.models import (
+    CapitalSummaryResponse,
     ChanlunAnalysisResponse,
     ChanlunAlertListResponse,
     ChanlunAlertRefreshResponse,
@@ -37,6 +38,10 @@ from app.models import (
     ChanlunSymbolMatch,
     ChanlunWorkspaceResponse,
     CzscResearchSnapshot,
+    EtfRadarHistoryResponse,
+    EtfRadarHoldersResponse,
+    EtfRadarMethodologyResponse,
+    EtfRadarOverviewResponse,
     KlineBar,
     MarketAdvanceDeclineSummary,
     MarketIndexSnapshot,
@@ -1470,6 +1475,43 @@ class FailingSectorReplicaLiveProvider:
         raise RuntimeError("qxlive disabled in default tests")
 
 
+class FakeCapitalSignalService:
+    def __init__(self) -> None:
+        self.summary_calls = 0
+
+    @staticmethod
+    def _metadata() -> dict[str, str]:
+        return {
+            "generated_at": "2026-07-19T10:00:00+08:00",
+            "trade_date": "2026-07-17",
+            "as_of": "2026-07-19T10:00:00+08:00",
+            "signal_stage": "post_close",
+            "model_version": "heuristic-v1",
+        }
+
+    def homepage_summary(self) -> CapitalSummaryResponse:
+        self.summary_calls += 1
+        return CapitalSummaryResponse(**self._metadata())
+
+    def overview(self) -> EtfRadarOverviewResponse:
+        return EtfRadarOverviewResponse(**self._metadata())
+
+    def history(self, *, days: int) -> EtfRadarHistoryResponse:
+        assert 1 <= days <= 365
+        return EtfRadarHistoryResponse(**self._metadata())
+
+    def holders(self) -> EtfRadarHoldersResponse:
+        return EtfRadarHoldersResponse(
+            **{**self._metadata(), "signal_stage": "disclosure"}
+        )
+
+    def methodology(self) -> EtfRadarMethodologyResponse:
+        return EtfRadarMethodologyResponse(
+            **self._metadata(),
+            pool_version="core-a-share-v1",
+        )
+
+
 def _client(
     tmp_path: Path,
     candidate_provider: object | None = None,
@@ -1486,6 +1528,7 @@ def _client(
     chanlun_research_service: object | None = None,
     chanlun_rc8_client: object | None = None,
     chanlun_shadow_scheduler: object | None = None,
+    capital_signal_service: object | None = None,
 ) -> TestClient:
     shutdown_research = getattr(main_module, "shutdown_chanlun_research", None)
     if shutdown_research is not None:
@@ -1502,6 +1545,10 @@ def _client(
     app.state.quote_provider = quote_provider or FakeQuoteProvider()
     app.state.news_risk_provider = news_risk_provider or FakeNewsRiskProvider()
     app.state.market_overview_provider = market_overview_provider or FakeMarketOverviewProvider()
+    if capital_signal_service is not None:
+        app.state.capital_signal_service = capital_signal_service
+    elif hasattr(app.state, "capital_signal_service"):
+        delattr(app.state, "capital_signal_service")
     if hasattr(app.state, "valuation_quote_provider"):
         delattr(app.state, "valuation_quote_provider")
     if concept_provider is not None:
@@ -1541,6 +1588,9 @@ def _client(
     MARKET_RANKINGS_CACHE.clear()
     SECTOR_INTRADAY_CACHE.clear()
     SECTOR_RADAR_CACHE.clear()
+    capital_cache = getattr(main_module, "CAPITAL_SUMMARY_CACHE", None)
+    if capital_cache is not None:
+        capital_cache.clear()
     if hasattr(app.state, "auction_snapshot_store"):
         delattr(app.state, "auction_snapshot_store")
     if hasattr(app.state, "auction_review_store"):
@@ -2440,6 +2490,53 @@ def test_market_overview_endpoint_reuses_cached_snapshot(tmp_path: Path) -> None
     assert first.status_code == 200
     assert second.status_code == 200
     assert provider.overview_calls == 1
+
+
+def test_capital_summary_returns_shared_metadata_and_reuses_cache(tmp_path: Path) -> None:
+    service = FakeCapitalSignalService()
+    client = _client(tmp_path, capital_signal_service=service)
+
+    first = client.get("/api/market/capital-summary")
+    second = client.get("/api/market/capital-summary")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert service.summary_calls == 1
+    payload = first.json()
+    assert payload["trade_date"] == "2026-07-17"
+    assert payload["signal_stage"] == "post_close"
+    assert payload["model_version"] == "heuristic-v1"
+    assert payload["generated_at"]
+    assert payload["as_of"]
+    assert payload["source_status"] == []
+
+
+def test_etf_radar_read_endpoints_return_shared_metadata(tmp_path: Path) -> None:
+    client = _client(tmp_path, capital_signal_service=FakeCapitalSignalService())
+
+    responses = [
+        client.get("/api/etf-radar/overview"),
+        client.get("/api/etf-radar/history?days=120"),
+        client.get("/api/etf-radar/holders"),
+        client.get("/api/etf-radar/methodology"),
+    ]
+
+    assert [response.status_code for response in responses] == [200, 200, 200, 200]
+    for response in responses:
+        payload = response.json()
+        assert payload["generated_at"]
+        assert payload["trade_date"] == "2026-07-17"
+        assert payload["as_of"]
+        assert payload["signal_stage"] in {"post_close", "disclosure"}
+        assert payload["model_version"] == "heuristic-v1"
+        assert "source_status" in payload
+
+
+def test_etf_radar_history_rejects_out_of_range_days(tmp_path: Path) -> None:
+    client = _client(tmp_path, capital_signal_service=FakeCapitalSignalService())
+
+    assert client.get("/api/etf-radar/history?days=0").status_code == 422
+    assert client.get("/api/etf-radar/history?days=366").status_code == 422
 
 
 def test_homepage_slow_caches_use_stale_while_revalidate(monkeypatch) -> None:

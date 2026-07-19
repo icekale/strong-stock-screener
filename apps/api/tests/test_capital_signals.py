@@ -1,8 +1,17 @@
 from __future__ import annotations
 
+from datetime import datetime
+from pathlib import Path
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
+
 import pytest
 
+from app.models import EtfSharePoint, MarginMarketPoint, StrongStockSourceStatus
+from app.providers.capital_signals import CapitalProviderResult
+from app.services.capital_signal_store import CapitalSignalStore
 from app.services.capital_signals import (
+    CapitalSignalService,
     build_share_change,
     robust_z_score,
     synchronization_ratio,
@@ -64,3 +73,196 @@ def test_synchronization_is_missing_without_valid_etfs() -> None:
     assert result.positive_count == 0
     assert result.valid_count == 0
     assert result.ratio is None
+
+
+class FakeCapitalProvider:
+    def __init__(self, *, fail: bool = False) -> None:
+        self.fail = fail
+        self.margin_calls: list[str] = []
+        self.share_calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def get_margin_rows(self, trade_date: str) -> CapitalProviderResult[MarginMarketPoint]:
+        self.margin_calls.append(trade_date)
+        if self.fail:
+            return CapitalProviderResult(
+                rows=[],
+                source_status=[StrongStockSourceStatus(source="两融", status="failed", detail="offline")],
+            )
+        values = {
+            "2026-07-17": (1_100_000_000, 900_000_000),
+            "2026-07-16": (1_000_000_000, 800_000_000),
+        }.get(trade_date)
+        rows = (
+            [
+                MarginMarketPoint(
+                    trade_date=trade_date,
+                    market="SSE",
+                    financing_balance_cny=values[0] - 10_000_000,
+                    securities_lending_balance_cny=10_000_000,
+                    margin_balance_cny=values[0],
+                    financing_buy_cny=100_000_000,
+                ),
+                MarginMarketPoint(
+                    trade_date=trade_date,
+                    market="SZSE",
+                    financing_balance_cny=values[1] - 5_000_000,
+                    securities_lending_balance_cny=5_000_000,
+                    margin_balance_cny=values[1],
+                    financing_buy_cny=80_000_000,
+                ),
+            ]
+            if values
+            else []
+        )
+        return CapitalProviderResult(
+            rows=rows,
+            source_status=[StrongStockSourceStatus(source="两融", status="success", detail="fake")],
+        )
+
+    def get_etf_share_rows(
+        self,
+        trade_date: str,
+        symbols: list[str] | tuple[str, ...],
+    ) -> CapitalProviderResult[EtfSharePoint]:
+        self.share_calls.append((trade_date, tuple(symbols)))
+        if self.fail:
+            return CapitalProviderResult(
+                rows=[],
+                source_status=[StrongStockSourceStatus(source="ETF份额", status="failed", detail="offline")],
+            )
+        shares = {
+            "2026-07-17": {"510300.SH": 12_000_000, "159915.SZ": 9_000_000},
+            "2026-07-16": {"510300.SH": 10_000_000},
+        }.get(trade_date, {})
+        rows = [
+            EtfSharePoint(
+                trade_date=trade_date,
+                symbol=symbol,
+                name="测试ETF",
+                total_shares=total_shares,
+            )
+            for symbol, total_shares in shares.items()
+            if symbol in symbols
+        ]
+        return CapitalProviderResult(
+            rows=rows,
+            source_status=[StrongStockSourceStatus(source="ETF份额", status="success", detail="fake")],
+        )
+
+
+class FakeQuoteProvider:
+    def get_quotes(self, symbols: list[str]) -> list[SimpleNamespace]:
+        return [SimpleNamespace(symbol=symbol, last_price=4.25) for symbol in symbols]
+
+
+def _clock() -> datetime:
+    return datetime(2026, 7, 19, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+
+def test_service_builds_and_persists_share_evidence(tmp_path: Path) -> None:
+    provider = FakeCapitalProvider()
+    store = CapitalSignalStore(tmp_path)
+    service = CapitalSignalService(
+        provider=provider,
+        store=store,
+        quote_provider=FakeQuoteProvider(),
+        clock=_clock,
+    )
+
+    snapshot = service.overview(force=True)
+
+    item = next(row for row in snapshot.items if row.symbol == "510300.SH")
+    assert snapshot.trade_date == "2026-07-17"
+    assert snapshot.signal_stage == "post_close"
+    assert item.share_change == 2_000_000
+    assert item.estimated_subscription_cny == 8_500_000
+    assert snapshot.valid_etf_count == 1
+    assert store.load_snapshot() == snapshot
+    assert provider.share_calls[0][0] == "2026-07-17"
+    assert provider.share_calls[1][0] == "2026-07-16"
+    assert provider.share_calls[1][1] == (
+        "510300.SH",
+        "510310.SH",
+        "510500.SH",
+        "512100.SH",
+        "563360.SH",
+        "588000.SH",
+    )
+
+
+def test_homepage_summary_combines_markets_and_reuses_hot_cache(tmp_path: Path) -> None:
+    provider = FakeCapitalProvider()
+    service = CapitalSignalService(
+        provider=provider,
+        store=CapitalSignalStore(tmp_path),
+        quote_provider=FakeQuoteProvider(),
+        clock=_clock,
+    )
+
+    first = service.homepage_summary()
+    second = service.homepage_summary()
+
+    assert first == second
+    assert first.margin.balance_cny == 2_000_000_000
+    assert first.margin.change_cny == 200_000_000
+    assert first.margin.change_pct == pytest.approx(11.1111, rel=1e-3)
+    assert first.margin.available_markets == 2
+    assert provider.margin_calls == ["2026-07-17", "2026-07-16"]
+    assert len(provider.share_calls) == 2
+
+
+def test_service_returns_cached_snapshot_as_stale_when_refresh_fails(tmp_path: Path) -> None:
+    store = CapitalSignalStore(tmp_path)
+    fresh_service = CapitalSignalService(
+        provider=FakeCapitalProvider(),
+        store=store,
+        quote_provider=FakeQuoteProvider(),
+        clock=_clock,
+    )
+    fresh = fresh_service.overview(force=True)
+    failed_service = CapitalSignalService(
+        provider=FakeCapitalProvider(fail=True),
+        store=store,
+        quote_provider=FakeQuoteProvider(),
+        clock=_clock,
+    )
+
+    stale = failed_service.overview(force=True)
+
+    assert stale.items == fresh.items
+    assert stale.generated_at == fresh.generated_at
+    assert stale.source_status[-1].status == "stale"
+    assert "缓存" in stale.source_status[-1].detail
+
+
+def test_service_returns_unavailable_snapshot_without_cache(tmp_path: Path) -> None:
+    service = CapitalSignalService(
+        provider=FakeCapitalProvider(fail=True),
+        store=CapitalSignalStore(tmp_path),
+        quote_provider=FakeQuoteProvider(),
+        clock=_clock,
+    )
+
+    snapshot = service.overview(force=True)
+
+    assert snapshot.trade_date == "2026-07-17"
+    assert snapshot.items == []
+    assert snapshot.evidence_strength is None
+    assert any(item.status == "failed" for item in snapshot.source_status)
+
+
+def test_methodology_calls_no_remote_provider(tmp_path: Path) -> None:
+    provider = FakeCapitalProvider()
+    service = CapitalSignalService(
+        provider=provider,
+        store=CapitalSignalStore(tmp_path),
+        clock=_clock,
+    )
+
+    result = service.methodology()
+
+    assert result.model_version == "heuristic-v1"
+    assert len(result.core_pool) == 7
+    assert result.thresholds["strong"] == 70
+    assert provider.margin_calls == []
+    assert provider.share_calls == []

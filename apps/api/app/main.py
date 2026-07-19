@@ -9,7 +9,7 @@ from time import perf_counter
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -23,6 +23,7 @@ from app.models import (
     AuctionSnapshotResponse,
     AuctionTimelineResponse,
     AuctionTop3ManualTradeSample,
+    CapitalSummaryResponse,
     ChanlunAnalysisResponse,
     ChanlunAlertListResponse,
     ChanlunAlertRefreshResponse,
@@ -34,6 +35,10 @@ from app.models import (
     ChanlunPeriod,
     ChanlunWorkspaceResponse,
     CzscResearchSnapshot,
+    EtfRadarHistoryResponse,
+    EtfRadarHoldersResponse,
+    EtfRadarMethodologyResponse,
+    EtfRadarOverviewResponse,
     GsgfAnalysis,
     GsgfBacktestSummary,
     GsgfModelHealth,
@@ -82,6 +87,7 @@ from app.models import (
 )
 from app.gsgf_rules import analyze_gsgf, build_gsgf_chart_annotations
 from app.providers.ifind import IfindMcpProvider
+from app.providers.capital_signals import OfficialCapitalDataProvider
 from app.providers.market_overview import EastmoneyMarketOverviewProvider
 from app.providers.concept_blocks import EastmoneyConceptBlockProvider
 from app.providers.heatmap import HeatmapProvider
@@ -99,6 +105,8 @@ from app.providers.watchlist import (
     upsert_watchlist_item,
 )
 from app.services.intraday import IntradayMonitor
+from app.services.capital_signal_store import CapitalSignalStore
+from app.services.capital_signals import CapitalSignalService
 from app.services.background_jobs import BackgroundJobStore, CancelCheck, ProgressCallback
 from app.services.cache_registry import CacheRegistry
 from app.services.chanlun.adapter import ChanlunAdapter
@@ -337,6 +345,9 @@ MARKET_OVERVIEW_CACHE: TtlCache[MarketOverviewResponse] = TtlCache(
 MARKET_RANKINGS_CACHE: TtlCache[MarketRankingsResponse] = TtlCache(
     ttl_seconds=45, name="market_rankings"
 )
+CAPITAL_SUMMARY_CACHE: TtlCache[CapitalSummaryResponse] = TtlCache(
+    ttl_seconds=60, name="capital_summary"
+)
 AUCTION_SNAPSHOT_CACHE: TtlCache[AuctionSnapshotResponse] = TtlCache(
     ttl_seconds=15, name="auction_snapshot"
 )
@@ -365,6 +376,7 @@ CACHE_DEFINITIONS = (
     ("market_emotion", "sentiment", MARKET_EMOTION_CACHE),
     ("market_overview", "home", MARKET_OVERVIEW_CACHE),
     ("market_rankings", "home", MARKET_RANKINGS_CACHE),
+    ("capital_summary", "home", CAPITAL_SUMMARY_CACHE),
     ("auction_snapshot", "auction", AUCTION_SNAPSHOT_CACHE),
     ("sector_radar", "sectors", SECTOR_RADAR_CACHE),
     ("plate_rotation_reference", "sectors", PLATE_ROTATION_REFERENCE_CACHE),
@@ -1122,6 +1134,33 @@ def update_auction_top3_manual_trade(
 def get_market_overview() -> dict[str, object]:
     result = _cached_market_overview()
     return result.model_dump(mode="json")
+
+
+@app.get("/api/market/capital-summary", response_model=CapitalSummaryResponse)
+def get_market_capital_summary() -> CapitalSummaryResponse:
+    return _cached_capital_summary()
+
+
+@app.get("/api/etf-radar/overview", response_model=EtfRadarOverviewResponse)
+def get_etf_radar_overview() -> EtfRadarOverviewResponse:
+    return _capital_signal_service().overview()
+
+
+@app.get("/api/etf-radar/history", response_model=EtfRadarHistoryResponse)
+def get_etf_radar_history(
+    days: int = Query(default=120, ge=1, le=365),
+) -> EtfRadarHistoryResponse:
+    return _capital_signal_service().history(days=days)
+
+
+@app.get("/api/etf-radar/holders", response_model=EtfRadarHoldersResponse)
+def get_etf_radar_holders() -> EtfRadarHoldersResponse:
+    return _capital_signal_service().holders()
+
+
+@app.get("/api/etf-radar/methodology", response_model=EtfRadarMethodologyResponse)
+def get_etf_radar_methodology() -> EtfRadarMethodologyResponse:
+    return _capital_signal_service().methodology()
 
 
 @app.get("/api/market/rankings")
@@ -2468,6 +2507,14 @@ def _cached_market_overview() -> MarketOverviewResponse:
     )
 
 
+def _cached_capital_summary() -> CapitalSummaryResponse:
+    service = _capital_signal_service()
+    cache_key = f"capital-summary:{_provider_cache_key(service)}"
+    return CAPITAL_SUMMARY_CACHE.get_or_refresh(
+        cache_key, service.homepage_summary
+    ).model_copy(deep=True)
+
+
 def _cached_market_rankings(limit: int) -> MarketRankingsResponse:
     provider = _market_overview_provider()
     cache_key = f"market-rankings:{_provider_cache_key(provider)}:{limit}"
@@ -3338,6 +3385,24 @@ def _quote_provider() -> object:
         base_url=settings.tickflow_base_url,
         timeout_seconds=settings.provider_timeout_seconds,
     )
+
+
+def _capital_signal_service() -> CapitalSignalService:
+    injected = getattr(app.state, "capital_signal_service", None)
+    if injected is not None:
+        return injected
+    cached = getattr(app.state, "default_capital_signal_service", None)
+    if cached is None:
+        settings = get_settings()
+        cached = CapitalSignalService(
+            provider=OfficialCapitalDataProvider(
+                timeout_seconds=settings.provider_timeout_seconds
+            ),
+            store=CapitalSignalStore(settings.data_dir),
+            quote_provider=_quote_provider(),
+        )
+        app.state.default_capital_signal_service = cached
+    return cached
 
 
 def _valuation_quote_provider() -> object:

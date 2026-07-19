@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { AntdRegistry } from "@ant-design/nextjs-registry";
+import { Suspense } from "react";
 import { AntdAppProvider } from "../components/AntdAppProvider";
 import { AppShell } from "../components/AppShell";
 import "./globals.css";
@@ -15,7 +16,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <AntdRegistry>
           <AntdAppProvider>
-            <AppShell>{children}</AppShell>
+            <Suspense fallback={<div className="app-shell app-shell--loading">{children}</div>}>
+              <AppShell>{children}</AppShell>
+            </Suspense>
           </AntdAppProvider>
         </AntdRegistry>
       </body>

@@ -547,9 +547,14 @@ export async function getSentimentDetail(
   return response.json() as Promise<SentimentDetailResponse>;
 }
 
-export async function getMarketEmotionSnapshot(tradeDate: string, limit = 80): Promise<MarketEmotionSnapshotResponse> {
+export async function getMarketEmotionSnapshot(
+  tradeDate: string,
+  limit = 80,
+  includeDistribution = true,
+): Promise<MarketEmotionSnapshotResponse> {
   const params = new URLSearchParams({
     trade_date: tradeDate,
+    include_distribution: String(includeDistribution),
     limit: String(limit),
   });
   const response = await fetch(`${API_BASE_URL}/api/short-term/market-emotion?${params.toString()}`);

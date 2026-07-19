@@ -40,6 +40,8 @@ body {
 }
 
 .app-shell {
+  --app-shell-header-height: 56px;
+  --app-shell-tabs-height: 42px;
   min-height: 100dvh;
   background: var(--app-canvas);
 }
@@ -201,6 +203,165 @@ body {
   background: var(--app-canvas);
 }
 
+.app-shell__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-height: var(--app-shell-header-height);
+  padding: 0 18px;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-surface);
+}
+
+.app-shell__header-leading,
+.app-shell__header-tools {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.app-shell__header-leading {
+  gap: 8px;
+}
+
+.app-shell__header-tools {
+  flex: 0 0 auto;
+  gap: 2px;
+}
+
+.app-shell__header .ant-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  color: var(--app-muted);
+}
+
+.app-shell__header .ant-btn:hover {
+  background: var(--app-raised);
+  color: var(--app-ink);
+}
+
+.app-shell__desktop-menu {
+  display: inline-flex;
+}
+
+.app-shell__mobile-menu,
+.app-shell__mobile-brand {
+  display: none;
+}
+
+.app-shell__breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  color: var(--app-muted);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.app-shell__breadcrumbs strong {
+  overflow: hidden;
+  color: var(--app-ink);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-shell__breadcrumb-separator {
+  color: #aab7c7;
+}
+
+.app-shell__tabs {
+  min-height: var(--app-shell-tabs-height);
+  padding: 0 12px;
+  border-bottom: 1px solid var(--app-border);
+  background: var(--app-surface);
+  overflow: hidden;
+}
+
+.app-shell__tabs-scroll {
+  display: flex;
+  min-height: var(--app-shell-tabs-height);
+  align-items: stretch;
+  gap: 2px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.app-shell__tabs-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.app-shell__tab {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-width: 116px;
+  max-width: 220px;
+  border-inline: 1px solid transparent;
+  color: var(--app-muted);
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+
+.app-shell__tab:hover {
+  background: var(--app-raised);
+  color: var(--app-ink);
+}
+
+.app-shell__tab--active {
+  border-inline-color: var(--app-border);
+  box-shadow: inset 0 -2px 0 var(--app-primary);
+  background: var(--app-raised);
+  color: var(--app-ink);
+}
+
+.app-shell__tab-button,
+.app-shell__tab-close {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.app-shell__tab-button {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  padding: 0 9px;
+  font-size: 12px;
+  line-height: var(--app-shell-tabs-height);
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-shell__tab-close {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  margin-right: 5px;
+  border-radius: 4px;
+  font-size: 10px;
+}
+
+.app-shell__tab-close:hover {
+  background: #dfe7f1;
+  color: var(--app-ink);
+}
+
+.app-shell--full-content .app-shell__desktop-nav {
+  display: none;
+}
+
+.app-shell--full-content .app-shell__main {
+  width: 100%;
+}
+
 .app-shell__mobile-header {
   display: none;
 }
@@ -221,7 +382,7 @@ body {
 .page-frame {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  min-height: calc(100dvh - var(--app-shell-header-height) - var(--app-shell-tabs-height));
   background: var(--app-canvas);
   color: var(--app-ink);
 }
@@ -892,6 +1053,9 @@ body {
 
 .app-shell__navigation-link:focus-visible,
 .app-shell__collapse-button:focus-visible,
+.app-shell__header .ant-btn:focus-visible,
+.app-shell__tab-button:focus-visible,
+.app-shell__tab-close:focus-visible,
 .app-shell__mobile-header .ant-btn:focus-visible,
 .app-shell__brand:focus-visible,
 .app-shell__mobile-brand:focus-visible {
@@ -900,26 +1064,43 @@ body {
 }
 
 @media (max-width: 979px) {
+  .app-shell {
+    --app-shell-header-height: 54px;
+  }
+
   .app-shell__desktop-nav {
     display: none;
   }
 
-  .app-shell__mobile-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-height: 48px;
+  .app-shell__header {
     padding: 0 12px;
-    border-bottom: 1px solid var(--app-border);
-    background: var(--app-surface);
   }
 
-  .app-shell__mobile-header .ant-btn {
-    color: var(--app-ink);
+  .app-shell__desktop-menu,
+  .app-shell__breadcrumbs {
+    display: none;
+  }
+
+  .app-shell__mobile-menu,
+  .app-shell__mobile-brand {
+    display: flex;
+  }
+
+  .app-shell__mobile-menu {
+    align-items: center;
+    justify-content: center;
   }
 
   .app-shell__mobile-brand {
+    align-items: center;
+    gap: 9px;
     color: var(--app-ink);
+    font-size: 14px;
+  }
+
+  .app-shell__mobile-brand .app-shell__mark {
+    width: 26px;
+    height: 26px;
   }
 
   .page-frame__header,
@@ -935,6 +1116,14 @@ body {
 
   .page-frame__content {
     padding: 14px 12px 20px;
+  }
+
+  .app-shell__tabs {
+    padding-inline: 6px;
+  }
+
+  .app-shell__tab {
+    min-width: 104px;
   }
 
   .market-overview-lead {

@@ -1054,7 +1054,7 @@ test("app shell uses grouped navigation with responsive collapse and mobile acce
   assert.match(source, /window\.matchMedia\("\(min-width: 980px\)"\)/);
   assert.match(source, /addEventListener\("change", handleDesktopViewportChange\)/);
   assert.match(source, /removeEventListener\("change", handleDesktopViewportChange\)/);
-  assert.match(source, /width=\{216\}/);
+  assert.match(source, /width=\{220\}/);
   assert.match(source, /collapsedWidth=\{64\}/);
   assert.match(source, /app-shell__desktop-sidebar--collapsed/);
   assert.match(

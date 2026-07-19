@@ -102,6 +102,12 @@ const historyDaily = computed(() => {
   return [...totals.entries()].sort(([left], [right]) => left.localeCompare(right));
 });
 
+const historyRows = computed(() =>
+  [...(history.value?.points ?? [])].sort(
+    (left, right) => right.trade_date.localeCompare(left.trade_date) || left.symbol.localeCompare(right.symbol)
+  )
+);
+
 const historyOption = computed<EChartsOption>(() => ({
   aria: {
     enabled: true,
@@ -314,7 +320,7 @@ onMounted(() => void loadTab('overview'));
       <a-alert v-if="activeError()" data-testid="etf-panel-error" type="warning" :message="activeError()" show-icon />
       <div v-if="activeLoading() && !history" data-testid="etf-local-loading" class="etf-state">正在读取份额变化...</div>
       <div v-else-if="history" class="etf-panel-content">
-        <EChart :height="280" :loading="activeLoading()" :option="historyOption" />
+        <EChart v-if="history.points.length" :height="280" :loading="activeLoading()" :option="historyOption" />
         <div class="etf-source-statuses">
           <span v-for="source in activeSources()" :key="source.source" class="etf-source-status">
             {{ source.source }} <StatusTag :status="sourceStatusTone(source.status)" />
@@ -322,7 +328,13 @@ onMounted(() => void loadTab('overview'));
         </div>
         <div v-if="history.points.length === 0" data-testid="etf-empty" class="etf-state">暂无份额历史</div>
         <div v-else class="etf-table-scroll">
-          <a-table :columns="historyColumns" :data-source="history.points" :pagination="false" :scroll="{ x: 980 }" :row-key="historyRowKey">
+          <a-table
+            :columns="historyColumns"
+            :data-source="historyRows"
+            :pagination="{ pageSize: 20, showSizeChanger: false }"
+            :scroll="{ x: 980 }"
+            :row-key="historyRowKey"
+          >
             <template #bodyCell="{ column, record }">
               <span :class="valueTone(['share_change', 'estimated_subscription_cny'].includes(columnKey(column.key)) ? recordNumber(record, column.key) : null)">
                 {{ historyCell(columnKey(column.key), record) }}

@@ -59,7 +59,7 @@ const TabsStub = defineComponent({
 
 const TableStub = defineComponent({
   name: 'ATable',
-  props: ['columns', 'dataSource', 'rowKey'],
+  props: ['columns', 'dataSource', 'pagination', 'rowKey'],
   template: `
     <div data-testid="table-stub">
       <div v-for="column in columns" :key="column.key || column.dataIndex">{{ column.title }}</div>
@@ -212,8 +212,11 @@ describe('EtfRadarView', () => {
 
     await tabs[1]!.trigger('click');
     await flushPromises();
-    const historyRowKey = wrapper.findComponent(TableStub).props('rowKey') as (row: { trade_date: string; symbol: string }) => string;
+    const historyTable = wrapper.findComponent(TableStub);
+    const historyRowKey = historyTable.props('rowKey') as (row: { trade_date: string; symbol: string }) => string;
     expect(historyRowKey({ trade_date: '2026-07-18', symbol: '510300.SH' })).toBe('2026-07-18-510300.SH');
+    expect(historyTable.props('pagination')).toEqual({ pageSize: 20, showSizeChanger: false });
+    expect((historyTable.props('dataSource') as Array<{ trade_date: string }>)[0]?.trade_date).toBe('2026-07-18');
     await tabs[2]!.trigger('click');
     await flushPromises();
     const holderRowKey = wrapper.findComponent(TableStub).props('rowKey') as (row: EtfHolderPosition) => string;
@@ -280,6 +283,19 @@ describe('EtfRadarView', () => {
     expect(wrapper.find('[data-testid="etf-panel-error"]').text()).toContain('overview refresh unavailable');
     expect(wrapper.text()).toContain('华夏上证50ETF');
     expect(wrapper.text()).toContain('证据强度');
+    wrapper.unmount();
+  });
+
+  it('does not render a blank chart when history has no points', async () => {
+    setDefaultApiResponses();
+    api.getEtfRadarHistory.mockResolvedValueOnce({ ...historyFixture(), points: [] });
+    const wrapper = await mountView();
+
+    await wrapper.findAll('.etf-tab-trigger')[1]!.trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="etf-history-chart"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain('暂无份额历史');
     wrapper.unmount();
   });
 

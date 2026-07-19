@@ -1,3 +1,4 @@
+import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -5,6 +6,7 @@ from threading import Event
 from time import sleep
 from zoneinfo import ZoneInfo
 
+import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main_module
@@ -2898,6 +2900,117 @@ def test_lifespan_starts_and_stops_injected_capital_signal_sampler(tmp_path: Pat
 
     assert sampler.start_calls == 1
     assert sampler.stop_calls == 1
+
+
+def test_shutdown_capital_signal_sampler_uses_explicit_wait_path() -> None:
+    class FakeSampler:
+        def __init__(self) -> None:
+            self.stop_calls = 0
+            self.stop_and_wait_calls = 0
+
+        def stop(self) -> None:
+            self.stop_calls += 1
+
+        def stop_and_wait(self) -> None:
+            self.stop_and_wait_calls += 1
+
+    sampler = FakeSampler()
+    app.state.capital_signal_sampler = sampler
+
+    try:
+        shutdown_capital_signal_sampler()
+    finally:
+        delattr(app.state, "capital_signal_sampler")
+
+    assert sampler.stop_and_wait_calls == 1
+    assert sampler.stop_calls == 0
+
+
+def test_lifespan_unwinds_started_jobs_when_injected_capital_start_fails(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    class FailingSampler:
+        def start(self) -> None:
+            calls.append("start_capital")
+            raise RuntimeError("capital sampler failed to start")
+
+        def stop(self) -> None:
+            calls.append("stop_capital")
+
+    monkeypatch.setattr(
+        main_module,
+        "startup_sentiment_monitor",
+        lambda: calls.append("start_sentiment"),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "startup_gsgf_auto_review",
+        lambda: calls.append("start_gsgf"),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "startup_auction_sampler",
+        lambda: calls.append("start_auction"),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "startup_sector_workbench_sampler",
+        lambda: calls.append("start_sector"),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "shutdown_chanlun_research",
+        lambda: calls.append("stop_chanlun"),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "shutdown_sector_workbench_sampler",
+        lambda: calls.append("stop_sector"),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "shutdown_auction_sampler",
+        lambda: calls.append("stop_auction"),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "shutdown_gsgf_auto_review",
+        lambda: calls.append("stop_gsgf"),
+    )
+    monkeypatch.setattr(
+        main_module,
+        "shutdown_sentiment_monitor",
+        lambda: calls.append("stop_sentiment"),
+    )
+    app.state.capital_signal_sampler = FailingSampler()
+    app.state.capital_signal_sampler_disabled = False
+
+    async def enter_lifespan() -> None:
+        async with main_module.lifespan(app):
+            pass
+
+    try:
+        with pytest.raises(RuntimeError, match="capital sampler failed to start"):
+            asyncio.run(enter_lifespan())
+    finally:
+        app.state.capital_signal_sampler_disabled = True
+        delattr(app.state, "capital_signal_sampler")
+
+    assert calls == [
+        "start_sentiment",
+        "start_gsgf",
+        "start_auction",
+        "start_sector",
+        "start_capital",
+        "stop_capital",
+        "stop_chanlun",
+        "stop_sector",
+        "stop_auction",
+        "stop_gsgf",
+        "stop_sentiment",
+    ]
 
 
 def test_startup_capital_signal_sampler_respects_disabled_state(

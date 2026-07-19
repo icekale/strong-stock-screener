@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime
-from threading import Event
+from threading import Barrier, Event, Lock, Thread
+from time import monotonic
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -128,7 +129,46 @@ def test_new_day_can_sample_again() -> None:
     assert calls == ["2026-07-03", "2026-07-06"]
 
 
-def test_thread_retries_after_refresh_exception() -> None:
+def test_concurrent_sample_once_serializes_refresh_and_completion() -> None:
+    callers_ready = Barrier(3)
+    refresh_entered = Event()
+    release_refresh = Event()
+    calls = 0
+    results: list[bool] = []
+
+    def refresh() -> SimpleNamespace:
+        nonlocal calls
+        calls += 1
+        refresh_entered.set()
+        assert release_refresh.wait(timeout=1)
+        return _snapshot("2026-07-03")
+
+    sampler = CapitalSignalSampler(
+        refresh=refresh,
+        clock=lambda: datetime(2026, 7, 3, 20, 0, tzinfo=SHANGHAI),
+    )
+
+    def sample() -> None:
+        callers_ready.wait()
+        results.append(sampler.sample_once())
+
+    threads = [Thread(target=sample), Thread(target=sample)]
+    for thread in threads:
+        thread.start()
+    callers_ready.wait()
+    try:
+        assert refresh_entered.wait(timeout=1)
+    finally:
+        release_refresh.set()
+        for thread in threads:
+            thread.join(timeout=1)
+
+    assert all(not thread.is_alive() for thread in threads)
+    assert calls == 1
+    assert sorted(results) == [False, True]
+
+
+def test_thread_retries_after_refresh_exception(caplog) -> None:
     completed = Event()
     calls = 0
 
@@ -147,6 +187,7 @@ def test_thread_retries_after_refresh_exception() -> None:
         idle_seconds=60,
     )
 
+    caplog.set_level("ERROR", logger="app.services.capital_signal_sampler")
     sampler.start()
     try:
         assert completed.wait(timeout=1)
@@ -155,6 +196,7 @@ def test_thread_retries_after_refresh_exception() -> None:
         sampler.stop()
 
     assert sampler.running is False
+    assert any("capital signal refresh failed" in record.message for record in caplog.records)
 
 
 def test_start_is_idempotent_and_stop_interrupts_wait() -> None:
@@ -180,8 +222,89 @@ def test_start_is_idempotent_and_stop_interrupts_wait() -> None:
         assert calls == 1
         assert sampler.running is True
     finally:
-        sampler.stop()
-        sampler.stop()
+        assert sampler.stop() is True
+        assert sampler.stop() is True
+
+    assert sampler.running is False
+
+
+def test_bounded_stop_reports_blocked_worker_then_stop_and_wait_finishes() -> None:
+    refresh_entered = Event()
+    release_refresh = Event()
+
+    def refresh() -> SimpleNamespace:
+        refresh_entered.set()
+        release_refresh.wait()
+        return _snapshot("2026-07-03")
+
+    sampler = CapitalSignalSampler(
+        refresh=refresh,
+        clock=lambda: datetime(2026, 7, 3, 20, 0, tzinfo=SHANGHAI),
+    )
+
+    sampler.start()
+    assert refresh_entered.wait(timeout=1)
+    try:
+        started_at = monotonic()
+        assert sampler.stop(timeout_seconds=0.01) is False
+        assert monotonic() - started_at < 0.5
+        assert sampler.running is True
+    finally:
+        release_refresh.set()
+        stop_and_wait = getattr(sampler, "stop_and_wait", sampler.stop)
+        stop_and_wait()
+
+    assert sampler.running is False
+
+
+def test_restart_waits_for_timed_out_worker_before_starting_new_generation() -> None:
+    refresh_entered = Event()
+    release_refresh = Event()
+    active_lock = Lock()
+    active_refreshes = 0
+    max_active_refreshes = 0
+
+    def refresh() -> SimpleNamespace:
+        nonlocal active_refreshes, max_active_refreshes
+        with active_lock:
+            active_refreshes += 1
+            max_active_refreshes = max(max_active_refreshes, active_refreshes)
+        try:
+            refresh_entered.set()
+            release_refresh.wait()
+            return _snapshot("2026-07-03")
+        finally:
+            with active_lock:
+                active_refreshes -= 1
+
+    sampler = CapitalSignalSampler(
+        refresh=refresh,
+        clock=lambda: datetime(2026, 7, 3, 20, 0, tzinfo=SHANGHAI),
+        idle_seconds=60,
+    )
+
+    sampler.start()
+    assert refresh_entered.wait(timeout=1)
+    restart = Thread(target=sampler.start)
+    restart_started = False
+    try:
+        assert sampler.stop(timeout_seconds=0.01) is False
+        restart.start()
+        restart_started = True
+        assert restart.is_alive()
+
+        release_refresh.set()
+        restart.join(timeout=1)
+
+        assert restart.is_alive() is False
+        assert sampler.running is True
+        assert max_active_refreshes == 1
+    finally:
+        release_refresh.set()
+        if restart_started:
+            restart.join(timeout=1)
+        stop_and_wait = getattr(sampler, "stop_and_wait", sampler.stop)
+        stop_and_wait()
 
     assert sampler.running is False
 

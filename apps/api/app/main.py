@@ -308,12 +308,12 @@ def _cors_allow_origins() -> list[str]:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    startup_sentiment_monitor()
-    startup_gsgf_auto_review()
-    startup_auction_sampler()
-    startup_sector_workbench_sampler()
-    startup_capital_signal_sampler()
     try:
+        startup_sentiment_monitor()
+        startup_gsgf_auto_review()
+        startup_auction_sampler()
+        startup_sector_workbench_sampler()
+        startup_capital_signal_sampler()
         yield
     finally:
         shutdown_capital_signal_sampler()
@@ -456,7 +456,11 @@ def startup_capital_signal_sampler() -> None:
 def shutdown_capital_signal_sampler() -> None:
     sampler = getattr(app.state, "capital_signal_sampler", None)
     if sampler is not None:
-        sampler.stop()
+        stop_and_wait = getattr(sampler, "stop_and_wait", None)
+        if callable(stop_and_wait):
+            stop_and_wait()
+        else:
+            sampler.stop()
 
 
 def startup_gsgf_auto_review() -> None:

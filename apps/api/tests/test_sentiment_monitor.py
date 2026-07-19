@@ -215,6 +215,9 @@ def test_sentiment_monitor_starts_with_app_when_runtime_config_enabled(tmp_path:
 
     app.state.runtime_config_path = path
     app.state.sentiment_monitor_snapshot_builder = build_snapshot
+    capital_sampler_disabled_exists = hasattr(app.state, "capital_signal_sampler_disabled")
+    capital_sampler_disabled = getattr(app.state, "capital_signal_sampler_disabled", None)
+    app.state.capital_signal_sampler_disabled = True
     try:
         with TestClient(app) as client:
             response = client.get("/api/short-term/sentiment/monitor/status")
@@ -224,6 +227,10 @@ def test_sentiment_monitor_starts_with_app_when_runtime_config_enabled(tmp_path:
         if hasattr(app.state, "sentiment_monitor"):
             app.state.sentiment_monitor.stop()
             delattr(app.state, "sentiment_monitor")
+        if capital_sampler_disabled_exists:
+            app.state.capital_signal_sampler_disabled = capital_sampler_disabled
+        else:
+            delattr(app.state, "capital_signal_sampler_disabled")
         delattr(app.state, "runtime_config_path")
         delattr(app.state, "sentiment_monitor_snapshot_builder")
 

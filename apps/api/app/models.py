@@ -2010,6 +2010,12 @@ class StrongStockDataUnavailable(RuntimeError):
 
 CapitalSignalStage = Literal["intraday", "post_close", "disclosure"]
 CapitalEvidenceLevel = Literal["常规", "观察", "疑似", "较强"]
+HuijinEtfRole = Literal["core", "validator"]
+EtfActivityDirection = Literal["increase", "decrease", "flat", "unknown"]
+EtfValidationState = Literal[
+    "confirmed_increase", "confirmed_decrease", "divergent", "incomplete"
+]
+HuijinBaselineSourceKind = Literal["reported", "derived"]
 
 
 class MarginMarketPoint(BaseModel):
@@ -2070,6 +2076,66 @@ class EtfRadarSummary(BaseModel):
     expected_etf_count: int = 7
     estimated_subscription_cny: float | None = None
     evidence: list[str] = Field(default_factory=list)
+
+
+class HuijinEtfBaseline(BaseModel):
+    baseline_id: str
+    pool_version: str
+    symbol: str
+    name: str
+    index_name: str
+    role: HuijinEtfRole
+    paired_symbol: str | None = None
+    report_period: str
+    baseline_total_shares: float = Field(gt=0)
+    confirmed_huijin_shares: float = Field(ge=0)
+    confirmed_huijin_holding_pct: float = Field(ge=0, le=100)
+    source_kind: HuijinBaselineSourceKind
+    source: str
+
+
+class HuijinEtfActivityItem(BaseModel):
+    symbol: str
+    name: str
+    index_name: str
+    role: HuijinEtfRole
+    paired_symbol: str | None = None
+    trade_date: str
+    total_shares: float | None = None
+    previous_total_shares: float | None = None
+    share_delta: float | None = None
+    daily_change_pct: float | None = None
+    baseline_change_pct: float | None = None
+    cumulative_baseline_change_pct: float | None = None
+    multiple: float | None = None
+    direction: EtfActivityDirection = "unknown"
+    is_tenfold: bool = False
+    report_period: str | None = None
+    confirmed_huijin_holding_pct: float | None = None
+    baseline_source_kind: HuijinBaselineSourceKind | None = None
+
+
+class HuijinEtfValidationGroup(BaseModel):
+    index_name: str
+    core_symbol: str
+    validator_symbol: str
+    state: EtfValidationState
+    conservative_daily_change_pct: float | None = None
+    conservative_baseline_change_pct: float | None = None
+    conservative_multiple: float | None = None
+
+
+class HuijinEtfActivitySummary(BaseModel):
+    core_count: int = 7
+    available_core_count: int = 0
+    tenfold_increase_count: int = 0
+    tenfold_decrease_count: int = 0
+    confirmed_increase_group_count: int = 0
+    confirmed_decrease_group_count: int = 0
+    divergent_group_count: int = 0
+    incomplete_group_count: int = 0
+    strongest_symbol: str | None = None
+    strongest_baseline_change_pct: float | None = None
 
 
 class CapitalSummaryResponse(CapitalSignalMetadata):

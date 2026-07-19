@@ -66,7 +66,7 @@ export function getLegacyDestination(pathname: string): string | null {
 }
 
 export function getNavigationSelection(pathname: string): NavigationSelection {
-  if (pathname.startsWith("/stock/")) {
+  if (pathname.startsWith("/stock/") || pathname === "/etf-radar") {
     return { groupKey: "market", itemKey: null };
   }
 

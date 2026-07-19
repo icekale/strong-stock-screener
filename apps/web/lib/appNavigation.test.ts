@@ -18,6 +18,11 @@ test("navigation selects the Chanlun workbench", () => {
   assert.ok(navigationGroups.find((group) => group.key === "observe")?.items.some((item) => item.href === "/chanlun"));
 });
 
+test("ETF radar keeps market context without adding a top-level sidebar item", () => {
+  assert.deepEqual(getNavigationSelection("/etf-radar"), { groupKey: "market", itemKey: null });
+  assert.equal(navigationGroups.some((group) => group.items.some((item) => String(item.href) === "/etf-radar")), false);
+});
+
 test("legacy routes resolve to unified workspaces", () => {
   assert.equal(getLegacyDestination("/sectors"), "/market?view=sectors");
   assert.equal(getLegacyDestination("/heatmap"), "/market?view=heatmap");

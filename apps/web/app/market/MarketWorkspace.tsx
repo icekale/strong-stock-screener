@@ -10,6 +10,7 @@ import { SectorPageWorkspaceContent } from "../sectors/SectorPageWorkspace";
 const MARKET_VIEW_OPTIONS = [
   { label: "板块", value: "sectors" },
   { label: "热图", value: "heatmap" },
+  { label: "ETF资金", value: "etf" },
 ];
 
 export function MarketWorkspace() {
@@ -18,6 +19,10 @@ export function MarketWorkspace() {
   const view = normalizeMarketView(searchParams.get("view"));
 
   function changeView(value: string | number) {
+    if (value === "etf") {
+      router.push("/etf-radar");
+      return;
+    }
     const next = normalizeMarketView(value);
     if (next !== view) {
       router.replace("/market?view=" + next, { scroll: false });

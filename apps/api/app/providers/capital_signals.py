@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import date
 from html.parser import HTMLParser
 from typing import Any, Generic, TypeVar
 
@@ -136,6 +137,8 @@ class OfficialCapitalDataProvider:
         if szse_symbols:
             szse_rows: list[EtfSharePoint] = []
             failures: list[Exception] = []
+            current = 0
+            rejected = 0
             for symbol in szse_symbols:
                 try:
                     response = self.http_client.get(
@@ -149,23 +152,37 @@ class OfficialCapitalDataProvider:
                         headers={**_HEADERS, "Referer": "https://www.szse.cn/"},
                     )
                     response.raise_for_status()
-                    szse_rows.extend(
-                        parse_szse_etf_share_payload(
-                            response.json(),
-                            trade_date=trade_date,
-                            symbols=[symbol],
-                        )
+                    symbol_rows = parse_szse_etf_share_payload(
+                        response.json(),
+                        trade_date=trade_date,
+                        symbols=[symbol],
                     )
+                    if symbol_rows:
+                        current += 1
+                        szse_rows.extend(symbol_rows)
+                    else:
+                        rejected += 1
                 except Exception as exc:
                     failures.append(exc)
             rows.extend(szse_rows)
-            if failures and not szse_rows:
+            if failures and not szse_rows and not rejected:
                 statuses.append(_failure_status("深交所ETF份额", failures[0]))
+            elif current == len(szse_symbols):
+                statuses.append(
+                    _status("深交所ETF份额", True, "当前快照归档；深市不补造历史")
+                )
             else:
-                detail = "当前快照归档；深市不补造历史"
-                if failures:
-                    detail += f"；{len(failures)} 只请求失败"
-                statuses.append(_status("深交所ETF份额", bool(szse_rows), detail))
+                statuses.append(
+                    StrongStockSourceStatus(
+                        source="深交所ETF份额",
+                        status="stale",
+                        detail=(
+                            f"当日有效 {current}/{len(szse_symbols)} 只；"
+                            f"{len(failures)} 只请求失败；{rejected} 只日期或空数据拒绝；"
+                            "深市不补造历史"
+                        ),
+                    )
+                )
 
         return CapitalProviderResult(rows=rows, source_status=statuses)
 
@@ -414,10 +431,13 @@ def _first_section(payload: Any) -> dict[str, Any]:
 def _date_text(value: Any) -> str | None:
     text = str(value or "").strip()
     if len(text) == 8 and text.isdigit():
-        return f"{text[:4]}-{text[4:6]}-{text[6:]}"
-    if len(text) == 10 and text[4] == "-" and text[7] == "-":
-        return text
-    return None
+        text = f"{text[:4]}-{text[4:6]}-{text[6:]}"
+    elif len(text) != 10 or text[4] != "-" or text[7] != "-":
+        return None
+    try:
+        return date.fromisoformat(text).isoformat()
+    except ValueError:
+        return None
 
 
 def _number(value: Any) -> float | None:

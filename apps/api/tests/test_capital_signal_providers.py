@@ -153,6 +153,39 @@ def test_szse_current_share_parser_rejects_missing_or_invalid_exchange_date() ->
     )
 
 
+def test_sse_share_parser_rejects_an_impossible_calendar_date() -> None:
+    payload = {
+        "result": [
+            {
+                "STAT_DATE": "2026-02-30",
+                "SEC_CODE": "510300",
+                "TOT_VOL": "100",
+            }
+        ]
+    }
+
+    assert parse_sse_etf_share_payload(payload, symbols=["510300.SH"]) == []
+
+
+def test_szse_share_parser_rejects_impossible_metadata_and_requested_dates() -> None:
+    for impossible_date in ("2026-02-30", "20260230"):
+        payload = [
+            {
+                "metadata": {"subname": impossible_date},
+                "data": SZSE_SHARE_FIXTURE[0]["data"],
+            }
+        ]
+
+        assert (
+            parse_szse_etf_share_payload(
+                payload,
+                trade_date=impossible_date,
+                symbols=["159915.SZ"],
+            )
+            == []
+        )
+
+
 def test_share_parsers_skip_missing_or_non_positive_sizes() -> None:
     sse = {"result": [{"STAT_DATE": "2026-07-17", "SEC_CODE": "510300", "TOT_VOL": "-"}]}
     szse = [{"metadata": {"subname": "2026-07-17"}, "data": [{"sys_key": "159915", "dqgm": "0"}]}]
@@ -272,6 +305,80 @@ def test_share_provider_collects_the_ten_etf_universe_without_live_calls() -> No
         ("上交所ETF份额", "success"),
         ("深交所ETF份额", "success"),
     ]
+
+
+def test_share_provider_marks_partial_szse_coverage_stale() -> None:
+    symbols = ["159915.SZ", "159919.SZ", "159922.SZ"]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        code = request.url.params["txtQueryKeyAndJC"]
+        if code == "159922":
+            return httpx.Response(503, json={"error": "temporary"})
+        exchange_date = "2026-07-17" if code == "159915" else "2026-07-16"
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "metadata": {"subname": exchange_date},
+                    "data": [{"sys_key": code, "dqgm": "100"}],
+                }
+            ],
+        )
+
+    provider = OfficialCapitalDataProvider(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+    result = provider.get_etf_share_rows("2026-07-17", symbols)
+
+    assert [row.symbol for row in result.rows] == ["159915.SZ"]
+    assert result.source_status[0].status == "stale"
+    assert result.source_status[0].detail == (
+        "当日有效 1/3 只；1 只请求失败；1 只日期或空数据拒绝；深市不补造历史"
+    )
+
+
+def test_share_provider_reports_all_date_rejected_szse_coverage_as_stale() -> None:
+    symbols = ["159915.SZ", "159919.SZ"]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        code = request.url.params["txtQueryKeyAndJC"]
+        exchange_date = "2026-07-16" if code == "159915" else "2026-02-30"
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "metadata": {"subname": exchange_date},
+                    "data": [{"sys_key": code, "dqgm": "100"}],
+                }
+            ],
+        )
+
+    provider = OfficialCapitalDataProvider(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+    result = provider.get_etf_share_rows("2026-07-17", symbols)
+
+    assert result.rows == []
+    assert result.source_status[0].status == "stale"
+    assert result.source_status[0].detail == (
+        "当日有效 0/2 只；0 只请求失败；2 只日期或空数据拒绝；深市不补造历史"
+    )
+
+
+def test_share_provider_keeps_all_request_failures_failed() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(503, json={"error": "temporary"})
+
+    provider = OfficialCapitalDataProvider(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+    result = provider.get_etf_share_rows("2026-07-17", ["159915.SZ", "159919.SZ"])
+
+    assert result.rows == []
+    assert result.source_status[0].status == "failed"
 
 
 def test_sina_report_dates_parser_reads_only_holder_period_options() -> None:

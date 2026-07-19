@@ -2069,15 +2069,6 @@ class MarginSummary(BaseModel):
     expected_markets: int = 2
 
 
-class EtfRadarSummary(BaseModel):
-    evidence_strength: float | None = Field(default=None, ge=0, le=100)
-    evidence_level: CapitalEvidenceLevel | None = None
-    valid_etf_count: int = 0
-    expected_etf_count: int = 7
-    estimated_subscription_cny: float | None = None
-    evidence: list[str] = Field(default_factory=list)
-
-
 class HuijinEtfBaseline(BaseModel):
     baseline_id: str
     pool_version: str
@@ -2138,6 +2129,16 @@ class HuijinEtfActivitySummary(BaseModel):
     strongest_baseline_change_pct: float | None = None
 
 
+class EtfRadarSummary(BaseModel):
+    evidence_strength: float | None = Field(default=None, ge=0, le=100)
+    evidence_level: CapitalEvidenceLevel | None = None
+    valid_etf_count: int = 0
+    expected_etf_count: int = 7
+    estimated_subscription_cny: float | None = None
+    evidence: list[str] = Field(default_factory=list)
+    activity: HuijinEtfActivitySummary = Field(default_factory=HuijinEtfActivitySummary)
+
+
 class CapitalSummaryResponse(CapitalSignalMetadata):
     margin: MarginSummary = Field(default_factory=MarginSummary)
     etf_radar: EtfRadarSummary = Field(default_factory=EtfRadarSummary)
@@ -2166,6 +2167,12 @@ class EtfRadarOverviewResponse(CapitalSignalMetadata):
     estimated_subscription_cny: float | None = None
     evidence: list[str] = Field(default_factory=list)
     items: list[EtfRadarItem] = Field(default_factory=list)
+    pool_version: str = "huijin-public-v1"
+    baseline_version: str | None = None
+    activity: HuijinEtfActivitySummary = Field(default_factory=HuijinEtfActivitySummary)
+    core_items: list[HuijinEtfActivityItem] = Field(default_factory=list)
+    validation_items: list[HuijinEtfActivityItem] = Field(default_factory=list)
+    validation_groups: list[HuijinEtfValidationGroup] = Field(default_factory=list)
 
 
 class EtfRadarHistoryPoint(BaseModel):
@@ -2176,6 +2183,10 @@ class EtfRadarHistoryPoint(BaseModel):
     share_change: float | None = None
     estimated_subscription_cny: float | None = None
     robust_score: float | None = None
+    daily_change_pct: float | None = None
+    baseline_change_pct: float | None = None
+    cumulative_baseline_change_pct: float | None = None
+    multiple: float | None = None
 
 
 class EtfRadarHistoryResponse(CapitalSignalMetadata):
@@ -2195,6 +2206,7 @@ class EtfHolderPosition(BaseModel):
 
 class EtfRadarHoldersResponse(CapitalSignalMetadata):
     positions: list[EtfHolderPosition] = Field(default_factory=list)
+    baselines: list[HuijinEtfBaseline] = Field(default_factory=list)
 
 
 class EtfRadarFactorDefinition(BaseModel):

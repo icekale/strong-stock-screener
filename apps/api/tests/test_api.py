@@ -1478,6 +1478,10 @@ class FailingSectorReplicaLiveProvider:
 class FakeCapitalSignalService:
     def __init__(self) -> None:
         self.summary_calls = 0
+        self.overview_calls = 0
+        self.history_calls = 0
+        self.holder_calls = 0
+        self.methodology_calls = 0
 
     @staticmethod
     def _metadata() -> dict[str, str]:
@@ -1486,7 +1490,7 @@ class FakeCapitalSignalService:
             "trade_date": "2026-07-17",
             "as_of": "2026-07-19T10:00:00+08:00",
             "signal_stage": "post_close",
-            "model_version": "heuristic-v1",
+            "model_version": "huijin-public-rule-v1",
         }
 
     def homepage_summary(self) -> CapitalSummaryResponse:
@@ -1494,21 +1498,28 @@ class FakeCapitalSignalService:
         return CapitalSummaryResponse(**self._metadata())
 
     def overview(self) -> EtfRadarOverviewResponse:
-        return EtfRadarOverviewResponse(**self._metadata())
+        self.overview_calls += 1
+        return EtfRadarOverviewResponse(
+            **self._metadata(),
+            pool_version="huijin-public-v1",
+        )
 
     def history(self, *, days: int) -> EtfRadarHistoryResponse:
+        self.history_calls += 1
         assert 1 <= days <= 365
         return EtfRadarHistoryResponse(**self._metadata())
 
     def holders(self) -> EtfRadarHoldersResponse:
+        self.holder_calls += 1
         return EtfRadarHoldersResponse(
             **{**self._metadata(), "signal_stage": "disclosure"}
         )
 
     def methodology(self) -> EtfRadarMethodologyResponse:
+        self.methodology_calls += 1
         return EtfRadarMethodologyResponse(
             **self._metadata(),
-            pool_version="core-a-share-v1",
+            pool_version="huijin-public-v1",
         )
 
 
@@ -2505,14 +2516,15 @@ def test_capital_summary_returns_shared_metadata_and_reuses_cache(tmp_path: Path
     payload = first.json()
     assert payload["trade_date"] == "2026-07-17"
     assert payload["signal_stage"] == "post_close"
-    assert payload["model_version"] == "heuristic-v1"
+    assert payload["model_version"] == "huijin-public-rule-v1"
     assert payload["generated_at"]
     assert payload["as_of"]
     assert payload["source_status"] == []
 
 
 def test_etf_radar_read_endpoints_return_shared_metadata(tmp_path: Path) -> None:
-    client = _client(tmp_path, capital_signal_service=FakeCapitalSignalService())
+    service = FakeCapitalSignalService()
+    client = _client(tmp_path, capital_signal_service=service)
 
     responses = [
         client.get("/api/etf-radar/overview"),
@@ -2528,8 +2540,16 @@ def test_etf_radar_read_endpoints_return_shared_metadata(tmp_path: Path) -> None
         assert payload["trade_date"] == "2026-07-17"
         assert payload["as_of"]
         assert payload["signal_stage"] in {"post_close", "disclosure"}
-        assert payload["model_version"] == "heuristic-v1"
+        assert payload["model_version"] == "huijin-public-rule-v1"
         assert "source_status" in payload
+    overview = responses[0].json()
+    assert overview["pool_version"] == "huijin-public-v1"
+    assert "core_items" in overview
+    assert "validation_groups" in overview
+    assert service.overview_calls == 1
+    assert service.history_calls == 1
+    assert service.holder_calls == 1
+    assert service.methodology_calls == 1
 
 
 def test_etf_radar_history_rejects_out_of_range_days(tmp_path: Path) -> None:

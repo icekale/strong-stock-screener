@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from app.models import (
     CapitalSummaryResponse,
+    EtfHolderPosition,
     EtfRadarFactorDefinition,
     EtfRadarHistoryPoint,
     EtfRadarHistoryResponse,
@@ -20,25 +21,27 @@ from app.models import (
     EtfShareChange,
     EtfSharePoint,
     EtfSynchronization,
+    HuijinEtfActivityItem,
+    HuijinEtfActivitySummary,
+    HuijinEtfBaseline,
+    HuijinEtfValidationGroup,
     MarginMarketPoint,
     MarginSummary,
     StrongStockSourceStatus,
 )
 from app.providers.capital_signals import CapitalProviderResult
 from app.services.capital_signal_store import CapitalSignalStore
-
-
-MODEL_VERSION = "heuristic-v1"
-POOL_VERSION = "core-a-share-v1"
-CORE_ETF_POOL = {
-    "510300.SH": ("沪深300ETF", "沪深300"),
-    "510310.SH": ("沪深300ETF易方达", "沪深300"),
-    "510500.SH": ("中证500ETF", "中证500"),
-    "512100.SH": ("中证1000ETF", "中证1000"),
-    "563360.SH": ("中证A500ETF", "中证A500"),
-    "588000.SH": ("科创50ETF", "科创50"),
-    "159915.SZ": ("创业板ETF", "创业板指"),
-}
+from app.services.huijin_etf_activity import (
+    ALL_ETFS,
+    CORE_ETFS,
+    MODEL_VERSION,
+    POOL_VERSION,
+    TENFOLD_BASELINE_PCT,
+    VALIDATION_ETFS,
+    build_baselines,
+    calculate_activity,
+    validate_pair,
+)
 
 
 class CapitalDataProvider(Protocol):
@@ -83,18 +86,66 @@ class CapitalSignalService:
         with self._lock:
             now = self.clock()
             cached = self.store.load_snapshot()
-            if not force and cached is not None and _is_fresh(cached.generated_at, now, self.ttl_seconds):
+            trade_date = _latest_weekday(now)
+            _, baselines, baseline_status = self._load_or_refresh_baselines(now)
+            active_baseline_version = _baseline_version(
+                _latest_applicable_baselines(baselines, trade_date)
+            )
+            if (
+                not force
+                and cached is not None
+                and cached.model_version == MODEL_VERSION
+                and cached.pool_version == POOL_VERSION
+                and cached.baseline_version == active_baseline_version
+                and _is_fresh(cached.generated_at, now, self.ttl_seconds)
+            ):
+                if any(status.status == "stale" for status in baseline_status):
+                    return cached.model_copy(
+                        update={"source_status": [*cached.source_status, *baseline_status]}
+                    )
                 return cached
 
-            trade_date = _latest_weekday(now)
-            symbols = list(CORE_ETF_POOL)
+            symbols = list(ALL_ETFS)
             current_result = self.provider.get_etf_share_rows(trade_date, symbols)
-            if not current_result.rows:
+            fetched_current_rows = [
+                row
+                for row in current_result.rows
+                if row.trade_date == trade_date and row.symbol in ALL_ETFS
+            ]
+            if not fetched_current_rows and cached is not None:
+                return cached.model_copy(
+                    update={
+                        "model_version": MODEL_VERSION,
+                        "pool_version": POOL_VERSION,
+                        "source_status": [
+                            *cached.source_status,
+                            *baseline_status,
+                            *current_result.source_status,
+                            StrongStockSourceStatus(
+                                source="ETF资金雷达缓存",
+                                status="stale",
+                                detail="远端刷新失败，返回最近持久化缓存",
+                            ),
+                        ],
+                    }
+                )
+            history = self.store.load_share_history()
+            stored_current_rows = [
+                row
+                for row in history
+                if row.trade_date == trade_date and row.symbol in ALL_ETFS
+            ]
+            current_rows = _merge_share_history(stored_current_rows, fetched_current_rows)
+            if not current_rows:
                 if cached is not None:
                     return cached.model_copy(
                         update={
+                            "model_version": MODEL_VERSION,
+                            "pool_version": POOL_VERSION,
                             "source_status": [
                                 *cached.source_status,
+                                *baseline_status,
+                                *current_result.source_status,
                                 StrongStockSourceStatus(
                                     source="ETF资金雷达缓存",
                                     status="stale",
@@ -103,17 +154,18 @@ class CapitalSignalService:
                             ]
                         }
                     )
-                return self._empty_overview(now, trade_date, current_result.source_status)
+                return self._empty_overview(
+                    now,
+                    trade_date,
+                    [*baseline_status, *current_result.source_status],
+                    baselines,
+                )
 
             previous_date = _previous_weekday(trade_date)
-            history = self.store.load_share_history()
-            stored_current_rows = [
-                row
-                for row in history
-                if row.trade_date == trade_date and row.symbol in CORE_ETF_POOL
-            ]
-            current_rows = _merge_share_history(stored_current_rows, current_result.rows)
-            retained_count = len(current_rows) - len(current_result.rows)
+            fetched_keys = {(row.trade_date, row.symbol) for row in fetched_current_rows}
+            retained_count = sum(
+                (row.trade_date, row.symbol) not in fetched_keys for row in stored_current_rows
+            )
             current_status = list(current_result.source_status)
             if retained_count > 0:
                 current_status.append(
@@ -126,49 +178,37 @@ class CapitalSignalService:
             previous_by_symbol = _latest_share_before(history, trade_date)
             missing_sse = [
                 symbol
-                for symbol in symbols
+                for symbol in (row.symbol for row in current_rows)
                 if symbol.endswith(".SH") and symbol not in previous_by_symbol
             ]
             previous_status: list[StrongStockSourceStatus] = []
             if missing_sse:
                 previous_result = self.provider.get_etf_share_rows(previous_date, missing_sse)
-                history = _merge_share_history(history, previous_result.rows)
+                fetched_previous_rows = [
+                    row
+                    for row in previous_result.rows
+                    if row.symbol in missing_sse and row.trade_date < trade_date
+                ]
+                history = _merge_share_history(history, fetched_previous_rows)
                 previous_by_symbol = _latest_share_before(history, trade_date)
                 previous_status = previous_result.source_status
 
-            close_by_symbol = self._quote_closes(symbols)
-            enriched: list[EtfSharePoint] = []
-            items: list[EtfRadarItem] = []
-            for row in current_rows:
-                previous = previous_by_symbol.get(row.symbol)
-                close = close_by_symbol.get(row.symbol, row.close)
-                change = build_share_change(
-                    current_shares=row.total_shares,
-                    previous_shares=previous.total_shares if previous else None,
-                    close=close,
-                )
-                prior_amounts = [
-                    item.estimated_subscription_cny
-                    for item in history
-                    if item.symbol == row.symbol
-                    and item.trade_date < row.trade_date
-                    and item.estimated_subscription_cny is not None
-                ][-60:]
-                robust_score = robust_z_score(change.estimated_subscription_cny, prior_amounts)
-                enriched_row = row.model_copy(
-                    update={
-                        "close": close,
-                        "share_change": change.share_change,
-                        "estimated_subscription_cny": change.estimated_subscription_cny,
-                        "robust_score": robust_score,
-                    }
-                )
-                enriched.append(enriched_row)
-                items.append(_radar_item(enriched_row))
+            current_by_symbol = {row.symbol: row for row in current_rows}
+            baseline_by_symbol = _latest_applicable_baselines(baselines, trade_date)
+            activity_by_symbol = _calculate_activity_rows(
+                trade_date=trade_date,
+                current_by_symbol=current_by_symbol,
+                previous_by_symbol=previous_by_symbol,
+                baseline_by_symbol=baseline_by_symbol,
+            )
+            core_items = [activity_by_symbol[symbol] for symbol in CORE_ETFS]
+            validation_items = [activity_by_symbol[symbol] for symbol in VALIDATION_ETFS]
+            validation_groups = _validation_groups(activity_by_symbol)
+            activity = _activity_summary(core_items, validation_groups)
+            items = [_legacy_radar_item(item) for item in core_items]
 
-            history = _merge_share_history(history, enriched)
+            history = _merge_share_history(history, current_rows)
             self.store.save_share_history(history)
-            summary = _radar_summary(items)
             generated_at = now.isoformat(timespec="seconds")
             snapshot = EtfRadarOverviewResponse(
                 generated_at=generated_at,
@@ -176,14 +216,16 @@ class CapitalSignalService:
                 as_of=generated_at,
                 signal_stage=_signal_stage(now, trade_date),
                 model_version=MODEL_VERSION,
-                source_status=[*current_status, *previous_status],
-                evidence_strength=summary.evidence_strength,
-                evidence_level=summary.evidence_level,
-                valid_etf_count=summary.valid_etf_count,
-                expected_etf_count=summary.expected_etf_count,
-                estimated_subscription_cny=summary.estimated_subscription_cny,
-                evidence=summary.evidence,
+                source_status=[*baseline_status, *current_status, *previous_status],
+                valid_etf_count=activity.available_core_count,
+                expected_etf_count=len(CORE_ETFS),
                 items=items,
+                pool_version=POOL_VERSION,
+                baseline_version=_baseline_version(baseline_by_symbol),
+                activity=activity,
+                core_items=core_items,
+                validation_items=validation_items,
+                validation_groups=validation_groups,
             )
             self.store.save_snapshot(snapshot)
             return snapshot
@@ -206,14 +248,7 @@ class CapitalSignalService:
                 model_version=radar.model_version,
                 source_status=[*radar.source_status, *margin_status],
                 margin=margin,
-                etf_radar=EtfRadarSummary(
-                    evidence_strength=radar.evidence_strength,
-                    evidence_level=radar.evidence_level,
-                    valid_etf_count=radar.valid_etf_count,
-                    expected_etf_count=radar.expected_etf_count,
-                    estimated_subscription_cny=radar.estimated_subscription_cny,
-                    evidence=radar.evidence[:3],
-                ),
+                etf_radar=EtfRadarSummary(activity=radar.activity),
             )
             self._homepage_cache = (now, result)
             return result
@@ -221,21 +256,40 @@ class CapitalSignalService:
     def history(self, *, days: int = 120) -> EtfRadarHistoryResponse:
         now = self.clock()
         trade_date = _latest_weekday(now)
-        rows = self.store.load_share_history()
+        rows = [row for row in self.store.load_share_history() if row.symbol in ALL_ETFS]
         dates = sorted({row.trade_date for row in rows})[-days:]
-        points = [
-            EtfRadarHistoryPoint(
-                trade_date=row.trade_date,
+        baselines = self.store.load_huijin_baselines()
+        points: list[EtfRadarHistoryPoint] = []
+        previous_by_symbol: dict[str, EtfSharePoint] = {}
+        for row in sorted(rows, key=lambda item: (item.trade_date, item.symbol)):
+            previous = previous_by_symbol.get(row.symbol)
+            baseline = _latest_applicable_baselines(baselines, row.trade_date).get(row.symbol)
+            definition = ALL_ETFS[row.symbol]
+            activity = calculate_activity(
                 symbol=row.symbol,
-                name=row.name or CORE_ETF_POOL.get(row.symbol, (row.symbol, ""))[0],
+                name=definition.name,
+                index_name=definition.index_name,
+                role=definition.role,
+                trade_date=row.trade_date,
                 total_shares=row.total_shares,
-                share_change=row.share_change,
-                estimated_subscription_cny=row.estimated_subscription_cny,
-                robust_score=row.robust_score,
+                previous_total_shares=previous.total_shares if previous is not None else None,
+                baseline=baseline,
             )
-            for row in rows
-            if row.trade_date in dates
-        ]
+            if row.trade_date in dates:
+                points.append(
+                    EtfRadarHistoryPoint(
+                        trade_date=row.trade_date,
+                        symbol=row.symbol,
+                        name=definition.name,
+                        total_shares=row.total_shares,
+                        share_change=activity.share_delta,
+                        daily_change_pct=activity.daily_change_pct,
+                        baseline_change_pct=activity.baseline_change_pct,
+                        cumulative_baseline_change_pct=activity.cumulative_baseline_change_pct,
+                        multiple=activity.multiple,
+                    )
+                )
+            previous_by_symbol[row.symbol] = row
         generated_at = now.isoformat(timespec="seconds")
         return EtfRadarHistoryResponse(
             generated_at=generated_at,
@@ -256,72 +310,16 @@ class CapitalSignalService:
     def holders(self) -> EtfRadarHoldersResponse:
         now = self.clock()
         generated_at = now.isoformat(timespec="seconds")
-        expected_period = _expected_holder_period(now)
-        cached = self.store.load_holder_reports()
-        cached_period = max((item.report_period for item in cached), default=None)
-        if cached and cached_period is not None and cached_period >= expected_period:
-            return EtfRadarHoldersResponse(
-                generated_at=generated_at,
-                trade_date=_latest_weekday(now),
-                as_of=generated_at,
-                signal_stage="disclosure",
-                model_version=MODEL_VERSION,
-                source_status=[
-                    StrongStockSourceStatus(
-                        source="基金持有人披露缓存",
-                        status="success",
-                        detail=f"最新报告期 {cached_period}",
-                    )
-                ],
-                positions=cached,
-            )
-
-        if self.holder_provider is not None:
-            result = self.holder_provider.get_holder_positions(
-                {symbol: details[0] for symbol, details in CORE_ETF_POOL.items()}
-            )
-            if result.rows:
-                self.store.save_holder_reports(result.rows)
-                return EtfRadarHoldersResponse(
-                    generated_at=generated_at,
-                    trade_date=_latest_weekday(now),
-                    as_of=generated_at,
-                    signal_stage="disclosure",
-                    model_version=MODEL_VERSION,
-                    source_status=result.source_status,
-                    positions=result.rows,
-                )
-            if cached:
-                return EtfRadarHoldersResponse(
-                    generated_at=generated_at,
-                    trade_date=_latest_weekday(now),
-                    as_of=generated_at,
-                    signal_stage="disclosure",
-                    model_version=MODEL_VERSION,
-                    source_status=[
-                        *result.source_status,
-                        StrongStockSourceStatus(
-                            source="基金持有人披露缓存",
-                            status="stale",
-                            detail=f"刷新失败，保留报告期 {cached_period}",
-                        ),
-                    ],
-                    positions=cached,
-                )
-
+        positions, baselines, source_status = self._load_or_refresh_baselines(now)
         return EtfRadarHoldersResponse(
             generated_at=generated_at,
             trade_date=_latest_weekday(now),
             as_of=generated_at,
             signal_stage="disclosure",
             model_version=MODEL_VERSION,
-            source_status=[
-                StrongStockSourceStatus(
-                    source="基金定期报告",
-                    status="stale",
-                    detail=f"尚无已确认的精确实体持有人记录，应有报告期 {expected_period}",
-                )
-            ],
+            source_status=source_status,
+            positions=positions,
+            baselines=_usable_baselines(baselines),
         )
 
     def methodology(self) -> EtfRadarMethodologyResponse:
@@ -337,45 +335,120 @@ class CapitalSignalService:
                 StrongStockSourceStatus(
                     source="资金雷达方法定义",
                     status="success",
-                    detail="启发式证据模型，非统计概率",
+                    detail="汇金 ETF 公开规则方法定义",
                 )
             ],
             pool_version=POOL_VERSION,
-            core_pool=list(CORE_ETF_POOL),
-            thresholds={"watch": 35, "suspected": 55, "strong": 70},
+            core_pool=list(ALL_ETFS),
+            thresholds={"tenfold_baseline_pct": TENFOLD_BASELINE_PCT},
             factors=[
                 EtfRadarFactorDefinition(
-                    key="same_time_turnover",
-                    name="同刻成交放大",
-                    description="当前累计成交额相对过去20日相同时刻中位数",
-                    availability="等待分钟基线",
+                    key="share_delta",
+                    name="份额日变化",
+                    description="share_delta = total_shares_today - total_shares_previous_day",
+                    availability="真实相邻归档日可用",
                 ),
                 EtfRadarFactorDefinition(
-                    key="relative_index_return",
-                    name="相对指数表现",
-                    description="ETF当日收益减对应指数收益",
-                    availability="等待指数映射行情",
+                    key="daily_change_pct",
+                    name="上日份额变化率",
+                    description="daily_change_pct = share_delta / total_shares_previous_day * 100",
+                    availability="真实相邻归档日可用",
                 ),
                 EtfRadarFactorDefinition(
-                    key="share_change",
-                    name="份额变化",
-                    description="交易所披露总份额的日变化",
-                    availability="盘后可用",
+                    key="baseline_change_pct",
+                    name="报告基准变化率",
+                    description="baseline_change_pct = share_delta / baseline_total_shares * 100",
+                    availability="持仓报告基准可用时计算",
                 ),
                 EtfRadarFactorDefinition(
-                    key="estimated_subscription",
-                    name="估算净申购金额",
-                    description="份额变化乘当日价格，仅代表规模代理",
-                    availability="盘后可用",
+                    key="cumulative_baseline_change_pct",
+                    name="报告期累计变化率",
+                    description="cumulative_baseline_change_pct = (total_shares - baseline_total_shares) / baseline_total_shares * 100",
+                    availability="持仓报告基准可用时计算",
                 ),
+                *_methodology_pair_factors(),
             ],
             limitations=[
-                "证据强度是启发式分数，不是国家队介入概率。",
                 "深交所历史份额从本服务上线后逐日归档，不向前填充。",
-                "当前行情源没有逐笔主动买卖和超大单等级。",
-                "ETF申购不能直接识别具体投资者身份。",
+                "ETF 总份额活动不能识别具体投资者或买方身份。",
+                "付费内容中的“7 月 6 日新规”不实现，也不作推测。",
             ],
         )
+
+    def _load_or_refresh_baselines(
+        self, now: datetime
+    ) -> tuple[
+        list[EtfHolderPosition],
+        list[HuijinEtfBaseline],
+        list[StrongStockSourceStatus],
+    ]:
+        expected_period = _expected_holder_period(now)
+        cached_positions = [
+            row for row in self.store.load_holder_reports() if row.symbol in ALL_ETFS
+        ]
+        cached_baselines = self.store.load_huijin_baselines()
+        if _has_complete_baseline_period(cached_baselines, expected_period):
+            return (
+                cached_positions,
+                cached_baselines,
+                [
+                    StrongStockSourceStatus(
+                        source="汇金 ETF 基准缓存",
+                        status="success",
+                        detail=f"完整报告期 {expected_period}，池版本 {POOL_VERSION}",
+                    )
+                ],
+            )
+
+        result = None
+        if self.holder_provider is not None:
+            try:
+                result = self.holder_provider.get_holder_positions(
+                    {symbol: definition.name for symbol, definition in ALL_ETFS.items()}
+                )
+            except Exception as exc:
+                result = CapitalProviderResult(
+                    rows=[],
+                    source_status=[
+                        StrongStockSourceStatus(
+                            source="基金持有人披露",
+                            status="failed",
+                            detail=str(exc),
+                        )
+                    ],
+                )
+
+        if result is not None and result.rows:
+            fetched_positions = [row for row in result.rows if row.symbol in ALL_ETFS]
+            positions = _merge_holder_positions(cached_positions, fetched_positions)
+            fetched_baselines = build_baselines(fetched_positions)
+            baselines = _merge_baselines(cached_baselines, fetched_baselines)
+            self.store.save_holder_reports(positions)
+            self.store.save_huijin_baselines(baselines)
+            if _has_complete_baseline_period(baselines, expected_period):
+                return positions, baselines, list(result.source_status)
+            return (
+                positions,
+                baselines,
+                [
+                    *result.source_status,
+                    StrongStockSourceStatus(
+                        source="汇金 ETF 基准缓存",
+                        status="stale",
+                        detail=_baseline_fallback_detail(baselines, expected_period),
+                    ),
+                ],
+            )
+
+        source_status = list(result.source_status) if result is not None else []
+        source_status.append(
+            StrongStockSourceStatus(
+                source="汇金 ETF 基准缓存",
+                status="stale",
+                detail=_baseline_fallback_detail(cached_baselines, expected_period),
+            )
+        )
+        return cached_positions, cached_baselines, source_status
 
     def _margin_summary(
         self, trade_date: str
@@ -455,8 +528,19 @@ class CapitalSignalService:
         now: datetime,
         trade_date: str,
         source_status: list[StrongStockSourceStatus],
+        baselines: list[HuijinEtfBaseline],
     ) -> EtfRadarOverviewResponse:
         generated_at = now.isoformat(timespec="seconds")
+        baseline_by_symbol = _latest_applicable_baselines(baselines, trade_date)
+        activity_by_symbol = _calculate_activity_rows(
+            trade_date=trade_date,
+            current_by_symbol={},
+            previous_by_symbol={},
+            baseline_by_symbol=baseline_by_symbol,
+        )
+        core_items = [activity_by_symbol[symbol] for symbol in CORE_ETFS]
+        validation_items = [activity_by_symbol[symbol] for symbol in VALIDATION_ETFS]
+        validation_groups = _validation_groups(activity_by_symbol)
         return EtfRadarOverviewResponse(
             generated_at=generated_at,
             trade_date=trade_date,
@@ -464,6 +548,13 @@ class CapitalSignalService:
             signal_stage=_signal_stage(now, trade_date),
             model_version=MODEL_VERSION,
             source_status=source_status,
+            items=[_legacy_radar_item(item) for item in core_items],
+            pool_version=POOL_VERSION,
+            baseline_version=_baseline_version(baseline_by_symbol),
+            activity=_activity_summary(core_items, validation_groups),
+            core_items=core_items,
+            validation_items=validation_items,
+            validation_groups=validation_groups,
         )
 
 
@@ -567,93 +658,185 @@ def _merge_margin_history(
     return sorted(merged.values(), key=lambda row: (row.trade_date, row.market))
 
 
-def _radar_item(row: EtfSharePoint) -> EtfRadarItem:
-    default_name, index_name = CORE_ETF_POOL.get(row.symbol, (row.symbol, "未映射指数"))
-    evidence: list[str] = []
-    if row.estimated_subscription_cny is not None:
-        direction = "净申购" if row.estimated_subscription_cny > 0 else "净赎回"
-        evidence.append(f"估算{direction} {_format_cny(abs(row.estimated_subscription_cny))}")
-    if row.robust_score is not None:
-        evidence.append(f"稳健标准分 {row.robust_score:+.2f}")
-    return EtfRadarItem(
-        symbol=row.symbol,
-        name=row.name or default_name,
-        index_name=index_name,
-        total_shares=row.total_shares,
-        share_change=row.share_change,
-        estimated_subscription_cny=row.estimated_subscription_cny,
-        robust_score=row.robust_score,
-        evidence_strength=_item_evidence_strength(row),
-        evidence=evidence,
-    )
-
-
-def _item_evidence_strength(row: EtfSharePoint) -> float | None:
-    scores: list[float] = []
-    if row.share_change is not None:
-        scores.append(75 if row.share_change > 0 else 25 if row.share_change < 0 else 50)
-    if row.robust_score is not None:
-        scores.append(max(0, min(100, 50 + row.robust_score * 12.5)))
-    return round(statistics.mean(scores), 1) if scores else None
-
-
-def _radar_summary(items: list[EtfRadarItem]) -> EtfRadarSummary:
-    synchronization = synchronization_ratio(
-        item.share_change > 0 if item.share_change is not None else None for item in items
-    )
-    robust_values = [item.robust_score for item in items if item.robust_score is not None]
-    scores: list[float] = []
-    if synchronization.ratio is not None:
-        scores.append(synchronization.ratio * 100)
-    if robust_values:
-        scores.append(max(0, min(100, 50 + statistics.median(robust_values) * 12.5)))
-    strength = round(statistics.mean(scores), 1) if scores else None
-    amounts = [
-        item.estimated_subscription_cny
-        for item in items
-        if item.estimated_subscription_cny is not None
-    ]
-    total_amount = sum(amounts) if amounts else None
-    evidence: list[str] = []
-    if synchronization.valid_count:
-        evidence.append(
-            f"{synchronization.positive_count}/{synchronization.valid_count} 只有效ETF份额增加"
+def _calculate_activity_rows(
+    *,
+    trade_date: str,
+    current_by_symbol: dict[str, EtfSharePoint],
+    previous_by_symbol: dict[str, EtfSharePoint],
+    baseline_by_symbol: dict[str, HuijinEtfBaseline],
+) -> dict[str, HuijinEtfActivityItem]:
+    output: dict[str, HuijinEtfActivityItem] = {}
+    for symbol, definition in ALL_ETFS.items():
+        current = current_by_symbol.get(symbol)
+        previous = previous_by_symbol.get(symbol)
+        output[symbol] = calculate_activity(
+            symbol=symbol,
+            name=definition.name,
+            index_name=definition.index_name,
+            role=definition.role,
+            trade_date=trade_date,
+            total_shares=current.total_shares if current is not None else None,
+            previous_total_shares=previous.total_shares if previous is not None else None,
+            baseline=baseline_by_symbol.get(symbol),
         )
-    if total_amount is not None:
-        direction = "净申购" if total_amount > 0 else "净赎回"
-        evidence.append(f"合计估算{direction} {_format_cny(abs(total_amount))}")
-    if robust_values:
-        evidence.append(f"份额金额中位标准分 {statistics.median(robust_values):+.2f}")
-    return EtfRadarSummary(
-        evidence_strength=strength,
-        evidence_level=_evidence_level(strength),
-        valid_etf_count=synchronization.valid_count,
-        expected_etf_count=len(CORE_ETF_POOL),
-        estimated_subscription_cny=total_amount,
-        evidence=evidence,
+    return output
+
+
+def _validation_groups(
+    activity_by_symbol: dict[str, HuijinEtfActivityItem],
+) -> list[HuijinEtfValidationGroup]:
+    return [
+        validate_pair(activity_by_symbol[symbol], activity_by_symbol[definition.paired_symbol])
+        for symbol, definition in CORE_ETFS.items()
+        if definition.paired_symbol is not None
+    ]
+
+
+def _activity_summary(
+    core_items: list[HuijinEtfActivityItem],
+    groups: list[HuijinEtfValidationGroup],
+) -> HuijinEtfActivitySummary:
+    strongest = max(
+        (item for item in core_items if item.baseline_change_pct is not None),
+        key=lambda item: abs(item.baseline_change_pct or 0),
+        default=None,
+    )
+    return HuijinEtfActivitySummary(
+        core_count=len(CORE_ETFS),
+        available_core_count=sum(item.total_shares is not None for item in core_items),
+        tenfold_increase_count=sum(
+            item.is_tenfold and item.direction == "increase" for item in core_items
+        ),
+        tenfold_decrease_count=sum(
+            item.is_tenfold and item.direction == "decrease" for item in core_items
+        ),
+        confirmed_increase_group_count=sum(
+            group.state == "confirmed_increase" for group in groups
+        ),
+        confirmed_decrease_group_count=sum(
+            group.state == "confirmed_decrease" for group in groups
+        ),
+        divergent_group_count=sum(group.state == "divergent" for group in groups),
+        incomplete_group_count=sum(group.state == "incomplete" for group in groups),
+        strongest_symbol=strongest.symbol if strongest is not None else None,
+        strongest_baseline_change_pct=(
+            strongest.baseline_change_pct if strongest is not None else None
+        ),
     )
 
 
-def _evidence_level(strength: float | None) -> str | None:
-    if strength is None:
+def _legacy_radar_item(item: HuijinEtfActivityItem) -> EtfRadarItem:
+    return EtfRadarItem(
+        symbol=item.symbol,
+        name=item.name,
+        index_name=item.index_name,
+        total_shares=item.total_shares,
+        share_change=item.share_delta,
+    )
+
+
+def _usable_baselines(baselines: list[HuijinEtfBaseline]) -> list[HuijinEtfBaseline]:
+    return [
+        row
+        for row in baselines
+        if row.pool_version == POOL_VERSION and row.symbol in ALL_ETFS
+    ]
+
+
+def _latest_applicable_baselines(
+    baselines: list[HuijinEtfBaseline], trade_date: str
+) -> dict[str, HuijinEtfBaseline]:
+    output: dict[str, HuijinEtfBaseline] = {}
+    for row in sorted(_usable_baselines(baselines), key=lambda item: item.report_period):
+        if row.report_period <= trade_date:
+            output[row.symbol] = row
+    return output
+
+
+def _baseline_version(baselines: dict[str, HuijinEtfBaseline]) -> str | None:
+    if set(baselines) != set(ALL_ETFS):
         return None
-    if strength >= 70:
-        return "较强"
-    if strength >= 55:
-        return "疑似"
-    if strength >= 35:
-        return "观察"
-    return "常规"
+    report_periods = {row.report_period for row in baselines.values()}
+    if len(report_periods) != 1:
+        return None
+    return f"{next(iter(report_periods))}:{POOL_VERSION}"
+
+
+def _has_complete_baseline_period(
+    baselines: list[HuijinEtfBaseline], report_period: str
+) -> bool:
+    symbols = {
+        row.symbol
+        for row in baselines
+        if row.pool_version == POOL_VERSION and row.report_period == report_period
+    }
+    return symbols == set(ALL_ETFS)
+
+
+def _merge_baselines(
+    cached: list[HuijinEtfBaseline], fetched: list[HuijinEtfBaseline]
+) -> list[HuijinEtfBaseline]:
+    merged = {
+        (row.pool_version, row.report_period, row.symbol): row
+        for row in cached
+        if row.symbol in ALL_ETFS
+    }
+    merged.update(
+        {
+            (row.pool_version, row.report_period, row.symbol): row
+            for row in fetched
+            if row.symbol in ALL_ETFS
+        }
+    )
+    return sorted(
+        merged.values(),
+        key=lambda row: (row.report_period, row.pool_version, row.symbol),
+    )
+
+
+def _merge_holder_positions(
+    cached: list[EtfHolderPosition], fetched: list[EtfHolderPosition]
+) -> list[EtfHolderPosition]:
+    merged = {
+        (row.report_period, row.symbol, row.entity_name): row
+        for row in cached
+        if row.symbol in ALL_ETFS
+    }
+    merged.update(
+        {
+            (row.report_period, row.symbol, row.entity_name): row
+            for row in fetched
+            if row.symbol in ALL_ETFS
+        }
+    )
+    return sorted(
+        merged.values(),
+        key=lambda row: (row.report_period, row.symbol, row.entity_name),
+    )
+
+
+def _baseline_fallback_detail(
+    baselines: list[HuijinEtfBaseline], expected_period: str
+) -> str:
+    usable_periods = sorted({row.report_period for row in _usable_baselines(baselines)})
+    if usable_periods:
+        return f"应有报告期 {expected_period} 不完整，保留可用报告期 {usable_periods[-1]}"
+    return f"应有报告期 {expected_period} 不完整，且无当前池版本可用基准"
+
+
+def _methodology_pair_factors() -> list[EtfRadarFactorDefinition]:
+    return [
+        EtfRadarFactorDefinition(
+            key=f"validation_{definition.index_name}",
+            name=f"{definition.index_name}成对验证",
+            description=f"{symbol}+{definition.paired_symbol} 同向确认，分歧不相加",
+            availability="两只 ETF 均有真实今日及前日份额时可用",
+        )
+        for symbol, definition in CORE_ETFS.items()
+        if definition.paired_symbol is not None
+    ]
 
 
 def _sum_optional(values: Iterable[float | None]) -> float | None:
     available = [value for value in values if value is not None]
     return sum(available) if available else None
-
-
-def _format_cny(value: float) -> str:
-    if value >= 100_000_000:
-        return f"{value / 100_000_000:.1f}亿"
-    if value >= 10_000:
-        return f"{value / 10_000:.0f}万"
-    return f"{value:.0f}元"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from shutil import rmtree
+from threading import RLock
 
 from app.models import (
     MarketEmotionSnapshotResponse,
@@ -10,6 +11,9 @@ from app.models import (
     StrongStockSourceStatus,
 )
 from app.services.short_term_sentiment import build_sentiment_summary
+
+
+_SNAPSHOT_IO_LOCK = RLock()
 
 
 class SentimentSnapshotStore:
@@ -22,37 +26,47 @@ class SentimentSnapshotStore:
         sentiment: ShortTermSentimentResponse,
         market_emotion: MarketEmotionSnapshotResponse,
     ) -> SentimentSummaryResponse:
-        trade_date = sentiment.trade_date
-        date_dir = self._date_dir(trade_date)
-        date_dir.mkdir(parents=True, exist_ok=True)
-        summary = build_sentiment_summary(
-            sentiment,
-            market_emotion,
-            snapshot_status="cached",
-            cached_at=market_emotion.generated_at,
-        )
-        (date_dir / "summary.json").write_text(summary.model_dump_json(indent=2), encoding="utf-8")
-        (date_dir / "sentiment.json").write_text(sentiment.model_dump_json(indent=2), encoding="utf-8")
-        (date_dir / "market_emotion.json").write_text(market_emotion.model_dump_json(indent=2), encoding="utf-8")
-        self._prune_trade_dates()
-        return summary
+        with _SNAPSHOT_IO_LOCK:
+            trade_date = sentiment.trade_date
+            date_dir = self._date_dir(trade_date)
+            date_dir.mkdir(parents=True, exist_ok=True)
+            summary = build_sentiment_summary(
+                sentiment,
+                market_emotion,
+                snapshot_status="cached",
+                cached_at=market_emotion.generated_at,
+            )
+            _write_model(date_dir / "summary.json", summary)
+            _write_model(date_dir / "sentiment.json", sentiment)
+            _write_model(date_dir / "market_emotion.json", market_emotion)
+            self._prune_trade_dates()
+            return summary
 
     def load_summary(self, trade_date: str) -> SentimentSummaryResponse | None:
-        path = self._date_dir(trade_date) / "summary.json"
-        summary = self._load_model(path, SentimentSummaryResponse)
-        if summary is None:
-            return None
-        deduped_status = _dedupe_source_status(summary.source_status)
-        if len(deduped_status) != len(summary.source_status):
-            summary = summary.model_copy(update={"source_status": deduped_status})
-            path.write_text(summary.model_dump_json(indent=2), encoding="utf-8")
-        return summary
+        with _SNAPSHOT_IO_LOCK:
+            path = self._date_dir(trade_date) / "summary.json"
+            summary = self._load_model(path, SentimentSummaryResponse)
+            if summary is None:
+                return None
+            deduped_status = _dedupe_source_status(summary.source_status)
+            if len(deduped_status) != len(summary.source_status):
+                summary = summary.model_copy(update={"source_status": deduped_status})
+                _write_model(path, summary)
+            return summary
 
     def load_sentiment(self, trade_date: str) -> ShortTermSentimentResponse | None:
-        return self._load_model(self._date_dir(trade_date) / "sentiment.json", ShortTermSentimentResponse)
+        with _SNAPSHOT_IO_LOCK:
+            return self._load_model(
+                self._date_dir(trade_date) / "sentiment.json",
+                ShortTermSentimentResponse,
+            )
 
     def load_market_emotion(self, trade_date: str) -> MarketEmotionSnapshotResponse | None:
-        return self._load_model(self._date_dir(trade_date) / "market_emotion.json", MarketEmotionSnapshotResponse)
+        with _SNAPSHOT_IO_LOCK:
+            return self._load_model(
+                self._date_dir(trade_date) / "market_emotion.json",
+                MarketEmotionSnapshotResponse,
+            )
 
     def _date_dir(self, trade_date: str) -> Path:
         safe_trade_date = trade_date.replace("/", "-").replace("..", "")
@@ -86,3 +100,9 @@ def _dedupe_source_status(items: list[StrongStockSourceStatus]) -> list[StrongSt
         seen.add(key)
         output.append(item)
     return output
+
+
+def _write_model(path: Path, model: object) -> None:
+    temp_path = path.with_suffix(f"{path.suffix}.tmp")
+    temp_path.write_text(model.model_dump_json(indent=2), encoding="utf-8")
+    temp_path.replace(path)

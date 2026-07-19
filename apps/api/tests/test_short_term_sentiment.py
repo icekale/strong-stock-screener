@@ -1,8 +1,20 @@
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
 from pathlib import Path
+from threading import Lock
+from time import sleep
+from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.main import MARKET_EMOTION_CACHE, SHORT_TERM_SENTIMENT_CACHE, _provider_cache_key, app
+from app.main import (
+    MARKET_EMOTION_CACHE,
+    MARKET_OVERVIEW_CACHE,
+    SHORT_TERM_SENTIMENT_CACHE,
+    _provider_cache_key,
+    _should_persist_market_emotion_sample,
+    app,
+)
 from app.models import (
     MarketEmotionBucket,
     MarketAdvanceDeclineSummary,
@@ -29,6 +41,7 @@ from fastapi.testclient import TestClient
 def clear_short_term_caches() -> None:
     SHORT_TERM_SENTIMENT_CACHE.clear()
     MARKET_EMOTION_CACHE.clear()
+    MARKET_OVERVIEW_CACHE.clear()
 
 
 class FakeSentimentCandidateProvider:
@@ -261,6 +274,37 @@ def test_market_emotion_snapshot_combines_limit_up_pool_and_realtime_market_over
     assert any("分时曲线" in note for note in result.notes)
 
 
+def test_market_emotion_snapshot_uses_preloaded_market_overview() -> None:
+    market_provider = FakeEmotionMarketOverviewProvider()
+    overview = market_provider.get_overview()
+
+    result = build_market_emotion_snapshot(
+        FakeSentimentCandidateProvider(),
+        market_provider,
+        trade_date="2026-06-26",
+        limit=20,
+        market_overview=overview,
+    )
+
+    assert result.metrics.turnover_cny == overview.turnover.total_cny
+    assert market_provider.overview_calls == 1
+
+
+def test_market_emotion_snapshot_can_skip_expensive_distribution_for_homepage() -> None:
+    market_provider = FakeEmotionMarketOverviewProvider()
+
+    result = build_market_emotion_snapshot(
+        FakeSentimentCandidateProvider(),
+        market_provider,
+        trade_date="2026-06-26",
+        limit=20,
+        include_distribution=False,
+    )
+
+    assert result.buckets == []
+    assert market_provider.distribution_calls == 0
+
+
 def test_market_emotion_history_store_persists_real_samples(tmp_path: Path) -> None:
     snapshot = build_market_emotion_snapshot(
         FakeSentimentCandidateProvider(),
@@ -411,8 +455,7 @@ def test_market_emotion_snapshot_api_uses_configured_sources(tmp_path: Path) -> 
     assert payload["metrics"]["seal_rate_pct"] == 60.0
     assert payload["buckets"][0]["label"] == ">10%"
     assert payload["buckets"][0]["count"] == 1
-    assert len(payload["samples"]) == 1
-    assert payload["samples"][0]["emotion_score"] == payload["metrics"]["emotion_score"]
+    assert payload["samples"] == []
 
 
 def test_short_term_sentiment_decision_api_returns_trade_permission(tmp_path: Path) -> None:
@@ -473,6 +516,176 @@ def test_market_emotion_api_reuses_cached_snapshot_for_fast_reload(tmp_path: Pat
     assert candidate_provider.calls == 1
     assert market_provider.overview_calls == 1
     assert market_provider.distribution_calls == 1
+
+
+def test_market_emotion_api_throttles_samples_to_three_minutes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FrozenDateTime(datetime):
+        current = datetime(2026, 6, 26, 9, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.current.astimezone(tz) if tz is not None else cls.current.replace(tzinfo=None)
+
+    monkeypatch.setattr("app.main.datetime", FrozenDateTime)
+    candidate_provider = FakeSentimentCandidateProvider()
+    market_provider = FakeEmotionMarketOverviewProvider()
+    app.state.candidate_provider = candidate_provider
+    app.state.market_overview_provider = market_provider
+    app.state.runs_dir = tmp_path
+    try:
+        first = TestClient(app).get("/api/short-term/market-emotion?trade_date=2026-06-26&limit=20")
+        second = TestClient(app).get("/api/short-term/market-emotion?trade_date=2026-06-26&limit=20")
+        FrozenDateTime.current += timedelta(minutes=3)
+        third = TestClient(app).get("/api/short-term/market-emotion?trade_date=2026-06-26&limit=20")
+    finally:
+        delattr(app.state, "candidate_provider")
+        delattr(app.state, "market_overview_provider")
+        delattr(app.state, "runs_dir")
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert third.status_code == 200
+    assert len(second.json()["samples"]) == 1
+    assert len(third.json()["samples"]) == 2
+
+
+def test_market_emotion_sampling_skips_weekends() -> None:
+    now = datetime(2026, 6, 28, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    assert not _should_persist_market_emotion_sample("2026-06-28", [], now=now)
+
+
+def test_market_emotion_sampling_stops_at_market_close() -> None:
+    tz = ZoneInfo("Asia/Shanghai")
+
+    assert _should_persist_market_emotion_sample(
+        "2026-06-29",
+        [],
+        now=datetime(2026, 6, 29, 15, 0, tzinfo=tz),
+    )
+    assert not _should_persist_market_emotion_sample(
+        "2026-06-29",
+        [],
+        now=datetime(2026, 6, 29, 15, 1, tzinfo=tz),
+    )
+
+
+def test_homepage_market_emotion_does_not_overwrite_full_snapshot(tmp_path: Path) -> None:
+    sentiment = build_short_term_sentiment(
+        FakeSentimentCandidateProvider(),
+        trade_date="2026-06-26",
+        limit=20,
+    )
+    full_emotion = build_market_emotion_snapshot(
+        FakeSentimentCandidateProvider(),
+        FakeEmotionMarketOverviewProvider(),
+        trade_date="2026-06-26",
+        limit=20,
+    )
+    store = SentimentSnapshotStore(tmp_path)
+    store.save(sentiment=sentiment, market_emotion=full_emotion)
+
+    app.state.candidate_provider = FakeSentimentCandidateProvider()
+    app.state.market_overview_provider = FakeEmotionMarketOverviewProvider()
+    app.state.runs_dir = tmp_path
+    try:
+        response = TestClient(app).get(
+            "/api/short-term/market-emotion"
+            "?trade_date=2026-06-26&limit=20&include_distribution=false"
+        )
+        persisted = store.load_market_emotion("2026-06-26")
+    finally:
+        delattr(app.state, "candidate_provider")
+        delattr(app.state, "market_overview_provider")
+        delattr(app.state, "runs_dir")
+
+    assert response.status_code == 200
+    assert response.json()["buckets"] == []
+    assert persisted is not None
+    assert persisted.buckets == full_emotion.buckets
+
+
+def test_historical_market_emotion_does_not_overwrite_full_snapshot(tmp_path: Path) -> None:
+    sentiment = build_short_term_sentiment(
+        FakeSentimentCandidateProvider(),
+        trade_date="2026-06-26",
+        limit=20,
+    )
+    historical_emotion = build_market_emotion_snapshot(
+        FakeSentimentCandidateProvider(),
+        FakeEmotionMarketOverviewProvider(),
+        trade_date="2026-06-26",
+        limit=20,
+    )
+    historical_emotion.buckets[0].count = 999
+    store = SentimentSnapshotStore(tmp_path)
+    store.save(sentiment=sentiment, market_emotion=historical_emotion)
+
+    app.state.candidate_provider = FakeSentimentCandidateProvider()
+    app.state.market_overview_provider = FakeEmotionMarketOverviewProvider()
+    app.state.runs_dir = tmp_path
+    try:
+        response = TestClient(app).get(
+            "/api/short-term/market-emotion?trade_date=2026-06-26&limit=20"
+        )
+        persisted = store.load_market_emotion("2026-06-26")
+    finally:
+        delattr(app.state, "candidate_provider")
+        delattr(app.state, "market_overview_provider")
+        delattr(app.state, "runs_dir")
+
+    assert response.status_code == 200
+    assert response.json()["buckets"][0]["count"] == 1
+    assert persisted is not None
+    assert persisted.buckets[0].count == 999
+
+
+def test_sentiment_snapshot_store_serializes_concurrent_saves(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import app.services.sentiment_snapshot_store as snapshot_store_module
+
+    sentiment = build_short_term_sentiment(
+        FakeSentimentCandidateProvider(),
+        trade_date="2026-06-26",
+        limit=20,
+    )
+    emotion = build_market_emotion_snapshot(
+        FakeSentimentCandidateProvider(),
+        FakeEmotionMarketOverviewProvider(),
+        trade_date="2026-06-26",
+        limit=20,
+    )
+    original_builder = snapshot_store_module.build_sentiment_summary
+    counter_lock = Lock()
+    active_builders = 0
+    max_active_builders = 0
+
+    def tracked_builder(*args, **kwargs):
+        nonlocal active_builders, max_active_builders
+        with counter_lock:
+            active_builders += 1
+            max_active_builders = max(max_active_builders, active_builders)
+        sleep(0.03)
+        try:
+            return original_builder(*args, **kwargs)
+        finally:
+            with counter_lock:
+                active_builders -= 1
+
+    monkeypatch.setattr(snapshot_store_module, "build_sentiment_summary", tracked_builder)
+    store = SentimentSnapshotStore(tmp_path)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(store.save, sentiment, emotion) for _ in range(2)]
+        for future in futures:
+            future.result()
+
+    assert max_active_builders == 1
 
 
 def test_sentiment_summary_api_uses_persisted_snapshot_without_provider_calls(tmp_path: Path) -> None:

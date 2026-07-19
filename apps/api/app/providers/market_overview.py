@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -57,6 +57,7 @@ class EastmoneyMarketOverviewProvider:
         realtime_quote_provider: object | None = None,
         ifind_index_provider: object | None = None,
         ifind_stock_provider: object | None = None,
+        daily_kline_provider: object | None = None,
         turnover_cache_path: Path | None = None,
         sentiment_snapshot_dir: Path | None = None,
     ) -> None:
@@ -64,6 +65,7 @@ class EastmoneyMarketOverviewProvider:
         self.realtime_quote_provider = realtime_quote_provider
         self.ifind_index_provider = ifind_index_provider
         self.ifind_stock_provider = ifind_stock_provider
+        self.daily_kline_provider = daily_kline_provider
         self.turnover_cache_path = turnover_cache_path
         self.sentiment_snapshot_dir = sentiment_snapshot_dir
         self._owns_client = http_client is None
@@ -283,43 +285,64 @@ class EastmoneyMarketOverviewProvider:
                 )
             )
 
-        try:
-            history = self._fetch_index_amount_history()
-            if history["trade_date"]:
-                trade_date = str(history["trade_date"])
-                eastmoney_trade_date = trade_date.replace("-", "")
-            previous_total = _number(history.get("previous_total_cny"))
-            if previous_total is not None:
-                turnover.previous_total_cny = round(previous_total, 2)
+        previous_turnover_record = self._previous_turnover_cny_record(trade_date)
+        if previous_turnover_record is not None:
+            previous_total, source, detail = previous_turnover_record
+            turnover.previous_total_cny = round(previous_total, 2)
             self._apply_turnover_change(turnover)
             source_status.append(
                 StrongStockSourceStatus(
-                    source="东方财富指数日K",
+                    source=source,
                     status="success",
-                    detail="沪深北指数日K成交额用于昨日对比",
+                    detail=detail,
                 )
             )
-        except Exception as exc:
-            source_status.append(
-                StrongStockSourceStatus(
-                    source="东方财富指数日K",
-                    status="failed",
-                    detail=f"昨日成交额获取失败: {exc.__class__.__name__}",
-                )
-            )
-        if turnover.previous_total_cny is None:
-            previous_turnover_record = self._previous_turnover_cny_record(trade_date)
-            if previous_turnover_record is not None:
-                previous_total, source, detail = previous_turnover_record
-                turnover.previous_total_cny = round(previous_total, 2)
+        else:
+            try:
+                history = self._fetch_index_amount_history()
+                if history["trade_date"] and turnover.total_cny is None:
+                    trade_date = str(history["trade_date"])
+                    eastmoney_trade_date = trade_date.replace("-", "")
+                previous_total = _number(history.get("previous_total_cny"))
+                if previous_total is not None:
+                    turnover.previous_total_cny = round(previous_total, 2)
                 self._apply_turnover_change(turnover)
                 source_status.append(
                     StrongStockSourceStatus(
-                        source=source,
+                        source="东方财富指数日K",
                         status="success",
-                        detail=detail,
+                        detail="沪深北指数日K成交额用于昨日对比",
                     )
                 )
+            except Exception as exc:
+                source_status.append(
+                    StrongStockSourceStatus(
+                        source="东方财富指数日K",
+                        status="failed",
+                        detail=f"昨日成交额获取失败: {exc.__class__.__name__}",
+                    )
+                )
+                try:
+                    history = self._fetch_daily_kline_amount_history(trade_date)
+                    previous_total = _number(history.get("previous_total_cny"))
+                    if previous_total is not None:
+                        turnover.previous_total_cny = round(previous_total, 2)
+                    self._apply_turnover_change(turnover)
+                    source_status.append(
+                        StrongStockSourceStatus(
+                            source="TickFlow 指数日K",
+                            status="success",
+                            detail="TickFlow 日K成交额用于昨日对比",
+                        )
+                    )
+                except Exception as fallback_exc:
+                    source_status.append(
+                        StrongStockSourceStatus(
+                            source="TickFlow 指数日K",
+                            status="disabled" if self.daily_kline_provider is None else "failed",
+                            detail=f"备用昨日成交额获取失败: {fallback_exc.__class__.__name__}",
+                        )
+                    )
         self._store_turnover_cache(trade_date, turnover.total_cny)
 
         try:
@@ -1135,6 +1158,43 @@ class EastmoneyMarketOverviewProvider:
             "previous_total_cny": previous_total,
         }
 
+    def _fetch_daily_kline_amount_history(self, trade_date: str) -> dict[str, object]:
+        provider = self.daily_kline_provider
+        if provider is None or not hasattr(provider, "get_klines"):
+            raise ValueError("daily kline provider unavailable")
+        expected_previous_date = _previous_weekday(_date_from_iso(trade_date))
+        if expected_previous_date is None:
+            raise ValueError("invalid market trade date")
+        latest_total = 0.0
+        previous_total = 0.0
+        trade_dates: list[str] = []
+        for symbol in TICKFLOW_INDEX_SYMBOLS:
+            bars = provider.get_klines(symbol, count=5)
+            if not isinstance(bars, list) or len(bars) < 2:
+                raise ValueError(f"index daily kline missing: {symbol}")
+            dated_bars = {
+                bar_date: bar
+                for bar in bars
+                if (bar_date := _date_from_iso(str(getattr(bar, "date", "") or ""))) is not None
+            }
+            previous = dated_bars.get(expected_previous_date)
+            latest_date = max(dated_bars) if dated_bars else None
+            latest = dated_bars.get(latest_date) if latest_date is not None else None
+            previous_amount = _number(getattr(previous, "amount", None)) if previous else None
+            latest_amount = _number(getattr(latest, "amount", None))
+            if previous_amount is None or latest_amount is None:
+                raise ValueError(f"index daily kline amount missing: {symbol}")
+            previous_total += previous_amount
+            latest_total += latest_amount
+            if latest_date:
+                trade_dates.append(latest_date.isoformat())
+        return {
+            "trade_date": max(trade_dates) if trade_dates else None,
+            "previous_trade_date": expected_previous_date.isoformat(),
+            "latest_total_cny": latest_total,
+            "previous_total_cny": previous_total,
+        }
+
     def _apply_turnover_change(self, turnover: MarketTurnoverSummary) -> None:
         if turnover.total_cny is None or not turnover.previous_total_cny:
             return
@@ -1153,48 +1213,47 @@ class EastmoneyMarketOverviewProvider:
         return turnover_cny, "历史情绪快照", "使用上一情绪快照成交额用于昨日对比"
 
     def _cached_previous_turnover_cny(self, trade_date: str | None) -> float | None:
-        if not trade_date:
+        expected_previous_date = _previous_weekday(_date_from_iso(trade_date))
+        if expected_previous_date is None:
             return None
         records = self._load_turnover_cache_records()
-        previous_dates = [
-            cached_date
-            for cached_date, record in records.items()
-            if cached_date < trade_date
-            and _number(record.get("turnover_cny")) is not None
-            and _is_complete_turnover_record(cached_date, record.get("updated_at"))
-        ]
-        if not previous_dates:
+        previous_date = expected_previous_date.isoformat()
+        record = records.get(previous_date)
+        if record is None or not _is_complete_turnover_record(
+            previous_date,
+            record.get("updated_at"),
+        ):
             return None
-        previous_date = max(previous_dates)
-        return _number(records[previous_date].get("turnover_cny"))
+        return _number(record.get("turnover_cny"))
 
     def _snapshot_previous_turnover_cny(self, trade_date: str | None) -> tuple[str, float, str | None] | None:
-        if not trade_date or self.sentiment_snapshot_dir is None or not self.sentiment_snapshot_dir.exists():
+        expected_previous_date = _previous_weekday(_date_from_iso(trade_date))
+        if (
+            expected_previous_date is None
+            or self.sentiment_snapshot_dir is None
+            or not self.sentiment_snapshot_dir.exists()
+        ):
             return None
-        candidates: list[tuple[str, float, str | None]] = []
-        for summary_path in self.sentiment_snapshot_dir.glob("*/summary.json"):
-            snapshot_date = summary_path.parent.name
-            if snapshot_date >= trade_date:
-                continue
-            try:
-                payload = json.loads(summary_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError):
-                continue
-            if not isinstance(payload, dict):
-                continue
-            metrics = payload.get("metrics")
-            if not isinstance(metrics, dict):
-                continue
-            turnover_cny = _number(metrics.get("turnover_cny"))
-            if turnover_cny is None or turnover_cny <= 0:
-                continue
-            updated_at = _text(payload.get("generated_at"))
-            if not _is_complete_turnover_record(snapshot_date, updated_at):
-                continue
-            candidates.append((snapshot_date, turnover_cny, updated_at))
-        if not candidates:
+        snapshot_date = expected_previous_date.isoformat()
+        summary_path = self.sentiment_snapshot_dir / snapshot_date / "summary.json"
+        try:
+            payload = json.loads(summary_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
             return None
-        return max(candidates, key=lambda item: item[0])
+        if not isinstance(payload, dict):
+            return None
+        metrics = payload.get("metrics")
+        if not isinstance(metrics, dict):
+            return None
+        turnover_cny = _number(metrics.get("turnover_cny"))
+        updated_at = _text(payload.get("generated_at"))
+        if (
+            turnover_cny is None
+            or turnover_cny <= 0
+            or not _is_complete_turnover_record(snapshot_date, updated_at)
+        ):
+            return None
+        return snapshot_date, turnover_cny, updated_at
 
     def _store_turnover_cache(
         self,
@@ -1638,6 +1697,15 @@ def _is_complete_turnover_record(trade_date: str, updated_at: object) -> bool:
     if local_time.date() > trade_day:
         return True
     return local_time.date() == trade_day and local_time.hour >= 15
+
+
+def _previous_weekday(trade_day: date | None) -> date | None:
+    if trade_day is None:
+        return None
+    previous = trade_day - timedelta(days=1)
+    while previous.weekday() >= 5:
+        previous -= timedelta(days=1)
+    return previous
 
 
 def _datetime_from_iso(value: object) -> datetime | None:

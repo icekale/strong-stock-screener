@@ -119,6 +119,8 @@ def build_market_emotion_snapshot(
     trade_date: str,
     limit: int = 80,
     sentiment_snapshot: ShortTermSentimentResponse | None = None,
+    market_overview: MarketOverviewResponse | None = None,
+    include_distribution: bool = True,
 ) -> MarketEmotionSnapshotResponse:
     sentiment = sentiment_snapshot or build_short_term_sentiment(
         candidate_provider,
@@ -126,7 +128,7 @@ def build_market_emotion_snapshot(
         limit=limit,
     )
     try:
-        overview = market_overview_provider.get_overview()
+        overview = market_overview or market_overview_provider.get_overview()
     except StrongStockDataUnavailable:
         raise
     except Exception as exc:
@@ -153,7 +155,15 @@ def build_market_emotion_snapshot(
         seal_rate_pct=seal_rate,
         turnover_change_pct=turnover.change_pct,
     )
-    buckets, distribution_status = _market_distribution(market_overview_provider)
+    if include_distribution:
+        buckets, distribution_status = _market_distribution(market_overview_provider)
+    else:
+        buckets = []
+        distribution_status = StrongStockSourceStatus(
+            source="全A实时涨跌幅",
+            status="disabled",
+            detail="主页趋势模式跳过涨跌幅分布计算",
+        )
     source_status = [
         *sentiment.source_status,
         *overview.source_status,
@@ -165,8 +175,8 @@ def build_market_emotion_snapshot(
         ),
         StrongStockSourceStatus(
             source="日内情绪曲线",
-            status="disabled",
-            detail="待后台采样任务流启用后生成真实分时曲线",
+            status="success",
+            detail="当前快照可作为采样点；首页盘中每 3 分钟补采样",
         ),
     ]
 
@@ -195,7 +205,7 @@ def build_market_emotion_snapshot(
         notes=[
             "第一版为盘中实时快照：涨停/炸板来自候选池，全A涨跌家数与成交额来自市场概览源。",
             "涨跌幅分布优先使用实时全市场个股行情；数据源失败时保留空桶并标注状态。",
-            "分时曲线需要后台定时采样沉淀；当前仅返回当前情绪落点。",
+            "盘中每次刷新都会沉淀一个带独立时间戳的情绪采样点，累计 2 个点后绘制分时曲线。",
         ],
     )
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, time, timedelta
 from threading import RLock, Thread
 from time import perf_counter
 from pathlib import Path
@@ -191,7 +191,11 @@ from app.services.sector_workbench_intraday import build_sector_intraday_series
 from app.services.sector_workbench_store import SectorThemeRowsStore, SectorWorkbenchSampleStore
 from app.services.short_term_cache import TtlCache
 from app.services.sentiment_snapshot_store import SentimentSnapshotStore
-from app.services.sentiment_monitor import SentimentMonitor, SentimentMonitorConfig
+from app.services.sentiment_monitor import (
+    SentimentMonitor,
+    SentimentMonitorConfig,
+    is_trading_session,
+)
 from app.services.sentiment_decision import build_sentiment_decision
 from app.services.sentiment_review_store import SentimentReviewStore
 from app.services.sentiment_watchlist import build_sentiment_watchlist_alerts
@@ -311,6 +315,8 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="强势股选股 API", version="0.1.0", lifespan=lifespan)
 _CHANLUN_RESEARCH_LOCK = RLock()
+_MARKET_EMOTION_HISTORY_WRITE_LOCK = RLock()
+_MARKET_EMOTION_SAMPLE_INTERVAL = timedelta(minutes=3)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_allow_origins(),
@@ -1953,7 +1959,11 @@ def get_short_term_sentiment_detail(
 
 
 @app.get("/api/short-term/market-emotion")
-def get_short_term_market_emotion(trade_date: str, limit: int = 80) -> dict[str, object]:
+def get_short_term_market_emotion(
+    trade_date: str,
+    limit: int = 80,
+    include_distribution: bool = True,
+) -> dict[str, object]:
     bounded_limit = max(1, min(limit, 100))
     candidate_provider = _candidate_provider()
     market_overview_provider = _market_overview_provider()
@@ -1962,7 +1972,7 @@ def get_short_term_market_emotion(trade_date: str, limit: int = 80) -> dict[str,
             "market-emotion:"
             f"{_provider_cache_key(candidate_provider)}:"
             f"{_provider_cache_key(market_overview_provider)}:"
-            f"{trade_date}:{bounded_limit}"
+            f"{trade_date}:{bounded_limit}:{include_distribution}"
         )
         result = MARKET_EMOTION_CACHE.get_or_set(
             cache_key,
@@ -1972,16 +1982,29 @@ def get_short_term_market_emotion(trade_date: str, limit: int = 80) -> dict[str,
                 trade_date=trade_date,
                 limit=bounded_limit,
                 sentiment_snapshot=_cached_short_term_sentiment(trade_date, bounded_limit),
+                market_overview=_cached_market_overview(),
+                include_distribution=include_distribution,
             ),
         ).model_copy(deep=True)
     except StrongStockDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     try:
         history_store = _market_emotion_history_store()
-        history_store.append(result)
-        result.samples = history_store.load(trade_date)
-        sentiment = _cached_short_term_sentiment(trade_date, bounded_limit)
-        _sentiment_snapshot_store().save(sentiment=sentiment, market_emotion=result)
+        with _MARKET_EMOTION_HISTORY_WRITE_LOCK:
+            samples = history_store.load(trade_date)
+            sampled_at = datetime.now(ZoneInfo("Asia/Shanghai")).replace(microsecond=0)
+            if _should_persist_market_emotion_sample(
+                trade_date,
+                samples,
+                now=sampled_at,
+            ):
+                result.generated_at = sampled_at.isoformat(timespec="seconds")
+                history_store.append(result)
+                samples = history_store.load(trade_date)
+            result.samples = samples
+        if include_distribution and trade_date == sampled_at.date().isoformat():
+            sentiment = _cached_short_term_sentiment(trade_date, bounded_limit)
+            _sentiment_snapshot_store().save(sentiment=sentiment, market_emotion=result)
     except Exception as exc:
         result.source_status.append(
             StrongStockSourceStatus(
@@ -3183,12 +3206,23 @@ def _build_and_persist_sentiment_snapshots(
             trade_date=trade_date,
             limit=limit,
             sentiment_snapshot=sentiment,
+            market_overview=_cached_market_overview(),
         ),
     ).model_copy(deep=True)
     try:
         history_store = _market_emotion_history_store()
-        history_store.append(market_emotion)
-        market_emotion.samples = history_store.load(trade_date)
+        with _MARKET_EMOTION_HISTORY_WRITE_LOCK:
+            samples = history_store.load(trade_date)
+            sampled_at = datetime.now(ZoneInfo("Asia/Shanghai")).replace(microsecond=0)
+            if _should_persist_market_emotion_sample(
+                trade_date,
+                samples,
+                now=sampled_at,
+            ):
+                market_emotion.generated_at = sampled_at.isoformat(timespec="seconds")
+                history_store.append(market_emotion)
+                samples = history_store.load(trade_date)
+            market_emotion.samples = samples
     except Exception as exc:
         market_emotion.source_status.append(
             StrongStockSourceStatus(
@@ -3199,6 +3233,44 @@ def _build_and_persist_sentiment_snapshots(
         )
     _sentiment_snapshot_store().save(sentiment=sentiment, market_emotion=market_emotion)
     return sentiment, market_emotion
+
+
+def _latest_market_emotion_sampled_at(
+    samples: list[object],
+) -> datetime | None:
+    latest: datetime | None = None
+    for sample in samples:
+        sampled_at = getattr(sample, "sampled_at", None)
+        if not sampled_at:
+            continue
+        try:
+            candidate = datetime.fromisoformat(str(sampled_at))
+        except ValueError:
+            continue
+        if candidate.tzinfo is None:
+            candidate = candidate.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+        candidate = candidate.astimezone(ZoneInfo("Asia/Shanghai"))
+        if latest is None or candidate > latest:
+            latest = candidate
+    return latest
+
+
+def _should_persist_market_emotion_sample(
+    trade_date: str,
+    samples: list[object],
+    *,
+    now: datetime | None = None,
+) -> bool:
+    current = now or datetime.now(ZoneInfo("Asia/Shanghai"))
+    if (
+        trade_date != current.date().isoformat()
+        or current.weekday() >= 5
+        or current.time() > time(15, 0)
+        or not is_trading_session(current)
+    ):
+        return False
+    latest = _latest_market_emotion_sampled_at(samples)
+    return latest is None or current - latest >= _MARKET_EMOTION_SAMPLE_INTERVAL
 
 
 def _provider_cache_key(provider: object) -> str:
@@ -3562,6 +3634,7 @@ def _market_overview_provider() -> object:
         realtime_quote_provider=_quote_provider(),
         ifind_index_provider=_ifind_provider(),
         ifind_stock_provider=_ifind_provider(),
+        daily_kline_provider=_kline_provider(),
         turnover_cache_path=base_settings.data_dir / "market-overview" / "turnover-history.json",
         sentiment_snapshot_dir=base_settings.data_dir / "sentiment_snapshots",
     )

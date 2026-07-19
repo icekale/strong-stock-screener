@@ -106,7 +106,11 @@ function sectionStatus() {
   return loading.value ? 'running' : error.value ? 'failed' : radar.value || heatmap.value ? 'success' : 'unknown';
 }
 
-function changeView(next: 'sectors' | 'heatmap') {
+function changeView(next: 'sectors' | 'heatmap' | 'etf') {
+  if (next === 'etf') {
+    void router.push('/etf-radar');
+    return;
+  }
   view.value = next;
   void router.replace({ query: { ...route.query, view: next } });
   void (next === 'sectors' ? loadSectors() : loadHeatmap());
@@ -165,7 +169,11 @@ onMounted(() => void (view.value === 'sectors' ? loadSectors() : loadHeatmap()))
   <div class="space-y-16px">
     <PageHeader title="板块与热图" description="实时强度曲线、题材轮动与全市场分布">
       <template #meta>{{ view === 'sectors' ? latestTime || '等待采样' : heatmap?.summary.updated_at || '等待更新' }}</template>
-      <a-segmented :value="view" :options="[{ label: '板块雷达', value: 'sectors' }, { label: '市场热图', value: 'heatmap' }]" @change="value => changeView(value as 'sectors' | 'heatmap')" />
+      <a-segmented
+        :value="view"
+        :options="[{ label: '板块雷达', value: 'sectors' }, { label: '市场热图', value: 'heatmap' }, { label: 'ETF资金', value: 'etf' }]"
+        @change="value => changeView(value as 'sectors' | 'heatmap' | 'etf')"
+      />
     </PageHeader>
 
     <a-alert v-if="error" :title="error" show-icon type="warning" />

@@ -1,0 +1,318 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from html.parser import HTMLParser
+from typing import Any, Generic, TypeVar
+
+import httpx
+
+from app.models import EtfSharePoint, MarginMarketPoint, StrongStockSourceStatus
+
+
+T = TypeVar("T")
+_SSE_BASE_URL = "https://query.sse.com.cn"
+_SZSE_BASE_URL = "https://www.szse.cn"
+_HEADERS = {
+    "Referer": "https://www.sse.com.cn/",
+    "User-Agent": "Mozilla/5.0 (compatible; StrongStockWorkbench/1.0)",
+}
+
+
+@dataclass(frozen=True)
+class CapitalProviderResult(Generic[T]):
+    rows: list[T]
+    source_status: list[StrongStockSourceStatus]
+
+
+class OfficialCapitalDataProvider:
+    def __init__(
+        self,
+        http_client: httpx.Client | None = None,
+        timeout_seconds: float = 12,
+    ) -> None:
+        self.http_client = http_client or httpx.Client(timeout=timeout_seconds)
+
+    def get_margin_rows(self, trade_date: str) -> CapitalProviderResult[MarginMarketPoint]:
+        rows: list[MarginMarketPoint] = []
+        statuses: list[StrongStockSourceStatus] = []
+        compact_date = trade_date.replace("-", "")
+
+        try:
+            response = self.http_client.get(
+                f"{_SSE_BASE_URL}/commonSoaQuery.do",
+                params={
+                    "isPagination": "true",
+                    "sqlId": "RZRQ_HZ_INFO",
+                    "beginDate": compact_date,
+                    "endDate": compact_date,
+                    "pageHelp.pageSize": 25,
+                    "pageHelp.pageNo": 1,
+                    "pageHelp.beginPage": 1,
+                    "pageHelp.cacheSize": 1,
+                    "pageHelp.endPage": 1,
+                },
+                headers=_HEADERS,
+            )
+            response.raise_for_status()
+            sse_rows = parse_sse_margin_payload(response.json())
+            rows.extend(sse_rows)
+            statuses.append(_status("上交所两融", bool(sse_rows), "交易所汇总口径"))
+        except Exception as exc:
+            statuses.append(_failure_status("上交所两融", exc))
+
+        try:
+            response = self.http_client.get(
+                f"{_SZSE_BASE_URL}/api/report/ShowReport/data",
+                params={
+                    "SHOWTYPE": "JSON",
+                    "CATALOGID": "1837_xxpl",
+                    "TABKEY": "tab1",
+                    "txtDate": trade_date,
+                },
+                headers={**_HEADERS, "Referer": "https://www.szse.cn/"},
+            )
+            response.raise_for_status()
+            szse_rows = parse_szse_margin_payload(response.json(), trade_date=trade_date)
+            rows.extend(szse_rows)
+            statuses.append(_status("深交所两融", bool(szse_rows), "交易所汇总口径"))
+        except Exception as exc:
+            statuses.append(_failure_status("深交所两融", exc))
+
+        return CapitalProviderResult(rows=rows, source_status=statuses)
+
+    def get_etf_share_rows(
+        self,
+        trade_date: str,
+        symbols: Sequence[str],
+    ) -> CapitalProviderResult[EtfSharePoint]:
+        rows: list[EtfSharePoint] = []
+        statuses: list[StrongStockSourceStatus] = []
+        sse_symbols = [symbol for symbol in symbols if symbol.endswith(".SH")]
+        szse_symbols = [symbol for symbol in symbols if symbol.endswith(".SZ")]
+
+        if sse_symbols:
+            try:
+                response = self.http_client.get(
+                    f"{_SSE_BASE_URL}/commonQuery.do",
+                    params={
+                        "isPagination": "true",
+                        "sqlId": "COMMON_SSE_ZQPZ_ETFZL_XXPL_ETFGM_SEARCH_L",
+                        "STAT_DATE": trade_date,
+                        "pageHelp.pageSize": 1000,
+                        "pageHelp.pageNo": 1,
+                        "pageHelp.beginPage": 1,
+                        "pageHelp.cacheSize": 1,
+                    },
+                    headers=_HEADERS,
+                )
+                response.raise_for_status()
+                sse_rows = parse_sse_etf_share_payload(response.json(), symbols=sse_symbols)
+                rows.extend(sse_rows)
+                statuses.append(_status("上交所ETF份额", bool(sse_rows), "万份转换为份"))
+            except Exception as exc:
+                statuses.append(_failure_status("上交所ETF份额", exc))
+
+        if szse_symbols:
+            szse_rows: list[EtfSharePoint] = []
+            failures: list[Exception] = []
+            for symbol in szse_symbols:
+                try:
+                    response = self.http_client.get(
+                        f"{_SZSE_BASE_URL}/api/report/ShowReport/data",
+                        params={
+                            "SHOWTYPE": "JSON",
+                            "CATALOGID": "1945",
+                            "TABKEY": "tab1",
+                            "txtQueryKeyAndJC": symbol.split(".", 1)[0],
+                        },
+                        headers={**_HEADERS, "Referer": "https://www.szse.cn/"},
+                    )
+                    response.raise_for_status()
+                    szse_rows.extend(
+                        parse_szse_etf_share_payload(
+                            response.json(),
+                            trade_date=trade_date,
+                            symbols=[symbol],
+                        )
+                    )
+                except Exception as exc:
+                    failures.append(exc)
+            rows.extend(szse_rows)
+            if failures and not szse_rows:
+                statuses.append(_failure_status("深交所ETF份额", failures[0]))
+            else:
+                detail = "当前快照归档；深市不补造历史"
+                if failures:
+                    detail += f"；{len(failures)} 只请求失败"
+                statuses.append(_status("深交所ETF份额", bool(szse_rows), detail))
+
+        return CapitalProviderResult(rows=rows, source_status=statuses)
+
+
+def parse_sse_margin_payload(payload: Any) -> list[MarginMarketPoint]:
+    rows = _payload_rows(payload)
+    output: list[MarginMarketPoint] = []
+    for row in rows:
+        trade_date = _date_text(row.get("opDate"))
+        if not trade_date:
+            continue
+        output.append(
+            MarginMarketPoint(
+                trade_date=trade_date,
+                market="SSE",
+                financing_balance_cny=_number(row.get("rzye")),
+                securities_lending_balance_cny=_number(row.get("rqylje")),
+                margin_balance_cny=_number(row.get("rzrqjyzl")),
+                financing_buy_cny=_number(row.get("rzmre")),
+            )
+        )
+    return output
+
+
+def parse_szse_margin_payload(payload: Any, *, trade_date: str) -> list[MarginMarketPoint]:
+    section = _first_section(payload)
+    rows = section.get("data") if isinstance(section, dict) else None
+    if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+        return []
+    row = rows[0]
+    return [
+        MarginMarketPoint(
+            trade_date=_date_text(trade_date) or trade_date,
+            market="SZSE",
+            financing_balance_cny=_hundred_million(row.get("jrrzye")),
+            securities_lending_balance_cny=_hundred_million(row.get("jrrjye")),
+            margin_balance_cny=_hundred_million(row.get("jrrzrjye")),
+            financing_buy_cny=_hundred_million(row.get("jrrzmr")),
+        )
+    ]
+
+
+def parse_sse_etf_share_payload(payload: Any, *, symbols: Sequence[str]) -> list[EtfSharePoint]:
+    allowed = set(symbols)
+    output: list[EtfSharePoint] = []
+    for row in _payload_rows(payload):
+        code = str(row.get("SEC_CODE") or "").strip()
+        symbol = f"{code}.SH"
+        total_shares = _ten_thousand(row.get("TOT_VOL"))
+        trade_date = _date_text(row.get("STAT_DATE"))
+        if symbol not in allowed or total_shares is None or total_shares <= 0 or not trade_date:
+            continue
+        output.append(
+            EtfSharePoint(
+                trade_date=trade_date,
+                symbol=symbol,
+                name=_plain_text(row.get("SEC_NAME")) or None,
+                total_shares=total_shares,
+            )
+        )
+    return output
+
+
+def parse_szse_etf_share_payload(
+    payload: Any,
+    *,
+    trade_date: str,
+    symbols: Sequence[str],
+) -> list[EtfSharePoint]:
+    allowed = set(symbols)
+    section = _first_section(payload)
+    rows = section.get("data") if isinstance(section, dict) else None
+    if not isinstance(rows, list):
+        return []
+    output: list[EtfSharePoint] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        code = _plain_text(row.get("sys_key"))[:6]
+        symbol = f"{code}.SZ"
+        total_shares = _ten_thousand(row.get("dqgm"))
+        if symbol not in allowed or total_shares is None or total_shares <= 0:
+            continue
+        output.append(
+            EtfSharePoint(
+                trade_date=_date_text(trade_date) or trade_date,
+                symbol=symbol,
+                name=_plain_text(row.get("kzjcurl")) or None,
+                total_shares=total_shares,
+            )
+        )
+    return output
+
+
+def _payload_rows(payload: Any) -> list[dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return []
+    rows = payload.get("result")
+    if not isinstance(rows, list):
+        page_help = payload.get("pageHelp")
+        rows = page_help.get("data") if isinstance(page_help, dict) else []
+    return [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+
+
+def _first_section(payload: Any) -> dict[str, Any]:
+    if isinstance(payload, list) and payload and isinstance(payload[0], dict):
+        return payload[0]
+    return {}
+
+
+def _date_text(value: Any) -> str | None:
+    text = str(value or "").strip()
+    if len(text) == 8 and text.isdigit():
+        return f"{text[:4]}-{text[4:6]}-{text[6:]}"
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        return text
+    return None
+
+
+def _number(value: Any) -> float | None:
+    if value is None:
+        return None
+    text = str(value).strip().replace(",", "")
+    if not text or text in {"-", "--"}:
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        return None
+
+
+def _hundred_million(value: Any) -> float | None:
+    number = _number(value)
+    return number * 100_000_000 if number is not None else None
+
+
+def _ten_thousand(value: Any) -> float | None:
+    number = _number(value)
+    return number * 10_000 if number is not None else None
+
+
+class _TextExtractor(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+
+def _plain_text(value: Any) -> str:
+    parser = _TextExtractor()
+    parser.feed(str(value or ""))
+    return "".join(parser.parts).strip()
+
+
+def _status(source: str, has_rows: bool, detail: str) -> StrongStockSourceStatus:
+    return StrongStockSourceStatus(
+        source=source,
+        status="success" if has_rows else "stale",
+        detail=detail if has_rows else "交易所暂未返回当日数据",
+    )
+
+
+def _failure_status(source: str, exc: Exception) -> StrongStockSourceStatus:
+    return StrongStockSourceStatus(
+        source=source,
+        status="failed",
+        detail=f"请求失败: {exc.__class__.__name__}",
+    )

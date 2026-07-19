@@ -2,41 +2,37 @@
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue';
 import dayjs from 'dayjs';
 import type { EChartsOption } from 'echarts';
-import type {
-  MarketRankingItem,
-  SectorRadarItem,
-  SectorReplicaMode,
-  SourceStatusValue,
-  StrongStockSourceStatus
-} from '@/service/types';
+import type { SectorRadarItem } from '@/service/types';
 import { useHomeDashboard } from '@/composables/useHomeDashboard';
-import { buildSectorReplicaChartOption } from '@/utils/charts/sectorReplicaChartOption';
 import { formatWorkbenchNumber } from '@/components/common/workbench/workbench';
 import type { WorkbenchMetric } from '@/components/common/workbench/workbench';
+import {
+  directionTone,
+  formatDirectionalCny,
+  formatDirectionalPercent,
+  formatEvidenceStrength,
+  formatPlainCny,
+  stageLabel
+} from '@/utils/domain/capitalSignals';
 
 defineOptions({ name: 'HomeView' });
 
 const SectorRadarChart = defineAsyncComponent(() => import('@/components/charts/SectorRadarChart.vue'));
 
-const { overview, rankings, sectorFlow, sectorTrend, sectorMode, busy, loadInitial, refreshAll, setSectorMode } =
-  useHomeDashboard();
+const { overview, sectorFlow, capital, busy, loadInitial, refreshAll } = useHomeDashboard();
 
 const overviewData = computed(() => overview.data.value);
 const overviewError = computed(() => overview.error.value);
 const overviewIsStale = computed(() => overview.isStale.value);
 const overviewLoading = computed(() => overview.loading.value);
-const rankingsData = computed(() => rankings.data.value);
-const rankingsError = computed(() => rankings.error.value);
-const rankingsIsStale = computed(() => rankings.isStale.value);
-const rankingsLoading = computed(() => rankings.loading.value);
 const sectorFlowData = computed(() => sectorFlow.data.value);
 const sectorFlowError = computed(() => sectorFlow.error.value);
 const sectorFlowIsStale = computed(() => sectorFlow.isStale.value);
 const sectorFlowLoading = computed(() => sectorFlow.loading.value);
-const sectorTrendData = computed(() => sectorTrend.data.value);
-const sectorTrendError = computed(() => sectorTrend.error.value);
-const sectorTrendIsStale = computed(() => sectorTrend.isStale.value);
-const sectorTrendLoading = computed(() => sectorTrend.loading.value);
+const capitalData = computed(() => capital.data.value);
+const capitalError = computed(() => capital.error.value);
+const capitalIsStale = computed(() => capital.isStale.value);
+const capitalLoading = computed(() => capital.loading.value);
 
 const chartsReady = ref(false);
 let chartFrame: number | null = null;
@@ -45,28 +41,17 @@ const staleDataTitle = '刷新失败，当前显示上次数据';
 const breadth = computed(() => overviewData.value?.advance_decline);
 const turnover = computed(() => overviewData.value?.turnover);
 const indices = computed(() => overviewData.value?.indices.slice(0, 4) ?? []);
-const rankingItems = computed(() => rankingsData.value?.pct_change_rank.slice(0, 8) ?? []);
-const sectorModeOptions = [
-  { label: '强度', value: 'strength' },
-  { label: '主力流', value: 'main_flow' }
-];
 
-const displayTradeDate = computed(() => {
-  const values = [
-    overviewData.value?.trade_date,
-    sectorFlowData.value?.trade_date,
-    sectorTrendData.value?.trade_date,
-    rankingsData.value?.trade_date
-  ];
-  return values.find(value => Boolean(value)) || '交易日待确认';
-});
+const displayTradeDate = computed(() =>
+  [overviewData.value?.trade_date, sectorFlowData.value?.trade_date, capitalData.value?.trade_date]
+    .find(value => Boolean(value)) || '交易日待确认'
+);
 
 const latestUpdate = computed(() => {
   const latest = [
     overviewData.value?.generated_at,
-    rankingsData.value?.generated_at,
     sectorFlowData.value?.generated_at,
-    sectorTrendData.value?.generated_at
+    capitalData.value?.generated_at
   ]
     .map(value => ({ value, timestamp: value ? dayjs(value).valueOf() : Number.NaN }))
     .filter(item => item.value && Number.isFinite(item.timestamp))
@@ -117,12 +102,16 @@ const overviewMetrics = computed<WorkbenchMetric[]>(() => [
   }
 ]);
 
-const sectorFlowOption = computed<EChartsOption>(() => {
-  const rows = (sectorFlowData.value?.inflow ?? [])
-    .filter((item): item is SectorRadarItem & { net_flow_cny: number } => item.net_flow_cny !== null)
-    .slice(0, 8)
-    .reverse();
+const sectorFlowRows = computed(() => {
+  const withFlow = (item: SectorRadarItem): item is SectorRadarItem & { net_flow_cny: number } =>
+    typeof item.net_flow_cny === 'number' && Number.isFinite(item.net_flow_cny);
+  const inflow = (sectorFlowData.value?.inflow ?? []).filter(withFlow).slice(0, 6);
+  const outflow = (sectorFlowData.value?.outflow ?? []).filter(withFlow).slice(0, 6);
+  return [...inflow, ...outflow].sort((left, right) => left.net_flow_cny - right.net_flow_cny);
+});
 
+const sectorFlowOption = computed<EChartsOption>(() => {
+  const rows = sectorFlowRows.value;
   if (!rows.length) return emptyChartOption('暂无板块资金流');
 
   return {
@@ -132,7 +121,7 @@ const sectorFlowOption = computed<EChartsOption>(() => {
       trigger: 'axis',
       confine: true,
       axisPointer: { type: 'shadow' },
-      valueFormatter: formatMoney
+      valueFormatter: value => formatDirectionalCny(typeof value === 'number' ? value : null)
     },
     xAxis: {
       type: 'value',
@@ -147,51 +136,20 @@ const sectorFlowOption = computed<EChartsOption>(() => {
       data: rows.map(item => item.name),
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: '#182336', fontSize: 11, width: 76, overflow: 'truncate' }
+      axisLabel: { color: '#182336', fontSize: 11, width: 84, overflow: 'truncate' }
     },
     series: [
       {
-        name: '净流入',
+        name: '净流入 / 净流出',
         type: 'bar',
         barMaxWidth: 16,
-        data: rows.map(item => item.net_flow_cny),
-        itemStyle: { color: '#d9363e' }
+        data: rows.map(item => ({
+          value: item.net_flow_cny,
+          itemStyle: { color: item.net_flow_cny >= 0 ? '#d9363e' : '#07845e' }
+        }))
       }
     ]
   } as EChartsOption;
-});
-
-const sectorTrendOption = computed<EChartsOption>(() => {
-  const data = sectorTrendData.value;
-  if (!data?.series.length) return emptyChartOption('等待板块采样');
-
-  return buildSectorReplicaChartOption({
-    axis: data.axis,
-    series: data.series,
-    mode: data.mode,
-    compact: true
-  }) as EChartsOption;
-});
-
-const sourceItems = computed(() => {
-  const merged = new Map<string, StrongStockSourceStatus>();
-  const groups = [
-    overviewData.value?.source_status,
-    rankingsData.value?.source_status,
-    sectorFlowData.value?.source_status,
-    sectorTrendData.value?.source_status
-  ];
-
-  groups.forEach(group => {
-    group?.forEach(item => {
-      const current = merged.get(item.source);
-      if (!current || sourceSeverity(item.status) > sourceSeverity(current.status)) {
-        merged.set(item.source, item);
-      }
-    });
-  });
-
-  return Array.from(merged.values());
 });
 
 function emptyChartOption(text: string): EChartsOption {
@@ -203,28 +161,6 @@ function emptyChartOption(text: string): EChartsOption {
       textStyle: { color: '#697991', fontSize: 13, fontWeight: 'normal' }
     }
   };
-}
-
-function sourceSeverity(status: SourceStatusValue): number {
-  if (status === 'failed') return 4;
-  if (status === 'stale') return 3;
-  if (status === 'missing_key') return 2;
-  if (status === 'disabled') return 1;
-  return 0;
-}
-
-function sourceStatusTone(status: SourceStatusValue) {
-  if (status === 'success') return 'success';
-  if (status === 'failed') return 'failed';
-  if (status === 'stale') return 'partial';
-  return 'unknown';
-}
-
-function sourceStatusNote(status: SourceStatusValue): string | undefined {
-  if (status === 'stale') return '延迟';
-  if (status === 'missing_key') return '缺少密钥';
-  if (status === 'disabled') return '未启用';
-  return undefined;
 }
 
 function formatMoney(value: unknown): string {
@@ -244,21 +180,23 @@ function formatGeneratedAt(value: string | undefined): string | undefined {
 }
 
 function changeTone(value: number | null | undefined): string {
-  return value !== null && value !== undefined && value >= 0 ? 'home-positive' : 'home-negative';
+  return toneClass(directionTone(value ?? null));
 }
 
-function asRankingItem(value: unknown): MarketRankingItem {
-  return value as MarketRankingItem;
+function toneClass(tone: 'fall' | 'neutral' | 'rise'): string {
+  if (tone === 'rise') return 'home-positive';
+  if (tone === 'fall') return 'home-negative';
+  return '';
+}
+
+function evidenceLevelClass(level: string | null): string {
+  if (level === '较强') return 'home-evidence-level--strong';
+  if (level === '疑似') return 'home-evidence-level--suspected';
+  return '';
 }
 
 function resourceError(error: Error | undefined, fallback: string): string | null {
-  return error ? error.message || fallback : null;
-}
-
-function handleSectorModeChange(value: string | number): void {
-  if (value === 'strength' || value === 'main_flow') {
-    setSectorMode(value as SectorReplicaMode).catch(() => undefined);
-  }
+  return error ? fallback : null;
 }
 
 onMounted(() => {
@@ -276,7 +214,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="home-dashboard">
-    <PageHeader title="市场总览" description="全 A 盘面、资金流与板块轮动">
+    <PageHeader title="市场总览" description="全 A 盘面、资金流与资本信号">
       <template #meta>
         <div class="home-header-meta">
           <span>交易日 {{ displayTradeDate }}</span>
@@ -317,17 +255,20 @@ onBeforeUnmount(() => {
 
     <MetricStrip :items="overviewMetrics" />
 
-    <div class="home-chart-grid">
-      <section class="home-panel">
+    <div class="home-main-grid">
+      <section class="home-panel home-flow-panel">
         <SectionHeader title="板块资金流" :updated-at="formatGeneratedAt(sectorFlowData?.generated_at)">
-          <span
-            v-if="sectorFlowIsStale"
-            class="home-stale-indicator"
-            :aria-label="staleDataTitle"
-            :title="staleDataTitle"
-          >
-            旧数据
-          </span>
+          <div class="home-section-actions">
+            <span
+              v-if="sectorFlowIsStale"
+              class="home-stale-indicator"
+              :aria-label="staleDataTitle"
+              :title="staleDataTitle"
+            >
+              旧数据
+            </span>
+            <RouterLink class="home-detail-link" to="/market?view=sectors">查看板块</RouterLink>
+          </div>
         </SectionHeader>
         <div class="home-chart">
           <template v-if="chartsReady">
@@ -336,11 +277,11 @@ onBeforeUnmount(() => {
               class="home-chart-state home-chart-state--error"
               role="alert"
             >
-              {{ resourceError(sectorFlowError, '板块资金流读取失败') }}
+              板块资金流读取失败
             </div>
             <SectorRadarChart
               v-else
-              :height="280"
+              :height="360"
               :loading="sectorFlowLoading && !sectorFlowData"
               :option="sectorFlowOption"
             />
@@ -349,100 +290,95 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section class="home-panel">
-        <SectionHeader title="板块实时曲线" :updated-at="formatGeneratedAt(sectorTrendData?.generated_at)">
-          <div class="home-section-actions">
-            <span
-              v-if="sectorTrendIsStale"
-              class="home-stale-indicator"
-              :aria-label="staleDataTitle"
-              :title="staleDataTitle"
-            >
-              旧数据
-            </span>
-            <ASegmented
-              :options="sectorModeOptions"
-              :value="sectorMode"
-              size="small"
-              @change="handleSectorModeChange"
-            />
-          </div>
-        </SectionHeader>
-        <div class="home-chart">
-          <template v-if="chartsReady">
-            <div
-              v-if="sectorTrendError && !sectorTrendData"
-              class="home-chart-state home-chart-state--error"
-              role="alert"
-            >
-              {{ resourceError(sectorTrendError, '板块曲线读取失败') }}
-            </div>
-            <SectorRadarChart
-              v-else
-              :height="280"
-              :loading="sectorTrendLoading && !sectorTrendData"
-              :option="sectorTrendOption"
-            />
-          </template>
-          <div v-else class="home-chart-state">图表准备中</div>
-        </div>
-      </section>
-    </div>
-
-    <div class="home-bottom-grid">
-      <section class="home-panel">
-        <SectionHeader title="市场关注榜" :updated-at="formatGeneratedAt(rankingsData?.generated_at)">
-          <span
-            v-if="rankingsIsStale"
-            class="home-stale-indicator"
-            :aria-label="staleDataTitle"
-            :title="staleDataTitle"
-          >
-            旧数据
-          </span>
-        </SectionHeader>
-        <DataList
-          :error="rankingsData ? null : resourceError(rankingsError, '市场关注榜读取失败')"
-          :items="rankingItems"
-          :loading="rankingsLoading && !rankingsData"
-          empty-description="暂无排行榜"
-        >
-          <template #list-item="{ item, index }">
-            <div class="home-ranking-row">
-              <span class="home-ranking-position">{{ Number(index) + 1 }}</span>
-              <div class="home-ranking-name">
-                <strong>{{ asRankingItem(item).name || asRankingItem(item).symbol }}</strong>
-                <span>{{ asRankingItem(item).symbol }}</span>
+      <div class="home-capital-stack">
+        <template v-if="capitalData">
+          <section class="home-panel home-capital-panel">
+            <SectionHeader title="两融余额" :updated-at="formatGeneratedAt(capitalData.generated_at)">
+              <div class="home-section-actions">
+                <span
+                  v-if="capitalIsStale"
+                  class="home-stale-indicator"
+                  :aria-label="staleDataTitle"
+                  :title="staleDataTitle"
+                >
+                  旧数据
+                </span>
+                <StatusTag
+                  :status="capitalData.margin.available_markets === capitalData.margin.expected_markets ? 'success' : 'partial'"
+                  :text="capitalData.margin.available_markets === capitalData.margin.expected_markets ? '完整' : '部分'"
+                />
               </div>
-              <div class="home-ranking-quote">
-                <span>{{ formatPrice(asRankingItem(item).last_price) }}</span>
-                <strong :class="changeTone(asRankingItem(item).pct_change)">
-                  {{ formatPercent(asRankingItem(item).pct_change) }}
-                </strong>
-              </div>
+            </SectionHeader>
+            <p class="home-capital-context">
+              {{ capitalData.trade_date }} · 沪深 {{ capitalData.margin.available_markets }}/{{ capitalData.margin.expected_markets }}
+            </p>
+            <div class="home-capital-primary">
+              <span>融资融券余额</span>
+              <strong>{{ formatPlainCny(capitalData.margin.balance_cny) }}</strong>
             </div>
-          </template>
-        </DataList>
-      </section>
+            <div class="home-capital-change">
+              <span>较上一交易日</span>
+              <strong :class="toneClass(directionTone(capitalData.margin.change_cny))">
+                {{ formatDirectionalCny(capitalData.margin.change_cny) }}
+              </strong>
+              <small :class="toneClass(directionTone(capitalData.margin.change_pct))">
+                {{ formatDirectionalPercent(capitalData.margin.change_pct) }}
+              </small>
+            </div>
+            <div class="home-capital-metrics">
+              <div><span>融资余额</span><strong>{{ formatPlainCny(capitalData.margin.financing_balance_cny) }}</strong></div>
+              <div><span>当日融资买入</span><strong>{{ formatPlainCny(capitalData.margin.financing_buy_cny) }}</strong></div>
+            </div>
+          </section>
 
-      <section class="home-panel">
-        <SectionHeader title="数据状态" :updated-at="latestUpdate === '等待更新' ? undefined : latestUpdate">
-          <span class="home-source-count">{{ sourceItems.length }} 个来源</span>
-        </SectionHeader>
-        <div v-if="sourceItems.length" class="home-source-list">
-          <div v-for="item in sourceItems" :key="item.source" class="home-source-row">
-            <strong class="home-source-name">{{ item.source }}</strong>
-            <span class="home-source-detail" :title="item.detail">{{ item.detail }}</span>
-            <span class="home-source-status">
-              <StatusTag :status="sourceStatusTone(item.status)" />
-              <span v-if="sourceStatusNote(item.status)" class="home-source-status-note">
-                {{ sourceStatusNote(item.status) }}
+          <section class="home-panel home-capital-panel">
+            <SectionHeader title="宽基护盘雷达">
+              <RouterLink class="home-detail-link" to="/etf-radar">查看详情</RouterLink>
+            </SectionHeader>
+            <p class="home-capital-context">
+              {{ stageLabel(capitalData.signal_stage) }} · {{ capitalData.model_version }}
+            </p>
+            <div class="home-evidence-heading">
+              <div class="home-capital-primary">
+                <span>证据强度</span>
+                <strong>{{ formatEvidenceStrength(capitalData.etf_radar.evidence_strength) }}</strong>
+              </div>
+              <span class="home-evidence-level" :class="evidenceLevelClass(capitalData.etf_radar.evidence_level)">
+                {{ capitalData.etf_radar.evidence_level || '待确认' }}
               </span>
-            </span>
-          </div>
-        </div>
-        <div v-else class="home-source-empty">数据来源待确认</div>
-      </section>
+            </div>
+            <div class="home-evidence-meter" role="img" :aria-label="`证据强度 ${formatEvidenceStrength(capitalData.etf_radar.evidence_strength)}`">
+              <span :style="{ width: `${Math.max(0, Math.min(100, capitalData.etf_radar.evidence_strength ?? 0))}%` }" />
+            </div>
+            <div class="home-capital-change">
+              <span>估算净申购</span>
+              <strong :class="toneClass(directionTone(capitalData.etf_radar.estimated_subscription_cny))">
+                {{ formatDirectionalCny(capitalData.etf_radar.estimated_subscription_cny) }}
+              </strong>
+              <small>有效ETF {{ capitalData.etf_radar.valid_etf_count }}/{{ capitalData.etf_radar.expected_etf_count }}</small>
+            </div>
+            <ul v-if="capitalData.etf_radar.evidence.length" class="home-evidence-list">
+              <li v-for="item in capitalData.etf_radar.evidence.slice(0, 2)" :key="item">{{ item }}</li>
+            </ul>
+            <p v-else class="home-capital-empty">等待交易所份额形成可比记录</p>
+          </section>
+        </template>
+
+        <template v-else>
+          <section class="home-panel home-capital-panel">
+            <SectionHeader title="两融余额" />
+            <div class="home-capital-state" :aria-busy="capitalLoading" :role="capitalError ? 'alert' : undefined">
+              {{ capitalError ? '资金信号读取失败' : '资金信号加载中' }}
+            </div>
+          </section>
+          <section class="home-panel home-capital-panel">
+            <SectionHeader title="宽基护盘雷达" />
+            <div class="home-capital-state" :aria-busy="capitalLoading">
+              {{ capitalError ? '等待服务恢复' : '等待交易所份额' }}
+            </div>
+          </section>
+        </template>
+      </div>
     </div>
   </div>
 </template>
@@ -458,19 +394,13 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 
-.home-header-meta {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 4px 12px;
-}
-
+.home-header-meta,
 .home-section-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
-  gap: 6px;
+  gap: 6px 12px;
 }
 
 .home-stale-indicator {
@@ -478,6 +408,17 @@ onBeforeUnmount(() => {
   font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+.home-detail-link {
+  color: var(--wb-primary);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.home-detail-link:hover {
+  text-decoration: underline;
 }
 
 .home-index-section {
@@ -491,18 +432,23 @@ onBeforeUnmount(() => {
   padding-top: 10px;
 }
 
-.home-index-cell {
+.home-index-cell,
+.home-panel {
   min-width: 0;
-  padding: 10px 12px;
   background: var(--wb-surface);
   border: 1px solid var(--wb-border);
   border-radius: var(--wb-radius);
 }
 
+.home-index-cell {
+  padding: 10px 12px;
+}
+
 .home-index-name,
 .home-index-empty,
-.home-source-count,
-.home-source-empty {
+.home-capital-context,
+.home-capital-state,
+.home-capital-empty {
   color: var(--wb-muted);
   font-size: 12px;
 }
@@ -530,38 +476,27 @@ onBeforeUnmount(() => {
   font-weight: 600;
 }
 
-.home-index-empty {
+.home-index-empty,
+.home-capital-state {
   padding: 28px 0 16px;
   text-align: center;
 }
 
-.home-chart-grid,
-.home-bottom-grid {
+.home-main-grid {
   display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.85fr);
   gap: 12px;
   min-width: 0;
 }
 
-.home-chart-grid {
-  grid-template-columns: minmax(0, 1.45fr) minmax(320px, 1fr);
-}
-
-.home-bottom-grid {
-  grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
-}
-
 .home-panel {
-  min-width: 0;
   padding: 12px;
-  background: var(--wb-surface);
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius);
 }
 
 .home-chart,
 .home-chart-state {
   width: 100%;
-  height: 280px;
+  height: 360px;
 }
 
 .home-chart {
@@ -581,105 +516,127 @@ onBeforeUnmount(() => {
   color: var(--wb-positive);
 }
 
-.home-ranking-row {
+.home-capital-stack {
   display: grid;
-  grid-template-columns: 24px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 8px;
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 12px;
   min-width: 0;
 }
 
-.home-ranking-position {
+.home-capital-panel {
+  overflow: hidden;
+}
+
+.home-capital-context {
+  margin: 2px 0 12px;
+}
+
+.home-capital-primary,
+.home-capital-change,
+.home-capital-metrics > div {
+  display: grid;
+  gap: 3px;
+}
+
+.home-capital-primary span,
+.home-capital-change span,
+.home-capital-metrics span {
   color: var(--wb-muted);
-  font-size: 12px;
+  font-size: 11px;
+}
+
+.home-capital-primary strong {
+  color: var(--wb-ink);
+  font-size: 20px;
   font-variant-numeric: tabular-nums;
 }
 
-.home-ranking-name {
-  min-width: 0;
+.home-capital-change {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  margin-top: 10px;
+  font-variant-numeric: tabular-nums;
 }
 
-.home-ranking-name strong,
-.home-ranking-name span {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.home-capital-change span {
+  grid-column: 1 / -1;
 }
 
-.home-ranking-name strong {
+.home-capital-change strong {
+  font-size: 15px;
+}
+
+.home-capital-change small {
+  color: var(--wb-muted);
+  font-size: 11px;
+}
+
+.home-capital-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--wb-border);
+}
+
+.home-capital-metrics strong {
   color: var(--wb-ink);
   font-size: 13px;
-}
-
-.home-ranking-name span {
-  margin-top: 2px;
-  color: var(--wb-muted);
-  font-size: 11px;
-}
-
-.home-ranking-quote {
-  display: grid;
-  grid-template-columns: minmax(56px, auto) minmax(58px, auto);
-  gap: 10px;
-  color: var(--wb-muted);
-  font-size: 12px;
   font-variant-numeric: tabular-nums;
-  text-align: right;
 }
 
-.home-source-list {
-  display: grid;
-}
-
-.home-source-row {
-  display: grid;
-  grid-template-columns: minmax(76px, 0.45fr) minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  padding: 9px 0;
-  border-bottom: 1px solid var(--wb-border);
-}
-
-.home-source-row:last-child {
-  border-bottom: 0;
-}
-
-.home-source-name,
-.home-source-detail {
-  min-width: 0;
-  overflow: hidden;
-  font-size: 12px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.home-source-name {
-  color: var(--wb-ink);
-}
-
-.home-source-detail {
-  color: var(--wb-muted);
-}
-
-.home-source-status {
+.home-evidence-heading {
   display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
 }
 
-.home-source-status-note {
+.home-evidence-level {
+  padding: 2px 7px;
   color: var(--wb-muted);
   font-size: 11px;
-  white-space: nowrap;
+  border: 1px solid var(--wb-border);
+  border-radius: 4px;
 }
 
-.home-source-empty {
-  padding: 28px 0 16px;
-  text-align: center;
+.home-evidence-level--strong {
+  color: var(--wb-positive);
+  border-color: color-mix(in srgb, var(--wb-positive) 35%, var(--wb-border));
+}
+
+.home-evidence-level--suspected {
+  color: var(--wb-warning);
+  border-color: color-mix(in srgb, var(--wb-warning) 35%, var(--wb-border));
+}
+
+.home-evidence-meter {
+  height: 5px;
+  margin: 10px 0 2px;
+  overflow: hidden;
+  background: var(--wb-surface-muted);
+  border-radius: 3px;
+}
+
+.home-evidence-meter span {
+  display: block;
+  height: 100%;
+  background: var(--wb-primary);
+}
+
+.home-evidence-list {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0 0;
+  padding: 9px 0 0 18px;
+  color: var(--wb-muted);
+  font-size: 11px;
+  border-top: 1px solid var(--wb-border);
+}
+
+.home-capital-empty {
+  margin: 12px 0 0;
 }
 
 .home-positive {
@@ -691,9 +648,13 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1023px) {
-  .home-chart-grid,
-  .home-bottom-grid {
+  .home-main-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .home-capital-stack {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto;
   }
 }
 
@@ -702,7 +663,8 @@ onBeforeUnmount(() => {
     padding: 10px;
   }
 
-  .home-index-grid {
+  .home-index-grid,
+  .home-capital-stack {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -711,14 +673,8 @@ onBeforeUnmount(() => {
     flex-direction: column;
   }
 
-  .home-ranking-quote {
-    grid-template-columns: minmax(52px, auto);
-    gap: 2px;
-  }
-
-  .home-source-row {
-    grid-template-columns: minmax(68px, 0.45fr) minmax(0, 1fr) auto;
-    gap: 6px;
+  .home-capital-stack {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>

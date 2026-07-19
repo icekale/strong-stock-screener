@@ -1,31 +1,22 @@
 // @vitest-environment jsdom
 
-import process from 'node:process';
-import { readFileSync } from 'node:fs';
-import { resolve as resolvePath } from 'node:path';
 import { defineComponent } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type {
-  MarketOverviewResponse,
-  MarketRankingsResponse,
-  SectorRadarResponse,
-  SectorReplicaMode,
-  SectorReplicaRadarResponse
-} from '@/service/types';
+import type { CapitalSummaryResponse, MarketOverviewResponse, SectorRadarResponse } from '@/service/types';
 import type { HomeDashboardDependencies } from '@/composables/useHomeDashboard';
 import HomeView from './HomeView.vue';
 
 type Deferred<T> = {
   promise: Promise<T>;
   resolve: (value: T) => void;
+  reject: (reason?: unknown) => void;
 };
 
 const api = vi.hoisted(() => ({
+  getCapitalSummary: vi.fn(),
   getMarketOverview: vi.fn(),
-  getMarketRankings: vi.fn(),
-  getSectorRadar: vi.fn(),
-  getSectorReplicaRadar: vi.fn()
+  getSectorRadar: vi.fn()
 }));
 
 vi.mock('@/service/product-api', () => api);
@@ -53,14 +44,14 @@ vi.mock('@/components/charts/SectorRadarChart.vue', () => ({
   }
 }));
 
-const source = readFileSync(resolvePath(process.cwd(), 'src/views/HomeView.vue'), 'utf8');
-
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>(resolvePromise => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }
 
 const ChartStub = defineComponent({
@@ -78,13 +69,14 @@ const AlertStub = defineComponent({
 const ButtonStub = defineComponent({
   name: 'AButton',
   props: ['loading'],
-  template: '<button><slot /></button>'
+  emits: ['click'],
+  template: '<button @click="$emit(\'click\')"><slot /></button>'
 });
 
-const SegmentedStub = defineComponent({
-  name: 'ASegmented',
-  props: ['value', 'options'],
-  template: '<div data-testid="sector-mode" />'
+const RouterLinkStub = defineComponent({
+  name: 'RouterLink',
+  props: ['to'],
+  template: '<a :href="to"><slot /></a>'
 });
 
 async function mountDashboard() {
@@ -103,7 +95,7 @@ async function mountDashboard() {
       stubs: {
         AAlert: AlertStub,
         AButton: ButtonStub,
-        ASegmented: SegmentedStub,
+        RouterLink: RouterLinkStub,
         SectorRadarChart: ChartStub
       }
     }
@@ -111,7 +103,7 @@ async function mountDashboard() {
   await Promise.resolve();
 
   return {
-    renderCharts() {
+    renderChart() {
       animationFrameCallback?.(0);
     },
     wrapper
@@ -150,28 +142,6 @@ function overviewFixture(): MarketOverviewResponse {
   };
 }
 
-function rankingsFixture(): MarketRankingsResponse {
-  return {
-    trade_date: '2026-07-18',
-    pct_change_rank: [
-      {
-        symbol: '600519.SH',
-        name: '贵州茅台',
-        last_price: 1600,
-        pct_change: 3.2,
-        turnover_rate: 0.4,
-        turnover_cny: 2_000_000_000,
-        volume: 120_000,
-        quote_time: '09:31:00'
-      }
-    ],
-    turnover_rank: [],
-    buckets: [],
-    source_status: [{ source: 'rankings', status: 'stale', detail: '排行榜延迟一分钟' }],
-    generated_at: '2026-07-18T09:32:05+08:00'
-  };
-}
-
 function sectorFlowFixture(): SectorRadarResponse {
   return {
     trade_date: '2026-07-18',
@@ -179,42 +149,56 @@ function sectorFlowFixture(): SectorRadarResponse {
     flow_source: 'ifind',
     inflow: [
       {
-        name: '半导体',
-        source: 'ifind',
-        change_pct: 2.1,
-        turnover_cny: 80_000_000_000,
-        advance_count: 42,
-        decline_count: 8,
-        leader: '中芯国际',
-        net_flow_cny: 6_800_000_000,
+        name: '半导体', source: 'ifind', change_pct: 2.1, turnover_cny: 80_000_000_000,
+        advance_count: 42, decline_count: 8, leader: '中芯国际', net_flow_cny: 6_800_000_000,
         strength_score: 88
       }
     ],
-    outflow: [],
-    source_status: [{ source: 'ifind', status: 'missing_key', detail: '资金流密钥缺失' }],
+    outflow: [
+      {
+        name: '煤炭', source: 'ifind', change_pct: -1.2, turnover_cny: 30_000_000_000,
+        advance_count: 4, decline_count: 26, leader: '中国神华', net_flow_cny: -2_600_000_000,
+        strength_score: -42
+      }
+    ],
+    source_status: [{ source: 'ifind', status: 'success', detail: '资金流正常' }],
     generated_at: '2026-07-18T09:33:05+08:00'
   };
 }
 
-function sectorTrendFixture(mode: SectorReplicaMode = 'strength'): SectorReplicaRadarResponse {
+function capitalFixture(): CapitalSummaryResponse {
   return {
-    result: 'success',
-    mode,
-    trade_date: '2026-07-18',
-    axis: ['09:30', '09:31'],
-    qxlive: { Aaxis: ['09:30', '09:31'], zflist: [1, 2], series: { 半导体: [120_000, 130_000] } },
-    plates: [],
-    checkplate: [],
-    legend: ['半导体'],
-    series: [{ name: '半导体', type: 'line', data: [120_000, 130_000], smooth: true, showSymbol: false }],
-    stocks: [],
-    related_tags: [],
-    source_status: [
-      { source: 'tencent', status: 'failed', detail: '板块趋势接口失败' },
-      { source: 'optional-trend', status: 'disabled', detail: '备用趋势源未启用' }
-    ],
-    generated_at: '2026-07-18T09:34:05+08:00'
+    generated_at: '2026-07-18T09:34:05+08:00',
+    trade_date: '2026-07-17',
+    as_of: '2026-07-18T09:34:05+08:00',
+    signal_stage: 'post_close',
+    model_version: 'heuristic-v1',
+    source_status: [{ source: '上交所ETF份额', status: 'success', detail: '正常' }],
+    margin: {
+      balance_cny: 1_405_364_008_462,
+      financing_balance_cny: 1_392_832_663_141,
+      securities_lending_balance_cny: 12_531_345_321,
+      financing_buy_cny: 107_304_029_411,
+      change_cny: -38_680_784_667,
+      change_pct: -2.68,
+      available_markets: 1,
+      expected_markets: 2
+    },
+    etf_radar: {
+      evidence_strength: 72.5,
+      evidence_level: '较强',
+      valid_etf_count: 6,
+      expected_etf_count: 7,
+      estimated_subscription_cny: 24_218_749_900,
+      evidence: ['6/6 只有效ETF份额增加', '合计估算净申购 242.2亿']
+    }
   };
+}
+
+function resolveAll() {
+  api.getMarketOverview.mockResolvedValueOnce(overviewFixture());
+  api.getSectorRadar.mockResolvedValueOnce(sectorFlowFixture());
+  api.getCapitalSummary.mockResolvedValueOnce(capitalFixture());
 }
 
 afterEach(() => {
@@ -222,204 +206,93 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('HomeView source contract', () => {
-  it.each([
-    'getAuctionModelTop3',
-    'AuctionModelTop3Response',
-    '竞价 Top3',
-    'getMarketEmotionSnapshot',
-    'MarketTrendChart',
-    '盘中情绪走势',
-    'useTradeDate',
-    'a-date-picker'
-  ])('does not contain removed homepage dependency %s', removed => {
-    expect(source).not.toContain(removed);
-  });
-
-  it.each([
-    'defineAsyncComponent',
-    'requestAnimationFrame',
-    'v-if="chartsReady"',
-    'useHomeDashboard',
-    'buildSectorReplicaChartOption'
-  ])('contains the dashboard rendering contract %s', required => {
-    expect(source).toContain(required);
-  });
-});
-
-describe('HomeView dashboard', () => {
-  it('starts resources together, renders them independently, and defers both charts', async () => {
+describe('HomeView capital dashboard', () => {
+  it('starts the three resources together and renders independent results', async () => {
     const overviewRequest = deferred<MarketOverviewResponse>();
-    const rankingsRequest = deferred<MarketRankingsResponse>();
-    const sectorFlowRequest = deferred<SectorRadarResponse>();
-    const sectorTrendRequest = deferred<SectorReplicaRadarResponse>();
+    const sectorRequest = deferred<SectorRadarResponse>();
+    const capitalRequest = deferred<CapitalSummaryResponse>();
     api.getMarketOverview.mockReturnValueOnce(overviewRequest.promise);
-    api.getMarketRankings.mockReturnValueOnce(rankingsRequest.promise);
-    api.getSectorRadar.mockReturnValueOnce(sectorFlowRequest.promise);
-    api.getSectorReplicaRadar.mockReturnValueOnce(sectorTrendRequest.promise);
-    const { renderCharts, wrapper } = await mountDashboard();
+    api.getSectorRadar.mockReturnValueOnce(sectorRequest.promise);
+    api.getCapitalSummary.mockReturnValueOnce(capitalRequest.promise);
+
+    const { wrapper } = await mountDashboard();
 
     expect(api.getMarketOverview).toHaveBeenCalledTimes(1);
-    expect(api.getMarketRankings).toHaveBeenCalledWith(12);
     expect(api.getSectorRadar).toHaveBeenCalledWith(12);
-    expect(api.getSectorReplicaRadar).toHaveBeenCalledWith({ mode: 'strength', limit: 5, stockLimit: 1 });
-    expect(wrapper.findAll('[data-testid="sector-chart"]')).toHaveLength(0);
-    expect(wrapper.text()).toContain('主要指数');
-    expect(wrapper.text()).toContain('总成交额');
+    expect(api.getCapitalSummary).toHaveBeenCalledTimes(1);
 
     overviewRequest.resolve(overviewFixture());
     await flushPromises();
-
     expect(wrapper.text()).toContain('上证指数');
-    expect(wrapper.text()).toContain('3510.25');
-    expect(wrapper.text()).toContain('1.23万亿');
-    expect(wrapper.text()).toContain('6 / 4');
-    expect(wrapper.text()).toContain('偏强');
-    expect(wrapper.text()).not.toContain('贵州茅台');
+    expect(wrapper.text()).not.toContain('融资融券余额');
 
-    rankingsRequest.resolve(rankingsFixture());
-    sectorFlowRequest.resolve(sectorFlowFixture());
-    sectorTrendRequest.resolve(sectorTrendFixture());
+    sectorRequest.resolve(sectorFlowFixture());
+    capitalRequest.resolve(capitalFixture());
     await flushPromises();
 
-    expect(wrapper.text()).toContain('贵州茅台');
-    const duplicateSourceRows = wrapper.findAll('.home-source-row').filter(row => row.text().includes('tencent'));
-    expect(duplicateSourceRows).toHaveLength(1);
-    expect(duplicateSourceRows[0]?.text()).toContain('失败');
-    expect(duplicateSourceRows[0]?.text()).toContain('板块趋势接口失败');
+    expect(wrapper.text()).toContain('融资融券余额');
+    expect(wrapper.text()).toContain('证据强度');
+    wrapper.unmount();
+  });
 
-    renderCharts();
+  it('renders one sector visualization and the two capital summaries', async () => {
+    resolveAll();
+    const { renderChart, wrapper } = await mountDashboard();
     await flushPromises();
 
-    expect(wrapper.findAll('[data-testid="sector-chart"]')).toHaveLength(2);
-    for (const heading of [
-      '主要指数',
-      '总成交额',
-      '上涨 / 下跌',
-      '涨停 / 跌停',
-      '盘面状态',
-      '板块资金流',
-      '板块实时曲线',
-      '市场关注榜',
-      '数据状态'
-    ]) {
+    expect(wrapper.findAll('[data-testid="sector-chart"]')).toHaveLength(0);
+    renderChart();
+    await flushPromises();
+
+    expect(wrapper.findAll('[data-testid="sector-chart"]')).toHaveLength(1);
+    for (const heading of ['板块资金流', '两融余额', '宽基护盘雷达']) {
       expect(wrapper.text()).toContain(heading);
     }
-    expect(wrapper.text()).not.toContain('竞价 Top3');
-    expect(wrapper.text()).not.toContain('盘中情绪走势');
-
+    for (const removed of ['板块实时曲线', '市场关注榜', '数据状态']) {
+      expect(wrapper.text()).not.toContain(removed);
+    }
+    expect(wrapper.find('a[href="/etf-radar"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain('沪深 1/2');
+    expect(wrapper.text()).toContain('部分');
+    expect(wrapper.text()).toContain('▼ -386.8亿');
+    expect(wrapper.text()).toContain('▲ +242.2亿');
     wrapper.unmount();
   });
 
-  it('renders honest notes for degraded source states', async () => {
+  it('keeps market and sector content when the capital summary fails', async () => {
     api.getMarketOverview.mockResolvedValueOnce(overviewFixture());
-    api.getMarketRankings.mockResolvedValueOnce(rankingsFixture());
     api.getSectorRadar.mockResolvedValueOnce(sectorFlowFixture());
-    api.getSectorReplicaRadar.mockResolvedValueOnce(sectorTrendFixture());
+    api.getCapitalSummary.mockRejectedValueOnce(new Error('capital unavailable'));
 
-    const { wrapper } = await mountDashboard();
+    const { renderChart, wrapper } = await mountDashboard();
+    await flushPromises();
+    renderChart();
     await flushPromises();
 
-    const sourceRows = wrapper.findAll('.home-source-row');
-    expect(sourceRows.find(row => row.text().includes('rankings'))?.text()).toContain('延迟');
-    expect(sourceRows.find(row => row.text().includes('ifind'))?.text()).toContain('缺少密钥');
-    expect(sourceRows.find(row => row.text().includes('optional-trend'))?.text()).toContain('未启用');
-
+    expect(wrapper.text()).toContain('上证指数');
+    expect(wrapper.findAll('[data-testid="sector-chart"]')).toHaveLength(1);
+    expect(wrapper.text()).toContain('资金信号读取失败');
     wrapper.unmount();
   });
 
-  it('keeps successful content visible and marks it old when refreshes fail', async () => {
-    api.getMarketOverview.mockResolvedValueOnce(overviewFixture());
-    api.getMarketRankings.mockResolvedValueOnce(rankingsFixture());
-    api.getSectorRadar.mockResolvedValueOnce(sectorFlowFixture());
-    api.getSectorReplicaRadar.mockResolvedValueOnce(sectorTrendFixture());
-
-    const { renderCharts, wrapper } = await mountDashboard();
+  it('keeps successful content and marks it stale after forced refresh failures', async () => {
+    resolveAll();
+    const { renderChart, wrapper } = await mountDashboard();
     await flushPromises();
-    renderCharts();
+    renderChart();
     await flushPromises();
-
-    expect(wrapper.findAll('[data-testid="sector-chart"]')).toHaveLength(2);
-    expect(wrapper.text()).toContain('贵州茅台');
 
     api.getMarketOverview.mockRejectedValueOnce(new Error('overview refresh failed'));
-    api.getMarketRankings.mockRejectedValueOnce(new Error('rankings refresh failed'));
-    api.getSectorRadar.mockRejectedValueOnce(new Error('sector flow refresh failed'));
-    api.getSectorReplicaRadar.mockRejectedValueOnce(new Error('sector trend refresh failed'));
+    api.getSectorRadar.mockRejectedValueOnce(new Error('sector refresh failed'));
+    api.getCapitalSummary.mockRejectedValueOnce(new Error('capital refresh failed'));
 
     await wrapper.find('button').trigger('click');
     await flushPromises();
 
-    expect(wrapper.findAll('[data-testid="sector-chart"]')).toHaveLength(2);
     expect(wrapper.text()).toContain('上证指数');
-    expect(wrapper.text()).toContain('贵州茅台');
-    expect(wrapper.findAll('[title="刷新失败，当前显示上次数据"]')).toHaveLength(4);
-    expect(wrapper.findAll('.home-chart-state--error')).toHaveLength(0);
-    const rankingPanel = wrapper.findAll('.home-panel').find(panel => panel.text().includes('市场关注榜'));
-    expect(rankingPanel?.find('[role="alert"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain('融资融券余额');
+    expect(wrapper.findAll('[title="刷新失败，当前显示上次数据"]')).toHaveLength(3);
     expect(wrapper.text()).not.toContain('refresh failed');
-
-    wrapper.unmount();
-  });
-
-  it('keeps trend formatting on the response mode until switched data arrives', async () => {
-    const mainFlowRequest = deferred<SectorReplicaRadarResponse>();
-    api.getMarketOverview.mockResolvedValueOnce(overviewFixture());
-    api.getMarketRankings.mockResolvedValueOnce(rankingsFixture());
-    api.getSectorRadar.mockResolvedValueOnce(sectorFlowFixture());
-    api.getSectorReplicaRadar
-      .mockResolvedValueOnce(sectorTrendFixture('strength'))
-      .mockReturnValueOnce(mainFlowRequest.promise);
-
-    const { renderCharts, wrapper } = await mountDashboard();
-    await flushPromises();
-    renderCharts();
-    await flushPromises();
-
-    const trendFormatter = () => {
-      const chart = wrapper.findAllComponents(ChartStub)[1];
-      const option = chart?.props('option') as {
-        yAxis: { axisLabel: { formatter: (value: number) => string } };
-      };
-      return option.yAxis.axisLabel.formatter;
-    };
-
-    expect(trendFormatter()(120_000)).toBe('120000');
-
-    wrapper.findComponent(SegmentedStub).vm.$emit('change', 'main_flow');
-    await Promise.resolve();
-    await wrapper.vm.$nextTick();
-
-    expect(api.getSectorReplicaRadar).toHaveBeenLastCalledWith({ mode: 'main_flow', limit: 5, stockLimit: 1 });
-    expect(trendFormatter()(120_000)).toBe('120000');
-
-    mainFlowRequest.resolve(sectorTrendFixture('main_flow'));
-    await flushPromises();
-
-    expect(trendFormatter()(120_000)).toBe('12万');
-
-    wrapper.unmount();
-  });
-
-  it('limits sector flow value-axis labels for narrow dashboard panels', async () => {
-    api.getMarketOverview.mockResolvedValueOnce(overviewFixture());
-    api.getMarketRankings.mockResolvedValueOnce(rankingsFixture());
-    api.getSectorRadar.mockResolvedValueOnce(sectorFlowFixture());
-    api.getSectorReplicaRadar.mockResolvedValueOnce(sectorTrendFixture());
-
-    const { renderCharts, wrapper } = await mountDashboard();
-    await flushPromises();
-    renderCharts();
-    await flushPromises();
-
-    const chart = wrapper.findAllComponents(ChartStub)[0];
-    const option = chart?.props('option') as {
-      xAxis: { splitNumber?: number; axisLabel: { hideOverlap?: boolean } };
-    };
-
-    expect(option.xAxis.splitNumber).toBe(4);
-    expect(option.xAxis.axisLabel.hideOverlap).toBe(true);
-
     wrapper.unmount();
   });
 });

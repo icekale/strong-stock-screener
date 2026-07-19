@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 
+import process from 'node:process';
+import { readFileSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
 import { defineComponent } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -43,6 +46,8 @@ vi.mock('@/components/charts/SectorRadarChart.vue', () => ({
     template: '<div data-testid="sector-chart" />'
   }
 }));
+
+const source = readFileSync(resolvePath(process.cwd(), 'src/views/HomeView.vue'), 'utf8');
 
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
@@ -256,6 +261,36 @@ describe('HomeView capital dashboard', () => {
     expect(wrapper.text()).toContain('部分');
     expect(wrapper.text()).toContain('▼ -386.8亿');
     expect(wrapper.text()).toContain('▲ +242.2亿');
+    expect(wrapper.text()).toContain('盘后确认 · heuristic-v1');
+    wrapper.unmount();
+  });
+
+  it('caps each sector direction at six rows and stacks the main grid responsively', async () => {
+    const flow = sectorFlowFixture();
+    const makeRow = (index: number, direction: 1 | -1) => ({
+      ...flow.inflow[0]!,
+      name: `${direction > 0 ? '流入' : '流出'}${index}`,
+      net_flow_cny: direction * (index + 1) * 100_000_000
+    });
+    flow.inflow = Array.from({ length: 8 }, (_, index) => makeRow(index, 1));
+    flow.outflow = Array.from({ length: 8 }, (_, index) => makeRow(index, -1));
+    api.getMarketOverview.mockResolvedValueOnce(overviewFixture());
+    api.getSectorRadar.mockResolvedValueOnce(flow);
+    api.getCapitalSummary.mockResolvedValueOnce(capitalFixture());
+
+    const { renderChart, wrapper } = await mountDashboard();
+    await flushPromises();
+    renderChart();
+    await flushPromises();
+
+    const option = wrapper.findComponent(ChartStub).props('option') as {
+      series: Array<{ data: Array<{ value: number }> }>;
+    };
+    const values = option.series[0]!.data.map(item => item.value);
+    expect(values).toHaveLength(12);
+    expect(values.filter(value => value > 0)).toHaveLength(6);
+    expect(values.filter(value => value < 0)).toHaveLength(6);
+    expect(source).toMatch(/@media \(max-width: 1023px\)[\s\S]*?\.home-main-grid[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/);
     wrapper.unmount();
   });
 
@@ -272,6 +307,23 @@ describe('HomeView capital dashboard', () => {
     expect(wrapper.text()).toContain('上证指数');
     expect(wrapper.findAll('[data-testid="sector-chart"]')).toHaveLength(1);
     expect(wrapper.text()).toContain('资金信号读取失败');
+    wrapper.unmount();
+  });
+
+  it('keeps capital summaries visible when market and sector resources fail', async () => {
+    api.getMarketOverview.mockRejectedValueOnce(new Error('overview unavailable'));
+    api.getSectorRadar.mockRejectedValueOnce(new Error('sector unavailable'));
+    api.getCapitalSummary.mockResolvedValueOnce(capitalFixture());
+
+    const { renderChart, wrapper } = await mountDashboard();
+    await flushPromises();
+    renderChart();
+    await flushPromises();
+
+    expect(wrapper.text()).toContain('两融余额');
+    expect(wrapper.text()).toContain('宽基护盘雷达');
+    expect(wrapper.text()).toContain('市场总览暂时不可用');
+    expect(wrapper.text()).toContain('板块资金流读取失败');
     wrapper.unmount();
   });
 

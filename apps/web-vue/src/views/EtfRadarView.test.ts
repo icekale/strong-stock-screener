@@ -59,7 +59,7 @@ const TabsStub = defineComponent({
 
 const TableStub = defineComponent({
   name: 'ATable',
-  props: ['columns', 'dataSource'],
+  props: ['columns', 'dataSource', 'rowKey'],
   template: `
     <div data-testid="table-stub">
       <div v-for="column in columns" :key="column.key || column.dataIndex">{{ column.title }}</div>
@@ -200,6 +200,8 @@ describe('EtfRadarView', () => {
     expect(api.getEtfRadarMethodology).not.toHaveBeenCalled();
     expect(wrapper.text()).toContain('证据强度');
     expect(wrapper.text()).toContain('华夏上证50ETF');
+    const subscriptionMetric = wrapper.findAll('.etf-metric').find(metric => metric.text().includes('方向性估算申购'));
+    expect(subscriptionMetric?.find('strong').classes()).toContain('etf-value--positive');
     wrapper.unmount();
   });
 
@@ -210,8 +212,14 @@ describe('EtfRadarView', () => {
 
     await tabs[1]!.trigger('click');
     await flushPromises();
+    const historyRowKey = wrapper.findComponent(TableStub).props('rowKey') as (row: { trade_date: string; symbol: string }) => string;
+    expect(historyRowKey({ trade_date: '2026-07-18', symbol: '510300.SH' })).toBe('2026-07-18-510300.SH');
     await tabs[2]!.trigger('click');
     await flushPromises();
+    const holderRowKey = wrapper.findComponent(TableStub).props('rowKey') as (row: EtfHolderPosition) => string;
+    expect(holderRowKey(holdersFixture().positions[0]!)).toBe(
+      '2026Q2-510300.SH-中央汇金投资有限责任公司'
+    );
     await tabs[3]!.trigger('click');
     await flushPromises();
     await tabs[1]!.trigger('click');
@@ -258,6 +266,20 @@ describe('EtfRadarView', () => {
     await tabs[2]!.trigger('click');
     await flushPromises();
     expect(wrapper.text()).toContain('暂无持有人披露');
+    wrapper.unmount();
+  });
+
+  it('shows a refresh error while retaining the populated active view', async () => {
+    setDefaultApiResponses();
+    const wrapper = await mountView();
+    api.getEtfRadarOverview.mockRejectedValueOnce(new Error('overview refresh unavailable'));
+
+    await wrapper.get('[data-testid="etf-refresh"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="etf-panel-error"]').text()).toContain('overview refresh unavailable');
+    expect(wrapper.text()).toContain('华夏上证50ETF');
+    expect(wrapper.text()).toContain('证据强度');
     wrapper.unmount();
   });
 

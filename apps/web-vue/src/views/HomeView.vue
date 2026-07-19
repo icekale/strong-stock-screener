@@ -115,6 +115,10 @@ const sectorFlowOption = computed<EChartsOption>(() => {
   if (!rows.length) return emptyChartOption('暂无板块资金流');
 
   return {
+    aria: {
+      enabled: true,
+      description: '板块资金流图，红色表示净流入，绿色表示净流出。'
+    },
     animationDuration: 160,
     grid: { left: 8, right: 18, top: 12, bottom: 22, containLabel: true },
     tooltip: {
@@ -615,7 +619,7 @@ onBeforeUnmount(() => {
   height: 5px;
   margin: 10px 0 2px;
   overflow: hidden;
-  background: var(--wb-surface-muted);
+  background: var(--wb-primary-soft);
   border-radius: 3px;
 }
 

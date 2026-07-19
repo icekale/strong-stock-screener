@@ -123,10 +123,30 @@ const historyOption = computed<EChartsOption>(() => ({
 }));
 
 const overviewMetrics = computed(() => [
-  { label: '证据强度', value: formatEvidenceStrength(overview.value?.evidence_strength ?? null), helper: overview.value?.evidence_level || '待确认' },
-  { label: '方向性估算申购', value: formatDirectionalCny(overview.value?.estimated_subscription_cny ?? null), tone: directionTone(overview.value?.estimated_subscription_cny ?? null) },
-  { label: '有效ETF', value: overview.value ? `${overview.value.valid_etf_count}/${overview.value.expected_etf_count}` : '--', helper: '核心池覆盖' },
-  { label: '模型版本', value: overview.value?.model_version || '--', helper: overview.value ? stageLabel(overview.value.signal_stage) : '待确认' }
+  {
+    label: '证据强度',
+    value: formatEvidenceStrength(overview.value?.evidence_strength ?? null),
+    helper: overview.value?.evidence_level || '待确认',
+    className: ''
+  },
+  {
+    label: '方向性估算申购',
+    value: formatDirectionalCny(overview.value?.estimated_subscription_cny ?? null),
+    helper: '',
+    className: valueTone(overview.value?.estimated_subscription_cny)
+  },
+  {
+    label: '有效ETF',
+    value: overview.value ? `${overview.value.valid_etf_count}/${overview.value.expected_etf_count}` : '--',
+    helper: '核心池覆盖',
+    className: ''
+  },
+  {
+    label: '模型版本',
+    value: overview.value?.model_version || '--',
+    helper: overview.value ? stageLabel(overview.value.signal_stage) : '待确认',
+    className: ''
+  }
 ]);
 
 function sourceStatusTone(status: SourceStatusValue) {
@@ -171,6 +191,14 @@ function holderCell(key: string, position: unknown) {
   if (key === 'shares' || key === 'change_shares') return key === 'shares' ? formatPlainShares(holder.shares) : formatDirectionalShares(holder.change_shares);
   if (key === 'holding_pct') return holder.holding_pct == null ? '--' : `${holder.holding_pct.toFixed(2)}%`;
   return String(holder[key as keyof EtfHolderPosition] ?? '--');
+}
+
+function historyRowKey(point: EtfRadarHistoryPoint) {
+  return `${point.trade_date}-${point.symbol}`;
+}
+
+function holderRowKey(position: EtfHolderPosition) {
+  return `${position.report_period}-${position.symbol}-${position.entity_name}`;
 }
 
 function columnKey(key: unknown) {
@@ -244,13 +272,13 @@ onMounted(() => void loadTab('overview'));
       <SectionHeader title="盘中资金信号" source="ETF份额与行情快照" :updated-at="formatAsOf(overview?.as_of)">
         <StatusTag :status="activeLoading() ? 'running' : activeError() ? 'failed' : overview ? 'success' : 'unknown'" />
       </SectionHeader>
+      <a-alert v-if="activeError()" data-testid="etf-panel-error" type="warning" :message="activeError()" show-icon />
       <div v-if="activeLoading() && !overview" data-testid="etf-local-loading" class="etf-state">正在读取盘中雷达...</div>
-      <a-alert v-else-if="activeError() && !overview" type="warning" :message="activeError()" show-icon />
       <div v-else-if="overview" class="etf-panel-content">
         <div class="etf-metrics">
           <div v-for="metric in overviewMetrics" :key="metric.label" class="etf-metric">
             <span class="etf-metric__label">{{ metric.label }}</span>
-            <strong :class="valueTone(typeof metric.value === 'number' ? metric.value : null)">{{ metric.value }}</strong>
+            <strong :class="metric.className">{{ metric.value }}</strong>
             <small>{{ metric.helper }}</small>
           </div>
         </div>
@@ -276,15 +304,15 @@ onMounted(() => void loadTab('overview'));
           </a-table>
         </div>
       </div>
-      <div v-else data-testid="etf-empty" class="etf-state">暂无盘中雷达数据</div>
+      <div v-else-if="!activeError()" data-testid="etf-empty" class="etf-state">暂无盘中雷达数据</div>
     </section>
 
     <section v-else-if="activeTab === 'history'" class="etf-panel">
       <SectionHeader title="份额变化" source="交易所ETF份额历史" :updated-at="formatAsOf(history?.as_of)">
         <StatusTag :status="activeLoading() ? 'running' : activeError() ? 'failed' : history ? 'success' : 'unknown'" />
       </SectionHeader>
+      <a-alert v-if="activeError()" data-testid="etf-panel-error" type="warning" :message="activeError()" show-icon />
       <div v-if="activeLoading() && !history" data-testid="etf-local-loading" class="etf-state">正在读取份额变化...</div>
-      <a-alert v-else-if="activeError() && !history" type="warning" :message="activeError()" show-icon />
       <div v-else-if="history" class="etf-panel-content">
         <EChart :height="280" :loading="activeLoading()" :option="historyOption" />
         <div class="etf-source-statuses">
@@ -294,7 +322,7 @@ onMounted(() => void loadTab('overview'));
         </div>
         <div v-if="history.points.length === 0" data-testid="etf-empty" class="etf-state">暂无份额历史</div>
         <div v-else class="etf-table-scroll">
-          <a-table :columns="historyColumns" :data-source="history.points" :pagination="false" :scroll="{ x: 980 }" row-key="trade_date">
+          <a-table :columns="historyColumns" :data-source="history.points" :pagination="false" :scroll="{ x: 980 }" :row-key="historyRowKey">
             <template #bodyCell="{ column, record }">
               <span :class="valueTone(['share_change', 'estimated_subscription_cny'].includes(columnKey(column.key)) ? recordNumber(record, column.key) : null)">
                 {{ historyCell(columnKey(column.key), record) }}
@@ -303,15 +331,15 @@ onMounted(() => void loadTab('overview'));
           </a-table>
         </div>
       </div>
-      <div v-else data-testid="etf-empty" class="etf-state">暂无份额历史</div>
+      <div v-else-if="!activeError()" data-testid="etf-empty" class="etf-state">暂无份额历史</div>
     </section>
 
     <section v-else-if="activeTab === 'holders'" class="etf-panel">
       <SectionHeader title="国家队持仓披露" source="基金定期报告" :updated-at="formatAsOf(holders?.as_of)">
         <StatusTag :status="activeLoading() ? 'running' : activeError() ? 'failed' : holders ? 'success' : 'unknown'" />
       </SectionHeader>
+      <a-alert v-if="activeError()" data-testid="etf-panel-error" type="warning" :message="activeError()" show-icon />
       <div v-if="activeLoading() && !holders" data-testid="etf-local-loading" class="etf-state">正在读取持有人披露...</div>
-      <a-alert v-else-if="activeError() && !holders" type="warning" :message="activeError()" show-icon />
       <div v-else-if="holders" class="etf-panel-content">
         <p class="etf-disclosure-note">持有人披露为报告期数据，不代表实时资金流向。</p>
         <div class="etf-source-statuses">
@@ -321,22 +349,22 @@ onMounted(() => void loadTab('overview'));
         </div>
         <div v-if="holders.positions.length === 0" data-testid="etf-empty" class="etf-state">暂无持有人披露</div>
         <div v-else class="etf-table-scroll">
-          <a-table :columns="holderColumns" :data-source="holders.positions" :pagination="false" :scroll="{ x: 1120 }" row-key="entity_name">
+          <a-table :columns="holderColumns" :data-source="holders.positions" :pagination="false" :scroll="{ x: 1120 }" :row-key="holderRowKey">
             <template #bodyCell="{ column, record }">
               <span :class="valueTone(columnKey(column.key) === 'change_shares' ? recordNumber(record, 'change_shares') : null)">{{ holderCell(columnKey(column.key), record) }}</span>
             </template>
           </a-table>
         </div>
       </div>
-      <div v-else data-testid="etf-empty" class="etf-state">暂无持有人披露</div>
+      <div v-else-if="!activeError()" data-testid="etf-empty" class="etf-state">暂无持有人披露</div>
     </section>
 
     <section v-else class="etf-panel">
       <SectionHeader title="方法与验证" source="模型说明与限制" :updated-at="formatAsOf(methodology?.as_of)">
         <StatusTag :status="activeLoading() ? 'running' : activeError() ? 'failed' : methodology ? 'success' : 'unknown'" />
       </SectionHeader>
+      <a-alert v-if="activeError()" data-testid="etf-panel-error" type="warning" :message="activeError()" show-icon />
       <div v-if="activeLoading() && !methodology" data-testid="etf-local-loading" class="etf-state">正在读取方法说明...</div>
-      <a-alert v-else-if="activeError() && !methodology" type="warning" :message="activeError()" show-icon />
       <div v-else-if="methodology" class="etf-panel-content etf-methodology">
         <div class="etf-source-statuses">
           <span v-for="source in activeSources()" :key="source.source" class="etf-source-status">
@@ -365,7 +393,7 @@ onMounted(() => void loadTab('overview'));
           <ul><li v-for="limitation in methodology.limitations" :key="limitation">{{ limitation }}</li></ul>
         </div>
       </div>
-      <div v-else data-testid="etf-empty" class="etf-state">暂无方法说明</div>
+      <div v-else-if="!activeError()" data-testid="etf-empty" class="etf-state">暂无方法说明</div>
     </section>
   </div>
 </template>
@@ -375,7 +403,7 @@ onMounted(() => void loadTab('overview'));
   min-width: 0;
   max-width: 100%;
   overflow-x: hidden;
-  color: var(--text-color);
+  color: var(--wb-ink);
 }
 
 .etf-header-meta,
@@ -384,7 +412,7 @@ onMounted(() => void loadTab('overview'));
   flex-wrap: wrap;
   gap: 8px 14px;
   align-items: center;
-  color: var(--text-color-3);
+  color: var(--wb-muted);
   font-size: 12px;
 }
 
@@ -395,9 +423,9 @@ onMounted(() => void loadTab('overview'));
 .etf-panel {
   min-width: 0;
   overflow: hidden;
-  border: 1px solid var(--border-color);
-  border-radius: 6px;
-  background: var(--container-bg-color);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius);
+  background: var(--wb-surface);
 }
 
 .etf-panel-content {
@@ -410,20 +438,24 @@ onMounted(() => void loadTab('overview'));
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 16px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--wb-border);
 }
 
 .etf-metric {
   min-width: 0;
-  padding: 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 4px;
-  background: var(--hover-color);
+  padding: 2px 12px;
+  border-inline-end: 1px solid var(--wb-border);
+}
+
+.etf-metric:last-child {
+  border-inline-end: 0;
 }
 
 .etf-metric__label,
 .etf-metric small {
   display: block;
-  color: var(--text-color-3);
+  color: var(--wb-muted);
   font-size: 12px;
 }
 
@@ -439,15 +471,16 @@ onMounted(() => void loadTab('overview'));
 .etf-evidence-block {
   margin-bottom: 14px;
   padding: 10px 12px;
-  border-left: 3px solid #1677ff;
-  background: var(--hover-color);
+  background: var(--wb-primary-soft);
+  border: 1px solid var(--wb-border);
+  border-radius: 4px;
 }
 
 .etf-evidence-block ul,
 .etf-methodology ul {
   margin: 6px 0 0;
   padding-left: 18px;
-  color: var(--text-color-2);
+  color: var(--wb-muted);
 }
 
 .etf-source-statuses {
@@ -470,26 +503,26 @@ onMounted(() => void loadTab('overview'));
 }
 
 .etf-value--positive {
-  color: #d9363e;
+  color: var(--wb-positive);
 }
 
 .etf-value--negative {
-  color: #07845e;
+  color: var(--wb-negative);
 }
 
 .etf-state {
   padding: 44px 16px;
-  color: var(--text-color-3);
+  color: var(--wb-muted);
   text-align: center;
 }
 
 .etf-disclosure-note {
   margin: 0 0 14px;
-  color: var(--text-color-2);
+  color: var(--wb-muted);
 }
 
 .etf-methodology {
-  color: var(--text-color-2);
+  color: var(--wb-muted);
 }
 
 .etf-methodology-grid {
@@ -500,7 +533,7 @@ onMounted(() => void loadTab('overview'));
 
 .etf-methodology h3 {
   margin: 0 0 8px;
-  color: var(--text-color);
+  color: var(--wb-ink);
   font-size: 14px;
 }
 
@@ -512,7 +545,7 @@ onMounted(() => void loadTab('overview'));
 }
 
 .etf-methodology dt {
-  color: var(--text-color);
+  color: var(--wb-ink);
   font-weight: 600;
 }
 

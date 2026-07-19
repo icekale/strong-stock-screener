@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import operator
+from collections.abc import Mapping
+
 import pytest
 
 from app.models import HuijinEtfActivityItem, HuijinEtfBaseline
@@ -7,6 +10,7 @@ from app.services.huijin_etf_activity import (
     ALL_ETFS,
     CORE_ETFS,
     VALIDATION_ETFS,
+    EtfDefinition,
     calculate_activity,
     validate_pair,
 )
@@ -75,6 +79,16 @@ def test_public_pool_contains_exact_core_and_validator_symbols() -> None:
     assert tuple(ALL_ETFS) == (*CORE_ETFS, *VALIDATION_ETFS)
 
 
+@pytest.mark.parametrize("mapping", [CORE_ETFS, VALIDATION_ETFS, ALL_ETFS])
+def test_exported_etf_mappings_are_immutable(
+    mapping: Mapping[str, EtfDefinition],
+) -> None:
+    symbol = next(iter(mapping))
+
+    with pytest.raises(TypeError):
+        operator.setitem(mapping, symbol, mapping[symbol])
+
+
 def test_calculate_activity_matches_2026_07_17_chinext_fixture() -> None:
     result = calculate_activity(
         symbol="159915.SZ",
@@ -115,6 +129,26 @@ def test_missing_previous_day_keeps_daily_metrics_unknown() -> None:
     assert result.daily_change_pct is None
     assert result.baseline_change_pct is None
     assert result.multiple is None
+    assert result.direction == "unknown"
+
+
+def test_missing_current_shares_keeps_all_calculated_metrics_unknown() -> None:
+    result = calculate_activity(
+        symbol="159915.SZ",
+        name="创业板ETF易方达",
+        index_name="创业板",
+        role="core",
+        trade_date="2026-07-17",
+        total_shares=None,
+        previous_total_shares=13_020_000_000,
+        baseline=_baseline(),
+    )
+
+    assert result.share_delta is None
+    assert result.daily_change_pct is None
+    assert result.baseline_change_pct is None
+    assert result.multiple is None
+    assert result.cumulative_baseline_change_pct is None
     assert result.direction == "unknown"
 
 

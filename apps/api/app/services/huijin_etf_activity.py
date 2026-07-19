@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 
 from app.models import (
     EtfActivityDirection,
@@ -24,7 +26,7 @@ class EtfDefinition:
     paired_symbol: str | None = None
 
 
-CORE_ETFS = {
+CORE_ETFS: Mapping[str, EtfDefinition] = MappingProxyType({
     "510050.SH": EtfDefinition("上证50ETF华夏", "上证50", "core"),
     "510300.SH": EtfDefinition("沪深300ETF华泰柏瑞", "沪深300", "core", "159919.SZ"),
     "510500.SH": EtfDefinition("中证500ETF南方", "中证500", "core", "159922.SZ"),
@@ -32,15 +34,17 @@ CORE_ETFS = {
     "159915.SZ": EtfDefinition("创业板ETF易方达", "创业板", "core"),
     "510230.SH": EtfDefinition("金融ETF国泰", "金融", "core"),
     "588080.SH": EtfDefinition("科创50ETF易方达", "科创50", "core"),
-}
+})
 
-VALIDATION_ETFS = {
+VALIDATION_ETFS: Mapping[str, EtfDefinition] = MappingProxyType({
     "159919.SZ": EtfDefinition("沪深300ETF嘉实", "沪深300", "validator", "510300.SH"),
     "159922.SZ": EtfDefinition("中证500ETF嘉实", "中证500", "validator", "510500.SH"),
     "159845.SZ": EtfDefinition("中证1000ETF华夏", "中证1000", "validator", "512100.SH"),
-}
+})
 
-ALL_ETFS = {**CORE_ETFS, **VALIDATION_ETFS}
+ALL_ETFS: Mapping[str, EtfDefinition] = MappingProxyType(
+    {**CORE_ETFS, **VALIDATION_ETFS}
+)
 
 
 def calculate_activity(

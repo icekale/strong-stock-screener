@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import type { AuctionModelPredictionItem, SectorRadarItem, StrongStockScreeningResponse } from "./types";
 const {
@@ -57,23 +57,17 @@ test("market pulse distinguishes pending panel data from failed data", () => {
   assert.match(source, /kind === "error" \? "读取失败" : "加载中"/);
 });
 
-test("homepage trend panels expose sector rotation and intraday emotion views", () => {
-  const panelsUrl = new URL("../components/overview/MarketTrendPanels.tsx", import.meta.url);
-  const chartUrl = new URL("../components/overview/OverviewTrendChart.tsx", import.meta.url);
-  const panels = existsSync(panelsUrl) ? readFileSync(panelsUrl, "utf8") : "";
-  const chart = existsSync(chartUrl) ? readFileSync(chartUrl, "utf8") : "";
+test("homepage capital panels expose financing and ETF evidence without probability wording", () => {
+  const panels = readFileSync(new URL("../components/overview/CapitalSignalPanels.tsx", import.meta.url), "utf8");
   const styles = readFileSync(new URL("../app/globals.css", import.meta.url), "utf8");
 
-  assert.match(panels, /板块轮动/);
-  assert.match(panels, /盘中情绪走势/);
-  assert.match(panels, /盘中样本不足/);
-  assert.match(panels, /累计 2 个点后绘制/);
-  assert.match(panels, /href="\/market\?view=sectors"/);
-  assert.match(panels, /href="\/sentiment"/);
-  assert.match(chart, /import\("echarts"\)/);
-  assert.match(styles, /\.market-trend-grid/);
-  assert.match(styles, /\.market-trend-chart/);
-  assert.match(styles, /\.market-trend-summary/);
+  assert.match(panels, /两融余额/);
+  assert.match(panels, /宽基护盘雷达/);
+  assert.match(panels, /证据强度/);
+  assert.match(panels, /href="\/etf-radar"/);
+  assert.doesNotMatch(panels, /概率/);
+  assert.match(styles, /\.capital-signal-stack/);
+  assert.match(styles, /\.capital-signal-panel/);
 });
 
 test("homepage only loads market direction data", () => {
@@ -85,13 +79,12 @@ test("homepage only loads market direction data", () => {
   assert.match(source, /getMarketOverview/);
   assert.match(source, /getSectorRadar\(12\)/);
   assert.match(source, /getSentimentSummary\(tradeDate, 80, false\)/);
-  assert.match(source, /getSectorReplicaRadar/);
-  assert.match(source, /getMarketEmotionSnapshot/);
-  assert.match(source, /MarketTrendPanels/);
-  assert.match(source, /IntersectionObserver/);
-  assert.match(source, /rootMargin: "240px"/);
-  assert.doesNotMatch(source, /disabled=\{refreshing \|\| trendsRefreshing\}/);
-  assert.doesNotMatch(source, /setTrendsRefreshing/);
+  assert.match(source, /getCapitalSummary/);
+  assert.match(source, /CapitalSignalPanels/);
+  assert.doesNotMatch(source, /getSectorReplicaRadar/);
+  assert.doesNotMatch(source, /getMarketEmotionSnapshot/);
+  assert.doesNotMatch(source, /MarketTrendPanels/);
+  assert.doesNotMatch(source, /IntersectionObserver/);
   assert.doesNotMatch(source, /<MarketFeed/);
 });
 
@@ -102,6 +95,7 @@ test("homepage applies core panels as each request settles", () => {
   assert.match(source, /runCorePanelRequest\(\s*\(\) => getHomepagePanel\("market"[\s\S]*?getMarketOverview/);
   assert.match(source, /runCorePanelRequest\(\s*\(\) => getHomepagePanel\("sector-radar"[\s\S]*?getSectorRadar\(12\)/);
   assert.match(source, /runCorePanelRequest\([\s\S]*?getHomepagePanel\("sentiment-summary"[\s\S]*?getSentimentSummary/);
+  assert.match(source, /runCorePanelRequest\([\s\S]*?getHomepagePanel\("capital-summary"[\s\S]*?getCapitalSummary/);
   assert.doesNotMatch(source, /Promise\.allSettled\(\[[\s\S]*?getMarketOverview\(\)/);
 });
 
@@ -112,35 +106,27 @@ test("homepage treats market overview as the critical refresh request", () => {
   assert.match(source, /getMarketOverview/);
   assert.match(source, /getHomepagePanel/);
   assert.match(source, /refresh\(true\)/);
-  assert.match(source, /IntersectionObserver/);
+  assert.doesNotMatch(source, /IntersectionObserver/);
 });
 
-test("homepage keeps the intraday emotion curve sampled while visible", () => {
+test("homepage no longer polls duplicate trend panels", () => {
   const source = readFileSync(new URL("../app/MarketOverviewWorkbench.tsx", import.meta.url), "utf8");
 
-  assert.match(source, /document\.visibilityState/);
-  assert.match(source, /setInterval\([\s\S]*?180_000/);
-  assert.match(source, /refreshEmotion/);
-});
-
-test("homepage caches activated trend requests without coupling them to core refresh", () => {
-  const source = readFileSync(new URL("../app/MarketOverviewWorkbench.tsx", import.meta.url), "utf8");
-  const sampleBlock = source.slice(source.indexOf("const sampleEmotion"), source.indexOf("const interval"));
-
-  assert.match(source, /getHomepagePanel\([\s\S]*?"sector-trend"/);
-  assert.match(source, /getHomepagePanel\("emotion-trend"/);
-  assert.match(source, /refreshEmotion/);
-  assert.match(sampleBlock, /void refreshEmotion\(true\)/);
-  assert.doesNotMatch(source, /onRefreshEmotion=\{\(\) => void refreshTrends\(\)\}/);
+  assert.doesNotMatch(source, /document\.visibilityState/);
+  assert.doesNotMatch(source, /setInterval/);
+  assert.doesNotMatch(source, /refreshEmotion/);
+  assert.doesNotMatch(source, /sector-trend|emotion-trend/);
 });
 
 test("homepage loading placeholder matches the focused composition", () => {
   const source = readFileSync(new URL("../app/page.tsx", import.meta.url), "utf8");
 
-  assert.ok(source.indexOf("板块资金流") < source.indexOf("市场状态"));
-  assert.ok(source.indexOf("市场状态") < source.indexOf("指数快照"));
-  assert.ok(source.indexOf("指数快照") < source.indexOf("板块轮动"));
-  assert.ok(source.indexOf("板块轮动") < source.indexOf("盘中情绪走势"));
+  assert.ok(source.indexOf("指数快照") < source.indexOf("市场状态"));
+  assert.ok(source.indexOf("市场状态") < source.indexOf("板块资金流"));
+  assert.ok(source.indexOf("板块资金流") < source.indexOf("两融余额"));
+  assert.ok(source.indexOf("两融余额") < source.indexOf("宽基护盘雷达"));
+  assert.doesNotMatch(source, /板块轮动/);
+  assert.doesNotMatch(source, /盘中情绪走势/);
   assert.doesNotMatch(source, /决策队列/);
   assert.doesNotMatch(source, /市场动态/);
 });

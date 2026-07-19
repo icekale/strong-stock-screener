@@ -3,15 +3,14 @@
 import { ReloadOutlined } from "@ant-design/icons";
 import { Button, Tag } from "antd";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { CapitalSignalPanels } from "../components/overview/CapitalSignalPanels";
 import { MarketIndexStrip, MarketPulse } from "../components/overview/MarketPulse";
-import { MarketTrendPanels } from "../components/overview/MarketTrendPanels";
 import { SectorHeatmapPreview } from "../components/overview/SectorHeatmapPreview";
 import { PageFrame } from "../components/workbench/PageFrame";
 import {
-  getMarketEmotionSnapshot,
+  getCapitalSummary,
   getMarketOverview,
   getSectorRadar,
-  getSectorReplicaRadar,
   getSentimentSummary,
 } from "../lib/api";
 import {
@@ -24,10 +23,9 @@ import {
 } from "../lib/marketOverview";
 import { createMemoryRequestCache } from "../lib/marketOverviewCache";
 import type {
-  MarketEmotionSnapshotResponse,
+  CapitalSummaryResponse,
   MarketOverviewResponse,
   SectorRadarResponse,
-  SectorReplicaRadarResponse,
   SentimentSummaryResponse,
 } from "../lib/types";
 
@@ -46,14 +44,9 @@ export function MarketOverviewWorkbench() {
   const [market, setMarket] = useState<PanelState<MarketOverviewResponse> | null>(null);
   const [sectorRadar, setSectorRadar] = useState<PanelState<SectorRadarResponse> | null>(null);
   const [sentiment, setSentiment] = useState<PanelState<SentimentSummaryResponse> | null>(null);
-  const [sectorTrend, setSectorTrend] = useState<PanelState<SectorReplicaRadarResponse> | null>(null);
-  const [emotionTrend, setEmotionTrend] = useState<PanelState<MarketEmotionSnapshotResponse> | null>(null);
-  const [trendsActivated, setTrendsActivated] = useState(false);
+  const [capital, setCapital] = useState<PanelState<CapitalSummaryResponse> | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const refreshGeneration = useRef(0);
-  const trendRefreshGeneration = useRef(0);
-  const emotionRefreshGeneration = useRef(0);
-  const trendAnchorRef = useRef<HTMLDivElement>(null);
 
   const refresh = useCallback((force = false) => {
     const generation = nextRequestGeneration(refreshGeneration.current);
@@ -92,6 +85,12 @@ export function MarketOverviewWorkbench() {
           setSentiment((previous) => toPanelState(result, panelValue(previous)));
         },
       ),
+      runCorePanelRequest(
+        () => getHomepagePanel("capital-summary", tradeDate, getCapitalSummary, force),
+        (result) => {
+          setCapital((previous) => toPanelState(result, panelValue(previous)));
+        },
+      ),
     ];
 
     void marketRequest.then((isLatest) => {
@@ -106,94 +105,9 @@ export function MarketOverviewWorkbench() {
     });
   }, []);
 
-  const refreshTrends = useCallback((force = false) => {
-    const generation = nextRequestGeneration(trendRefreshGeneration.current);
-    trendRefreshGeneration.current = generation;
-    const tradeDate = getShanghaiTradeDate();
-
-    return executeLatestOnly({
-      generation,
-      currentGeneration: () => trendRefreshGeneration.current,
-      execute: () =>
-        Promise.allSettled([
-          getHomepagePanel(
-            "sector-trend",
-            tradeDate,
-            () => getSectorReplicaRadar({ mode: "strength", limit: 6, stockLimit: 1 }),
-            force,
-          ),
-          getHomepagePanel("emotion-trend", tradeDate, () => getMarketEmotionSnapshot(tradeDate, 80, false), force),
-        ]),
-      apply: ([sectorResult, emotionResult]) => {
-        setSectorTrend((previous) => toPanelState(sectorResult, panelValue(previous)));
-        setEmotionTrend((previous) => toPanelState(emotionResult, panelValue(previous)));
-      },
-      finishLoading: () => undefined,
-    });
-  }, []);
-
-  const refreshEmotion = useCallback((force = true) => {
-    const generation = nextRequestGeneration(emotionRefreshGeneration.current);
-    emotionRefreshGeneration.current = generation;
-    const tradeDate = getShanghaiTradeDate();
-
-    return executeLatestOnly({
-      generation,
-      currentGeneration: () => emotionRefreshGeneration.current,
-      execute: () =>
-        settleRequest(() =>
-          getHomepagePanel("emotion-trend", tradeDate, () => getMarketEmotionSnapshot(tradeDate, 80, false), force),
-        ),
-      apply: (result) => {
-        setEmotionTrend((previous) => toPanelState(result, panelValue(previous)));
-      },
-      finishLoading: () => undefined,
-    });
-  }, []);
-
   useEffect(() => {
     void refresh();
   }, [refresh]);
-
-  useEffect(() => {
-    if (trendsActivated || !trendAnchorRef.current) {
-      return;
-    }
-    if (typeof IntersectionObserver === "undefined") {
-      setTrendsActivated(true);
-      return;
-    }
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting) {
-          setTrendsActivated(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "240px" },
-    );
-    observer.observe(trendAnchorRef.current);
-    return () => observer.disconnect();
-  }, [trendsActivated]);
-
-  useEffect(() => {
-    if (trendsActivated) {
-      void refreshTrends();
-    }
-  }, [refreshTrends, trendsActivated]);
-
-  useEffect(() => {
-    if (!trendsActivated) {
-      return;
-    }
-    const sampleEmotion = () => {
-      if (document.visibilityState === "visible" && getMarketSession() === "盘中") {
-        void refreshEmotion(true);
-      }
-    };
-    const interval = window.setInterval(sampleEmotion, 180_000);
-    return () => window.clearInterval(interval);
-  }, [refreshEmotion, trendsActivated]);
 
   const tradeDate = getShanghaiTradeDate();
   const session = getMarketSession();
@@ -205,12 +119,7 @@ export function MarketOverviewWorkbench() {
           disabled={refreshing}
           icon={<ReloadOutlined />}
           loading={refreshing}
-          onClick={() => {
-            void refresh(true);
-            if (trendsActivated) {
-              void refreshTrends(true);
-            }
-          }}
+          onClick={() => void refresh(true)}
           type="primary"
         >
           刷新
@@ -221,18 +130,11 @@ export function MarketOverviewWorkbench() {
       title="市场总览"
     >
       <div className="market-overview-layout">
-        <div className="market-overview-lead">
-          <SectorHeatmapPreview onRefresh={() => void refresh(true)} sectorRadar={sectorRadar} />
-          <MarketPulse market={market} onRefresh={() => void refresh(true)} sentiment={sentiment} />
-        </div>
         <MarketIndexStrip market={market} onRefresh={() => void refresh(true)} />
-        <div ref={trendAnchorRef}>
-          <MarketTrendPanels
-            emotion={emotionTrend}
-            onRefreshEmotion={() => void refreshEmotion(true)}
-            onRefreshSector={() => void refreshTrends(true)}
-            sector={sectorTrend}
-          />
+        <MarketPulse market={market} onRefresh={() => void refresh(true)} sentiment={sentiment} />
+        <div className="market-overview-lead market-capital-grid">
+          <SectorHeatmapPreview onRefresh={() => void refresh(true)} sectorRadar={sectorRadar} />
+          <CapitalSignalPanels capital={capital} onRefresh={() => void refresh(true)} />
         </div>
       </div>
     </PageFrame>

@@ -18,14 +18,14 @@ function MarketOverviewPlaceholder() {
   return (
     <PageFrame context="正在读取上海市场数据" title="市场总览">
       <div className="market-overview-layout">
-        <div className="market-overview-lead">
-          <PlaceholderPanel rows={5} title="板块资金流" />
-          <PlaceholderPanel rows={5} title="市场状态" />
-        </div>
         <PlaceholderPanel rows={1} title="指数快照" />
-        <div className="market-trend-grid">
-          <PlaceholderPanel rows={6} title="板块轮动" />
-          <PlaceholderPanel rows={6} title="盘中情绪走势" />
+        <PlaceholderPanel rows={2} title="市场状态" />
+        <div className="market-overview-lead market-capital-grid">
+          <PlaceholderPanel rows={7} title="板块资金流" />
+          <div className="capital-signal-stack">
+            <PlaceholderPanel rows={2} title="两融余额" />
+            <PlaceholderPanel rows={2} title="宽基护盘雷达" />
+          </div>
         </div>
       </div>
     </PageFrame>

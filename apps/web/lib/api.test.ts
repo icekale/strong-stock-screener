@@ -16,10 +16,41 @@ const {
   cancelChanlunPaperOrder,
   createChanlunPaperOrderDraft,
   fillChanlunPaperOrder,
+  getCapitalSummary,
+  getEtfRadarHistory,
+  getEtfRadarHolders,
+  getEtfRadarMethodology,
+  getEtfRadarOverview,
   refreshChanlunAlerts,
   searchChanlunSymbols,
 } =
   (await import(new URL("./api.ts", import.meta.url).href)) as typeof import("./api");
+
+test("capital radar clients use the dedicated read-only endpoints", async () => {
+  const originalFetch = globalThis.fetch;
+  const requests: URL[] = [];
+  globalThis.fetch = async (input) => {
+    requests.push(new URL(String(input)));
+    return new Response(JSON.stringify({}), { headers: { "Content-Type": "application/json" } });
+  };
+
+  try {
+    await getCapitalSummary();
+    await getEtfRadarOverview();
+    await getEtfRadarHistory(90);
+    await getEtfRadarHolders();
+    await getEtfRadarMethodology();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(requests[0].pathname, "/api/market/capital-summary");
+  assert.equal(requests[1].pathname, "/api/etf-radar/overview");
+  assert.equal(requests[2].pathname, "/api/etf-radar/history");
+  assert.equal(requests[2].searchParams.get("days"), "90");
+  assert.equal(requests[3].pathname, "/api/etf-radar/holders");
+  assert.equal(requests[4].pathname, "/api/etf-radar/methodology");
+});
 
 test("cache-only Top3 marks a missing cache separately from an API failure", async () => {
   const originalFetch = globalThis.fetch;

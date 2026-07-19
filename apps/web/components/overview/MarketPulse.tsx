@@ -1,3 +1,4 @@
+import { directionTone, formatDirectionalPercent } from "../../lib/capitalSignals";
 import { marketBreadthPercent, type PanelState } from "../../lib/marketOverview";
 import type { MarketOverviewResponse, SentimentSummaryResponse } from "../../lib/types";
 import { DataState } from "../workbench/DataState";
@@ -39,6 +40,7 @@ export function MarketPulse({ market, onRefresh, sentiment }: MarketPulseProps) 
           <div className="market-state-grid">
             <MarketMetric
               detail={marketData ? formatTurnoverChange(marketData.turnover.change_pct) : undefined}
+              detailTone={marketData ? directionTone(marketData.turnover.change_pct) : undefined}
               label="总成交额"
               unavailable={!marketData}
               value={marketData ? formatCny(marketData.turnover.total_cny) : marketUnavailableLabel}
@@ -112,6 +114,7 @@ export function MarketIndexStrip({ market, onRefresh }: { market: PanelState<Mar
 
 function MarketMetric({
   detail,
+  detailTone,
   label,
   split = false,
   tone,
@@ -119,6 +122,7 @@ function MarketMetric({
   value,
 }: {
   detail?: string;
+  detailTone?: "fall" | "neutral" | "rise";
   label: string;
   split?: boolean;
   tone?: "primary";
@@ -135,7 +139,7 @@ function MarketMetric({
           {split ? <SplitValue value={value} /> : value}
         </div>
       )}
-      {detail ? <div className="market-state__detail">{detail}</div> : null}
+      {detail ? <div className={`market-state__detail ${detailTone ? toneClass(detailTone) : ""}`}>{detail}</div> : null}
     </div>
   );
 }
@@ -161,7 +165,7 @@ function formatCny(value: number | null) {
 }
 
 function formatTurnoverChange(value: number | null) {
-  return value === null ? "昨日对比待确认" : `较昨日 ${value > 0 ? "+" : ""}${value.toFixed(2)}%`;
+  return value === null ? "昨日对比待确认" : `较昨日 ${formatDirectionalPercent(value)}`;
 }
 
 function formatCount(value: number | null) {
@@ -179,4 +183,10 @@ function formatPercent(value: number | null) {
 function marketTone(value: number | null) {
   if (value === null || value === 0) return "";
   return value > 0 ? "market-rise-text" : "market-fall-text";
+}
+
+function toneClass(tone: "fall" | "neutral" | "rise") {
+  if (tone === "rise") return "market-rise-text";
+  if (tone === "fall") return "market-fall-text";
+  return "";
 }

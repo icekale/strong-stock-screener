@@ -1993,3 +1993,109 @@ export type SystemStatusResponse = {
 export type SystemCacheClearResponse = {
   cleared: string[];
 };
+
+export type CapitalSignalStage = "intraday" | "post_close" | "disclosure";
+export type CapitalEvidenceLevel = "常规" | "观察" | "疑似" | "较强";
+
+export type CapitalSignalMetadata = {
+  generated_at: string;
+  trade_date: string;
+  as_of: string;
+  signal_stage: CapitalSignalStage;
+  model_version: string;
+  source_status: StrongStockSourceStatus[];
+};
+
+export type MarginSummary = {
+  balance_cny: number | null;
+  financing_balance_cny: number | null;
+  securities_lending_balance_cny: number | null;
+  financing_buy_cny: number | null;
+  change_cny: number | null;
+  change_pct: number | null;
+  available_markets: number;
+  expected_markets: number;
+};
+
+export type EtfRadarSummary = {
+  evidence_strength: number | null;
+  evidence_level: CapitalEvidenceLevel | null;
+  valid_etf_count: number;
+  expected_etf_count: number;
+  estimated_subscription_cny: number | null;
+  evidence: string[];
+};
+
+export type CapitalSummaryResponse = CapitalSignalMetadata & {
+  margin: MarginSummary;
+  etf_radar: EtfRadarSummary;
+};
+
+export type EtfRadarItem = {
+  symbol: string;
+  name: string;
+  index_name: string;
+  total_shares: number | null;
+  share_change: number | null;
+  estimated_subscription_cny: number | null;
+  robust_score: number | null;
+  same_time_turnover_ratio: number | null;
+  relative_index_return_pct: number | null;
+  late_session_acceleration: number | null;
+  evidence_strength: number | null;
+  evidence: string[];
+};
+
+export type EtfRadarOverviewResponse = CapitalSignalMetadata & {
+  evidence_strength: number | null;
+  evidence_level: CapitalEvidenceLevel | null;
+  valid_etf_count: number;
+  expected_etf_count: number;
+  estimated_subscription_cny: number | null;
+  evidence: string[];
+  items: EtfRadarItem[];
+};
+
+export type EtfRadarHistoryPoint = {
+  trade_date: string;
+  symbol: string;
+  name: string;
+  total_shares: number | null;
+  share_change: number | null;
+  estimated_subscription_cny: number | null;
+  robust_score: number | null;
+};
+
+export type EtfRadarHistoryResponse = CapitalSignalMetadata & {
+  points: EtfRadarHistoryPoint[];
+};
+
+export type EtfHolderPosition = {
+  symbol: string;
+  name: string;
+  report_period: string;
+  entity_name: string;
+  shares: number | null;
+  holding_pct: number | null;
+  change_shares: number | null;
+  source: string;
+};
+
+export type EtfRadarHoldersResponse = CapitalSignalMetadata & {
+  positions: EtfHolderPosition[];
+};
+
+export type EtfRadarFactorDefinition = {
+  key: string;
+  name: string;
+  description: string;
+  availability: string;
+};
+
+export type EtfRadarMethodologyResponse = CapitalSignalMetadata & {
+  pool_version: string;
+  core_pool: string[];
+  thresholds: Record<string, number>;
+  factors: EtfRadarFactorDefinition[];
+  limitations: string[];
+};

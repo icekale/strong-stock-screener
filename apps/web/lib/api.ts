@@ -10,6 +10,7 @@ import type {
   AuctionTop3TrainingGenerateResponse,
   AuctionTop3TrainingSummary,
   BackgroundJobState,
+  CapitalSummaryResponse,
   ChanlunAnalysisResponse,
   ChanlunAlertListResponse,
   ChanlunAlertRefreshResponse,
@@ -24,6 +25,10 @@ import type {
   CzscResearchSnapshot,
   CzscShadowScreeningJobResponse,
   DataSourceStatusResponse,
+  EtfRadarHistoryResponse,
+  EtfRadarHoldersResponse,
+  EtfRadarMethodologyResponse,
+  EtfRadarOverviewResponse,
   GsgfAnalysis,
   GsgfAutoReviewConfig,
   GsgfBacktestSummary,
@@ -147,6 +152,47 @@ export async function getMarketOverview(): Promise<MarketOverviewResponse> {
     throw new Error(`读取全A市场概览失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<MarketOverviewResponse>;
+}
+
+export async function getCapitalSummary(): Promise<CapitalSummaryResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/market/capital-summary`);
+  if (!response.ok) {
+    throw new Error(`读取资金信号摘要失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<CapitalSummaryResponse>;
+}
+
+export async function getEtfRadarOverview(): Promise<EtfRadarOverviewResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/etf-radar/overview`);
+  if (!response.ok) {
+    throw new Error(`读取ETF资金雷达失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<EtfRadarOverviewResponse>;
+}
+
+export async function getEtfRadarHistory(days = 120): Promise<EtfRadarHistoryResponse> {
+  const params = new URLSearchParams({ days: String(days) });
+  const response = await fetch(`${API_BASE_URL}/api/etf-radar/history?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取ETF份额历史失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<EtfRadarHistoryResponse>;
+}
+
+export async function getEtfRadarHolders(): Promise<EtfRadarHoldersResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/etf-radar/holders`);
+  if (!response.ok) {
+    throw new Error(`读取ETF持有人披露失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<EtfRadarHoldersResponse>;
+}
+
+export async function getEtfRadarMethodology(): Promise<EtfRadarMethodologyResponse> {
+  const response = await fetch(`${API_BASE_URL}/api/etf-radar/methodology`);
+  if (!response.ok) {
+    throw new Error(`读取ETF资金雷达方法失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<EtfRadarMethodologyResponse>;
 }
 
 export async function getMarketRankings(limit = 30): Promise<MarketRankingsResponse> {

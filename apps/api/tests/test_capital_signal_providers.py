@@ -290,6 +290,76 @@ def test_share_provider_marks_partial_sse_coverage_stale() -> None:
     assert "缺失 1" in result.source_status[0].detail
 
 
+def test_share_provider_preserves_all_wrong_date_sse_rows_but_marks_current_stale() -> None:
+    symbols = ["510300.SH", "510500.SH"]
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "result": [
+                    {
+                        "STAT_DATE": "2026-07-16",
+                        "SEC_CODE": symbol.split(".", 1)[0],
+                        "TOT_VOL": "100",
+                    }
+                    for symbol in symbols
+                ]
+            },
+        )
+
+    provider = OfficialCapitalDataProvider(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+    result = provider.get_etf_share_rows("2026-07-17", symbols)
+
+    assert {row.symbol for row in result.rows} == set(symbols)
+    assert {row.trade_date for row in result.rows} == {"2026-07-16"}
+    assert result.source_status[0].status == "stale"
+    assert "当日有效 0/2" in result.source_status[0].detail
+    assert "缺失 2" in result.source_status[0].detail
+    assert "2026-07-16" in result.source_status[0].detail
+
+
+def test_share_provider_counts_only_current_rows_in_mixed_date_sse_response() -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "result": [
+                    {
+                        "STAT_DATE": "2026-07-17",
+                        "SEC_CODE": "510300",
+                        "TOT_VOL": "100",
+                    },
+                    {
+                        "STAT_DATE": "2026-07-16",
+                        "SEC_CODE": "510500",
+                        "TOT_VOL": "100",
+                    },
+                ]
+            },
+        )
+
+    provider = OfficialCapitalDataProvider(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+    result = provider.get_etf_share_rows(
+        "2026-07-17", ["510300.SH", "510500.SH"]
+    )
+
+    assert [(row.symbol, row.trade_date) for row in result.rows] == [
+        ("510300.SH", "2026-07-17"),
+        ("510500.SH", "2026-07-16"),
+    ]
+    assert result.source_status[0].status == "stale"
+    assert "当日有效 1/2" in result.source_status[0].detail
+    assert "缺失 1" in result.source_status[0].detail
+    assert "2026-07-16" in result.source_status[0].detail
+
+
 def test_share_provider_collects_the_ten_etf_universe_without_live_calls() -> None:
     symbols = [
         "510050.SH",

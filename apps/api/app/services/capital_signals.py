@@ -5,6 +5,7 @@ import json
 import statistics
 from collections.abc import Iterable
 from datetime import datetime, timedelta
+from math import isclose
 from threading import RLock
 from typing import Protocol
 from zoneinfo import ZoneInfo
@@ -909,19 +910,46 @@ def _has_position_coverage(
     baselines: list[HuijinEtfBaseline],
     report_period: str,
 ) -> bool:
-    expected_symbols = {
-        row.symbol
+    expected_rows = [
+        row
         for row in baselines
         if row.pool_version == POOL_VERSION and row.report_period == report_period
-    }
-    if not expected_symbols:
+    ]
+    expected_by_symbol = {row.symbol: row for row in expected_rows}
+    if (
+        len(expected_rows) != len(ALL_ETFS)
+        or set(expected_by_symbol) != set(ALL_ETFS)
+    ):
         return False
-    position_symbols = {
-        row.symbol
-        for row in positions
-        if row.report_period == report_period and row.symbol in expected_symbols
+    position_baselines = build_baselines(
+        [
+            row
+            for row in positions
+            if row.report_period == report_period and row.symbol in expected_by_symbol
+        ]
+    )
+    position_by_symbol = {
+        row.symbol: row
+        for row in position_baselines
+        if row.pool_version == POOL_VERSION and row.report_period == report_period
     }
-    return position_symbols == expected_symbols
+    if set(position_by_symbol) != set(expected_by_symbol):
+        return False
+    return all(
+        isclose(
+            position_by_symbol[symbol].confirmed_huijin_shares,
+            baseline.confirmed_huijin_shares,
+            rel_tol=1e-12,
+            abs_tol=1e-9,
+        )
+        and isclose(
+            position_by_symbol[symbol].confirmed_huijin_holding_pct,
+            baseline.confirmed_huijin_holding_pct,
+            rel_tol=1e-12,
+            abs_tol=1e-9,
+        )
+        for symbol, baseline in expected_by_symbol.items()
+    )
 
 
 def _holder_state_fingerprint(

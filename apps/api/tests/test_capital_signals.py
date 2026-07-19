@@ -899,6 +899,40 @@ def test_holders_marks_complete_baselines_stale_when_positions_are_unavailable(
     assert not any(status.status == "success" for status in result.source_status)
 
 
+def test_holders_refreshes_when_cached_entity_totals_do_not_match_baselines(
+    tmp_path: Path,
+) -> None:
+    cached_positions = _holder_positions()
+    second_entity_positions = [
+        row.model_copy(
+            update={
+                "entity_name": "中央汇金资产管理有限责任公司",
+                "shares": 50,
+                "holding_pct": 5,
+            }
+        )
+        for row in cached_positions
+    ]
+    holder_provider = FakeHolderProvider(fail=True)
+    store = CapitalSignalStore(tmp_path)
+    store.save_huijin_baselines(
+        build_baselines([*cached_positions, *second_entity_positions])
+    )
+    store.save_holder_reports(cached_positions)
+    service = CapitalSignalService(
+        provider=FakeCapitalProvider(),
+        holder_provider=holder_provider,
+        store=store,
+        clock=_clock,
+    )
+
+    result = service.holders()
+
+    assert len(holder_provider.calls) == 1
+    assert any(status.status == "stale" for status in result.source_status)
+    assert not any(status.status == "success" for status in result.source_status)
+
+
 def test_holders_replaces_corrected_same_period_symbol_group(tmp_path: Path) -> None:
     positions = _holder_positions()
     corrected_symbol = positions[1].symbol

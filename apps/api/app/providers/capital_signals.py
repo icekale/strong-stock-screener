@@ -130,15 +130,24 @@ class OfficialCapitalDataProvider:
                 response.raise_for_status()
                 sse_rows = parse_sse_etf_share_payload(response.json(), symbols=sse_symbols)
                 rows.extend(sse_rows)
-                returned_symbols = {row.symbol for row in sse_rows}
-                missing_count = len(set(sse_symbols) - returned_symbols)
+                current_symbols = {
+                    row.symbol for row in sse_rows if row.trade_date == trade_date
+                }
+                missing_count = len(set(sse_symbols) - current_symbols)
+                returned_dates = sorted({row.trade_date for row in sse_rows})
+                mismatched_dates = [date for date in returned_dates if date != trade_date]
+                date_detail = (
+                    f"；实际返回日期 {', '.join(returned_dates)}"
+                    if mismatched_dates
+                    else ""
+                )
                 statuses.append(
                     StrongStockSourceStatus(
                         source="上交所ETF份额",
                         status="success" if missing_count == 0 else "stale",
                         detail=(
-                            f"当日有效 {len(returned_symbols)}/{len(sse_symbols)} 只；"
-                            f"缺失 {missing_count} 只；万份转换为份"
+                            f"当日有效 {len(current_symbols)}/{len(sse_symbols)} 只；"
+                            f"缺失 {missing_count} 只；万份转换为份{date_detail}"
                         ),
                     )
                 )

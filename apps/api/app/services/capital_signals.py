@@ -94,8 +94,7 @@ class CapitalSignalService:
             if (
                 not force
                 and cached is not None
-                and cached.model_version == MODEL_VERSION
-                and cached.pool_version == POOL_VERSION
+                and _is_compatible_snapshot(cached)
                 and cached.baseline_version == active_baseline_version
                 and _is_fresh(cached.generated_at, now, self.ttl_seconds)
             ):
@@ -112,23 +111,6 @@ class CapitalSignalService:
                 for row in current_result.rows
                 if row.trade_date == trade_date and row.symbol in ALL_ETFS
             ]
-            if not fetched_current_rows and cached is not None:
-                return cached.model_copy(
-                    update={
-                        "model_version": MODEL_VERSION,
-                        "pool_version": POOL_VERSION,
-                        "source_status": [
-                            *cached.source_status,
-                            *baseline_status,
-                            *current_result.source_status,
-                            StrongStockSourceStatus(
-                                source="ETF资金雷达缓存",
-                                status="stale",
-                                detail="远端刷新失败，返回最近持久化缓存",
-                            ),
-                        ],
-                    }
-                )
             history = self.store.load_share_history()
             stored_current_rows = [
                 row
@@ -137,11 +119,9 @@ class CapitalSignalService:
             ]
             current_rows = _merge_share_history(stored_current_rows, fetched_current_rows)
             if not current_rows:
-                if cached is not None:
+                if cached is not None and _is_compatible_snapshot(cached):
                     return cached.model_copy(
                         update={
-                            "model_version": MODEL_VERSION,
-                            "pool_version": POOL_VERSION,
                             "source_status": [
                                 *cached.source_status,
                                 *baseline_status,
@@ -154,10 +134,25 @@ class CapitalSignalService:
                             ]
                         }
                     )
+                incompatible_cache_status = (
+                    [
+                        StrongStockSourceStatus(
+                            source="ETF资金雷达缓存",
+                            status="stale",
+                            detail="不兼容的旧版缓存已忽略，返回空的新模型响应",
+                        )
+                    ]
+                    if cached is not None
+                    else []
+                )
                 return self._empty_overview(
                     now,
                     trade_date,
-                    [*baseline_status, *current_result.source_status],
+                    [
+                        *baseline_status,
+                        *current_result.source_status,
+                        *incompatible_cache_status,
+                    ],
                     baselines,
                 )
 
@@ -630,6 +625,31 @@ def _is_fresh(generated_at: str, now: datetime, ttl_seconds: int) -> bool:
         return 0 <= (now - parsed).total_seconds() <= ttl_seconds
     except ValueError:
         return False
+
+
+def _is_compatible_snapshot(snapshot: EtfRadarOverviewResponse) -> bool:
+    if snapshot.model_version != MODEL_VERSION or snapshot.pool_version != POOL_VERSION:
+        return False
+    if len(snapshot.core_items) != len(CORE_ETFS):
+        return False
+    if len(snapshot.validation_items) != len(VALIDATION_ETFS):
+        return False
+    if len(snapshot.validation_groups) != 3:
+        return False
+    if {item.symbol for item in snapshot.core_items} != set(CORE_ETFS):
+        return False
+    if {item.symbol for item in snapshot.validation_items} != set(VALIDATION_ETFS):
+        return False
+    expected_groups = {
+        (definition.index_name, symbol, definition.paired_symbol)
+        for symbol, definition in CORE_ETFS.items()
+        if definition.paired_symbol is not None
+    }
+    actual_groups = {
+        (group.index_name, group.core_symbol, group.validator_symbol)
+        for group in snapshot.validation_groups
+    }
+    return actual_groups == expected_groups
 
 
 def _latest_share_before(

@@ -11,6 +11,7 @@ from app.models import (
     EtfHolderPosition,
     EtfRadarHistoryPoint,
     EtfRadarHoldersResponse,
+    EtfRadarItem,
     EtfRadarOverviewResponse,
     EtfRadarSummary,
     EtfSharePoint,
@@ -482,6 +483,9 @@ def test_service_returns_cached_snapshot_as_stale_when_refresh_fails(tmp_path: P
         clock=_clock,
     )
     fresh = fresh_service.overview(force=True)
+    store.save_share_history(
+        [row for row in store.load_share_history() if row.trade_date != "2026-07-17"]
+    )
     failed_service = CapitalSignalService(
         provider=FakeCapitalProvider(fail=True),
         store=store,
@@ -496,6 +500,111 @@ def test_service_returns_cached_snapshot_as_stale_when_refresh_fails(tmp_path: P
     assert stale.generated_at == fresh.generated_at
     assert stale.source_status[-1].status == "stale"
     assert "缓存" in stale.source_status[-1].detail
+
+
+def test_zero_row_refresh_recalculates_from_real_same_day_history(tmp_path: Path) -> None:
+    store = CapitalSignalStore(tmp_path)
+    _seed_prior_rows(store)
+    fresh_service = CapitalSignalService(
+        provider=FakeCapitalProvider(),
+        store=store,
+        holder_provider=FakeHolderProvider(),
+        clock=_clock,
+    )
+    cached = fresh_service.overview(force=True)
+    store.save_share_history(
+        [
+            *[
+                row
+                for row in store.load_share_history()
+                if row.trade_date != "2026-07-17"
+            ],
+            *[
+                EtfSharePoint(
+                    trade_date="2026-07-17",
+                    symbol=symbol,
+                    name=definition.name,
+                    total_shares=2_000,
+                )
+                for symbol, definition in ALL_ETFS.items()
+            ],
+        ]
+    )
+    failed_service = CapitalSignalService(
+        provider=FakeCapitalProvider(fail=True),
+        store=store,
+        holder_provider=FakeHolderProvider(fail=True),
+        clock=lambda: datetime(2026, 7, 19, 10, 5, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+
+    refreshed = failed_service.overview(force=True)
+
+    assert refreshed.generated_at != cached.generated_at
+    assert refreshed.model_version == "huijin-public-rule-v1"
+    assert len(refreshed.core_items) == 7
+    assert len(refreshed.validation_items) == 3
+    assert len(refreshed.validation_groups) == 3
+    assert refreshed.activity.available_core_count == 7
+    assert {item.total_shares for item in refreshed.core_items} == {2_000}
+    assert any(status.status == "failed" for status in refreshed.source_status)
+    assert any(status.source == "ETF份额缓存" for status in refreshed.source_status)
+
+
+def test_incompatible_legacy_snapshot_is_ignored_when_no_current_rows(tmp_path: Path) -> None:
+    store = CapitalSignalStore(tmp_path)
+    store.save_snapshot(
+        EtfRadarOverviewResponse(
+            generated_at="2026-07-18T10:00:00+08:00",
+            trade_date="2026-07-17",
+            as_of="2026-07-18T10:00:00+08:00",
+            signal_stage="post_close",
+            model_version="heuristic-v1",
+            pool_version="core-a-share-v1",
+            evidence_strength=99,
+            evidence_level="较强",
+            valid_etf_count=1,
+            estimated_subscription_cny=8_500_000,
+            evidence=["旧启发式证据"],
+            items=[
+                EtfRadarItem(
+                    symbol="510310.SH",
+                    name="旧池ETF",
+                    index_name="沪深300",
+                    total_shares=12_000_000,
+                    share_change=2_000_000,
+                    robust_score=8,
+                    evidence_strength=99,
+                    evidence=["旧项目证据"],
+                )
+            ],
+        )
+    )
+    service = CapitalSignalService(
+        provider=FakeCapitalProvider(fail=True),
+        store=store,
+        holder_provider=FakeHolderProvider(fail=True),
+        clock=_clock,
+    )
+
+    result = service.overview(force=True)
+
+    assert result.model_version == "huijin-public-rule-v1"
+    assert result.pool_version == POOL_VERSION
+    assert len(result.core_items) == 7
+    assert len(result.validation_items) == 3
+    assert len(result.validation_groups) == 3
+    assert all(item.total_shares is None for item in [*result.core_items, *result.validation_items])
+    assert result.activity.available_core_count == 0
+    assert result.evidence_strength is None
+    assert result.evidence_level is None
+    assert result.estimated_subscription_cny is None
+    assert result.evidence == []
+    assert {item.symbol for item in result.items} == set(CORE_ETFS)
+    assert all(item.robust_score is None and item.evidence == [] for item in result.items)
+    assert any(
+        status.status == "stale" and "不兼容" in status.detail and "忽略" in status.detail
+        for status in result.source_status
+    )
 
 
 def test_service_merges_partial_refresh_with_same_day_persisted_rows(tmp_path: Path) -> None:

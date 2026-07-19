@@ -195,7 +195,19 @@ function capitalFixture(): CapitalSummaryResponse {
       valid_etf_count: 6,
       expected_etf_count: 7,
       estimated_subscription_cny: 24_218_749_900,
-      evidence: ['6/6 只有效ETF份额增加', '合计估算净申购 242.2亿']
+      evidence: ['6/6 只有效ETF份额增加', '合计估算净申购 242.2亿'],
+      activity: {
+        core_count: 7,
+        available_core_count: 0,
+        tenfold_increase_count: 0,
+        tenfold_decrease_count: 0,
+        confirmed_increase_group_count: 0,
+        confirmed_decrease_group_count: 0,
+        divergent_group_count: 0,
+        incomplete_group_count: 0,
+        strongest_symbol: null,
+        strongest_baseline_change_pct: null
+      }
     }
   };
 }

@@ -2090,7 +2090,7 @@ export type EtfRadarSummary = {
   expected_etf_count: number;
   estimated_subscription_cny: number | null;
   evidence: string[];
-  activity?: HuijinEtfActivitySummary;
+  activity: HuijinEtfActivitySummary;
 };
 
 export type CapitalSummaryResponse = CapitalSignalMetadata & {
@@ -2121,13 +2121,13 @@ export type EtfRadarOverviewResponse = CapitalSignalMetadata & {
   estimated_subscription_cny: number | null;
   evidence: string[];
   items: EtfRadarItem[];
-  pool_version?: string;
-  baseline_version?: string | null;
-  baseline_fingerprint?: string | null;
-  activity?: HuijinEtfActivitySummary;
-  core_items?: HuijinEtfActivityItem[];
-  validation_items?: HuijinEtfActivityItem[];
-  validation_groups?: HuijinEtfValidationGroup[];
+  pool_version: string;
+  baseline_version: string | null;
+  baseline_fingerprint: string | null;
+  activity: HuijinEtfActivitySummary;
+  core_items: HuijinEtfActivityItem[];
+  validation_items: HuijinEtfActivityItem[];
+  validation_groups: HuijinEtfValidationGroup[];
 };
 
 export type EtfRadarHistoryPoint = {
@@ -2138,10 +2138,10 @@ export type EtfRadarHistoryPoint = {
   share_change: number | null;
   estimated_subscription_cny: number | null;
   robust_score: number | null;
-  daily_change_pct?: number | null;
-  baseline_change_pct?: number | null;
-  cumulative_baseline_change_pct?: number | null;
-  multiple?: number | null;
+  daily_change_pct: number | null;
+  baseline_change_pct: number | null;
+  cumulative_baseline_change_pct: number | null;
+  multiple: number | null;
 };
 
 export type EtfRadarHistoryResponse = CapitalSignalMetadata & {
@@ -2161,7 +2161,7 @@ export type EtfHolderPosition = {
 
 export type EtfRadarHoldersResponse = CapitalSignalMetadata & {
   positions: EtfHolderPosition[];
-  baselines?: HuijinEtfBaseline[];
+  baselines: HuijinEtfBaseline[];
 };
 
 export type EtfRadarFactorDefinition = {

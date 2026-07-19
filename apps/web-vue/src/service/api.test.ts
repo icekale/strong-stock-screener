@@ -14,9 +14,11 @@ import { apiRequest } from './product-request';
 import type {
   CapitalSummaryResponse,
   EtfActivityDirection,
+  EtfRadarHistoryPoint,
   EtfRadarHistoryResponse,
   EtfRadarHoldersResponse,
   EtfRadarOverviewResponse,
+  EtfRadarSummary,
   EtfValidationState,
   HuijinBaselineSourceKind,
   HuijinEtfActivityItem,
@@ -127,6 +129,43 @@ describe('apiRequest', () => {
       'confirmed_increase' | 'confirmed_decrease' | 'divergent' | 'incomplete'
     >();
     expectTypeOf<HuijinBaselineSourceKind>().toEqualTypeOf<'reported' | 'derived'>();
+    expectTypeOf<Pick<EtfRadarSummary, 'activity'>>().toEqualTypeOf<{
+      activity: HuijinEtfActivitySummary;
+    }>();
+    expectTypeOf<
+      Pick<
+        EtfRadarOverviewResponse,
+        | 'pool_version'
+        | 'baseline_version'
+        | 'baseline_fingerprint'
+        | 'activity'
+        | 'core_items'
+        | 'validation_items'
+        | 'validation_groups'
+      >
+    >().toEqualTypeOf<{
+      pool_version: string;
+      baseline_version: string | null;
+      baseline_fingerprint: string | null;
+      activity: HuijinEtfActivitySummary;
+      core_items: HuijinEtfActivityItem[];
+      validation_items: HuijinEtfActivityItem[];
+      validation_groups: HuijinEtfValidationGroup[];
+    }>();
+    expectTypeOf<
+      Pick<
+        EtfRadarHistoryPoint,
+        'daily_change_pct' | 'baseline_change_pct' | 'cumulative_baseline_change_pct' | 'multiple'
+      >
+    >().toEqualTypeOf<{
+      daily_change_pct: number | null;
+      baseline_change_pct: number | null;
+      cumulative_baseline_change_pct: number | null;
+      multiple: number | null;
+    }>();
+    expectTypeOf<Pick<EtfRadarHoldersResponse, 'baselines'>>().toEqualTypeOf<{
+      baselines: HuijinEtfBaseline[];
+    }>();
 
     const activity = {
       core_count: 7,

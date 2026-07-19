@@ -112,6 +112,24 @@ function overviewFixture(): EtfRadarOverviewResponse {
     expected_etf_count: 7,
     estimated_subscription_cny: 12_460_000_000,
     evidence: ['7/7 只有效ETF份额增加', '宽基ETF同步放量', '估算净申购与指数表现同向'],
+    pool_version: 'huijin-public-v1',
+    baseline_version: null,
+    baseline_fingerprint: null,
+    activity: {
+      core_count: 7,
+      available_core_count: 0,
+      tenfold_increase_count: 0,
+      tenfold_decrease_count: 0,
+      confirmed_increase_group_count: 0,
+      confirmed_decrease_group_count: 0,
+      divergent_group_count: 0,
+      incomplete_group_count: 0,
+      strongest_symbol: null,
+      strongest_baseline_change_pct: null
+    },
+    core_items: [],
+    validation_items: [],
+    validation_groups: [],
     items: Array.from({ length: 7 }, (_, index) => ({
       symbol: `51030${index}.SH`,
       name: index === 0 ? '华夏上证50ETF' : `宽基ETF${index + 1}`,
@@ -133,9 +151,9 @@ function historyFixture(): EtfRadarHistoryResponse {
   return {
     ...metadata(),
     points: [
-      { trade_date: '2026-07-16', symbol: '510300.SH', name: '沪深300ETF', total_shares: 8_000_000_000, share_change: 40_000_000, estimated_subscription_cny: 1_200_000_000, robust_score: 71 },
-      { trade_date: '2026-07-17', symbol: '510300.SH', name: '沪深300ETF', total_shares: 8_050_000_000, share_change: 50_000_000, estimated_subscription_cny: 1_500_000_000, robust_score: 74 },
-      { trade_date: '2026-07-18', symbol: '510300.SH', name: '沪深300ETF', total_shares: 8_020_000_000, share_change: -30_000_000, estimated_subscription_cny: -900_000_000, robust_score: 68 }
+      { trade_date: '2026-07-16', symbol: '510300.SH', name: '沪深300ETF', total_shares: 8_000_000_000, share_change: 40_000_000, estimated_subscription_cny: 1_200_000_000, robust_score: 71, daily_change_pct: null, baseline_change_pct: null, cumulative_baseline_change_pct: null, multiple: null },
+      { trade_date: '2026-07-17', symbol: '510300.SH', name: '沪深300ETF', total_shares: 8_050_000_000, share_change: 50_000_000, estimated_subscription_cny: 1_500_000_000, robust_score: 74, daily_change_pct: null, baseline_change_pct: null, cumulative_baseline_change_pct: null, multiple: null },
+      { trade_date: '2026-07-18', symbol: '510300.SH', name: '沪深300ETF', total_shares: 8_020_000_000, share_change: -30_000_000, estimated_subscription_cny: -900_000_000, robust_score: 68, daily_change_pct: null, baseline_change_pct: null, cumulative_baseline_change_pct: null, multiple: null }
     ]
   };
 }
@@ -143,7 +161,7 @@ function historyFixture(): EtfRadarHistoryResponse {
 function holdersFixture(positions: EtfHolderPosition[] = [
   { symbol: '510300.SH', name: '沪深300ETF', report_period: '2026Q2', entity_name: '中央汇金投资有限责任公司', shares: 2_100_000_000, holding_pct: 8.2, change_shares: 120_000_000, source: '基金定期报告' }
 ]): EtfRadarHoldersResponse {
-  return { ...metadata(), positions };
+  return { ...metadata(), positions, baselines: [] };
 }
 
 function methodologyFixture(): EtfRadarMethodologyResponse {

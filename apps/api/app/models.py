@@ -2169,6 +2169,7 @@ class EtfRadarOverviewResponse(CapitalSignalMetadata):
     items: list[EtfRadarItem] = Field(default_factory=list)
     pool_version: str = "huijin-public-v1"
     baseline_version: str | None = None
+    baseline_fingerprint: str | None = None
     activity: HuijinEtfActivitySummary = Field(default_factory=HuijinEtfActivitySummary)
     core_items: list[HuijinEtfActivityItem] = Field(default_factory=list)
     validation_items: list[HuijinEtfActivityItem] = Field(default_factory=list)

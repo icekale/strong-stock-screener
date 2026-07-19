@@ -234,6 +234,62 @@ def test_share_provider_fetches_only_requested_exchange_symbols() -> None:
     assert result.source_status[0].status == "success"
 
 
+def test_share_provider_marks_full_sse_coverage_success() -> None:
+    requests: list[httpx.Request] = []
+    symbols = ["510300.SH", "510500.SH"]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "result": [
+                    {
+                        "STAT_DATE": "2026-07-17",
+                        "SEC_CODE": symbol.split(".", 1)[0],
+                        "TOT_VOL": "100",
+                    }
+                    for symbol in symbols
+                ]
+            },
+        )
+
+    provider = OfficialCapitalDataProvider(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+    result = provider.get_etf_share_rows("2026-07-17", symbols)
+
+    assert len(requests) == 1
+    assert "SEC_CODE" not in requests[0].url.params
+    assert result.source_status[0].status == "success"
+    assert "2/2" in result.source_status[0].detail
+    assert "缺失 0" in result.source_status[0].detail
+
+
+def test_share_provider_marks_partial_sse_coverage_stale() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json=SSE_SHARE_FIXTURE)
+
+    provider = OfficialCapitalDataProvider(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+    result = provider.get_etf_share_rows(
+        "2026-07-17", ["510300.SH", "510500.SH"]
+    )
+
+    assert len(requests) == 1
+    assert "SEC_CODE" not in requests[0].url.params
+    assert [row.symbol for row in result.rows] == ["510300.SH"]
+    assert result.source_status[0].status == "stale"
+    assert "1/2" in result.source_status[0].detail
+    assert "缺失 1" in result.source_status[0].detail
+
+
 def test_share_provider_collects_the_ten_etf_universe_without_live_calls() -> None:
     symbols = [
         "510050.SH",

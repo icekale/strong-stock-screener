@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -386,6 +389,38 @@ def test_fresh_snapshot_is_recomputed_when_baseline_version_changes(tmp_path: Pa
     assert refreshed.generated_at != stale.generated_at
 
 
+def test_fresh_partial_baseline_snapshot_is_invalidated_by_fingerprint_change(
+    tmp_path: Path,
+) -> None:
+    holder_provider = FakeHolderProvider(positions=_holder_positions()[:1])
+    service, store = _service(tmp_path, holder_provider=holder_provider)
+    _seed_prior_rows(store)
+    first = service.overview(force=True)
+    added_baseline = build_baselines([_holder_positions()[1]])
+    store.save_huijin_baselines([*store.load_huijin_baselines(), *added_baseline])
+
+    second = service.overview()
+
+    assert first.baseline_version is None
+    assert second.baseline_version is None
+    assert first.baseline_fingerprint != second.baseline_fingerprint
+    assert first.core_items[1].report_period is None
+    assert second.core_items[1].report_period == "2025-12-31"
+
+
+def test_unchanged_incomplete_baseline_state_bounds_holder_refresh_attempts(
+    tmp_path: Path,
+) -> None:
+    holder_provider = FakeHolderProvider(fail=True)
+    service, store = _service(tmp_path, holder_provider=holder_provider)
+    _seed_prior_rows(store)
+
+    service.overview(force=True)
+    service.overview()
+
+    assert len(holder_provider.calls) == 1
+
+
 @pytest.mark.parametrize("cache_kind", ["old_pool", "partial"])
 def test_incompatible_current_period_baseline_cache_triggers_refresh(
     tmp_path: Path, cache_kind: str
@@ -730,6 +765,29 @@ def test_history_uses_only_real_dates_exact_pool_and_applicable_baseline(tmp_pat
     assert latest.multiple == pytest.approx(20)
     assert latest.estimated_subscription_cny is None
     assert latest.robust_score is None
+    assert result.source_status[0].status == "success"
+    assert "最新归档 2026-07-17" in result.source_status[0].detail
+    assert "2 个可用交易日" in result.source_status[0].detail
+
+
+def test_history_marks_latest_archived_date_stale(tmp_path: Path) -> None:
+    service, store = _service(tmp_path)
+    store.save_share_history(
+        [
+            EtfSharePoint(
+                trade_date="2026-07-16",
+                symbol="510300.SH",
+                name=ALL_ETFS["510300.SH"].name,
+                total_shares=1_000,
+            )
+        ]
+    )
+
+    result = service.history(days=120)
+
+    assert result.source_status[0].status == "stale"
+    assert "最新归档 2026-07-16" in result.source_status[0].detail
+    assert "1 个可用交易日" in result.source_status[0].detail
 
 
 def test_methodology_calls_no_remote_provider(tmp_path: Path) -> None:
@@ -789,3 +847,141 @@ def test_holders_fetches_exact_positions_once_then_reuses_store(tmp_path: Path) 
     assert holder_provider.calls == [
         {symbol: definition.name for symbol, definition in ALL_ETFS.items()}
     ]
+
+
+def test_holders_refreshes_complete_baselines_when_positions_are_missing(tmp_path: Path) -> None:
+    holder_provider = FakeHolderProvider()
+    store = CapitalSignalStore(tmp_path)
+    store.save_huijin_baselines(build_baselines(_holder_positions()))
+    service = CapitalSignalService(
+        provider=FakeCapitalProvider(),
+        holder_provider=holder_provider,
+        store=store,
+        clock=_clock,
+    )
+
+    result = service.holders()
+
+    assert len(holder_provider.calls) == 1
+    assert {row.symbol for row in result.positions} == set(ALL_ETFS)
+    assert all(status.status != "stale" for status in result.source_status)
+
+
+def test_holders_marks_complete_baselines_stale_when_positions_are_unavailable(
+    tmp_path: Path,
+) -> None:
+    class EmptySuccessHolderProvider:
+        def get_holder_positions(self, _symbols: dict[str, str]):
+            return CapitalProviderResult(
+                rows=[],
+                source_status=[
+                    StrongStockSourceStatus(
+                        source="空持有人测试",
+                        status="success",
+                        detail="unexpected empty success",
+                    )
+                ],
+            )
+
+    store = CapitalSignalStore(tmp_path)
+    store.save_huijin_baselines(build_baselines(_holder_positions()))
+    service = CapitalSignalService(
+        provider=FakeCapitalProvider(),
+        holder_provider=EmptySuccessHolderProvider(),
+        store=store,
+        clock=_clock,
+    )
+
+    result = service.holders()
+
+    assert result.positions == []
+    assert any(status.status == "stale" for status in result.source_status)
+    assert not any(status.status == "success" for status in result.source_status)
+
+
+def test_holders_replaces_corrected_same_period_symbol_group(tmp_path: Path) -> None:
+    positions = _holder_positions()
+    corrected_symbol = positions[1].symbol
+    missing_symbol = positions[-1].symbol
+    stale_entity = positions[1].model_copy(
+        update={
+            "entity_name": "中央汇金资产管理有限责任公司",
+            "shares": 50,
+            "holding_pct": 5,
+        }
+    )
+    cached_positions = [
+        *[row for row in positions if row.symbol != missing_symbol],
+        stale_entity,
+    ]
+    holder_provider = FakeHolderProvider(
+        positions=[positions[1], positions[-1]],
+    )
+    store = CapitalSignalStore(tmp_path)
+    store.save_huijin_baselines(build_baselines(positions))
+    store.save_holder_reports(cached_positions)
+    service = CapitalSignalService(
+        provider=FakeCapitalProvider(),
+        holder_provider=holder_provider,
+        store=store,
+        clock=_clock,
+    )
+
+    service.holders()
+
+    corrected_group = [
+        row
+        for row in store.load_holder_reports()
+        if row.report_period == "2025-12-31" and row.symbol == corrected_symbol
+    ]
+    assert corrected_group == [positions[1]]
+
+
+def test_concurrent_holders_refreshes_preserve_disjoint_position_results(
+    tmp_path: Path,
+) -> None:
+    positions = _holder_positions()
+
+    class DisjointConcurrentHolderProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+            self._calls_lock = threading.Lock()
+            self._second_started = threading.Event()
+
+        def get_holder_positions(self, _symbols: dict[str, str]):
+            with self._calls_lock:
+                call_index = self.calls
+                self.calls += 1
+            if call_index == 0:
+                concurrent = self._second_started.wait(timeout=0.2)
+                if concurrent:
+                    time.sleep(0.05)
+            else:
+                self._second_started.set()
+            return CapitalProviderResult(
+                rows=positions[:5] if call_index == 0 else positions[5:],
+                source_status=[
+                    StrongStockSourceStatus(
+                        source="并发持有人测试",
+                        status="success",
+                        detail=f"batch {call_index}",
+                    )
+                ],
+            )
+
+    holder_provider = DisjointConcurrentHolderProvider()
+    store = CapitalSignalStore(tmp_path)
+    store.save_huijin_baselines(build_baselines(positions))
+    service = CapitalSignalService(
+        provider=FakeCapitalProvider(),
+        holder_provider=holder_provider,
+        store=store,
+        clock=_clock,
+    )
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _index: service.holders(), range(2)))
+
+    assert holder_provider.calls == 2
+    assert {row.symbol for row in store.load_holder_reports()} == set(ALL_ETFS)
+    assert {row.symbol for result in results for row in result.positions} == set(ALL_ETFS)

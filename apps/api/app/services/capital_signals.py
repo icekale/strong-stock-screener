@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import statistics
 from collections.abc import Iterable
 from datetime import datetime, timedelta
@@ -81,6 +83,7 @@ class CapitalSignalService:
         self.ttl_seconds = ttl_seconds
         self._lock = RLock()
         self._homepage_cache: tuple[datetime, CapitalSummaryResponse] | None = None
+        self._baseline_refresh_attempts: dict[tuple[str, str, bool], datetime] = {}
 
     def overview(self, *, force: bool = False) -> EtfRadarOverviewResponse:
         with self._lock:
@@ -88,14 +91,18 @@ class CapitalSignalService:
             cached = self.store.load_snapshot()
             trade_date = _latest_weekday(now)
             _, baselines, baseline_status = self._load_or_refresh_baselines(now)
-            active_baseline_version = _baseline_version(
-                _latest_applicable_baselines(baselines, trade_date)
+            active_baselines = _latest_applicable_baselines(baselines, trade_date)
+            active_baseline_version = _baseline_version(active_baselines)
+            active_baseline_fingerprint = _baseline_fingerprint(active_baselines)
+            reusable_snapshot = (
+                cached is not None
+                and _is_compatible_snapshot(cached)
+                and cached.baseline_version == active_baseline_version
+                and cached.baseline_fingerprint == active_baseline_fingerprint
             )
             if (
                 not force
-                and cached is not None
-                and _is_compatible_snapshot(cached)
-                and cached.baseline_version == active_baseline_version
+                and reusable_snapshot
                 and _is_fresh(cached.generated_at, now, self.ttl_seconds)
             ):
                 if any(status.status == "stale" for status in baseline_status):
@@ -119,7 +126,7 @@ class CapitalSignalService:
             ]
             current_rows = _merge_share_history(stored_current_rows, fetched_current_rows)
             if not current_rows:
-                if cached is not None and _is_compatible_snapshot(cached):
+                if reusable_snapshot:
                     return cached.model_copy(
                         update={
                             "source_status": [
@@ -139,7 +146,7 @@ class CapitalSignalService:
                         StrongStockSourceStatus(
                             source="ETF资金雷达缓存",
                             status="stale",
-                            detail="不兼容的旧版缓存已忽略，返回空的新模型响应",
+                            detail="不兼容或基准已变化的缓存已忽略，返回空的新模型响应",
                         )
                     ]
                     if cached is not None
@@ -217,6 +224,7 @@ class CapitalSignalService:
                 items=items,
                 pool_version=POOL_VERSION,
                 baseline_version=_baseline_version(baseline_by_symbol),
+                baseline_fingerprint=_baseline_fingerprint(baseline_by_symbol),
                 activity=activity,
                 core_items=core_items,
                 validation_items=validation_items,
@@ -286,6 +294,12 @@ class CapitalSignalService:
                 )
             previous_by_symbol[row.symbol] = row
         generated_at = now.isoformat(timespec="seconds")
+        latest_date = dates[-1] if dates else None
+        archive_detail = (
+            f"最新归档 {latest_date}；返回最近 {len(dates)} 个可用交易日"
+            if latest_date is not None
+            else "无归档数据；返回最近 0 个可用交易日"
+        )
         return EtfRadarHistoryResponse(
             generated_at=generated_at,
             trade_date=trade_date,
@@ -295,27 +309,30 @@ class CapitalSignalService:
             source_status=[
                 StrongStockSourceStatus(
                     source="ETF份额历史缓存",
-                    status="success" if points else "stale",
-                    detail=f"返回最近 {len(dates)} 个可用交易日",
+                    status="success" if latest_date == trade_date else "stale",
+                    detail=archive_detail,
                 )
             ],
             points=points,
         )
 
     def holders(self) -> EtfRadarHoldersResponse:
-        now = self.clock()
-        generated_at = now.isoformat(timespec="seconds")
-        positions, baselines, source_status = self._load_or_refresh_baselines(now)
-        return EtfRadarHoldersResponse(
-            generated_at=generated_at,
-            trade_date=_latest_weekday(now),
-            as_of=generated_at,
-            signal_stage="disclosure",
-            model_version=MODEL_VERSION,
-            source_status=source_status,
-            positions=positions,
-            baselines=_usable_baselines(baselines),
-        )
+        with self._lock:
+            now = self.clock()
+            generated_at = now.isoformat(timespec="seconds")
+            positions, baselines, source_status = self._load_or_refresh_baselines(
+                now, positions_required=True
+            )
+            return EtfRadarHoldersResponse(
+                generated_at=generated_at,
+                trade_date=_latest_weekday(now),
+                as_of=generated_at,
+                signal_stage="disclosure",
+                model_version=MODEL_VERSION,
+                source_status=source_status,
+                positions=positions,
+                baselines=_usable_baselines(baselines),
+            )
 
     def methodology(self) -> EtfRadarMethodologyResponse:
         now = self.clock()
@@ -371,7 +388,7 @@ class CapitalSignalService:
         )
 
     def _load_or_refresh_baselines(
-        self, now: datetime
+        self, now: datetime, *, positions_required: bool = False
     ) -> tuple[
         list[EtfHolderPosition],
         list[HuijinEtfBaseline],
@@ -382,7 +399,13 @@ class CapitalSignalService:
             row for row in self.store.load_holder_reports() if row.symbol in ALL_ETFS
         ]
         cached_baselines = self.store.load_huijin_baselines()
-        if _has_complete_baseline_period(cached_baselines, expected_period):
+        baselines_complete = _has_complete_baseline_period(
+            cached_baselines, expected_period
+        )
+        positions_complete = _has_position_coverage(
+            cached_positions, cached_baselines, expected_period
+        )
+        if baselines_complete and (not positions_required or positions_complete):
             return (
                 cached_positions,
                 cached_baselines,
@@ -390,13 +413,45 @@ class CapitalSignalService:
                     StrongStockSourceStatus(
                         source="汇金 ETF 基准缓存",
                         status="success",
-                        detail=f"完整报告期 {expected_period}，池版本 {POOL_VERSION}",
+                        detail=(
+                            f"完整报告期 {expected_period}，池版本 {POOL_VERSION}"
+                            + ("，持有人记录完整" if positions_required else "")
+                        ),
+                    )
+                ],
+            )
+
+        state_fingerprint = _holder_state_fingerprint(
+            cached_positions, cached_baselines
+        )
+        attempt_key = (expected_period, state_fingerprint, positions_required)
+        self._baseline_refresh_attempts = {
+            key: attempted_at
+            for key, attempted_at in self._baseline_refresh_attempts.items()
+            if (now - attempted_at).total_seconds() <= self.ttl_seconds
+        }
+        if attempt_key in self._baseline_refresh_attempts:
+            return (
+                cached_positions,
+                cached_baselines,
+                [
+                    StrongStockSourceStatus(
+                        source="汇金 ETF 基准缓存",
+                        status="stale",
+                        detail=_refresh_incomplete_detail(
+                            cached_positions,
+                            cached_baselines,
+                            expected_period,
+                            positions_required=positions_required,
+                            throttled=True,
+                        ),
                     )
                 ],
             )
 
         result = None
         if self.holder_provider is not None:
+            self._baseline_refresh_attempts[attempt_key] = now
             try:
                 result = self.holder_provider.get_holder_positions(
                     {symbol: definition.name for symbol, definition in ALL_ETFS.items()}
@@ -416,31 +471,57 @@ class CapitalSignalService:
         if result is not None and result.rows:
             fetched_positions = [row for row in result.rows if row.symbol in ALL_ETFS]
             positions = _merge_holder_positions(cached_positions, fetched_positions)
+            result_status = _position_aware_statuses(
+                list(result.source_status),
+                positions,
+                positions_required=positions_required,
+            )
             fetched_baselines = build_baselines(fetched_positions)
             baselines = _merge_baselines(cached_baselines, fetched_baselines)
             self.store.save_holder_reports(positions)
             self.store.save_huijin_baselines(baselines)
-            if _has_complete_baseline_period(baselines, expected_period):
-                return positions, baselines, list(result.source_status)
+            baselines_complete = _has_complete_baseline_period(
+                baselines, expected_period
+            )
+            positions_complete = _has_position_coverage(
+                positions, baselines, expected_period
+            )
+            if baselines_complete and (not positions_required or positions_complete):
+                return positions, baselines, result_status
             return (
                 positions,
                 baselines,
                 [
-                    *result.source_status,
+                    *result_status,
                     StrongStockSourceStatus(
                         source="汇金 ETF 基准缓存",
                         status="stale",
-                        detail=_baseline_fallback_detail(baselines, expected_period),
+                        detail=_refresh_incomplete_detail(
+                            positions,
+                            baselines,
+                            expected_period,
+                            positions_required=positions_required,
+                        ),
                     ),
                 ],
             )
 
         source_status = list(result.source_status) if result is not None else []
+        source_status = _position_aware_statuses(
+            source_status,
+            cached_positions,
+            positions_required=positions_required,
+        )
         source_status.append(
             StrongStockSourceStatus(
                 source="汇金 ETF 基准缓存",
                 status="stale",
-                detail=_baseline_fallback_detail(cached_baselines, expected_period),
+                detail=_refresh_incomplete_detail(
+                    cached_positions,
+                    cached_baselines,
+                    expected_period,
+                    positions_required=positions_required,
+                ),
             )
         )
         return cached_positions, cached_baselines, source_status
@@ -546,6 +627,7 @@ class CapitalSignalService:
             items=[_legacy_radar_item(item) for item in core_items],
             pool_version=POOL_VERSION,
             baseline_version=_baseline_version(baseline_by_symbol),
+            baseline_fingerprint=_baseline_fingerprint(baseline_by_symbol),
             activity=_activity_summary(core_items, validation_groups),
             core_items=core_items,
             validation_items=validation_items,
@@ -782,6 +864,35 @@ def _baseline_version(baselines: dict[str, HuijinEtfBaseline]) -> str | None:
     return f"{next(iter(report_periods))}:{POOL_VERSION}"
 
 
+def _baseline_fingerprint(baselines: dict[str, HuijinEtfBaseline]) -> str:
+    payload = [
+        {
+            "symbol": row.symbol,
+            "baseline_id": row.baseline_id,
+            "report_period": row.report_period,
+            "pool_version": row.pool_version,
+            "baseline_total_shares": row.baseline_total_shares,
+            "confirmed_huijin_shares": row.confirmed_huijin_shares,
+            "confirmed_huijin_holding_pct": row.confirmed_huijin_holding_pct,
+            "source_kind": row.source_kind,
+            "source": row.source,
+        }
+        for _, row in sorted(baselines.items())
+    ]
+    return _stable_fingerprint(payload)
+
+
+def _stable_fingerprint(payload: object) -> str:
+    serialized = json.dumps(
+        payload,
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    return hashlib.sha256(serialized.encode("utf-8")).hexdigest()
+
+
 def _has_complete_baseline_period(
     baselines: list[HuijinEtfBaseline], report_period: str
 ) -> bool:
@@ -791,6 +902,57 @@ def _has_complete_baseline_period(
         if row.pool_version == POOL_VERSION and row.report_period == report_period
     }
     return symbols == set(ALL_ETFS)
+
+
+def _has_position_coverage(
+    positions: list[EtfHolderPosition],
+    baselines: list[HuijinEtfBaseline],
+    report_period: str,
+) -> bool:
+    expected_symbols = {
+        row.symbol
+        for row in baselines
+        if row.pool_version == POOL_VERSION and row.report_period == report_period
+    }
+    if not expected_symbols:
+        return False
+    position_symbols = {
+        row.symbol
+        for row in positions
+        if row.report_period == report_period and row.symbol in expected_symbols
+    }
+    return position_symbols == expected_symbols
+
+
+def _holder_state_fingerprint(
+    positions: list[EtfHolderPosition], baselines: list[HuijinEtfBaseline]
+) -> str:
+    return _stable_fingerprint(
+        {
+            "positions": [
+                row.model_dump(mode="json")
+                for row in sorted(
+                    positions,
+                    key=lambda item: (
+                        item.report_period,
+                        item.symbol,
+                        item.entity_name,
+                    ),
+                )
+            ],
+            "baselines": [
+                row.model_dump(mode="json")
+                for row in sorted(
+                    baselines,
+                    key=lambda item: (
+                        item.report_period,
+                        item.pool_version,
+                        item.symbol,
+                    ),
+                )
+            ],
+        }
+    )
 
 
 def _merge_baselines(
@@ -817,10 +979,12 @@ def _merge_baselines(
 def _merge_holder_positions(
     cached: list[EtfHolderPosition], fetched: list[EtfHolderPosition]
 ) -> list[EtfHolderPosition]:
+    fetched_groups = {(row.report_period, row.symbol) for row in fetched}
     merged = {
         (row.report_period, row.symbol, row.entity_name): row
         for row in cached
         if row.symbol in ALL_ETFS
+        and (row.report_period, row.symbol) not in fetched_groups
     }
     merged.update(
         {
@@ -842,6 +1006,55 @@ def _baseline_fallback_detail(
     if usable_periods:
         return f"应有报告期 {expected_period} 不完整，保留可用报告期 {usable_periods[-1]}"
     return f"应有报告期 {expected_period} 不完整，且无当前池版本可用基准"
+
+
+def _refresh_incomplete_detail(
+    positions: list[EtfHolderPosition],
+    baselines: list[HuijinEtfBaseline],
+    expected_period: str,
+    *,
+    positions_required: bool,
+    throttled: bool = False,
+) -> str:
+    if positions_required and _has_complete_baseline_period(baselines, expected_period):
+        expected_symbols = {
+            row.symbol
+            for row in baselines
+            if row.pool_version == POOL_VERSION and row.report_period == expected_period
+        }
+        available_symbols = {
+            row.symbol
+            for row in positions
+            if row.report_period == expected_period and row.symbol in expected_symbols
+        }
+        detail = (
+            f"报告期 {expected_period} 持有人记录不完整，"
+            f"当前 {len(available_symbols)}/{len(expected_symbols)} 只"
+        )
+    else:
+        detail = _baseline_fallback_detail(baselines, expected_period)
+    return f"{detail}；刷新尝试已限流" if throttled else detail
+
+
+def _position_aware_statuses(
+    statuses: list[StrongStockSourceStatus],
+    positions: list[EtfHolderPosition],
+    *,
+    positions_required: bool,
+) -> list[StrongStockSourceStatus]:
+    if not positions_required or positions:
+        return statuses
+    return [
+        status.model_copy(
+            update={
+                "status": "stale",
+                "detail": f"{status.detail}；未返回持有人记录",
+            }
+        )
+        if status.status == "success"
+        else status
+        for status in statuses
+    ]
 
 
 def _methodology_pair_factors() -> list[EtfRadarFactorDefinition]:

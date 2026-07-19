@@ -130,7 +130,18 @@ class OfficialCapitalDataProvider:
                 response.raise_for_status()
                 sse_rows = parse_sse_etf_share_payload(response.json(), symbols=sse_symbols)
                 rows.extend(sse_rows)
-                statuses.append(_status("上交所ETF份额", bool(sse_rows), "万份转换为份"))
+                returned_symbols = {row.symbol for row in sse_rows}
+                missing_count = len(set(sse_symbols) - returned_symbols)
+                statuses.append(
+                    StrongStockSourceStatus(
+                        source="上交所ETF份额",
+                        status="success" if missing_count == 0 else "stale",
+                        detail=(
+                            f"当日有效 {len(returned_symbols)}/{len(sse_symbols)} 只；"
+                            f"缺失 {missing_count} 只；万份转换为份"
+                        ),
+                    )
+                )
             except Exception as exc:
                 statuses.append(_failure_status("上交所ETF份额", exc))
 

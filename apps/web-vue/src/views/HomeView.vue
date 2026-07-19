@@ -10,7 +10,6 @@ import {
   directionTone,
   formatDirectionalCny,
   formatDirectionalPercent,
-  formatEvidenceStrength,
   formatPlainCny,
   stageLabel
 } from '@/utils/domain/capitalSignals';
@@ -193,11 +192,15 @@ function toneClass(tone: 'fall' | 'neutral' | 'rise'): string {
   return '';
 }
 
-function evidenceLevelClass(level: string | null): string {
-  if (level === '较强') return 'home-evidence-level--strong';
-  if (level === '疑似') return 'home-evidence-level--suspected';
-  return '';
-}
+const etfActivityStatus = computed<'success' | 'partial'>(() => {
+  const data = capitalData.value;
+  if (!data) return 'partial';
+
+  const activity = data.etf_radar.activity;
+  const coverageComplete = activity.available_core_count === activity.core_count;
+  const sourceDegraded = data.source_status.some(source => source.status === 'stale' || source.status === 'failed');
+  return coverageComplete && !capitalIsStale.value && !sourceDegraded ? 'success' : 'partial';
+});
 
 function resourceError(error: Error | undefined, fallback: string): string | null {
   return error ? fallback : null;
@@ -336,35 +339,59 @@ onBeforeUnmount(() => {
           </section>
 
           <section class="home-panel home-capital-panel">
-            <SectionHeader title="宽基护盘雷达">
-              <RouterLink class="home-detail-link" to="/etf-radar">查看详情</RouterLink>
-            </SectionHeader>
-            <p class="home-capital-context">
-              {{ stageLabel(capitalData.signal_stage) }} · {{ capitalData.model_version }}
-            </p>
-            <div class="home-evidence-heading">
-              <div class="home-capital-primary">
-                <span>证据强度</span>
-                <strong>{{ formatEvidenceStrength(capitalData.etf_radar.evidence_strength) }}</strong>
+            <SectionHeader title="汇金 ETF 活动">
+              <div class="home-section-actions">
+                <span
+                  v-if="capitalIsStale"
+                  class="home-stale-indicator"
+                  :aria-label="staleDataTitle"
+                  :title="staleDataTitle"
+                >
+                  旧数据
+                </span>
+                <StatusTag :status="etfActivityStatus" />
+                <RouterLink class="home-detail-link" to="/etf-radar">查看详情</RouterLink>
               </div>
-              <span class="home-evidence-level" :class="evidenceLevelClass(capitalData.etf_radar.evidence_level)">
-                {{ capitalData.etf_radar.evidence_level || '待确认' }}
-              </span>
+            </SectionHeader>
+            <p class="home-capital-context home-etf-context">
+              数据日 {{ capitalData.trade_date }} · {{ stageLabel(capitalData.signal_stage) }} · {{ capitalData.model_version }}
+            </p>
+            <div class="home-etf-count-strip">
+              <div>
+                <strong class="home-positive" data-testid="tenfold-increase">
+                  十倍量增加 {{ capitalData.etf_radar.activity.tenfold_increase_count }}
+                </strong>
+              </div>
+              <div>
+                <strong class="home-negative" data-testid="tenfold-decrease">
+                  十倍量减少 {{ capitalData.etf_radar.activity.tenfold_decrease_count }}
+                </strong>
+              </div>
             </div>
-            <div class="home-evidence-meter" role="img" :aria-label="`证据强度 ${formatEvidenceStrength(capitalData.etf_radar.evidence_strength)}`">
-              <span :style="{ width: `${Math.max(0, Math.min(100, capitalData.etf_radar.evidence_strength ?? 0))}%` }" />
+            <div class="home-etf-facts">
+              <div>
+                <strong class="home-positive">确认增加 {{ capitalData.etf_radar.activity.confirmed_increase_group_count }}组</strong>
+              </div>
+              <div>
+                <strong class="home-negative">确认减少 {{ capitalData.etf_radar.activity.confirmed_decrease_group_count }}组</strong>
+              </div>
+              <div>
+                <strong data-testid="divergent-groups">方向分歧 {{ capitalData.etf_radar.activity.divergent_group_count }}组</strong>
+              </div>
+              <div>
+                <strong>数据不全 {{ capitalData.etf_radar.activity.incomplete_group_count }}组</strong>
+              </div>
             </div>
-            <div class="home-capital-change">
-              <span>估算净申购</span>
-              <strong :class="toneClass(directionTone(capitalData.etf_radar.estimated_subscription_cny))">
-                {{ formatDirectionalCny(capitalData.etf_radar.estimated_subscription_cny) }}
-              </strong>
-              <small>有效ETF {{ capitalData.etf_radar.valid_etf_count }}/{{ capitalData.etf_radar.expected_etf_count }}</small>
+            <div class="home-etf-strongest" data-testid="strongest-core-etf">
+              <span>最强核心 ETF 活动代理</span>
+              <div>
+                <strong>{{ capitalData.etf_radar.activity.strongest_symbol || '待确认' }}</strong>
+                <small :class="toneClass(directionTone(capitalData.etf_radar.activity.strongest_baseline_change_pct))">
+                  {{ capitalData.etf_radar.activity.strongest_symbol ? formatDirectionalPercent(capitalData.etf_radar.activity.strongest_baseline_change_pct) : '--' }}
+                </small>
+              </div>
+              <small>覆盖 {{ capitalData.etf_radar.activity.available_core_count }}/{{ capitalData.etf_radar.activity.core_count }}</small>
             </div>
-            <ul v-if="capitalData.etf_radar.evidence.length" class="home-evidence-list">
-              <li v-for="item in capitalData.etf_radar.evidence.slice(0, 2)" :key="item">{{ item }}</li>
-            </ul>
-            <p v-else class="home-capital-empty">等待交易所份额形成可比记录</p>
           </section>
         </template>
 
@@ -376,9 +403,9 @@ onBeforeUnmount(() => {
             </div>
           </section>
           <section class="home-panel home-capital-panel">
-            <SectionHeader title="宽基护盘雷达" />
+            <SectionHeader title="汇金 ETF 活动" />
             <div class="home-capital-state" :aria-busy="capitalLoading">
-              {{ capitalError ? '等待服务恢复' : '等待交易所份额' }}
+              {{ capitalError ? '等待服务恢复' : '等待 ETF 活动数据' }}
             </div>
           </section>
         </template>
@@ -451,8 +478,7 @@ onBeforeUnmount(() => {
 .home-index-name,
 .home-index-empty,
 .home-capital-context,
-.home-capital-state,
-.home-capital-empty {
+.home-capital-state {
   color: var(--wb-muted);
   font-size: 12px;
 }
@@ -590,57 +616,88 @@ onBeforeUnmount(() => {
   font-variant-numeric: tabular-nums;
 }
 
-.home-evidence-heading {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 12px;
+.home-etf-context {
+  margin-bottom: 8px;
 }
 
-.home-evidence-level {
-  padding: 2px 7px;
-  color: var(--wb-muted);
-  font-size: 11px;
-  border: 1px solid var(--wb-border);
-  border-radius: 4px;
-}
-
-.home-evidence-level--strong {
-  color: var(--wb-positive);
-  border-color: color-mix(in srgb, var(--wb-positive) 35%, var(--wb-border));
-}
-
-.home-evidence-level--suspected {
-  color: var(--wb-warning);
-  border-color: color-mix(in srgb, var(--wb-warning) 35%, var(--wb-border));
-}
-
-.home-evidence-meter {
-  height: 5px;
-  margin: 10px 0 2px;
-  overflow: hidden;
-  background: var(--wb-primary-soft);
-  border-radius: 3px;
-}
-
-.home-evidence-meter span {
-  display: block;
-  height: 100%;
-  background: var(--wb-primary);
-}
-
-.home-evidence-list {
+.home-etf-count-strip,
+.home-etf-facts {
   display: grid;
-  gap: 4px;
-  margin: 10px 0 0;
-  padding: 9px 0 0 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+
+.home-etf-count-strip {
+  padding: 8px 0;
+  border-top: 1px solid var(--wb-border);
+  border-bottom: 1px solid var(--wb-border);
+}
+
+.home-etf-count-strip > div,
+.home-etf-facts > div,
+.home-etf-strongest {
+  display: grid;
+  gap: 2px;
+}
+
+.home-etf-strongest > span,
+.home-etf-strongest small {
   color: var(--wb-muted);
   font-size: 11px;
+}
+
+.home-etf-count-strip strong {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-etf-facts {
+  margin-top: 9px;
+}
+
+.home-etf-facts strong {
+  color: var(--wb-ink);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-etf-facts .home-positive,
+.home-etf-strongest .home-positive {
+  color: var(--wb-positive);
+}
+
+.home-etf-facts .home-negative,
+.home-etf-strongest .home-negative {
+  color: var(--wb-negative);
+}
+
+.home-etf-strongest {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  margin-top: 9px;
+  padding-top: 8px;
   border-top: 1px solid var(--wb-border);
 }
 
-.home-capital-empty {
-  margin: 12px 0 0;
+.home-etf-strongest > span {
+  grid-column: 1 / -1;
+}
+
+.home-etf-strongest > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.home-etf-strongest strong {
+  color: var(--wb-ink);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-etf-strongest small {
+  font-variant-numeric: tabular-nums;
 }
 
 .home-positive {

@@ -177,7 +177,7 @@ function capitalFixture(): CapitalSummaryResponse {
     trade_date: '2026-07-17',
     as_of: '2026-07-18T09:34:05+08:00',
     signal_stage: 'post_close',
-    model_version: 'heuristic-v1',
+    model_version: 'huijin-public-rule-v1',
     source_status: [{ source: '上交所ETF份额', status: 'success', detail: '正常' }],
     margin: {
       balance_cny: 1_405_364_008_462,
@@ -198,15 +198,15 @@ function capitalFixture(): CapitalSummaryResponse {
       evidence: ['6/6 只有效ETF份额增加', '合计估算净申购 242.2亿'],
       activity: {
         core_count: 7,
-        available_core_count: 0,
-        tenfold_increase_count: 0,
-        tenfold_decrease_count: 0,
-        confirmed_increase_group_count: 0,
+        available_core_count: 6,
+        tenfold_increase_count: 5,
+        tenfold_decrease_count: 1,
+        confirmed_increase_group_count: 2,
         confirmed_decrease_group_count: 0,
-        divergent_group_count: 0,
+        divergent_group_count: 1,
         incomplete_group_count: 0,
-        strongest_symbol: null,
-        strongest_baseline_change_pct: null
+        strongest_symbol: '159915.SZ',
+        strongest_baseline_change_pct: 6.019
       }
     }
   };
@@ -237,6 +237,9 @@ describe('HomeView capital dashboard', () => {
     expect(api.getMarketOverview).toHaveBeenCalledTimes(1);
     expect(api.getSectorRadar).toHaveBeenCalledWith(12);
     expect(api.getCapitalSummary).toHaveBeenCalledTimes(1);
+    expect(Object.keys(api)).toEqual(['getCapitalSummary', 'getMarketOverview', 'getSectorRadar']);
+    expect(wrapper.text()).toContain('汇金 ETF 活动');
+    expect(wrapper.text()).toContain('等待 ETF 活动数据');
 
     overviewRequest.resolve(overviewFixture());
     await flushPromises();
@@ -248,7 +251,7 @@ describe('HomeView capital dashboard', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('融资融券余额');
-    expect(wrapper.text()).toContain('证据强度');
+    expect(wrapper.text()).toContain('十倍量增加 5');
     wrapper.unmount();
   });
 
@@ -262,7 +265,7 @@ describe('HomeView capital dashboard', () => {
     await flushPromises();
 
     expect(wrapper.findAll('[data-testid="sector-chart"]')).toHaveLength(1);
-    for (const heading of ['板块资金流', '两融余额', '宽基护盘雷达']) {
+    for (const heading of ['板块资金流', '两融余额', '汇金 ETF 活动']) {
       expect(wrapper.text()).toContain(heading);
     }
     for (const removed of ['板块实时曲线', '市场关注榜', '数据状态']) {
@@ -272,8 +275,66 @@ describe('HomeView capital dashboard', () => {
     expect(wrapper.text()).toContain('沪深 1/2');
     expect(wrapper.text()).toContain('部分');
     expect(wrapper.text()).toContain('▼ -386.8亿');
-    expect(wrapper.text()).toContain('▲ +242.2亿');
-    expect(wrapper.text()).toContain('盘后确认 · heuristic-v1');
+    expect(wrapper.text()).toContain('数据日 2026-07-17');
+    expect(wrapper.text()).toContain('盘后确认 · huijin-public-rule-v1');
+    expect(wrapper.text()).toContain('十倍量增加 5');
+    expect(wrapper.text()).toContain('十倍量减少 1');
+    expect(wrapper.text()).toContain('确认增加 2组');
+    expect(wrapper.text()).toContain('确认减少 0组');
+    expect(wrapper.text()).toContain('方向分歧 1组');
+    expect(wrapper.text()).toContain('数据不全 0组');
+    expect(wrapper.text()).toContain('159915.SZ');
+    expect(wrapper.text()).toContain('▲ +6.02%');
+    expect(wrapper.text()).toContain('覆盖 6/7');
+    for (const legacy of [
+      '证据强度',
+      '估算净申购',
+      '宽基护盘雷达',
+      '6/6 只有效ETF份额增加',
+      '合计估算净申购 242.2亿'
+    ]) {
+      expect(wrapper.text()).not.toContain(legacy);
+    }
+    const etfPanel = wrapper.findAll('.home-capital-panel')[1]!;
+    expect(etfPanel.get('.wb-status-tag').text()).toBe('部分');
+    expect(etfPanel.get('[data-testid="tenfold-increase"]').classes()).toContain('home-positive');
+    expect(etfPanel.get('[data-testid="tenfold-decrease"]').classes()).toContain('home-negative');
+    expect(etfPanel.get('[data-testid="divergent-groups"]').classes()).not.toContain('home-positive');
+    expect(etfPanel.get('[data-testid="divergent-groups"]').classes()).not.toContain('home-negative');
+    wrapper.unmount();
+  });
+
+  it('shows an honest fallback when the strongest core ETF is unavailable', async () => {
+    const capital = capitalFixture();
+    capital.etf_radar.activity.strongest_symbol = null;
+    capital.etf_radar.activity.strongest_baseline_change_pct = null;
+    api.getMarketOverview.mockResolvedValueOnce(overviewFixture());
+    api.getSectorRadar.mockResolvedValueOnce(sectorFlowFixture());
+    api.getCapitalSummary.mockResolvedValueOnce(capital);
+
+    const { wrapper } = await mountDashboard();
+    await flushPromises();
+
+    const strongest = wrapper.get('[data-testid="strongest-core-etf"]');
+    expect(strongest.text()).toContain('待确认');
+    expect(strongest.text()).toContain('--');
+    wrapper.unmount();
+  });
+
+  it('marks complete coverage partial when a backend ETF source is stale', async () => {
+    const capital = capitalFixture();
+    capital.etf_radar.activity.available_core_count = capital.etf_radar.activity.core_count;
+    capital.source_status = [{ source: '深交所ETF份额', status: 'stale', detail: '使用上一交易日数据' }];
+    api.getMarketOverview.mockResolvedValueOnce(overviewFixture());
+    api.getSectorRadar.mockResolvedValueOnce(sectorFlowFixture());
+    api.getCapitalSummary.mockResolvedValueOnce(capital);
+
+    const { wrapper } = await mountDashboard();
+    await flushPromises();
+
+    const etfPanel = wrapper.findAll('.home-capital-panel')[1]!;
+    expect(etfPanel.get('.wb-status-tag').text()).toBe('部分');
+    expect(etfPanel.text()).not.toContain('旧数据');
     wrapper.unmount();
   });
 
@@ -302,6 +363,7 @@ describe('HomeView capital dashboard', () => {
     expect(values).toHaveLength(12);
     expect(values.filter(value => value > 0)).toHaveLength(6);
     expect(values.filter(value => value < 0)).toHaveLength(6);
+    expect(source).toMatch(/\.home-capital-stack\s*\{[\s\S]*?grid-template-rows: repeat\(2, minmax\(0, 1fr\)\)/);
     expect(source).toMatch(/@media \(max-width: 1023px\)[\s\S]*?\.home-main-grid[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/);
     wrapper.unmount();
   });
@@ -319,6 +381,8 @@ describe('HomeView capital dashboard', () => {
     expect(wrapper.text()).toContain('上证指数');
     expect(wrapper.findAll('[data-testid="sector-chart"]')).toHaveLength(1);
     expect(wrapper.text()).toContain('资金信号读取失败');
+    expect(wrapper.text()).toContain('汇金 ETF 活动');
+    expect(wrapper.text()).toContain('等待服务恢复');
     wrapper.unmount();
   });
 
@@ -333,18 +397,25 @@ describe('HomeView capital dashboard', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('两融余额');
-    expect(wrapper.text()).toContain('宽基护盘雷达');
+    expect(wrapper.text()).toContain('汇金 ETF 活动');
     expect(wrapper.text()).toContain('市场总览暂时不可用');
     expect(wrapper.text()).toContain('板块资金流读取失败');
     wrapper.unmount();
   });
 
   it('keeps successful content and marks it stale after forced refresh failures', async () => {
-    resolveAll();
+    const capital = capitalFixture();
+    capital.etf_radar.activity.available_core_count = capital.etf_radar.activity.core_count;
+    api.getMarketOverview.mockResolvedValueOnce(overviewFixture());
+    api.getSectorRadar.mockResolvedValueOnce(sectorFlowFixture());
+    api.getCapitalSummary.mockResolvedValueOnce(capital);
     const { renderChart, wrapper } = await mountDashboard();
     await flushPromises();
     renderChart();
     await flushPromises();
+
+    const initialEtfPanel = wrapper.findAll('.home-capital-panel')[1]!;
+    expect(initialEtfPanel.get('.wb-status-tag').text()).toBe('成功');
 
     api.getMarketOverview.mockRejectedValueOnce(new Error('overview refresh failed'));
     api.getSectorRadar.mockRejectedValueOnce(new Error('sector refresh failed'));
@@ -355,7 +426,11 @@ describe('HomeView capital dashboard', () => {
 
     expect(wrapper.text()).toContain('上证指数');
     expect(wrapper.text()).toContain('融资融券余额');
-    expect(wrapper.findAll('[title="刷新失败，当前显示上次数据"]')).toHaveLength(3);
+    expect(wrapper.findAll('[title="刷新失败，当前显示上次数据"]')).toHaveLength(4);
+    const staleEtfPanel = wrapper.findAll('.home-capital-panel')[1]!;
+    expect(staleEtfPanel.get('.wb-status-tag').text()).toBe('部分');
+    expect(staleEtfPanel.text()).toContain('旧数据');
+    expect(staleEtfPanel.text()).toContain('159915.SZ');
     expect(wrapper.text()).not.toContain('refresh failed');
     wrapper.unmount();
   });

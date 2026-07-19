@@ -21,8 +21,10 @@ from app.main import (
     app,
     _refresh_sector_theme_rows,
     shutdown_auction_sampler,
+    shutdown_capital_signal_sampler,
     shutdown_sector_workbench_sampler,
     startup_auction_sampler,
+    startup_capital_signal_sampler,
     startup_sector_workbench_sampler,
 )
 from app.models import (
@@ -1594,6 +1596,7 @@ def _client(
         delattr(app.state, "chanlun_shadow_scheduler")
     app.state.chanlun_screening_summarizer = chanlun_screening_summarizer
     app.state.auction_sampler_disabled = True
+    app.state.capital_signal_sampler_disabled = True
     app.state.sector_workbench_sampler_disabled = True
     AUCTION_SNAPSHOT_CACHE.clear()
     MARKET_RANKINGS_CACHE.clear()
@@ -2867,6 +2870,64 @@ def test_startup_sector_workbench_sampler_respects_disabled_state(tmp_path: Path
 
     assert not hasattr(app.state, "sector_workbench_sampler")
     shutdown_sector_workbench_sampler()
+
+
+def test_lifespan_starts_and_stops_injected_capital_signal_sampler(tmp_path: Path) -> None:
+    class FakeSampler:
+        def __init__(self) -> None:
+            self.start_calls = 0
+            self.stop_calls = 0
+
+        def start(self) -> None:
+            self.start_calls += 1
+
+        def stop(self) -> None:
+            self.stop_calls += 1
+
+    client = _client(tmp_path)
+    sampler = FakeSampler()
+    app.state.capital_signal_sampler = sampler
+    app.state.capital_signal_sampler_disabled = False
+
+    try:
+        with client:
+            pass
+    finally:
+        app.state.capital_signal_sampler_disabled = True
+        delattr(app.state, "capital_signal_sampler")
+
+    assert sampler.start_calls == 1
+    assert sampler.stop_calls == 1
+
+
+def test_startup_capital_signal_sampler_respects_disabled_state(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _client(tmp_path)
+    if hasattr(app.state, "capital_signal_sampler"):
+        delattr(app.state, "capital_signal_sampler")
+
+    def fail_if_constructed(**_kwargs):
+        raise AssertionError("disabled sampler must not be constructed")
+
+    monkeypatch.setattr(main_module, "CapitalSignalSampler", fail_if_constructed)
+
+    startup_capital_signal_sampler()
+
+    assert not hasattr(app.state, "capital_signal_sampler")
+
+
+def test_shutdown_capital_signal_sampler_does_not_construct_service(monkeypatch) -> None:
+    if hasattr(app.state, "capital_signal_sampler"):
+        delattr(app.state, "capital_signal_sampler")
+
+    def fail_if_constructed():
+        raise AssertionError("shutdown must not construct capital service")
+
+    monkeypatch.setattr(main_module, "_capital_signal_service", fail_if_constructed)
+
+    shutdown_capital_signal_sampler()
 
 
 def test_auction_review_latest_returns_404_before_summary(tmp_path: Path) -> None:

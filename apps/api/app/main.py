@@ -105,6 +105,7 @@ from app.providers.watchlist import (
     upsert_watchlist_item,
 )
 from app.services.intraday import IntradayMonitor
+from app.services.capital_signal_sampler import CapitalSignalSampler
 from app.services.capital_signal_store import CapitalSignalStore
 from app.services.capital_signals import CapitalSignalService
 from app.services.background_jobs import BackgroundJobStore, CancelCheck, ProgressCallback
@@ -311,9 +312,11 @@ async def lifespan(_app: FastAPI):
     startup_gsgf_auto_review()
     startup_auction_sampler()
     startup_sector_workbench_sampler()
+    startup_capital_signal_sampler()
     try:
         yield
     finally:
+        shutdown_capital_signal_sampler()
         shutdown_chanlun_research()
         shutdown_sector_workbench_sampler()
         shutdown_auction_sampler()
@@ -434,6 +437,24 @@ def startup_sector_workbench_sampler() -> None:
 
 def shutdown_sector_workbench_sampler() -> None:
     sampler = getattr(app.state, "sector_workbench_sampler", None)
+    if sampler is not None:
+        sampler.stop()
+
+
+def startup_capital_signal_sampler() -> None:
+    if getattr(app.state, "capital_signal_sampler_disabled", False):
+        return
+    sampler = getattr(app.state, "capital_signal_sampler", None)
+    if sampler is None:
+        sampler = CapitalSignalSampler(
+            refresh=lambda: _capital_signal_service().overview(force=True)
+        )
+        app.state.capital_signal_sampler = sampler
+    sampler.start()
+
+
+def shutdown_capital_signal_sampler() -> None:
+    sampler = getattr(app.state, "capital_signal_sampler", None)
     if sampler is not None:
         sampler.stop()
 

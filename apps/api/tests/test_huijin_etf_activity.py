@@ -184,6 +184,90 @@ def test_build_baselines_skips_incomplete_groups_and_orders_snapshots() -> None:
     ]
 
 
+def test_build_baselines_ignores_invalid_rows_without_contaminating_valid_group() -> None:
+    valid = _position(
+        symbol="510300.SH",
+        report_period="2025-12-31",
+        shares=1_000,
+        holding_pct=10,
+    )
+    positions = [
+        valid,
+        _position(symbol="510300.SH", report_period="2025-12-31", shares=None),
+        _position(symbol="510300.SH", report_period="2025-12-31", holding_pct=None),
+        _position(symbol="510300.SH", report_period="2025-12-31", shares=-1),
+        _position(symbol="510300.SH", report_period="2025-12-31", holding_pct=-1),
+        _position(symbol="510300.SH", report_period="2025-12-31", shares=float("inf")),
+        _position(
+            symbol="510300.SH",
+            report_period="2025-12-31",
+            holding_pct=float("nan"),
+        ),
+        _position(symbol="510300.SH", report_period="2025-12-31", holding_pct=101),
+    ]
+
+    baselines = huijin_etf_activity.build_baselines(positions)
+
+    assert len(baselines) == 1
+    assert baselines[0].confirmed_huijin_shares == 1_000
+    assert baselines[0].confirmed_huijin_holding_pct == 10
+    assert baselines[0].baseline_total_shares == 10_000
+
+
+def test_build_baselines_counts_identical_duplicate_disclosures_once() -> None:
+    position = _position(
+        symbol="510300.SH",
+        report_period="2025-12-31",
+        shares=1_000,
+        holding_pct=10,
+    )
+
+    baselines = huijin_etf_activity.build_baselines([position, position.model_copy()])
+
+    assert len(baselines) == 1
+    assert baselines[0].confirmed_huijin_shares == 1_000
+    assert baselines[0].confirmed_huijin_holding_pct == 10
+
+
+def test_build_baselines_conflicting_duplicate_invalidates_only_its_group() -> None:
+    positions = [
+        _position(symbol="510300.SH", report_period="2025-12-31"),
+        _position(symbol="510300.SH", report_period="2025-12-31", shares=2_000),
+        _position(symbol="510500.SH", report_period="2025-12-31"),
+    ]
+
+    expected = [("2025-12-31", "510500.SH")]
+    assert [
+        (row.report_period, row.symbol)
+        for row in huijin_etf_activity.build_baselines(positions)
+    ] == expected
+    assert [
+        (row.report_period, row.symbol)
+        for row in huijin_etf_activity.build_baselines(list(reversed(positions)))
+    ] == expected
+
+
+def test_build_baselines_skips_aggregate_percentage_above_100() -> None:
+    positions = [
+        _position(
+            symbol="510300.SH",
+            report_period="2025-12-31",
+            entity_name="中央汇金投资有限责任公司",
+            shares=6_000,
+            holding_pct=60,
+        ),
+        _position(
+            symbol="510300.SH",
+            report_period="2025-12-31",
+            entity_name="中央汇金资产管理有限责任公司",
+            shares=6_000,
+            holding_pct=60,
+        ),
+    ]
+
+    assert huijin_etf_activity.build_baselines(positions) == []
+
+
 def test_calculate_activity_matches_2026_07_17_chinext_fixture() -> None:
     result = calculate_activity(
         symbol="159915.SZ",

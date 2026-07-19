@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from math import isfinite
 from types import MappingProxyType
 
 from app.models import (
@@ -53,18 +54,44 @@ ALL_ETFS: Mapping[str, EtfDefinition] = MappingProxyType(
 
 
 def build_baselines(positions: list[EtfHolderPosition]) -> list[HuijinEtfBaseline]:
-    grouped: dict[tuple[str, str], tuple[float, float]] = {}
+    entity_disclosures: dict[tuple[str, str, str], tuple[float, float]] = {}
+    conflicting_groups: set[tuple[str, str]] = set()
     for position in positions:
         if (
             position.symbol not in ALL_ETFS
             or position.entity_name not in _HUIJIN_LEGAL_ENTITIES
         ):
             continue
-        key = (position.report_period, position.symbol)
-        shares, holding_pct = grouped.get(key, (0, 0))
-        grouped[key] = (
-            shares + (position.shares or 0),
-            holding_pct + (position.holding_pct or 0),
+        shares = position.shares
+        holding_pct = position.holding_pct
+        if (
+            shares is None
+            or holding_pct is None
+            or not isfinite(shares)
+            or not isfinite(holding_pct)
+            or shares <= 0
+            or holding_pct <= 0
+            or holding_pct > 100
+        ):
+            continue
+        group_key = (position.report_period, position.symbol)
+        disclosure_key = (*group_key, position.entity_name)
+        disclosure = (shares, holding_pct)
+        existing = entity_disclosures.get(disclosure_key)
+        if existing is None:
+            entity_disclosures[disclosure_key] = disclosure
+        elif existing != disclosure:
+            conflicting_groups.add(group_key)
+
+    grouped: dict[tuple[str, str], tuple[float, float]] = {}
+    for disclosure_key, disclosure in sorted(entity_disclosures.items()):
+        group_key = disclosure_key[:2]
+        if group_key in conflicting_groups:
+            continue
+        shares, holding_pct = grouped.get(group_key, (0, 0))
+        grouped[group_key] = (
+            shares + disclosure[0],
+            holding_pct + disclosure[1],
         )
 
     baselines = []
@@ -72,7 +99,16 @@ def build_baselines(positions: list[EtfHolderPosition]) -> list[HuijinEtfBaselin
     for report_period in report_periods:
         for symbol, definition in ALL_ETFS.items():
             shares, holding_pct = grouped.get((report_period, symbol), (0, 0))
-            if shares <= 0 or holding_pct <= 0:
+            if (
+                not isfinite(shares)
+                or not isfinite(holding_pct)
+                or shares <= 0
+                or holding_pct <= 0
+                or holding_pct > 100
+            ):
+                continue
+            baseline_total_shares = shares / (holding_pct / 100)
+            if not isfinite(baseline_total_shares) or baseline_total_shares <= 0:
                 continue
             baselines.append(
                 HuijinEtfBaseline(
@@ -84,7 +120,7 @@ def build_baselines(positions: list[EtfHolderPosition]) -> list[HuijinEtfBaselin
                     role=definition.role,
                     paired_symbol=definition.paired_symbol,
                     report_period=report_period,
-                    baseline_total_shares=shares / (holding_pct / 100),
+                    baseline_total_shares=baseline_total_shares,
                     confirmed_huijin_shares=shares,
                     confirmed_huijin_holding_pct=holding_pct,
                     source_kind="derived",

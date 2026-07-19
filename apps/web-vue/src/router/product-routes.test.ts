@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import type { RouteMap } from '@elegant-router/types';
+import { getRouteName, getRoutePath } from './elegant/transform';
 import { productRoutes, resolveProductRoute } from './product-routes';
 
 describe('product route table', () => {
@@ -27,6 +29,13 @@ describe('product route table', () => {
         constant: true
       }
     });
+  });
+
+  it('registers the ETF radar in the generated route contract', () => {
+    const path: RouteMap['etf-radar'] = '/etf-radar';
+
+    expect(getRouteName(path)).toBe('etf-radar');
+    expect(getRoutePath('etf-radar')).toBe(path);
   });
 
   it('resolves stock detail as a dynamic route', () => {

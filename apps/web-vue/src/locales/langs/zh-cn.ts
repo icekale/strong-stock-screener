@@ -156,6 +156,7 @@ const local: App.I18n.Schema = {
     screener: '强势选股',
     auction: '竞价雷达',
     market: '板块与热图',
+    'etf-radar': 'ETF资金雷达',
     stock: '个股详情',
     watchlist: '自选与风险',
     sentiment: '情绪与复盘',

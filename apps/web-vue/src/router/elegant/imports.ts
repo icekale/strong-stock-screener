@@ -18,7 +18,6 @@ export const views: Record<string, RouteComponent | (() => Promise<RouteComponen
   auction: () => import('@/views/AuctionView.vue'),
   market: () => import('@/views/MarketView.vue'),
   'etf-radar': () => import('@/views/EtfRadarView.vue'),
-  etf_radar: () => import('@/views/EtfRadarView.vue'),
   stock: () => import('@/views/StockView.vue'),
   watchlist: () => import('@/views/WatchlistView.vue'),
   sentiment: () => import('@/views/SentimentView.vue'),

@@ -48,16 +48,28 @@ export function stageLabel(stage: CapitalSignalStage): string {
 
 function formatCnyMagnitude(value: number): string {
   const absolute = Math.abs(value);
-  if (absolute >= 1_000_000_000_000) return `${(value / 1_000_000_000_000).toFixed(2)}万亿`;
-  if (absolute >= 100_000_000) return `${(value / 100_000_000).toFixed(1)}亿`;
-  if (absolute >= 10_000) return `${(value / 10_000).toFixed(0)}万`;
+  if (absolute >= 1_000_000_000_000 || roundsToNextUnit(absolute, 100_000_000, 1)) {
+    return `${(value / 1_000_000_000_000).toFixed(2)}万亿`;
+  }
+  if (absolute >= 100_000_000 || roundsToNextUnit(absolute, 10_000, 0)) {
+    return `${(value / 100_000_000).toFixed(1)}亿`;
+  }
+  if (absolute >= 10_000 || roundsToNextUnit(absolute, 1, 0)) return `${(value / 10_000).toFixed(0)}万`;
   return value.toFixed(0);
 }
 
 function formatShareMagnitude(value: number): string {
   const absolute = Math.abs(value);
   const sign = value < 0 ? "-" : "";
-  if (absolute >= 100_000_000) return `${sign}${(absolute / 100_000_000).toFixed(2)}亿份`;
-  if (absolute >= 10_000) return `${sign}${(absolute / 10_000).toFixed(0)}万份`;
+  if (absolute >= 100_000_000 || roundsToNextUnit(absolute, 10_000, 0)) {
+    return `${sign}${(absolute / 100_000_000).toFixed(2)}亿份`;
+  }
+  if (absolute >= 10_000 || roundsToNextUnit(absolute, 1, 0)) {
+    return `${sign}${(absolute / 10_000).toFixed(0)}万份`;
+  }
   return `${sign}${absolute.toFixed(0)}份`;
+}
+
+function roundsToNextUnit(value: number, divisor: number, fractionDigits: number): boolean {
+  return Number((value / divisor).toFixed(fractionDigits)) >= 10_000;
 }

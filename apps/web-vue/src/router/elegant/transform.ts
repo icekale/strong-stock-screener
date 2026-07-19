@@ -165,6 +165,7 @@ const routeMap: RouteMap = {
   "screener": "/screener",
   "auction": "/auction",
   "market": "/market",
+  "etf-radar": "/etf-radar",
   "stock": "/stock/:symbol",
   "watchlist": "/watchlist",
   "sentiment": "/sentiment",

@@ -156,6 +156,7 @@ const local: App.I18n.Schema = {
     screener: 'Strong Stock Screener',
     auction: 'Auction Radar',
     market: 'Sectors and Heatmap',
+    'etf-radar': 'ETF Capital Radar',
     stock: 'Stock Detail',
     watchlist: 'Watchlist and Risk',
     sentiment: 'Sentiment and Review',

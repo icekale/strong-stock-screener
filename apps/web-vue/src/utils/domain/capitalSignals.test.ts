@@ -43,6 +43,12 @@ describe('capital signal formatting', () => {
     expect(formatPlainShares(null)).toBe('--');
   });
 
+  it('promotes rounded CNY and share values to the next display unit', () => {
+    expect(formatPlainCny(99_999_999)).toBe('1.0亿');
+    expect(formatPlainCny(999_999_999_999)).toBe('1.00万亿');
+    expect(formatPlainShares(99_999_999)).toBe('1.00亿份');
+  });
+
   it('formats evidence strength as a score and translates every signal stage', () => {
     expect(formatEvidenceStrength(72.25)).toBe('72.3');
     expect(formatEvidenceStrength(null)).toBe('--');

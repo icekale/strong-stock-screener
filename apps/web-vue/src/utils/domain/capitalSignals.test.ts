@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
+  activityDirectionLabel,
   directionTone,
+  formatActivityMultiple,
   formatDirectionalCny,
   formatDirectionalPercent,
   formatDirectionalShares,
   formatEvidenceStrength,
   formatPlainCny,
   formatPlainShares,
-  stageLabel
+  stageLabel,
+  validationStateLabel,
+  validationStateTone
 } from './capitalSignals';
 
 describe('capital signal formatting', () => {
@@ -55,5 +59,30 @@ describe('capital signal formatting', () => {
     expect(stageLabel('intraday')).toBe('盘中代理');
     expect(stageLabel('post_close')).toBe('盘后确认');
     expect(stageLabel('disclosure')).toBe('定期披露');
+  });
+
+  it('formats activity multiples deterministically', () => {
+    expect(formatActivityMultiple(60.19)).toBe('60.2倍');
+    expect(formatActivityMultiple(null)).toBe('--');
+    expect(formatActivityMultiple(0)).toBe('0.0倍');
+    expect(formatActivityMultiple(-1.25)).toBe('-1.3倍');
+  });
+
+  it('labels every ETF activity direction', () => {
+    expect(activityDirectionLabel('increase')).toBe('申购');
+    expect(activityDirectionLabel('decrease')).toBe('赎回');
+    expect(activityDirectionLabel('flat')).toBe('持平');
+    expect(activityDirectionLabel('unknown')).toBe('待确认');
+  });
+
+  it('labels and tones every ETF validation state', () => {
+    expect(validationStateLabel('confirmed_increase')).toBe('确认增加');
+    expect(validationStateLabel('confirmed_decrease')).toBe('确认减少');
+    expect(validationStateLabel('divergent')).toBe('方向分歧');
+    expect(validationStateLabel('incomplete')).toBe('数据不全');
+    expect(validationStateTone('confirmed_increase')).toBe('rise');
+    expect(validationStateTone('confirmed_decrease')).toBe('fall');
+    expect(validationStateTone('divergent')).toBe('neutral');
+    expect(validationStateTone('incomplete')).toBe('neutral');
   });
 });

@@ -1998,6 +1998,10 @@ export type SystemCacheClearResponse = {
 
 export type CapitalSignalStage = "intraday" | "post_close" | "disclosure";
 export type CapitalEvidenceLevel = "常规" | "观察" | "疑似" | "较强";
+export type HuijinEtfRole = "core" | "validator";
+export type EtfActivityDirection = "increase" | "decrease" | "flat" | "unknown";
+export type EtfValidationState = "confirmed_increase" | "confirmed_decrease" | "divergent" | "incomplete";
+export type HuijinBaselineSourceKind = "reported" | "derived";
 
 export type CapitalSignalMetadata = {
   generated_at: string;
@@ -2019,6 +2023,66 @@ export type MarginSummary = {
   expected_markets: number;
 };
 
+export type HuijinEtfBaseline = {
+  baseline_id: string;
+  pool_version: string;
+  symbol: string;
+  name: string;
+  index_name: string;
+  role: HuijinEtfRole;
+  paired_symbol: string | null;
+  report_period: string;
+  baseline_total_shares: number;
+  confirmed_huijin_shares: number;
+  confirmed_huijin_holding_pct: number;
+  source_kind: HuijinBaselineSourceKind;
+  source: string;
+};
+
+export type HuijinEtfActivityItem = {
+  symbol: string;
+  name: string;
+  index_name: string;
+  role: HuijinEtfRole;
+  paired_symbol: string | null;
+  trade_date: string;
+  total_shares: number | null;
+  previous_total_shares: number | null;
+  share_delta: number | null;
+  daily_change_pct: number | null;
+  baseline_change_pct: number | null;
+  cumulative_baseline_change_pct: number | null;
+  multiple: number | null;
+  direction: EtfActivityDirection;
+  is_tenfold: boolean;
+  report_period: string | null;
+  confirmed_huijin_holding_pct: number | null;
+  baseline_source_kind: HuijinBaselineSourceKind | null;
+};
+
+export type HuijinEtfValidationGroup = {
+  index_name: string;
+  core_symbol: string;
+  validator_symbol: string;
+  state: EtfValidationState;
+  conservative_daily_change_pct: number | null;
+  conservative_baseline_change_pct: number | null;
+  conservative_multiple: number | null;
+};
+
+export type HuijinEtfActivitySummary = {
+  core_count: number;
+  available_core_count: number;
+  tenfold_increase_count: number;
+  tenfold_decrease_count: number;
+  confirmed_increase_group_count: number;
+  confirmed_decrease_group_count: number;
+  divergent_group_count: number;
+  incomplete_group_count: number;
+  strongest_symbol: string | null;
+  strongest_baseline_change_pct: number | null;
+};
+
 export type EtfRadarSummary = {
   evidence_strength: number | null;
   evidence_level: CapitalEvidenceLevel | null;
@@ -2026,6 +2090,7 @@ export type EtfRadarSummary = {
   expected_etf_count: number;
   estimated_subscription_cny: number | null;
   evidence: string[];
+  activity?: HuijinEtfActivitySummary;
 };
 
 export type CapitalSummaryResponse = CapitalSignalMetadata & {
@@ -2056,6 +2121,13 @@ export type EtfRadarOverviewResponse = CapitalSignalMetadata & {
   estimated_subscription_cny: number | null;
   evidence: string[];
   items: EtfRadarItem[];
+  pool_version?: string;
+  baseline_version?: string | null;
+  baseline_fingerprint?: string | null;
+  activity?: HuijinEtfActivitySummary;
+  core_items?: HuijinEtfActivityItem[];
+  validation_items?: HuijinEtfActivityItem[];
+  validation_groups?: HuijinEtfValidationGroup[];
 };
 
 export type EtfRadarHistoryPoint = {
@@ -2066,6 +2138,10 @@ export type EtfRadarHistoryPoint = {
   share_change: number | null;
   estimated_subscription_cny: number | null;
   robust_score: number | null;
+  daily_change_pct?: number | null;
+  baseline_change_pct?: number | null;
+  cumulative_baseline_change_pct?: number | null;
+  multiple?: number | null;
 };
 
 export type EtfRadarHistoryResponse = CapitalSignalMetadata & {
@@ -2085,6 +2161,7 @@ export type EtfHolderPosition = {
 
 export type EtfRadarHoldersResponse = CapitalSignalMetadata & {
   positions: EtfHolderPosition[];
+  baselines?: HuijinEtfBaseline[];
 };
 
 export type EtfRadarFactorDefinition = {

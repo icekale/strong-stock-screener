@@ -1,4 +1,4 @@
-import type { CapitalSignalStage } from "@/service/types";
+import type { CapitalSignalStage, EtfActivityDirection, EtfValidationState } from "@/service/types";
 
 export type DirectionTone = "fall" | "neutral" | "rise";
 
@@ -27,6 +27,30 @@ export function formatPlainCny(value: number | null): string {
 
 export function formatEvidenceStrength(value: number | null): string {
   return value === null ? "--" : value.toFixed(1);
+}
+
+export function formatActivityMultiple(value: number | null): string {
+  return value === null ? "--" : `${value.toFixed(1)}倍`;
+}
+
+export function activityDirectionLabel(value: EtfActivityDirection): string {
+  if (value === "increase") return "申购";
+  if (value === "decrease") return "赎回";
+  if (value === "flat") return "持平";
+  return "待确认";
+}
+
+export function validationStateLabel(value: EtfValidationState): string {
+  if (value === "confirmed_increase") return "确认增加";
+  if (value === "confirmed_decrease") return "确认减少";
+  if (value === "divergent") return "方向分歧";
+  return "数据不全";
+}
+
+export function validationStateTone(value: EtfValidationState): DirectionTone {
+  if (value === "confirmed_increase") return "rise";
+  if (value === "confirmed_decrease") return "fall";
+  return "neutral";
 }
 
 export function formatPlainShares(value: number | null): string {

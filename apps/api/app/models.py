@@ -2006,3 +2006,141 @@ class StrongStockIntradaySnapshot(BaseModel):
 
 class StrongStockDataUnavailable(RuntimeError):
     pass
+
+
+CapitalSignalStage = Literal["intraday", "post_close", "disclosure"]
+CapitalEvidenceLevel = Literal["常规", "观察", "疑似", "较强"]
+
+
+class MarginMarketPoint(BaseModel):
+    trade_date: str
+    market: Literal["SSE", "SZSE"]
+    financing_balance_cny: float | None = None
+    securities_lending_balance_cny: float | None = None
+    margin_balance_cny: float | None = None
+    financing_buy_cny: float | None = None
+
+
+class EtfSharePoint(BaseModel):
+    trade_date: str
+    symbol: str
+    name: str | None = None
+    total_shares: float
+    close: float | None = None
+    share_change: float | None = None
+    estimated_subscription_cny: float | None = None
+    robust_score: float | None = None
+
+
+class EtfShareChange(BaseModel):
+    share_change: float | None = None
+    estimated_subscription_cny: float | None = None
+
+
+class EtfSynchronization(BaseModel):
+    positive_count: int = 0
+    valid_count: int = 0
+    ratio: float | None = None
+
+
+class CapitalSignalMetadata(BaseModel):
+    generated_at: str
+    trade_date: str
+    as_of: str
+    signal_stage: CapitalSignalStage
+    model_version: str
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+
+
+class MarginSummary(BaseModel):
+    balance_cny: float | None = None
+    financing_balance_cny: float | None = None
+    securities_lending_balance_cny: float | None = None
+    financing_buy_cny: float | None = None
+    change_cny: float | None = None
+    change_pct: float | None = None
+    available_markets: int = 0
+    expected_markets: int = 2
+
+
+class EtfRadarSummary(BaseModel):
+    evidence_strength: float | None = Field(default=None, ge=0, le=100)
+    evidence_level: CapitalEvidenceLevel | None = None
+    valid_etf_count: int = 0
+    expected_etf_count: int = 7
+    estimated_subscription_cny: float | None = None
+    evidence: list[str] = Field(default_factory=list)
+
+
+class CapitalSummaryResponse(CapitalSignalMetadata):
+    margin: MarginSummary = Field(default_factory=MarginSummary)
+    etf_radar: EtfRadarSummary = Field(default_factory=EtfRadarSummary)
+
+
+class EtfRadarItem(BaseModel):
+    symbol: str
+    name: str
+    index_name: str
+    total_shares: float | None = None
+    share_change: float | None = None
+    estimated_subscription_cny: float | None = None
+    robust_score: float | None = None
+    same_time_turnover_ratio: float | None = None
+    relative_index_return_pct: float | None = None
+    late_session_acceleration: float | None = None
+    evidence_strength: float | None = Field(default=None, ge=0, le=100)
+    evidence: list[str] = Field(default_factory=list)
+
+
+class EtfRadarOverviewResponse(CapitalSignalMetadata):
+    evidence_strength: float | None = Field(default=None, ge=0, le=100)
+    evidence_level: CapitalEvidenceLevel | None = None
+    valid_etf_count: int = 0
+    expected_etf_count: int = 7
+    estimated_subscription_cny: float | None = None
+    evidence: list[str] = Field(default_factory=list)
+    items: list[EtfRadarItem] = Field(default_factory=list)
+
+
+class EtfRadarHistoryPoint(BaseModel):
+    trade_date: str
+    symbol: str
+    name: str
+    total_shares: float | None = None
+    share_change: float | None = None
+    estimated_subscription_cny: float | None = None
+    robust_score: float | None = None
+
+
+class EtfRadarHistoryResponse(CapitalSignalMetadata):
+    points: list[EtfRadarHistoryPoint] = Field(default_factory=list)
+
+
+class EtfHolderPosition(BaseModel):
+    symbol: str
+    name: str
+    report_period: str
+    entity_name: str
+    shares: float | None = None
+    holding_pct: float | None = None
+    change_shares: float | None = None
+    source: str
+
+
+class EtfRadarHoldersResponse(CapitalSignalMetadata):
+    positions: list[EtfHolderPosition] = Field(default_factory=list)
+
+
+class EtfRadarFactorDefinition(BaseModel):
+    key: str
+    name: str
+    description: str
+    availability: str
+
+
+class EtfRadarMethodologyResponse(CapitalSignalMetadata):
+    pool_version: str
+    core_pool: list[str] = Field(default_factory=list)
+    thresholds: dict[str, float] = Field(default_factory=dict)
+    factors: list[EtfRadarFactorDefinition] = Field(default_factory=list)
+    limitations: list[str] = Field(default_factory=list)

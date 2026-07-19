@@ -338,6 +338,22 @@ describe('HomeView capital dashboard', () => {
     wrapper.unmount();
   });
 
+  it('keeps complete ETF activity successful when only a margin source fails', async () => {
+    const capital = capitalFixture();
+    capital.etf_radar.activity.available_core_count = capital.etf_radar.activity.core_count;
+    capital.source_status = [{ source: '上交所两融', status: 'failed', detail: '两融服务不可用' }];
+    api.getMarketOverview.mockResolvedValueOnce(overviewFixture());
+    api.getSectorRadar.mockResolvedValueOnce(sectorFlowFixture());
+    api.getCapitalSummary.mockResolvedValueOnce(capital);
+
+    const { wrapper } = await mountDashboard();
+    await flushPromises();
+
+    const etfPanel = wrapper.findAll('.home-capital-panel')[1]!;
+    expect(etfPanel.get('.wb-status-tag').text()).toBe('成功');
+    wrapper.unmount();
+  });
+
   it('caps each sector direction at six rows and stacks the main grid responsively', async () => {
     const flow = sectorFlowFixture();
     const makeRow = (index: number, direction: 1 | -1) => ({
@@ -363,7 +379,10 @@ describe('HomeView capital dashboard', () => {
     expect(values).toHaveLength(12);
     expect(values.filter(value => value > 0)).toHaveLength(6);
     expect(values.filter(value => value < 0)).toHaveLength(6);
-    expect(source).toMatch(/\.home-capital-stack\s*\{[\s\S]*?grid-template-rows: repeat\(2, minmax\(0, 1fr\)\)/);
+    expect(source).toMatch(/\.home-capital-stack\s*\{[\s\S]*?grid-template-rows: repeat\(2, minmax\(min-content, 1fr\)\)/);
+    expect(source).toMatch(/\.home-capital-panel\s*\{[^}]*min-height:/);
+    expect(source).not.toMatch(/\.home-capital-panel\s*\{[^}]*overflow:\s*hidden/);
+    expect(source).toMatch(/\.home-etf-context\s*\{[^}]*overflow:\s*hidden[^}]*text-overflow:\s*ellipsis[^}]*white-space:\s*nowrap/);
     expect(source).toMatch(/@media \(max-width: 1023px\)[\s\S]*?\.home-main-grid[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/);
     wrapper.unmount();
   });

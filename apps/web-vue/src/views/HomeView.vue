@@ -192,13 +192,19 @@ function toneClass(tone: 'fall' | 'neutral' | 'rise'): string {
   return '';
 }
 
+function isEtfActivitySource(source: string): boolean {
+  return source.toUpperCase().includes('ETF') || ['汇金', '持有人', '基金'].some(marker => source.includes(marker));
+}
+
 const etfActivityStatus = computed<'success' | 'partial'>(() => {
   const data = capitalData.value;
   if (!data) return 'partial';
 
   const activity = data.etf_radar.activity;
   const coverageComplete = activity.available_core_count === activity.core_count;
-  const sourceDegraded = data.source_status.some(source => source.status === 'stale' || source.status === 'failed');
+  const sourceDegraded = data.source_status.some(
+    source => isEtfActivitySource(source.source) && (source.status === 'stale' || source.status === 'failed')
+  );
   return coverageComplete && !capitalIsStale.value && !sourceDegraded ? 'success' : 'partial';
 });
 
@@ -548,13 +554,13 @@ onBeforeUnmount(() => {
 
 .home-capital-stack {
   display: grid;
-  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(min-content, 1fr));
   gap: 12px;
   min-width: 0;
 }
 
 .home-capital-panel {
-  overflow: hidden;
+  min-height: 200px;
 }
 
 .home-capital-context {
@@ -617,7 +623,11 @@ onBeforeUnmount(() => {
 }
 
 .home-etf-context {
+  min-width: 0;
   margin-bottom: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .home-etf-count-strip,

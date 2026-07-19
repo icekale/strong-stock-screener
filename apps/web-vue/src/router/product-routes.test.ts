@@ -8,11 +8,25 @@ describe('product route table', () => {
       '/screener',
       '/auction',
       '/market',
+      '/etf-radar',
       '/watchlist',
       '/sentiment',
       '/chanlun',
       '/system'
     ]);
+  });
+
+  it('exposes the ETF capital radar as a top-level workbench route', () => {
+    expect(productRoutes.find(route => route.path === '/etf-radar')).toMatchObject({
+      name: 'etf-radar',
+      component: 'layout.base$view.etf-radar',
+      meta: {
+        title: 'ETF资金雷达',
+        icon: 'ant-design:radar-chart-outlined',
+        order: 5,
+        constant: true
+      }
+    });
   });
 
   it('resolves stock detail as a dynamic route', () => {

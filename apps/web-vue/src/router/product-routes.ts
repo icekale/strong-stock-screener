@@ -26,6 +26,12 @@ export const productRoutes: ElegantConstRoute[] = [
     meta: { title: '板块与热图', icon: 'ant-design:line-chart-outlined', order: 4, constant: true }
   },
   {
+    name: 'etf-radar',
+    path: '/etf-radar',
+    component: 'layout.base$view.etf-radar',
+    meta: { title: 'ETF资金雷达', icon: 'ant-design:radar-chart-outlined', order: 5, constant: true }
+  },
+  {
     name: 'stock',
     path: '/stock/:symbol',
     component: 'layout.base$view.stock',
@@ -36,25 +42,25 @@ export const productRoutes: ElegantConstRoute[] = [
     name: 'watchlist',
     path: '/watchlist',
     component: 'layout.base$view.watchlist',
-    meta: { title: '自选与风险', icon: 'ant-design:folder-open-outlined', order: 5, constant: true }
+    meta: { title: '自选与风险', icon: 'ant-design:folder-open-outlined', order: 6, constant: true }
   },
   {
     name: 'sentiment',
     path: '/sentiment',
     component: 'layout.base$view.sentiment',
-    meta: { title: '情绪与复盘', icon: 'ant-design:thunderbolt-outlined', order: 6, constant: true }
+    meta: { title: '情绪与复盘', icon: 'ant-design:thunderbolt-outlined', order: 7, constant: true }
   },
   {
     name: 'chanlun',
     path: '/chanlun',
     component: 'layout.base$view.chanlun',
-    meta: { title: '缠论工作台', icon: 'ant-design:fund-outlined', order: 7, constant: true }
+    meta: { title: '缠论工作台', icon: 'ant-design:fund-outlined', order: 8, constant: true }
   },
   {
     name: 'system',
     path: '/system',
     component: 'layout.base$view.system',
-    meta: { title: '模型与数据源', icon: 'ant-design:setting-outlined', order: 8, constant: true }
+    meta: { title: '模型与数据源', icon: 'ant-design:setting-outlined', order: 9, constant: true }
   },
   {
     name: 'settings',

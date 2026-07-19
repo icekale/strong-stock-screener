@@ -5,13 +5,20 @@ from threading import RLock
 
 from pydantic import TypeAdapter
 
-from app.models import EtfHolderPosition, EtfRadarOverviewResponse, EtfSharePoint, MarginMarketPoint
+from app.models import (
+    EtfHolderPosition,
+    EtfRadarOverviewResponse,
+    EtfSharePoint,
+    HuijinEtfBaseline,
+    MarginMarketPoint,
+)
 
 
 _STORE_LOCK = RLock()
 _MARGIN_LIST = TypeAdapter(list[MarginMarketPoint])
 _SHARE_LIST = TypeAdapter(list[EtfSharePoint])
 _HOLDER_LIST = TypeAdapter(list[EtfHolderPosition])
+_HUIJIN_BASELINE_LIST = TypeAdapter(list[HuijinEtfBaseline])
 
 
 class CapitalSignalStore:
@@ -20,6 +27,7 @@ class CapitalSignalStore:
         self.margin_history_path = self.root_dir / "margin-history.json"
         self.share_history_path = self.root_dir / "etf-share-history.json"
         self.holder_reports_path = self.root_dir / "etf-holder-reports.json"
+        self.huijin_baselines_path = self.root_dir / "huijin-etf-baselines.json"
         self.snapshot_path = self.root_dir / "etf-radar-snapshot.json"
 
     def load_margin_history(self) -> list[MarginMarketPoint]:
@@ -51,6 +59,17 @@ class CapitalSignalStore:
     def save_holder_reports(self, rows: list[EtfHolderPosition]) -> None:
         with _STORE_LOCK:
             self._write_bytes(self.holder_reports_path, _HOLDER_LIST.dump_json(rows, indent=2))
+
+    def load_huijin_baselines(self) -> list[HuijinEtfBaseline]:
+        with _STORE_LOCK:
+            return self._load_list(self.huijin_baselines_path, _HUIJIN_BASELINE_LIST)
+
+    def save_huijin_baselines(self, rows: list[HuijinEtfBaseline]) -> None:
+        with _STORE_LOCK:
+            self._write_bytes(
+                self.huijin_baselines_path,
+                _HUIJIN_BASELINE_LIST.dump_json(rows, indent=2),
+            )
 
     def load_snapshot(self) -> EtfRadarOverviewResponse | None:
         with _STORE_LOCK:

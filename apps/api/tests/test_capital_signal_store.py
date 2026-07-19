@@ -2,8 +2,36 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from app.models import EtfHolderPosition, EtfRadarOverviewResponse, EtfSharePoint, MarginMarketPoint
+from app.models import (
+    EtfHolderPosition,
+    EtfRadarOverviewResponse,
+    EtfSharePoint,
+    HuijinEtfBaseline,
+    MarginMarketPoint,
+)
 from app.services.capital_signal_store import CapitalSignalStore
+
+
+def _huijin_baseline(
+    *,
+    report_period: str = "2025-12-31",
+    pool_version: str = "huijin-public-v1",
+) -> HuijinEtfBaseline:
+    return HuijinEtfBaseline(
+        baseline_id=f"{report_period}:{pool_version}:510300.SH",
+        pool_version=pool_version,
+        symbol="510300.SH",
+        name="沪深300ETF华泰柏瑞",
+        index_name="沪深300",
+        role="core",
+        paired_symbol="159919.SZ",
+        report_period=report_period,
+        baseline_total_shares=88_826_848_719,
+        confirmed_huijin_shares=73_513_100_000,
+        confirmed_huijin_holding_pct=82.76,
+        source_kind="derived",
+        source="基金持有人披露持仓与比例推导",
+    )
 
 
 def test_store_round_trips_margin_and_share_history(tmp_path: Path) -> None:
@@ -107,3 +135,49 @@ def test_store_round_trips_holder_reports(tmp_path: Path) -> None:
     store.save_holder_reports(positions)
 
     assert store.load_holder_reports() == positions
+
+
+def test_store_round_trips_huijin_baselines_without_temp_residue(tmp_path: Path) -> None:
+    store = CapitalSignalStore(tmp_path)
+    baselines = [_huijin_baseline()]
+
+    store.save_huijin_baselines(baselines)
+
+    assert store.huijin_baselines_path == (
+        tmp_path / "capital-signals" / "huijin-etf-baselines.json"
+    )
+    assert store.load_huijin_baselines() == baselines
+    assert not list(store.root_dir.glob("*.tmp"))
+
+
+def test_store_huijin_baseline_save_replaces_full_versioned_snapshot(
+    tmp_path: Path,
+) -> None:
+    store = CapitalSignalStore(tmp_path)
+    old_baseline = _huijin_baseline()
+    replacement = _huijin_baseline(
+        report_period="2026-06-30",
+        pool_version="huijin-public-v2",
+    )
+
+    store.save_huijin_baselines([old_baseline])
+    store.save_huijin_baselines([old_baseline])
+
+    assert store.load_huijin_baselines() == [old_baseline]
+
+    store.save_huijin_baselines([replacement])
+
+    assert store.load_huijin_baselines() == [replacement]
+
+
+def test_store_returns_empty_huijin_baselines_for_missing_or_corrupt_file(
+    tmp_path: Path,
+) -> None:
+    store = CapitalSignalStore(tmp_path)
+
+    assert store.load_huijin_baselines() == []
+
+    store.root_dir.mkdir(parents=True)
+    store.huijin_baselines_path.write_text("not json", encoding="utf-8")
+
+    assert store.load_huijin_baselines() == []

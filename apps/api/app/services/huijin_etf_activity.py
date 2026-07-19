@@ -6,6 +6,7 @@ from types import MappingProxyType
 
 from app.models import (
     EtfActivityDirection,
+    EtfHolderPosition,
     HuijinEtfActivityItem,
     HuijinEtfBaseline,
     HuijinEtfRole,
@@ -16,6 +17,10 @@ from app.models import (
 POOL_VERSION = "huijin-public-v1"
 MODEL_VERSION = "huijin-public-rule-v1"
 TENFOLD_BASELINE_PCT = 0.1
+_HUIJIN_LEGAL_ENTITIES = frozenset({
+    "中央汇金投资有限责任公司",
+    "中央汇金资产管理有限责任公司",
+})
 
 
 @dataclass(frozen=True)
@@ -45,6 +50,48 @@ VALIDATION_ETFS: Mapping[str, EtfDefinition] = MappingProxyType({
 ALL_ETFS: Mapping[str, EtfDefinition] = MappingProxyType(
     {**CORE_ETFS, **VALIDATION_ETFS}
 )
+
+
+def build_baselines(positions: list[EtfHolderPosition]) -> list[HuijinEtfBaseline]:
+    grouped: dict[tuple[str, str], tuple[float, float]] = {}
+    for position in positions:
+        if (
+            position.symbol not in ALL_ETFS
+            or position.entity_name not in _HUIJIN_LEGAL_ENTITIES
+        ):
+            continue
+        key = (position.report_period, position.symbol)
+        shares, holding_pct = grouped.get(key, (0, 0))
+        grouped[key] = (
+            shares + (position.shares or 0),
+            holding_pct + (position.holding_pct or 0),
+        )
+
+    baselines = []
+    report_periods = sorted({report_period for report_period, _ in grouped})
+    for report_period in report_periods:
+        for symbol, definition in ALL_ETFS.items():
+            shares, holding_pct = grouped.get((report_period, symbol), (0, 0))
+            if shares <= 0 or holding_pct <= 0:
+                continue
+            baselines.append(
+                HuijinEtfBaseline(
+                    baseline_id=f"{report_period}:{POOL_VERSION}:{symbol}",
+                    pool_version=POOL_VERSION,
+                    symbol=symbol,
+                    name=definition.name,
+                    index_name=definition.index_name,
+                    role=definition.role,
+                    paired_symbol=definition.paired_symbol,
+                    report_period=report_period,
+                    baseline_total_shares=shares / (holding_pct / 100),
+                    confirmed_huijin_shares=shares,
+                    confirmed_huijin_holding_pct=holding_pct,
+                    source_kind="derived",
+                    source="基金持有人披露持仓与比例推导",
+                )
+            )
+    return baselines
 
 
 def calculate_activity(

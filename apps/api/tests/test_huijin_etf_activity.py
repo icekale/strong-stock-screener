@@ -5,7 +5,8 @@ from collections.abc import Mapping
 
 import pytest
 
-from app.models import HuijinEtfActivityItem, HuijinEtfBaseline
+from app.models import EtfHolderPosition, HuijinEtfActivityItem, HuijinEtfBaseline
+from app.services import huijin_etf_activity
 from app.services.huijin_etf_activity import (
     ALL_ETFS,
     CORE_ETFS,
@@ -14,6 +15,25 @@ from app.services.huijin_etf_activity import (
     calculate_activity,
     validate_pair,
 )
+
+
+def _position(
+    *,
+    symbol: str,
+    report_period: str,
+    entity_name: str = "中央汇金投资有限责任公司",
+    shares: float | None = 1_000,
+    holding_pct: float | None = 10,
+) -> EtfHolderPosition:
+    return EtfHolderPosition(
+        symbol=symbol,
+        name="披露名称不作为基线定义",
+        report_period=report_period,
+        entity_name=entity_name,
+        shares=shares,
+        holding_pct=holding_pct,
+        source="基金持有人披露",
+    )
 
 
 def _baseline(
@@ -87,6 +107,81 @@ def test_exported_etf_mappings_are_immutable(
 
     with pytest.raises(TypeError):
         operator.setitem(mapping, symbol, mapping[symbol])
+
+
+def test_build_baselines_derives_confirmed_huijin_fixture() -> None:
+    positions = [
+        _position(
+            symbol="510300.SH",
+            report_period="2025-12-31",
+            entity_name="中央汇金资产管理有限责任公司",
+            shares=37_858_500_000,
+            holding_pct=42.62,
+        ),
+        _position(
+            symbol="510300.SH",
+            report_period="2025-12-31",
+            shares=35_654_600_000,
+            holding_pct=40.14,
+        ),
+        _position(
+            symbol="510300.SH",
+            report_period="2025-12-31",
+            entity_name="中国证券金融股份有限公司",
+            shares=9_999_999_999,
+            holding_pct=11.11,
+        ),
+        _position(
+            symbol="999999.SH",
+            report_period="2025-12-31",
+            shares=1_000,
+            holding_pct=10,
+        ),
+    ]
+
+    baselines = huijin_etf_activity.build_baselines(positions)
+
+    assert len(baselines) == 1
+    baseline = baselines[0]
+    assert baseline.baseline_id == "2025-12-31:huijin-public-v1:510300.SH"
+    assert baseline.pool_version == "huijin-public-v1"
+    assert baseline.symbol == "510300.SH"
+    assert baseline.name == "沪深300ETF华泰柏瑞"
+    assert baseline.index_name == "沪深300"
+    assert baseline.role == "core"
+    assert baseline.paired_symbol == "159919.SZ"
+    assert baseline.report_period == "2025-12-31"
+    assert baseline.confirmed_huijin_shares == 73_513_100_000
+    assert baseline.confirmed_huijin_holding_pct == pytest.approx(82.76)
+    assert baseline.baseline_total_shares == pytest.approx(88_826_848_719, rel=1e-6)
+    assert baseline.source_kind == "derived"
+    assert baseline.source == "基金持有人披露持仓与比例推导"
+
+
+def test_build_baselines_skips_incomplete_groups_and_orders_snapshots() -> None:
+    positions = [
+        _position(symbol="510500.SH", report_period="2025-12-31"),
+        _position(symbol="510300.SH", report_period="2024-12-31"),
+        _position(symbol="510050.SH", report_period="2025-12-31"),
+        _position(symbol="510300.SH", report_period="2025-12-31"),
+        _position(symbol="512100.SH", report_period="2025-12-31", shares=None),
+        _position(symbol="159915.SZ", report_period="2025-12-31", holding_pct=None),
+        _position(symbol="510230.SH", report_period="2025-12-31", shares=0),
+        _position(
+            symbol="588080.SH",
+            report_period="2025-12-31",
+            entity_name="国新投资有限公司",
+        ),
+    ]
+
+    baselines = huijin_etf_activity.build_baselines(positions)
+
+    assert [(row.report_period, row.symbol) for row in baselines] == [
+        ("2024-12-31", "510300.SH"),
+        ("2025-12-31", "510050.SH"),
+        ("2025-12-31", "510300.SH"),
+        ("2025-12-31", "510500.SH"),
+    ]
 
 
 def test_calculate_activity_matches_2026_07_17_chinext_fixture() -> None:

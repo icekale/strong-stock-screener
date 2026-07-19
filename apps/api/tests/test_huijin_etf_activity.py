@@ -235,3 +235,22 @@ def test_pair_conservative_values_use_smaller_absolute_magnitude() -> None:
     assert result.conservative_baseline_change_pct == -2
     assert result.conservative_multiple == 20
 
+
+def test_unknown_symbol_calculates_metrics_without_a_pair() -> None:
+    result = calculate_activity(
+        symbol="999999.SH",
+        name="测试ETF",
+        index_name="测试指数",
+        role="core",
+        trade_date="2026-07-17",
+        total_shares=11_000,
+        previous_total_shares=10_000,
+        baseline=_baseline(symbol="999999.SH", total_shares=10_000),
+    )
+
+    assert result.paired_symbol is None
+    assert result.share_delta == 1_000
+    assert result.daily_change_pct == pytest.approx(10)
+    assert result.baseline_change_pct == pytest.approx(10)
+    assert result.multiple == pytest.approx(100)
+    assert result.direction == "increase"

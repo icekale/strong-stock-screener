@@ -76,12 +76,13 @@ def calculate_activity(
             * 100
         )
 
+    definition = ALL_ETFS.get(symbol)
     return HuijinEtfActivityItem(
         symbol=symbol,
         name=name,
         index_name=index_name,
         role=role,
-        paired_symbol=ALL_ETFS[symbol].paired_symbol,
+        paired_symbol=definition.paired_symbol if definition is not None else None,
         trade_date=trade_date,
         total_shares=total_shares,
         previous_total_shares=previous_total_shares,

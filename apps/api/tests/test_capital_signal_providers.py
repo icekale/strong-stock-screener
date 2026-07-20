@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+from copy import deepcopy
+
 import httpx
+import pytest
 
 from app.providers.capital_signals import (
     OfficialCapitalDataProvider,
@@ -58,12 +61,17 @@ SSE_SHARE_FIXTURE = {
 
 SZSE_SHARE_FIXTURE = [
     {
-        "metadata": {"subname": "2026-07-17"},
+        "metadata": {
+            "subname": "2026-07-20",
+            "cols": {
+                "dqgm": "当前规模<br>（万份）<span>说明</span><br>（2026-07-17）"
+            },
+        },
         "data": [
             {
-                "sys_key": "<a href='?code=159915'><u>159915</u></a>",
-                "kzjcurl": "<a href='?name=创业板ETF'><u>创业板ETF</u></a>",
-                "dqgm": "481,234.56",
+                "sys_key": "<u>159915</u>",
+                "kzjcurl": "<u>创业板ETF易方达</u>",
+                "dqgm": "1,492,045.49",
             }
         ],
     }
@@ -111,9 +119,9 @@ def test_szse_current_share_parser_does_not_invent_history() -> None:
 
     assert len(rows) == 1
     assert rows[0].symbol == "159915.SZ"
-    assert rows[0].name == "创业板ETF"
+    assert rows[0].name == "创业板ETF易方达"
     assert rows[0].trade_date == "2026-07-17"
-    assert rows[0].total_shares == 4_812_345_600
+    assert rows[0].total_shares == 14_920_454_900
 
 
 def test_szse_current_share_parser_rejects_a_different_exchange_date() -> None:
@@ -126,7 +134,40 @@ def test_szse_current_share_parser_rejects_a_different_exchange_date() -> None:
     assert rows == []
 
 
-def test_szse_current_share_parser_rejects_missing_or_invalid_exchange_date() -> None:
+def test_szse_share_parser_uses_scale_column_date_not_page_date() -> None:
+    rows = parse_szse_etf_share_payload(
+        SZSE_SHARE_FIXTURE,
+        trade_date="2026-07-17",
+        symbols=["159915.SZ"],
+    )
+
+    assert len(rows) == 1
+    assert rows[0].trade_date == "2026-07-17"
+    assert rows[0].total_shares == pytest.approx(14_920_454_900)
+
+
+@pytest.mark.parametrize(
+    "dqgm_title",
+    [
+        "当前规模（万份）",
+        "当前规模（2026-07-16）（2026-07-17）",
+        "当前规模（2026-02-31）",
+    ],
+)
+def test_szse_share_parser_rejects_missing_ambiguous_or_invalid_scale_date(
+    dqgm_title: str,
+) -> None:
+    payload = deepcopy(SZSE_SHARE_FIXTURE)
+    payload[0]["metadata"]["cols"]["dqgm"] = dqgm_title
+
+    assert parse_szse_etf_share_payload(
+        payload,
+        trade_date="2026-07-17",
+        symbols=["159915.SZ"],
+    ) == []
+
+
+def test_szse_current_share_parser_rejects_missing_or_invalid_scale_date() -> None:
     missing_date = [{"metadata": {}, "data": SZSE_SHARE_FIXTURE[0]["data"]}]
     invalid_date = [
         {
@@ -171,7 +212,10 @@ def test_szse_share_parser_rejects_impossible_metadata_and_requested_dates() -> 
     for impossible_date in ("2026-02-30", "20260230"):
         payload = [
             {
-                "metadata": {"subname": impossible_date},
+                "metadata": {
+                    "subname": "2026-07-20",
+                    "cols": {"dqgm": f"当前规模（{impossible_date}）"},
+                },
                 "data": SZSE_SHARE_FIXTURE[0]["data"],
             }
         ]
@@ -188,7 +232,15 @@ def test_szse_share_parser_rejects_impossible_metadata_and_requested_dates() -> 
 
 def test_share_parsers_skip_missing_or_non_positive_sizes() -> None:
     sse = {"result": [{"STAT_DATE": "2026-07-17", "SEC_CODE": "510300", "TOT_VOL": "-"}]}
-    szse = [{"metadata": {"subname": "2026-07-17"}, "data": [{"sys_key": "159915", "dqgm": "0"}]}]
+    szse = [
+        {
+            "metadata": {
+                "subname": "2026-07-20",
+                "cols": {"dqgm": "当前规模（2026-07-17）"},
+            },
+            "data": [{"sys_key": "159915", "dqgm": "0"}],
+        }
+    ]
 
     assert parse_sse_etf_share_payload(sse, symbols=["510300.SH"]) == []
     assert parse_szse_etf_share_payload(szse, trade_date="2026-07-17", symbols=["159915.SZ"]) == []
@@ -401,7 +453,10 @@ def test_share_provider_collects_the_ten_etf_universe_without_live_calls() -> No
                 200,
                 json=[
                     {
-                        "metadata": {"subname": "2026-07-17"},
+                        "metadata": {
+                            "subname": "2026-07-20",
+                            "cols": {"dqgm": "当前规模（2026-07-17）"},
+                        },
                         "data": [
                             {
                                 "sys_key": code,
@@ -431,6 +486,7 @@ def test_share_provider_collects_the_ten_etf_universe_without_live_calls() -> No
         ("上交所ETF份额", "success"),
         ("深交所ETF份额", "success"),
     ]
+    assert "份额日期 2026-07-17" in result.source_status[1].detail
 
 
 def test_share_provider_marks_partial_szse_coverage_stale() -> None:
@@ -445,7 +501,10 @@ def test_share_provider_marks_partial_szse_coverage_stale() -> None:
             200,
             json=[
                 {
-                    "metadata": {"subname": exchange_date},
+                    "metadata": {
+                        "subname": "2026-07-20",
+                        "cols": {"dqgm": f"当前规模（{exchange_date}）"},
+                    },
                     "data": [{"sys_key": code, "dqgm": "100"}],
                 }
             ],
@@ -460,7 +519,8 @@ def test_share_provider_marks_partial_szse_coverage_stale() -> None:
     assert [row.symbol for row in result.rows] == ["159915.SZ"]
     assert result.source_status[0].status == "stale"
     assert result.source_status[0].detail == (
-        "当日有效 1/3 只；1 只请求失败；1 只日期或空数据拒绝；深市不补造历史"
+        "当日有效 1/3 只；1 只请求失败；1 只日期或空数据拒绝；"
+        "深市不补造历史；份额日期 2026-07-17"
     )
 
 
@@ -474,7 +534,10 @@ def test_share_provider_reports_all_date_rejected_szse_coverage_as_stale() -> No
             200,
             json=[
                 {
-                    "metadata": {"subname": exchange_date},
+                    "metadata": {
+                        "subname": "2026-07-20",
+                        "cols": {"dqgm": f"当前规模（{exchange_date}）"},
+                    },
                     "data": [{"sys_key": code, "dqgm": "100"}],
                 }
             ],

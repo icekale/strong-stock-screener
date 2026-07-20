@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+import re
 from collections.abc import Mapping
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import date
@@ -37,6 +38,7 @@ _HOLDER_ENTITIES = frozenset(
         "国新投资有限公司",
     }
 )
+_ISO_DATE_PATTERN = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)")
 
 
 @dataclass(frozen=True)
@@ -185,11 +187,17 @@ class OfficialCapitalDataProvider:
                 except Exception as exc:
                     failures.append(exc)
             rows.extend(szse_rows)
+            actual_dates = sorted({row.trade_date for row in szse_rows})
+            date_detail = f"；份额日期 {', '.join(actual_dates)}" if actual_dates else ""
             if failures and not szse_rows and not rejected:
                 statuses.append(_failure_status("深交所ETF份额", failures[0]))
             elif current == len(szse_symbols):
                 statuses.append(
-                    _status("深交所ETF份额", True, "当前快照归档；深市不补造历史")
+                    _status(
+                        "深交所ETF份额",
+                        True,
+                        f"当前快照归档；深市不补造历史{date_detail}",
+                    )
                 )
             else:
                 statuses.append(
@@ -199,7 +207,7 @@ class OfficialCapitalDataProvider:
                         detail=(
                             f"当日有效 {current}/{len(szse_symbols)} 只；"
                             f"{len(failures)} 只请求失败；{rejected} 只日期或空数据拒绝；"
-                            "深市不补造历史"
+                            f"深市不补造历史{date_detail}"
                         ),
                     )
                 )
@@ -368,7 +376,7 @@ def parse_szse_etf_share_payload(
     allowed = set(symbols)
     section = _first_section(payload)
     metadata = section.get("metadata") if isinstance(section, dict) else None
-    exchange_date = _date_text(metadata.get("subname")) if isinstance(metadata, dict) else None
+    exchange_date = _szse_share_date(metadata)
     if not exchange_date or exchange_date != _date_text(trade_date):
         return []
     rows = section.get("data") if isinstance(section, dict) else None
@@ -392,6 +400,19 @@ def parse_szse_etf_share_payload(
             )
         )
     return output
+
+
+def _szse_share_date(metadata: Any) -> str | None:
+    if not isinstance(metadata, dict):
+        return None
+    columns = metadata.get("cols")
+    title = columns.get("dqgm") if isinstance(columns, dict) else None
+    dates = {
+        parsed
+        for value in _ISO_DATE_PATTERN.findall(str(title or ""))
+        if (parsed := _date_text(value)) is not None
+    }
+    return next(iter(dates)) if len(dates) == 1 else None
 
 
 def parse_sina_report_dates(html: str) -> list[str]:

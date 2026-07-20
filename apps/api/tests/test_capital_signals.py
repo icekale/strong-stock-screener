@@ -334,6 +334,24 @@ def test_service_builds_complete_huijin_activity_and_legacy_mapping(tmp_path: Pa
     ]
 
 
+def test_overview_before_disclosure_uses_latest_completed_trade_date(tmp_path: Path) -> None:
+    provider = FakeCapitalProvider()
+    service = CapitalSignalService(
+        provider=provider,
+        store=CapitalSignalStore(tmp_path),
+        holder_provider=FakeHolderProvider(),
+        clock=lambda: datetime(2026, 7, 20, 12, 49, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+
+    snapshot = service.overview(force=True)
+
+    assert snapshot.trade_date == "2026-07-17"
+    assert provider.share_calls[0] == ("2026-07-17", tuple(ALL_ETFS))
+    assert provider.share_calls[1][0] == "2026-07-16"
+    sse_item = next(item for item in snapshot.core_items if item.symbol == "510300.SH")
+    assert sse_item.share_delta == 20
+
+
 def test_missing_validator_prior_history_makes_group_incomplete(tmp_path: Path) -> None:
     provider = FakeCapitalProvider()
     service, store = _service(tmp_path, provider=provider)

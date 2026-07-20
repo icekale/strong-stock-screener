@@ -90,7 +90,7 @@ class CapitalSignalService:
         with self._lock:
             now = self.clock()
             cached = self.store.load_snapshot()
-            trade_date = _latest_weekday(now)
+            trade_date = _latest_disclosed_trade_date(now)
             _, baselines, baseline_status = self._load_or_refresh_baselines(now)
             active_baselines = _latest_applicable_baselines(baselines, trade_date)
             active_baseline_version = _baseline_version(active_baselines)
@@ -673,6 +673,15 @@ def synchronization_ratio(values: Iterable[bool | None]) -> EtfSynchronization:
 
 def _latest_weekday(now: datetime) -> str:
     value = now.date()
+    while value.weekday() >= 5:
+        value -= timedelta(days=1)
+    return value.isoformat()
+
+
+def _latest_disclosed_trade_date(now: datetime) -> str:
+    value = now.date()
+    if value.weekday() < 5 and (now.hour, now.minute) < (19, 5):
+        value -= timedelta(days=1)
     while value.weekday() >= 5:
         value -= timedelta(days=1)
     return value.isoformat()

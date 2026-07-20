@@ -29,7 +29,7 @@ export const productRoutes: ElegantConstRoute[] = [
     name: 'etf-radar',
     path: '/etf-radar',
     component: 'layout.base$view.etf-radar',
-    meta: { title: 'ETF资金雷达', icon: 'ant-design:radar-chart-outlined', order: 5, constant: true }
+    meta: { title: '汇金持仓追踪', icon: 'ant-design:radar-chart-outlined', order: 5, constant: true }
   },
   {
     name: 'stock',

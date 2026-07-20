@@ -26,12 +26,12 @@ vi.mock('@/service/product-api', () => api);
 
 const TabsStub = defineComponent({
   name: 'ATabs',
-  props: { activeKey: { type: String, default: 'overview' } },
+  props: { activeKey: { type: String, default: 'trajectory' } },
   emits: ['update:activeKey', 'change'],
   setup(props, { emit }) {
     const tabs = [
-      ['overview', '今日活动'],
-      ['history', '累计轨迹'],
+      ['trajectory', '持仓轨迹'],
+      ['activity', '日度活动'],
       ['holders', '确认持仓'],
       ['methodology', '方法与数据']
     ] as const;
@@ -76,18 +76,7 @@ const TableStub = defineComponent({
 const ChartStub = defineComponent({
   name: 'EChart',
   props: ['option', 'height', 'loading'],
-  template: '<div data-testid="etf-history-chart" />'
-});
-
-const SelectStub = defineComponent({
-  name: 'ASelect',
-  props: ['value', 'options'],
-  emits: ['update:value'],
-  template: `
-    <select data-testid="history-select" :value="value" @change="$emit('update:value', $event.target.value)">
-      <option v-for="option in options" :key="option.value" :value="option.value">{{ option.label }}</option>
-    </select>
-  `
+  template: '<div data-testid="huijin-trajectory-chart" />'
 });
 
 const AlertStub = defineComponent({
@@ -138,8 +127,8 @@ function activityItem(overrides: Partial<HuijinEtfActivityItem> = {}): HuijinEtf
     direction: 'increase',
     is_tenfold: true,
     report_period: '2025-12-31',
-    baseline_total_shares: null,
-    confirmed_huijin_shares: null,
+    baseline_total_shares: 10_000_000_000,
+    confirmed_huijin_shares: 1_234_000_000,
     confirmed_huijin_holding_pct: 12.34,
     baseline_source_kind: 'reported',
     ...overrides
@@ -153,7 +142,7 @@ function overviewFixture(): EtfRadarOverviewResponse {
     activityItem({ symbol: '510500.SH', name: '南方中证500ETF', index_name: '中证500', paired_symbol: '159922.SZ', total_shares: 8_030_000_000, previous_total_shares: 8_000_000_000, share_delta: 30_000_000, daily_change_pct: 0.38, baseline_change_pct: 3, cumulative_baseline_change_pct: 3, multiple: 3, direction: 'increase', is_tenfold: false }),
     activityItem({ symbol: '512100.SH', name: '南方中证1000ETF', index_name: '中证1000', paired_symbol: '159845.SZ', total_shares: 6_050_000_000, previous_total_shares: 6_000_000_000, share_delta: 50_000_000, daily_change_pct: 0.83, baseline_change_pct: 10.5, cumulative_baseline_change_pct: 10.5, multiple: 10.5, direction: 'increase' }),
     activityItem({ symbol: '159915.SZ', name: '易方达创业板ETF', index_name: '创业板指', paired_symbol: null, total_shares: 4_100_000_000, previous_total_shares: null, share_delta: null, daily_change_pct: null, baseline_change_pct: 6, cumulative_baseline_change_pct: 6, multiple: null, direction: 'unknown', is_tenfold: false }),
-    activityItem({ symbol: '510230.SH', name: '国泰金融ETF', index_name: '金融', paired_symbol: null, total_shares: 3_020_000_000, previous_total_shares: 3_000_000_000, share_delta: 20_000_000, daily_change_pct: 0.67, baseline_change_pct: null, cumulative_baseline_change_pct: null, multiple: null, direction: 'increase', is_tenfold: false, report_period: null, confirmed_huijin_holding_pct: null, baseline_source_kind: null }),
+    activityItem({ symbol: '510230.SH', name: '国泰金融ETF', index_name: '金融', paired_symbol: null, total_shares: 3_020_000_000, previous_total_shares: 3_000_000_000, share_delta: 20_000_000, daily_change_pct: 0.67, baseline_change_pct: null, cumulative_baseline_change_pct: null, multiple: null, direction: 'increase', is_tenfold: false, report_period: null, baseline_total_shares: null, confirmed_huijin_shares: null, confirmed_huijin_holding_pct: null, baseline_source_kind: null }),
     activityItem({ symbol: '588080.SH', name: '易方达科创50ETF', index_name: '科创50', paired_symbol: null, total_shares: null, previous_total_shares: 5_000_000_000, share_delta: null, daily_change_pct: null, baseline_change_pct: 2, cumulative_baseline_change_pct: 2, multiple: null, direction: 'unknown', is_tenfold: false })
   ];
   const validationItems = [
@@ -247,8 +236,8 @@ function setDefaultApiResponses() {
   api.getEtfRadarMethodology.mockResolvedValue(methodologyFixture());
 }
 
-async function mountView() {
-  const wrapper = mount(EtfRadarView, {
+function mountViewImmediately() {
+  return mount(EtfRadarView, {
     global: {
       stubs: {
         ATabs: TabsStub,
@@ -256,12 +245,15 @@ async function mountView() {
         ATable: TableStub,
         AAlert: AlertStub,
         AButton: ButtonStub,
-        ASelect: SelectStub,
         ASkeleton: { template: '<div data-testid="etf-skeleton" />' },
         EChart: ChartStub
       }
     }
   });
+}
+
+async function mountView() {
+  const wrapper = mountViewImmediately();
   await flushPromises();
   return wrapper;
 }
@@ -276,12 +268,22 @@ afterEach(() => {
 });
 
 describe('EtfRadarView', () => {
-  it('renders the Huijin overview with seven core rows and three conservative validation rows', async () => {
+  it('renders the holdings trajectory first and keeps the Huijin daily activity available', async () => {
     setDefaultApiResponses();
     const wrapper = await mountView();
 
-    expect(wrapper.findAll('.etf-tab-trigger').map(tab => tab.text())).toEqual(['今日活动', '累计轨迹', '确认持仓', '方法与数据']);
-    expect(wrapper.text()).toContain('汇金 ETF 追踪');
+    expect(wrapper.findAll('.etf-tab-trigger').map(tab => tab.text())).toEqual([
+      '持仓轨迹', '日度活动', '确认持仓', '方法与数据'
+    ]);
+    expect(wrapper.text()).toContain('汇金持仓追踪');
+    expect(wrapper.find('[data-testid="huijin-trajectory-panel"]').exists()).toBe(true);
+    expect(api.getEtfRadarOverview).toHaveBeenCalledTimes(1);
+    expect(api.getEtfRadarHistory).toHaveBeenCalledTimes(1);
+    expect(api.getEtfRadarHolders).not.toHaveBeenCalled();
+    expect(api.getEtfRadarMethodology).not.toHaveBeenCalled();
+
+    await openTab(wrapper, 1);
+
     expect(wrapper.text()).toContain('十倍量增加');
     expect(wrapper.text()).toContain('十倍量减少');
     expect(wrapper.text()).toContain('交叉验证');
@@ -290,10 +292,14 @@ describe('EtfRadarView', () => {
     expect(wrapper.findAll('[data-testid="validation-row"]')).toHaveLength(3);
     expect(wrapper.text()).toContain('▲ +2.00亿份');
     expect(wrapper.text()).toContain('▼ -1.20亿份');
-    expect(wrapper.text()).toContain('今日缺失');
-    expect(wrapper.text()).toContain('缺少前日');
-    expect(wrapper.text()).toContain('缺少基线');
+    expect(wrapper.text()).toContain('交易所尚未披露');
+    expect(wrapper.text()).toContain('日度历史积累中');
+    expect(wrapper.text()).toContain('确认基线缺失');
     expect(wrapper.text()).toContain('可计算');
+    expect(wrapper.text()).toContain('配对一致增加');
+    expect(wrapper.text()).toContain('配对一致减少');
+    expect(wrapper.text()).not.toContain('确认增加');
+    expect(wrapper.text()).not.toContain('确认减少');
     expect(wrapper.text()).toContain('▲ +10.50%');
     expect(wrapper.text()).toContain('▼ -9.25%');
     expect(wrapper.text()).toContain('10.5倍');
@@ -321,6 +327,7 @@ describe('EtfRadarView', () => {
     });
 
     const wrapper = await mountView();
+    await openTab(wrapper, 1);
 
     expect(wrapper.get('.wb-section-header .wb-status-tag').text()).toBe('部分');
     expect(wrapper.text()).toContain('上游不可用，沿用 2026-07-17 归档快照');
@@ -347,6 +354,7 @@ describe('EtfRadarView', () => {
     api.getEtfRadarOverview.mockResolvedValueOnce(fixture);
 
     const wrapper = await mountView();
+    await openTab(wrapper, 1);
     const divergenceMetric = wrapper.findAll('.etf-metric').find(metric => metric.text().includes('方向分歧'))!;
     expect(divergenceMetric.get('strong').classes()).not.toContain('etf-value--warning');
 
@@ -362,68 +370,54 @@ describe('EtfRadarView', () => {
     wrapper.unmount();
   });
 
-  it('requests only overview initially and each lazy endpoint once on first activation', async () => {
-    setDefaultApiResponses();
-    const wrapper = await mountView();
+  it('starts overview and 120-day history together, reuses activity data, and lazily loads the other endpoints', async () => {
+    let resolveOverview!: (value: EtfRadarOverviewResponse) => void;
+    api.getEtfRadarOverview.mockReturnValue(new Promise(resolve => {
+      resolveOverview = resolve;
+    }));
+    api.getEtfRadarHistory.mockResolvedValue(historyFixture());
+    api.getEtfRadarHolders.mockResolvedValue(holdersFixture());
+    api.getEtfRadarMethodology.mockResolvedValue(methodologyFixture());
 
-    expect(api.getEtfRadarOverview).toHaveBeenCalledTimes(1);
-    expect(api.getEtfRadarHistory).not.toHaveBeenCalled();
+    const wrapper = mountViewImmediately();
+    await vi.waitFor(() => {
+      expect(api.getEtfRadarOverview).toHaveBeenCalledTimes(1);
+      expect(api.getEtfRadarHistory).toHaveBeenCalledTimes(1);
+    });
+
+    expect(api.getEtfRadarHistory).toHaveBeenCalledWith(120);
     expect(api.getEtfRadarHolders).not.toHaveBeenCalled();
     expect(api.getEtfRadarMethodology).not.toHaveBeenCalled();
+
+    resolveOverview(overviewFixture());
+    await flushPromises();
 
     await openTab(wrapper, 1);
     await openTab(wrapper, 2);
     await openTab(wrapper, 3);
     await openTab(wrapper, 1);
+    await openTab(wrapper, 0);
 
+    expect(api.getEtfRadarOverview).toHaveBeenCalledTimes(1);
     expect(api.getEtfRadarHistory).toHaveBeenCalledTimes(1);
     expect(api.getEtfRadarHolders).toHaveBeenCalledTimes(1);
     expect(api.getEtfRadarMethodology).toHaveBeenCalledTimes(1);
     wrapper.unmount();
   });
 
-  it('charts one selected ETF against global real dates and shows only its real rows newest first', async () => {
+  it('switches the selected trajectory ETF entirely in the frontend', async () => {
     setDefaultApiResponses();
     const wrapper = await mountView();
-    await openTab(wrapper, 1);
 
-    const chart = wrapper.findComponent(ChartStub);
-    const option = chart.props('option') as any;
-    expect(chart.props('height')).toBe(304);
-    expect(option.animation).toBe(false);
-    expect(option.aria.enabled).toBe(true);
-    expect(option.aria.description).toContain('华夏上证50ETF');
-    expect(option.xAxis.data).toEqual(['2026-07-16', '2026-07-17', '2026-07-18']);
-    expect(option.series[0].connectNulls).toBe(false);
-    expect(option.series[0].data).toEqual([8, null, 14.5]);
-    const rows = wrapper.get('[data-testid="history-table"]').findAll('tbody tr');
-    expect(rows).toHaveLength(3);
-    expect(rows[0]!.text()).toContain('2026-07-18');
-    expect(rows[2]!.text()).toContain('2026-07-16');
-    const historyTable = wrapper.findAllComponents(TableStub).find(table => table.attributes('data-testid') === 'history-table');
-    expect((historyTable?.props('dataSource') as Array<{ symbol: string }>).map(row => row.symbol)).toEqual([
-      '510050.SH',
-      '510050.SH',
-      '510050.SH'
-    ]);
-    wrapper.unmount();
-  });
-
-  it('shows an explicit cumulative empty state when the selected ETF has no baseline values', async () => {
-    setDefaultApiResponses();
-    const wrapper = await mountView();
-    await openTab(wrapper, 1);
-
-    await wrapper.get('[data-testid="history-select"]').setValue('510300.SH');
+    expect(wrapper.get('[data-testid="huijin-selected-symbol"]').text()).toBe('510050.SH');
+    await wrapper.findAll('[data-testid="huijin-ranking-row"]')[1]!.trigger('click');
     await flushPromises();
 
-    expect(wrapper.find('[data-testid="etf-history-chart"]').exists()).toBe(false);
-    expect(wrapper.get('[data-testid="history-chart-empty"]').text()).toContain('暂无报告基线累计值');
-    const historyTable = wrapper.findAllComponents(TableStub).find(table => table.attributes('data-testid') === 'history-table');
-    expect((historyTable?.props('dataSource') as Array<{ symbol: string; trade_date: string }>)).toMatchObject([
-      { symbol: '510300.SH', trade_date: '2026-07-18' },
-      { symbol: '510300.SH', trade_date: '2026-07-16' }
-    ]);
+    expect(wrapper.get('[data-testid="huijin-selected-symbol"]').text()).toBe('512100.SH');
+    expect(api.getEtfRadarOverview).toHaveBeenCalledTimes(1);
+    expect(api.getEtfRadarHistory).toHaveBeenCalledTimes(1);
+    expect(api.getEtfRadarHolders).not.toHaveBeenCalled();
+    expect(api.getEtfRadarMethodology).not.toHaveBeenCalled();
     wrapper.unmount();
   });
 
@@ -459,7 +453,7 @@ describe('EtfRadarView', () => {
     wrapper.unmount();
   });
 
-  it('retains loaded content and marks it stale when forced refresh fails', async () => {
+  it('forces both trajectory requests and retains overview content when its refresh fails', async () => {
     setDefaultApiResponses();
     const wrapper = await mountView();
     api.getEtfRadarOverview.mockRejectedValueOnce(new Error('刷新失败：上游不可用'));
@@ -470,20 +464,34 @@ describe('EtfRadarView', () => {
     expect(wrapper.text()).toContain('华夏上证50ETF');
     expect(wrapper.get('[data-testid="etf-panel-error"]').text()).toContain('刷新失败：上游不可用');
     expect(wrapper.get('[data-testid="etf-panel-error"]').text()).toContain('当前显示上次成功数据');
-    expect(wrapper.get('.wb-section-header .wb-status-tag').text()).toBe('部分');
+    expect(api.getEtfRadarOverview).toHaveBeenCalledTimes(2);
+    expect(api.getEtfRadarHistory).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
+  });
+
+  it('retains trajectory history and surfaces its refresh error separately', async () => {
+    setDefaultApiResponses();
+    const wrapper = await mountView();
+    api.getEtfRadarHistory.mockRejectedValueOnce(new Error('历史刷新失败：归档不可用'));
+
+    await wrapper.get('[data-testid="etf-refresh"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="huijin-history-status"]').text()).toContain('历史刷新失败：归档不可用');
+    expect(wrapper.find('[data-testid="etf-panel-error"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="huijin-trajectory-chart"]').exists()).toBe(true);
+    expect(api.getEtfRadarOverview).toHaveBeenCalledTimes(2);
+    expect(api.getEtfRadarHistory).toHaveBeenCalledTimes(2);
     wrapper.unmount();
   });
 
   it('keeps implementation contracts accessible, token-based, and free of old generic fields', () => {
     expect(source).toContain('icon-ic-round-refresh');
-    expect(source).toContain("defineAsyncComponent(() => import('@/components/charts/EChart.vue'))");
-    expect(source).not.toContain("import EChart from '@/components/charts/EChart.vue'");
+    expect(source).toContain('ttlMs: 15_000');
     expect(source).toMatch(/overflow-x\s*:\s*auto/);
     expect(source).toMatch(/min-width\s*:\s*0/);
     expect(source).toMatch(/\.etf-panel\s+:deep\(\.wb-section-header\)\s*\{[^}]*padding:\s*12px 16px/s);
     expect(source).toMatch(/\.etf-panel\s*>\s*:deep\(\.ant-alert\)\s*\{[^}]*margin:\s*0 16px 12px/s);
-    expect(source).toMatch(/aria:\s*\{\s*enabled:\s*true/);
-    expect(source).toContain('connectNulls: false');
     expect(source).not.toMatch(/evidence_strength|robust_score|same_time_turnover_ratio|relative_index_return_pct|estimated_subscription_cny/);
     expect(source).not.toMatch(/#[0-9a-f]{3,8}\b/i);
   });

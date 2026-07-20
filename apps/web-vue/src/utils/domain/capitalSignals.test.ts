@@ -76,8 +76,8 @@ describe('capital signal formatting', () => {
   });
 
   it('labels and tones every ETF validation state', () => {
-    expect(validationStateLabel('confirmed_increase')).toBe('确认增加');
-    expect(validationStateLabel('confirmed_decrease')).toBe('确认减少');
+    expect(validationStateLabel('confirmed_increase')).toBe('配对一致增加');
+    expect(validationStateLabel('confirmed_decrease')).toBe('配对一致减少');
     expect(validationStateLabel('divergent')).toBe('方向分歧');
     expect(validationStateLabel('incomplete')).toBe('数据不全');
     expect(validationStateTone('confirmed_increase')).toBe('rise');

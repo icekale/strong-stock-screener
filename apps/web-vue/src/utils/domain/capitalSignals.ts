@@ -41,8 +41,8 @@ export function activityDirectionLabel(value: EtfActivityDirection): string {
 }
 
 export function validationStateLabel(value: EtfValidationState): string {
-  if (value === "confirmed_increase") return "确认增加";
-  if (value === "confirmed_decrease") return "确认减少";
+  if (value === "confirmed_increase") return "配对一致增加";
+  if (value === "confirmed_decrease") return "配对一致减少";
   if (value === "divergent") return "方向分歧";
   return "数据不全";
 }

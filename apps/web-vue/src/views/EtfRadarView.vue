@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import type { EChartsOption } from 'echarts';
 import { Skeleton as ASkeleton } from 'ant-design-vue';
 import dayjs from 'dayjs';
-import { computed, defineAsyncComponent, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref } from 'vue';
 import IconIcRoundRefresh from '~icons/ic/round-refresh';
 import PageHeader from '@/components/common/workbench/page-header.vue';
 import SectionHeader from '@/components/common/workbench/section-header.vue';
 import StatusTag from '@/components/common/workbench/status-tag.vue';
+import HuijinTrajectoryPanel from '@/components/etf-radar/HuijinTrajectoryPanel.vue';
 import {
   getEtfRadarHistory,
   getEtfRadarHolders,
@@ -17,7 +17,6 @@ import type {
   CapitalSignalMetadata,
   EtfActivityDirection,
   EtfHolderPosition,
-  EtfRadarHistoryPoint,
   EtfRadarHistoryResponse,
   EtfRadarHoldersResponse,
   EtfRadarMethodologyResponse,
@@ -40,27 +39,28 @@ import {
   validationStateLabel,
   validationStateTone
 } from '@/utils/domain/capitalSignals';
+import { huijinActivityDataState, pickDefaultHuijinSymbol } from '@/utils/domain/huijinTrajectory';
 
 defineOptions({ name: 'EtfRadarView' });
 
-const EChart = defineAsyncComponent(() => import('@/components/charts/EChart.vue'));
-
-type EtfTab = 'overview' | 'history' | 'holders' | 'methodology';
+type EtfTab = 'trajectory' | 'activity' | 'holders' | 'methodology';
+type EtfDataKey = 'overview' | 'history' | 'holders' | 'methodology';
 type EtfResponse =
   | EtfRadarOverviewResponse
   | EtfRadarHistoryResponse
   | EtfRadarHoldersResponse
   | EtfRadarMethodologyResponse;
 
-const activeTab = ref<EtfTab>('overview');
+const activeTab = ref<EtfTab>('trajectory');
 const overview = ref<EtfRadarOverviewResponse | null>(null);
 const history = ref<EtfRadarHistoryResponse | null>(null);
 const holders = ref<EtfRadarHoldersResponse | null>(null);
 const methodology = ref<EtfRadarMethodologyResponse | null>(null);
-const selectedHistorySymbol = ref('');
-const loading = reactive<Record<EtfTab, boolean>>({ overview: false, history: false, holders: false, methodology: false });
-const errors = reactive<Record<EtfTab, string | null>>({ overview: null, history: null, holders: null, methodology: null });
-const loaded = reactive<Record<EtfTab, boolean>>({ overview: false, history: false, holders: false, methodology: false });
+const selectedTrajectorySymbol = ref('');
+const historyLoading = ref(false);
+const loading = reactive<Record<EtfTab, boolean>>({ trajectory: false, activity: false, holders: false, methodology: false });
+const errors = reactive<Record<EtfDataKey, string | null>>({ overview: null, history: null, holders: null, methodology: null });
+const loaded = reactive({ holders: false, methodology: false });
 const requestCache = createMemoryRequestCache({ ttlMs: 15_000 });
 
 const coreColumns = [
@@ -73,15 +73,6 @@ const coreColumns = [
   { title: '方向', dataIndex: 'direction', key: 'direction', width: 136 },
   { title: '确认持仓', dataIndex: 'confirmed_huijin_holding_pct', key: 'holding', width: 178 },
   { title: '数据状态', dataIndex: 'data_state', key: 'data_state', width: 100, fixed: 'right' as const }
-];
-
-const historyColumns = [
-  { title: '交易日', dataIndex: 'trade_date', key: 'trade_date', width: 116 },
-  { title: '总份额', dataIndex: 'total_shares', key: 'total_shares', width: 138 },
-  { title: '日变化', dataIndex: 'daily_change_pct', key: 'daily_change_pct', width: 116 },
-  { title: '报告基线变化', dataIndex: 'baseline_change_pct', key: 'baseline_change_pct', width: 132 },
-  { title: '累计变化', dataIndex: 'cumulative_baseline_change_pct', key: 'cumulative_baseline_change_pct', width: 120 },
-  { title: '倍数', dataIndex: 'multiple', key: 'multiple', width: 92 }
 ];
 
 const baselineColumns = [
@@ -105,8 +96,8 @@ const holderColumns = [
 ];
 
 const activeData = computed<EtfResponse | null>(() => {
-  if (activeTab.value === 'overview') return overview.value;
-  if (activeTab.value === 'history') return history.value;
+  if (activeTab.value === 'trajectory') return overview.value ?? history.value;
+  if (activeTab.value === 'activity') return overview.value;
   if (activeTab.value === 'holders') return holders.value;
   return methodology.value;
 });
@@ -119,7 +110,7 @@ const overviewMetrics = computed(() => {
     { label: '十倍量增加', value: activity?.tenfold_increase_count ?? '--', helper: '增加方向', className: 'etf-value--positive' },
     { label: '十倍量减少', value: activity?.tenfold_decrease_count ?? '--', helper: '减少方向', className: 'etf-value--negative' },
     {
-      label: '确认配对',
+      label: '配对一致',
       value: activity ? activity.confirmed_increase_group_count + activity.confirmed_decrease_group_count : '--',
       helper: activity ? `增加 ${activity.confirmed_increase_group_count} / 减少 ${activity.confirmed_decrease_group_count}` : '增加 -- / 减少 --',
       className: ''
@@ -133,35 +124,6 @@ const validationItemsBySymbol = computed(() => {
   return new Map(items.map(item => [item.symbol, item]));
 });
 
-const historyOptions = computed(() => {
-  const names = new Map<string, string>();
-  for (const point of history.value?.points ?? []) {
-    if (!names.has(point.symbol)) names.set(point.symbol, point.name);
-  }
-  return [...names.entries()]
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([symbol, name]) => ({ value: symbol, label: `${name} · ${symbol}` }));
-});
-
-const historyDates = computed(() =>
-  [...new Set((history.value?.points ?? []).map(point => point.trade_date))].sort((left, right) => left.localeCompare(right))
-);
-
-const selectedHistoryPoints = computed(() =>
-  (history.value?.points ?? [])
-    .filter(point => point.symbol === selectedHistorySymbol.value)
-    .sort((left, right) => right.trade_date.localeCompare(left.trade_date))
-);
-
-const selectedHistoryName = computed(() => selectedHistoryPoints.value[0]?.name ?? selectedHistorySymbol.value);
-
-const historySeriesData = computed(() => {
-  const values = new Map(selectedHistoryPoints.value.map(point => [point.trade_date, point.cumulative_baseline_change_pct]));
-  return historyDates.value.map(date => values.get(date) ?? null);
-});
-
-const hasCumulativeHistory = computed(() => historySeriesData.value.some(value => value !== null));
-
 const formulaFactors = computed(() =>
   (methodology.value?.factors ?? []).filter(factor => !factor.key.startsWith('validation_'))
 );
@@ -169,32 +131,6 @@ const formulaFactors = computed(() =>
 const validationRuleFactors = computed(() =>
   (methodology.value?.factors ?? []).filter(factor => factor.key.startsWith('validation_'))
 );
-
-const historyOption = computed<EChartsOption>(() => ({
-  aria: {
-    enabled: true,
-    description: `${selectedHistoryName.value}按真实归档交易日展示相对报告基线的累计份额变化，缺失日期保留为空。`
-  },
-  animation: false,
-  grid: { left: 68, right: 24, top: 24, bottom: 38 },
-  tooltip: {
-    trigger: 'axis',
-    valueFormatter: value => value == null ? '--' : formatDirectionalPercent(Number(value))
-  },
-  xAxis: { type: 'category', boundaryGap: false, data: historyDates.value },
-  yAxis: {
-    type: 'value',
-    axisLabel: { formatter: (value: number) => formatDirectionalPercent(value) }
-  },
-  series: [{
-    name: selectedHistoryName.value,
-    type: 'line',
-    connectNulls: false,
-    showSymbol: true,
-    symbolSize: 6,
-    data: historySeriesData.value
-  }]
-}));
 
 function sourceStatusTone(status: SourceStatusValue) {
   return status === 'success' ? 'success' : status === 'stale' ? 'partial' : status === 'failed' ? 'failed' : 'unknown';
@@ -231,13 +167,6 @@ function formatFingerprint(value: string | null | undefined) {
   return value.length > 10 ? `${value.slice(0, 10)}...` : value;
 }
 
-function coreDataState(item: HuijinEtfActivityItem) {
-  if (item.total_shares == null) return '今日缺失';
-  if (item.previous_total_shares == null) return '缺少前日';
-  if (item.baseline_change_pct == null || item.report_period == null) return '缺少基线';
-  return '可计算';
-}
-
 function directionDisplay(direction: EtfActivityDirection) {
   if (direction === 'increase') return `增加（${activityDirectionLabel(direction)}代理）`;
   if (direction === 'decrease') return `减少（${activityDirectionLabel(direction)}代理）`;
@@ -255,18 +184,8 @@ function coreCell(key: string, record: unknown) {
   if (key === 'baseline_change_pct') return formatPercent(item.baseline_change_pct);
   if (key === 'multiple') return formatActivityMultiple(item.multiple);
   if (key === 'direction') return directionDisplay(item.direction);
-  if (key === 'data_state') return coreDataState(item);
+  if (key === 'data_state') return huijinActivityDataState(item);
   return String(item[key as keyof HuijinEtfActivityItem] ?? '--');
-}
-
-function historyCell(key: string, record: unknown) {
-  const point = record as EtfRadarHistoryPoint;
-  if (key === 'total_shares') return formatPlainShares(point.total_shares);
-  if (key === 'daily_change_pct') return formatPercent(point.daily_change_pct);
-  if (key === 'baseline_change_pct') return formatPercent(point.baseline_change_pct);
-  if (key === 'cumulative_baseline_change_pct') return formatPercent(point.cumulative_baseline_change_pct);
-  if (key === 'multiple') return formatActivityMultiple(point.multiple);
-  return String(point[key as keyof EtfRadarHistoryPoint] ?? '--');
 }
 
 function baselineCell(key: string, record: unknown) {
@@ -322,24 +241,30 @@ function recordNumber(record: unknown, key: unknown) {
   return typeof value === 'number' ? value : null;
 }
 
-function historyRowKey(point: EtfRadarHistoryPoint) {
-  return `${point.trade_date}-${point.symbol}`;
-}
-
 function holderRowKey(position: EtfHolderPosition) {
   return `${position.report_period}-${position.symbol}-${position.entity_name}`;
 }
 
-function activeErrorMessage() {
-  const error = errors[activeTab.value];
+function activeDataKey(): Exclude<EtfDataKey, 'history'> {
+  if (activeTab.value === 'activity' || activeTab.value === 'trajectory') return 'overview';
+  return activeTab.value;
+}
+
+function dataErrorMessage(key: EtfDataKey, data: EtfResponse | null) {
+  const error = errors[key];
   if (!error) return '';
-  return activeData.value ? `${error}；当前显示上次成功数据` : error;
+  return data ? `${error}；当前显示上次成功数据` : error;
+}
+
+function activeErrorMessage() {
+  return dataErrorMessage(activeDataKey(), activeData.value);
 }
 
 function activeStatus() {
   if (loading[activeTab.value]) return 'running';
-  if (errors[activeTab.value] && activeData.value) return 'partial';
-  if (errors[activeTab.value]) return 'failed';
+  const error = errors[activeDataKey()];
+  if (error && activeData.value) return 'partial';
+  if (error) return 'failed';
   if (activeData.value?.source_status.some(source => source.status === 'stale' || source.status === 'failed')) {
     return 'partial';
   }
@@ -350,43 +275,71 @@ function activeSources() {
   return activeMetadata.value?.source_status ?? [];
 }
 
-function selectHistorySymbol(response: EtfRadarHistoryResponse) {
-  if (response.points.some(point => point.symbol === selectedHistorySymbol.value)) return;
-  selectedHistorySymbol.value = [...new Set(response.points.map(point => point.symbol))].sort()[0] ?? '';
+async function loadOverview(force = false) {
+  loading.activity = true;
+  errors.overview = null;
+  try {
+    overview.value = await requestCache.get('etf-radar-overview', getEtfRadarOverview, { force });
+  } catch (error) {
+    errors.overview = errorMessage(error, '读取汇金持仓概览失败');
+  } finally {
+    loading.activity = false;
+  }
 }
 
-async function loadTab(tab: EtfTab, force = false) {
+async function loadHistory(force = false) {
+  historyLoading.value = true;
+  errors.history = null;
+  try {
+    history.value = await requestCache.get('etf-radar-history', () => getEtfRadarHistory(120), { force });
+  } catch (error) {
+    errors.history = errorMessage(error, '读取汇金持仓历史失败');
+  } finally {
+    historyLoading.value = false;
+  }
+}
+
+async function loadTrajectory(force = false) {
+  loading.trajectory = true;
+  await Promise.allSettled([loadOverview(force), loadHistory(force)]);
+  if (!selectedTrajectorySymbol.value && overview.value) {
+    selectedTrajectorySymbol.value = pickDefaultHuijinSymbol(overview.value.core_items);
+  }
+  loading.trajectory = false;
+}
+
+async function loadLazyTab(tab: 'holders' | 'methodology', force = false) {
   if (!force && loaded[tab]) return;
   loading[tab] = true;
   errors[tab] = null;
   try {
-    if (tab === 'overview') overview.value = await requestCache.get('etf-radar-overview', getEtfRadarOverview, { force });
-    if (tab === 'history') {
-      const response = await requestCache.get('etf-radar-history', () => getEtfRadarHistory(120), { force });
-      history.value = response;
-      selectHistorySymbol(response);
-    }
     if (tab === 'holders') holders.value = await requestCache.get('etf-radar-holders', getEtfRadarHolders, { force });
     if (tab === 'methodology') methodology.value = await requestCache.get('etf-radar-methodology', getEtfRadarMethodology, { force });
     loaded[tab] = true;
   } catch (error) {
-    errors[tab] = errorMessage(error, '读取汇金ETF追踪数据失败');
+    errors[tab] = errorMessage(error, '读取汇金持仓追踪数据失败');
   } finally {
     loading[tab] = false;
   }
 }
 
-function changeTab(tab: unknown) {
-  if (tab === 'overview' || tab === 'history' || tab === 'holders' || tab === 'methodology') void loadTab(tab);
+function loadTab(tab: EtfTab, force = false) {
+  if (tab === 'trajectory') return loadTrajectory(force);
+  if (tab === 'activity') return force ? loadOverview(true) : Promise.resolve();
+  return loadLazyTab(tab, force);
 }
 
-onMounted(() => void loadTab('overview'));
+function changeTab(tab: unknown) {
+  if (tab === 'holders' || tab === 'methodology') void loadLazyTab(tab);
+}
+
+onMounted(() => void loadTrajectory());
 </script>
 
 <template>
   <div class="etf-radar-page">
     <PageHeader
-      title="汇金 ETF 追踪"
+      title="汇金持仓追踪"
       description="分开展示定期报告确认持仓与每日 ETF 份额活动代理，不将份额变化视为国家队确认交易。"
     >
       <template #meta>
@@ -403,18 +356,41 @@ onMounted(() => void loadTab('overview'));
     </PageHeader>
 
     <a-tabs v-model:active-key="activeTab" class="etf-tabs" @change="changeTab">
-      <a-tab-pane key="overview" tab="今日活动" />
-      <a-tab-pane key="history" tab="累计轨迹" />
+      <a-tab-pane key="trajectory" tab="持仓轨迹" />
+      <a-tab-pane key="activity" tab="日度活动" />
       <a-tab-pane key="holders" tab="确认持仓" />
       <a-tab-pane key="methodology" tab="方法与数据" />
     </a-tabs>
 
-    <section v-if="activeTab === 'overview'" class="etf-panel">
+    <section v-if="activeTab === 'trajectory'" class="etf-panel etf-panel--trajectory">
+      <a-alert
+        v-if="errors.overview"
+        data-testid="etf-panel-error"
+        type="warning"
+        :message="dataErrorMessage('overview', overview)"
+        show-icon
+      />
+      <div v-if="loading.trajectory && !overview" class="etf-loading" aria-label="正在读取持仓轨迹">
+        <a-skeleton active :paragraph="{ rows: 8 }" />
+      </div>
+      <HuijinTrajectoryPanel
+        v-else-if="overview"
+        :overview="overview"
+        :history="history"
+        :selected-symbol="selectedTrajectorySymbol"
+        :history-loading="historyLoading"
+        :history-error="dataErrorMessage('history', history) || null"
+        @select="selectedTrajectorySymbol = $event"
+      />
+      <div v-else-if="!errors.overview" class="etf-state">暂无持仓轨迹数据</div>
+    </section>
+
+    <section v-else-if="activeTab === 'activity'" class="etf-panel">
       <SectionHeader title="今日份额活动" source="交易所份额与报告基线" :updated-at="formatAsOf(overview?.as_of)">
         <StatusTag :status="activeStatus()" />
       </SectionHeader>
       <a-alert v-if="errors.overview" data-testid="etf-panel-error" type="warning" :message="activeErrorMessage()" show-icon />
-      <div v-if="loading.overview && !overview" class="etf-loading" aria-label="正在读取今日活动">
+      <div v-if="loading.activity && !overview" class="etf-loading" aria-label="正在读取今日活动">
         <a-skeleton active :paragraph="{ rows: 7 }" />
       </div>
       <div v-else-if="overview" class="etf-panel-content">
@@ -508,66 +484,6 @@ onMounted(() => void loadTab('overview'));
         <div v-else class="etf-state etf-state--compact">暂无配对验证数据</div>
       </div>
       <div v-else-if="!errors.overview" class="etf-state">暂无今日活动数据</div>
-    </section>
-
-    <section v-else-if="activeTab === 'history'" class="etf-panel">
-      <SectionHeader title="累计轨迹" source="真实归档交易日" :updated-at="formatAsOf(history?.as_of)">
-        <StatusTag :status="activeStatus()" />
-      </SectionHeader>
-      <a-alert v-if="errors.history" data-testid="etf-panel-error" type="warning" :message="activeErrorMessage()" show-icon />
-      <div v-if="loading.history && !history" class="etf-loading" aria-label="正在读取累计轨迹">
-        <a-skeleton active :paragraph="{ rows: 8 }" />
-      </div>
-      <div v-else-if="history" class="etf-panel-content">
-        <div class="etf-toolbar">
-          <label for="etf-history-symbol">ETF</label>
-          <a-select
-            id="etf-history-symbol"
-            v-model:value="selectedHistorySymbol"
-            class="etf-history-select"
-            :options="historyOptions"
-          />
-          <span>缺失交易日不插值、不前向填充</span>
-        </div>
-        <div class="etf-source-statuses">
-          <div v-for="source in activeSources()" :key="source.source" class="etf-source-status">
-            <span class="etf-source-status__summary">
-              {{ source.source }} <StatusTag :status="sourceStatusTone(source.status)" />
-            </span>
-            <span class="etf-source-status__detail">{{ source.detail || '--' }}</span>
-          </div>
-        </div>
-        <template v-if="history.points.length">
-          <EChart v-if="hasCumulativeHistory" :height="304" :loading="loading.history" :option="historyOption" />
-          <div v-else data-testid="history-chart-empty" class="etf-chart-empty">
-            {{ selectedHistoryName }} 暂无报告基线累计值
-          </div>
-          <div
-            class="etf-table-scroll etf-history-table"
-            tabindex="0"
-            role="region"
-            aria-label="所选 ETF 累计轨迹明细"
-          >
-            <a-table
-              data-testid="history-table"
-              :columns="historyColumns"
-              :data-source="selectedHistoryPoints"
-              :pagination="{ pageSize: 12, showSizeChanger: false, size: 'small' }"
-              :scroll="{ x: 716 }"
-              :row-key="historyRowKey"
-              size="small"
-            >
-              <template #bodyCell="{ column, record }">
-                <span :class="['daily_change_pct', 'baseline_change_pct', 'cumulative_baseline_change_pct'].includes(columnKey(column.key)) ? valueTone(recordNumber(record, column.key)) : ''">
-                  {{ historyCell(columnKey(column.key), record) }}
-                </span>
-              </template>
-            </a-table>
-          </div>
-        </template>
-        <div v-else class="etf-state">暂无累计轨迹数据</div>
-      </div>
-      <div v-else-if="!errors.history" class="etf-state">暂无累计轨迹数据</div>
     </section>
 
     <section v-else-if="activeTab === 'holders'" class="etf-panel">

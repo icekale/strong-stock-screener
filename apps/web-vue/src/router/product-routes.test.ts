@@ -18,12 +18,12 @@ describe('product route table', () => {
     ]);
   });
 
-  it('exposes the ETF capital radar as a top-level workbench route', () => {
+  it('exposes the Huijin holdings tracker as a top-level workbench route', () => {
     expect(productRoutes.find(route => route.path === '/etf-radar')).toMatchObject({
       name: 'etf-radar',
       component: 'layout.base$view.etf-radar',
       meta: {
-        title: 'ETF资金雷达',
+        title: '汇金持仓追踪',
         icon: 'ant-design:radar-chart-outlined',
         order: 5,
         constant: true

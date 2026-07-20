@@ -2032,6 +2032,7 @@ class EtfSharePoint(BaseModel):
     symbol: str
     name: str | None = None
     total_shares: float
+    date_validation: Literal["unverified", "szse_dqgm_v1"] = "unverified"
     close: float | None = None
     share_change: float | None = None
     estimated_subscription_cny: float | None = None

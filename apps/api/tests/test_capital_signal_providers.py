@@ -130,6 +130,7 @@ def test_szse_current_share_parser_does_not_invent_history() -> None:
     assert rows[0].name == "创业板ETF易方达"
     assert rows[0].trade_date == "2026-07-17"
     assert rows[0].total_shares == 14_920_454_900
+    assert rows[0].date_validation == "szse_dqgm_v1"
 
 
 def test_szse_current_share_parser_rejects_a_different_exchange_date() -> None:
@@ -550,6 +551,33 @@ def test_share_provider_exposes_strictly_rejected_official_metadata_dates() -> N
     assert result.request_failures == 0
     assert result.available_trade_dates == ("2026-07-17",)
     assert "份额日期 2026-07-17" in result.source_status[1].detail
+
+
+def test_share_provider_distinguishes_same_date_empty_szse_from_date_rejection() -> None:
+    symbols = ["159915.SZ", "159919.SZ"]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        code = request.url.params["txtQueryKeyAndJC"]
+        exchange_date = "2026-07-17" if code == "159915" else "2026-07-16"
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "metadata": {"cols": {"dqgm": f"当前规模（{exchange_date}）"}},
+                    "data": [],
+                }
+            ],
+        )
+
+    provider = OfficialCapitalDataProvider(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+    result = provider.get_etf_share_rows("2026-07-17", symbols)
+
+    assert result.rows == []
+    assert result.empty_symbols == ("159915.SZ",)
+    assert result.rejected_symbols == ("159919.SZ",)
 
 
 def test_share_provider_marks_partial_szse_coverage_stale() -> None:

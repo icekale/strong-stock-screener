@@ -77,6 +77,19 @@ def test_store_returns_empty_history_for_missing_or_corrupt_files(tmp_path: Path
     assert store.load_share_history() == []
 
 
+def test_store_treats_legacy_szse_share_dates_as_unverified(tmp_path: Path) -> None:
+    store = CapitalSignalStore(tmp_path)
+    store.root_dir.mkdir(parents=True)
+    store.share_history_path.write_text(
+        '[{"trade_date":"2026-07-17","symbol":"159915.SZ","total_shares":1000}]',
+        encoding="utf-8",
+    )
+
+    row = store.load_share_history()[0]
+
+    assert row.date_validation == "unverified"
+
+
 def test_store_keeps_latest_400_margin_trade_dates(tmp_path: Path) -> None:
     store = CapitalSignalStore(tmp_path)
     rows = [

@@ -175,3 +175,45 @@ corepack pnpm@9.15.0 build
 - `apps/web-vue/src/utils/domain/huijinTrajectory.test.ts`
 - `apps/web-vue/src/components/etf-radar/HuijinTrajectoryPanel.vue`
 - `apps/web-vue/src/components/etf-radar/HuijinTrajectoryPanel.test.ts`
+
+## 2026-07-21 Final Re-review Fixes
+
+本轮仅处理复审新增的 2 个 Important；未修改已关闭的前端修复，未发现规格冲突。
+
+### I1 SZSE 日期 provenance 与四态缓存边界
+
+- RED 1：`test_service_does_not_revive_unverified_szse_cache_after_network_failure` 预置旧 JSON 语义的 `159915.SZ@2026-07-17=9999`，本轮该符号网络失败。旧实现把它作为 failed cache 复活，实际 `total_shares=9999`。
+- RED 1 命令：`cd apps/api && .venv/bin/pytest tests/test_capital_signals.py -k does_not_revive_unverified_szse_cache_after_network_failure -vv`
+- RED 1 结果：`1 failed, 49 deselected`，失败值 `9999.0 is None`。
+- RED 2：`test_service_reuses_verified_same_day_cache_after_temporary_empty_response` 预置十只合法同日缓存，其中 SZ 行带 strict provenance；provider 返回同日元数据但暂时空数据。旧实现 `available_core_count=0`。
+- RED 2 命令：`cd apps/api && .venv/bin/pytest tests/test_capital_signals.py -k reuses_verified_same_day_cache_after_temporary_empty_response -vv`
+- RED 2 结果：`1 failed, 49 deselected`，实际覆盖 `0`，预期 `7`。
+- RED 3：strict parser 行、旧持久化 JSON 默认值和 provider 空数据分类分别由以下命令确认缺失：
+  - `cd apps/api && .venv/bin/pytest tests/test_capital_signal_store.py -k legacy_szse_share_dates_as_unverified -vv` -> `1 failed, 9 deselected`，字段实际为 `None`。
+  - `cd apps/api && .venv/bin/pytest tests/test_capital_signal_providers.py -k szse_current_share_parser_does_not_invent_history -vv` -> `1 failed, 28 deselected`，字段实际为 `None`。
+  - `cd apps/api && .venv/bin/pytest tests/test_capital_signal_providers.py -k distinguishes_same_date_empty_szse_from_date_rejection -vv` -> `1 failed, 28 deselected`，`empty_symbols` 实际为空。
+- 修复：`EtfSharePoint.date_validation` 默认 `unverified`，strict `metadata.cols.dqgm` 解析行标记 `szse_dqgm_v1`。provider 将结果分为有效 strict 行、`rejected_symbols`（日期缺失/非法/明确错配）、`empty_symbols`（同日元数据但无有效行）和 `failed_symbols`（网络/请求失败）。服务对明确 rejected 同日行直接删除；failed/empty 时保留 SH 同日缓存，但 SZ 仅复用 `szse_dqgm_v1`，未验证旧 SZ 行从历史移除。首轮与候选日期路径使用同一规则。
+- GREEN：
+  - 两条服务复现：`2 passed, 48 deselected`。
+  - provenance/store 边界：`2 passed, 8 deselected`（含原损坏文件守卫）。
+  - strict parser 与四态 provider 测试分别 `1 passed, 28 deselected`。
+- 文件：`apps/api/app/models.py`、`apps/api/app/providers/capital_signals.py`、`apps/api/app/services/capital_signals.py`、`apps/api/tests/test_capital_signal_store.py`、`apps/api/tests/test_capital_signal_providers.py`、`apps/api/tests/test_capital_signals.py`。
+
+### I2 `history()` 按 snapshot 状态协调首载
+
+- RED：`test_history_refreshes_when_only_sse_history_exists_without_snapshot` 仅预置 `510300.SH@2026-07-16` 且无 snapshot。旧实现 full-universe provider 调用为 `[]`，未刷新最新/SZ 历史。
+- RED 命令：`cd apps/api && .venv/bin/pytest tests/test_capital_signals.py -k refreshes_when_only_sse_history_exists_without_snapshot -vv`
+- RED 结果：`1 failed, 51 deselected`。
+- 守卫：`test_history_uses_fresh_compatible_snapshot_without_refresh` 在修复前已通过，证明新鲜 snapshot 路径本来不重复请求；修复后继续保持 provider 调用为零。
+- 修复：进入 `RLock` 后先加载 snapshot；仅当 snapshot 存在、兼容且 TTL 新鲜时直接使用其披露日，否则调用一次 `overview()` 并无条件重新读取 history。SZ 未来日期清理在刷新/重读之后执行。
+- GREEN 命令：`cd apps/api && .venv/bin/pytest tests/test_capital_signals.py -k 'refreshes_when_only_sse_history_exists_without_snapshot or uses_fresh_compatible_snapshot_without_refresh' -q`
+- GREEN 结果：`2 passed, 50 deselected`。
+- 文件：`apps/api/app/services/capital_signals.py`、`apps/api/tests/test_capital_signals.py`。
+
+### 本轮验证
+
+- 受影响回归：`cd apps/api && .venv/bin/pytest tests/test_capital_signal_store.py tests/test_capital_signal_providers.py tests/test_capital_signals.py -q` -> exit 0，`91 passed in 0.54s`。
+- 完整后端计划 suite：`cd apps/api && .venv/bin/pytest tests/test_huijin_etf_activity.py tests/test_capital_signal_store.py tests/test_capital_signal_providers.py tests/test_capital_signals.py tests/test_capital_signal_sampler.py tests/test_api.py -q` -> exit 0，`267 passed in 15.87s`。
+- 完整 Ruff：`cd apps/api && .venv/bin/ruff check app/models.py app/providers/capital_signals.py app/services/huijin_etf_activity.py app/services/capital_signal_store.py app/services/capital_signals.py app/services/capital_signal_sampler.py app/main.py tests/test_huijin_etf_activity.py tests/test_capital_signal_store.py tests/test_capital_signal_providers.py tests/test_capital_signals.py tests/test_capital_signal_sampler.py tests/test_api.py` -> exit 0，`All checks passed!`。
+- API/前端影响：`date_validation` 仅属于内部 `EtfSharePoint` 持久化模型，未进入 API response 或前端类型；本轮无前端文件改动。
+- `git diff --check`：exit 0，无输出。

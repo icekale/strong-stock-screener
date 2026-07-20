@@ -125,26 +125,15 @@ class CapitalSignalService:
                 for row in current_result.rows
                 if row.trade_date == trade_date and row.symbol in ALL_ETFS
             ]
-            stored_current_rows = [
-                row
-                for row in history
-                if row.trade_date == trade_date and row.symbol in ALL_ETFS
-            ]
             current_request_failed = _has_request_failures(current_result)
-            failed_symbols = set(getattr(current_result, "failed_symbols", ()))
-            rejected_symbols = set(getattr(current_result, "rejected_symbols", ()))
-            if rejected_symbols:
-                history = [
-                    row
-                    for row in history
-                    if not (
-                        row.trade_date == trade_date and row.symbol in rejected_symbols
-                    )
-                ]
+            sanitized_history, trusted_current_rows = _trusted_same_day_cache(
+                history,
+                trade_date=trade_date,
+                result=current_result,
+            )
+            if sanitized_history != history:
+                history = sanitized_history
                 self.store.save_share_history(history)
-            trusted_current_rows = [
-                row for row in stored_current_rows if row.symbol in failed_symbols
-            ]
             current_rows = _merge_share_history(trusted_current_rows, fetched_current_rows)
             disclosure_status: list[StrongStockSourceStatus] = []
             fallback_status: list[StrongStockSourceStatus] = []
@@ -165,34 +154,22 @@ class CapitalSignalService:
                             for row in fallback_result.rows
                             if row.trade_date == candidate_date and row.symbol in ALL_ETFS
                         ]
-                        fallback_rejected_symbols = set(
-                            getattr(fallback_result, "rejected_symbols", ())
+                        sanitized_history, trusted_fallback_rows = (
+                            _trusted_same_day_cache(
+                                history,
+                                trade_date=candidate_date,
+                                result=fallback_result,
+                            )
                         )
-                        if fallback_rejected_symbols:
-                            history = [
-                                row
-                                for row in history
-                                if not (
-                                    row.trade_date == candidate_date
-                                    and row.symbol in fallback_rejected_symbols
-                                )
-                            ]
+                        if sanitized_history != history:
+                            history = sanitized_history
                             self.store.save_share_history(history)
                         if _has_complete_core_coverage(fallback_rows):
                             trade_date = candidate_date
                             current_result = fallback_result
                             fetched_current_rows = fallback_rows
-                            fallback_failed_symbols = set(
-                                getattr(fallback_result, "failed_symbols", ())
-                            )
-                            stored_current_rows = [
-                                row
-                                for row in history
-                                if row.trade_date == trade_date
-                                and row.symbol in fallback_failed_symbols
-                            ]
                             current_rows = _merge_share_history(
-                                stored_current_rows, fallback_rows
+                                trusted_fallback_rows, fallback_rows
                             )
                             disclosure_status.append(
                                 StrongStockSourceStatus(
@@ -399,20 +376,17 @@ class CapitalSignalService:
             now = self.clock()
             trade_date = _latest_weekday(now)
             history = self.store.load_share_history()
-            if not history:
-                self.overview()
+            snapshot = self.store.load_snapshot()
+            if (
+                snapshot is not None
+                and _is_compatible_snapshot(snapshot)
+                and _is_fresh(snapshot.generated_at, now, self.ttl_seconds)
+            ):
+                disclosed_trade_date = snapshot.trade_date
+            else:
+                disclosed_trade_date = self.overview().trade_date
                 history = self.store.load_share_history()
             if any(row.symbol in ALL_ETFS and row.symbol.endswith(".SZ") for row in history):
-                snapshot = self.store.load_snapshot()
-                if (
-                    snapshot is not None
-                    and _is_compatible_snapshot(snapshot)
-                    and _is_fresh(snapshot.generated_at, now, self.ttl_seconds)
-                ):
-                    disclosed_trade_date = snapshot.trade_date
-                else:
-                    disclosed_trade_date = self.overview().trade_date
-                    history = self.store.load_share_history()
                 sanitized_history = _discard_future_szse_rows(history, disclosed_trade_date)
                 if sanitized_history != history:
                     self.store.save_share_history(sanitized_history)
@@ -877,6 +851,40 @@ def _available_trade_dates(
         {trade_date for trade_date in available_trade_dates if trade_date < before},
         reverse=True,
     )
+
+
+def _trusted_same_day_cache(
+    history: list[EtfSharePoint],
+    *,
+    trade_date: str,
+    result: CapitalProviderResult[EtfSharePoint],
+) -> tuple[list[EtfSharePoint], list[EtfSharePoint]]:
+    transient_symbols = {
+        *getattr(result, "failed_symbols", ()),
+        *getattr(result, "empty_symbols", ()),
+    }
+    rejected_symbols = set(getattr(result, "rejected_symbols", ()))
+    retained: list[EtfSharePoint] = []
+    trusted: list[EtfSharePoint] = []
+    for row in history:
+        is_current_tracked = (
+            row.trade_date == trade_date and row.symbol in ALL_ETFS
+        )
+        if not is_current_tracked:
+            retained.append(row)
+            continue
+        if row.symbol in rejected_symbols:
+            continue
+        if (
+            row.symbol in transient_symbols
+            and row.symbol.endswith(".SZ")
+            and row.date_validation != "szse_dqgm_v1"
+        ):
+            continue
+        retained.append(row)
+        if row.symbol in transient_symbols:
+            trusted.append(row)
+    return retained, trusted
 
 
 def _signal_stage(now: datetime, trade_date: str) -> str:

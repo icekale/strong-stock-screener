@@ -49,6 +49,7 @@ class CapitalProviderResult(Generic[T]):
     available_trade_dates: tuple[str, ...] = field(default_factory=tuple)
     failed_symbols: tuple[str, ...] = field(default_factory=tuple)
     rejected_symbols: tuple[str, ...] = field(default_factory=tuple)
+    empty_symbols: tuple[str, ...] = field(default_factory=tuple)
 
 
 class OfficialCapitalDataProvider:
@@ -119,6 +120,7 @@ class OfficialCapitalDataProvider:
         available_trade_dates: set[str] = set()
         failed_symbols: set[str] = set()
         rejected_symbols: set[str] = set()
+        empty_symbols: set[str] = set()
         sse_symbols = [symbol for symbol in symbols if symbol.endswith(".SH")]
         szse_symbols = [symbol for symbol in symbols if symbol.endswith(".SZ")]
 
@@ -144,7 +146,15 @@ class OfficialCapitalDataProvider:
                 current_symbols = {
                     row.symbol for row in sse_rows if row.trade_date == trade_date
                 }
-                rejected_symbols.update(set(sse_symbols) - current_symbols)
+                mismatched_symbols = {
+                    row.symbol
+                    for row in sse_rows
+                    if row.trade_date != trade_date and row.symbol not in current_symbols
+                }
+                rejected_symbols.update(mismatched_symbols)
+                empty_symbols.update(
+                    set(sse_symbols) - current_symbols - mismatched_symbols
+                )
                 missing_count = len(set(sse_symbols) - current_symbols)
                 returned_dates = sorted({row.trade_date for row in sse_rows})
                 mismatched_dates = [date for date in returned_dates if date != trade_date]
@@ -174,6 +184,7 @@ class OfficialCapitalDataProvider:
             failures: list[Exception] = []
             current = 0
             rejected = 0
+            empty = 0
             for symbol in szse_symbols:
                 try:
                     response = self.http_client.get(
@@ -194,6 +205,10 @@ class OfficialCapitalDataProvider:
                     if exchange_date is not None:
                         available_trade_dates.add(exchange_date)
                         szse_available_trade_dates.add(exchange_date)
+                    if exchange_date is None or exchange_date != _date_text(trade_date):
+                        rejected += 1
+                        rejected_symbols.add(symbol)
+                        continue
                     symbol_rows = parse_szse_etf_share_payload(
                         payload,
                         trade_date=trade_date,
@@ -203,8 +218,8 @@ class OfficialCapitalDataProvider:
                         current += 1
                         szse_rows.extend(symbol_rows)
                     else:
-                        rejected += 1
-                        rejected_symbols.add(symbol)
+                        empty += 1
+                        empty_symbols.add(symbol)
                 except Exception as exc:
                     failures.append(exc)
                     request_failures += 1
@@ -212,7 +227,7 @@ class OfficialCapitalDataProvider:
             rows.extend(szse_rows)
             actual_dates = sorted(szse_available_trade_dates)
             date_detail = f"；份额日期 {', '.join(actual_dates)}" if actual_dates else ""
-            if failures and not szse_rows and not rejected:
+            if failures and not szse_rows and not rejected and not empty:
                 statuses.append(_failure_status("深交所ETF份额", failures[0]))
             elif current == len(szse_symbols):
                 statuses.append(
@@ -229,7 +244,7 @@ class OfficialCapitalDataProvider:
                         status="stale",
                         detail=(
                             f"当日有效 {current}/{len(szse_symbols)} 只；"
-                            f"{len(failures)} 只请求失败；{rejected} 只日期或空数据拒绝；"
+                            f"{len(failures)} 只请求失败；{rejected + empty} 只日期或空数据拒绝；"
                             f"深市不补造历史{date_detail}"
                         ),
                     )
@@ -242,6 +257,7 @@ class OfficialCapitalDataProvider:
             available_trade_dates=tuple(sorted(available_trade_dates)),
             failed_symbols=tuple(symbol for symbol in symbols if symbol in failed_symbols),
             rejected_symbols=tuple(symbol for symbol in symbols if symbol in rejected_symbols),
+            empty_symbols=tuple(symbol for symbol in symbols if symbol in empty_symbols),
         )
 
 
@@ -427,6 +443,7 @@ def parse_szse_etf_share_payload(
                 symbol=symbol,
                 name=_plain_text(row.get("kzjcurl")) or None,
                 total_shares=total_shares,
+                date_validation="szse_dqgm_v1",
             )
         )
     return output

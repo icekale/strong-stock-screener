@@ -164,13 +164,14 @@ class CapitalSignalService:
                         if sanitized_history != history:
                             history = sanitized_history
                             self.store.save_share_history(history)
-                        if _has_complete_core_coverage(fallback_rows):
+                        merged_fallback_rows = _merge_share_history(
+                            trusted_fallback_rows, fallback_rows
+                        )
+                        if _has_complete_core_coverage(merged_fallback_rows):
                             trade_date = candidate_date
                             current_result = fallback_result
                             fetched_current_rows = fallback_rows
-                            current_rows = _merge_share_history(
-                                trusted_fallback_rows, fallback_rows
-                            )
+                            current_rows = merged_fallback_rows
                             disclosure_status.append(
                                 StrongStockSourceStatus(
                                     source="ETF份额披露日期",

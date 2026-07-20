@@ -584,7 +584,106 @@ def test_overview_tries_reported_candidate_dates_newest_to_oldest_until_complete
     assert snapshot.activity.available_core_count == len(CORE_ETFS)
 
 
-def test_overview_candidate_date_rejects_unvalidated_cached_symbols(
+def _overview_with_verified_candidate_cache(
+    tmp_path: Path, *, transient_kind: str
+) -> EtfRadarOverviewResponse:
+    cached_symbol = "159915.SZ"
+
+    class CandidateDateProvider(FakeCapitalProvider):
+        def get_etf_share_rows(
+            self,
+            trade_date: str,
+            symbols: list[str] | tuple[str, ...],
+        ) -> CapitalProviderResult[EtfSharePoint]:
+            self.share_calls.append((trade_date, tuple(symbols)))
+            if trade_date == "2026-07-20":
+                return CapitalProviderResult(
+                    rows=[],
+                    source_status=[
+                        StrongStockSourceStatus(
+                            source="ETF份额", status="stale", detail="delayed"
+                        )
+                    ],
+                    available_trade_dates=("2026-07-17",),
+                )
+            if trade_date != "2026-07-17":
+                return CapitalProviderResult(rows=[], source_status=[])
+            return CapitalProviderResult(
+                rows=[
+                    EtfSharePoint(
+                        trade_date=trade_date,
+                        symbol=symbol,
+                        name=ALL_ETFS[symbol].name,
+                        total_shares=1_000,
+                        date_validation=(
+                            "szse_dqgm_v1"
+                            if symbol.endswith(".SZ")
+                            else "unverified"
+                        ),
+                    )
+                    for symbol in symbols
+                    if symbol != cached_symbol
+                ],
+                source_status=[
+                    StrongStockSourceStatus(
+                        source="ETF份额", status="stale", detail=transient_kind
+                    )
+                ],
+                request_failures=1 if transient_kind == "failed" else 0,
+                failed_symbols=(cached_symbol,) if transient_kind == "failed" else (),
+                empty_symbols=(cached_symbol,) if transient_kind == "empty" else (),
+            )
+
+    store = CapitalSignalStore(tmp_path)
+    store.save_share_history(
+        [
+            EtfSharePoint(
+                trade_date="2026-07-17",
+                symbol=cached_symbol,
+                name=ALL_ETFS[cached_symbol].name,
+                total_shares=2_222,
+                date_validation="szse_dqgm_v1",
+            )
+        ]
+    )
+    service = CapitalSignalService(
+        provider=CandidateDateProvider(),
+        store=store,
+        holder_provider=FakeHolderProvider(),
+        clock=lambda: datetime(2026, 7, 20, 21, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+    return service.overview(force=True)
+
+
+def test_overview_candidate_empty_uses_verified_cache_for_core_coverage(
+    tmp_path: Path,
+) -> None:
+    snapshot = _overview_with_verified_candidate_cache(
+        tmp_path, transient_kind="empty"
+    )
+
+    assert snapshot.trade_date == "2026-07-17"
+    assert snapshot.activity.available_core_count == len(CORE_ETFS)
+    assert next(
+        item for item in snapshot.core_items if item.symbol == "159915.SZ"
+    ).total_shares == 2_222
+
+
+def test_overview_candidate_failure_uses_verified_cache_for_core_coverage(
+    tmp_path: Path,
+) -> None:
+    snapshot = _overview_with_verified_candidate_cache(
+        tmp_path, transient_kind="failed"
+    )
+
+    assert snapshot.trade_date == "2026-07-17"
+    assert snapshot.activity.available_core_count == len(CORE_ETFS)
+    assert next(
+        item for item in snapshot.core_items if item.symbol == "159915.SZ"
+    ).total_shares == 2_222
+
+
+def test_overview_candidate_date_rejects_verified_cached_symbols(
     tmp_path: Path,
 ) -> None:
     rejected_symbol = "159919.SZ"
@@ -623,6 +722,7 @@ def test_overview_candidate_date_rejects_unvalidated_cached_symbols(
                 symbol=rejected_symbol,
                 name=ALL_ETFS[rejected_symbol].name,
                 total_shares=9_999,
+                date_validation="szse_dqgm_v1",
             )
         ]
     )

@@ -217,3 +217,30 @@ corepack pnpm@9.15.0 build
 - 完整 Ruff：`cd apps/api && .venv/bin/ruff check app/models.py app/providers/capital_signals.py app/services/huijin_etf_activity.py app/services/capital_signal_store.py app/services/capital_signals.py app/services/capital_signal_sampler.py app/main.py tests/test_huijin_etf_activity.py tests/test_capital_signal_store.py tests/test_capital_signal_providers.py tests/test_capital_signals.py tests/test_capital_signal_sampler.py tests/test_api.py` -> exit 0，`All checks passed!`。
 - API/前端影响：`date_validation` 仅属于内部 `EtfSharePoint` 持久化模型，未进入 API response 或前端类型；本轮无前端文件改动。
 - `git diff --check`：exit 0，无输出。
+
+## 2026-07-21 Third Targeted Re-review Fix
+
+本轮仅处理第三次复审剩余的 1 个 Important；改动范围限定为 service、对应测试和本报告。
+
+### I1 候选日先合并 trusted cache 再判断完整性
+
+- RED 1：`test_overview_candidate_empty_uses_verified_cache_for_core_coverage` 预置 `159915.SZ@2026-07-17=2222` 且 `date_validation="szse_dqgm_v1"`；候选日其余九只新抓取成功，`159915.SZ` 为 `empty_symbols`。旧实现结果仍为 `trade_date=2026-07-20`。
+- RED 1 命令：`cd apps/api && .venv/bin/pytest tests/test_capital_signals.py -k candidate_empty_uses_verified_cache_for_core_coverage -vv`
+- RED 1 结果：`1 failed, 53 deselected`，实际日期 `2026-07-20`，预期 `2026-07-17`。
+- RED 2：`test_overview_candidate_failure_uses_verified_cache_for_core_coverage` 使用相同 verified cache，并将候选日该符号标为 `failed_symbols`。旧实现同样停在 `2026-07-20`。
+- RED 2 命令：`cd apps/api && .venv/bin/pytest tests/test_capital_signals.py -k candidate_failure_uses_verified_cache_for_core_coverage -vv`
+- RED 2 结果：`1 failed, 53 deselected`，实际日期 `2026-07-20`，预期 `2026-07-17`。
+- rejected 守卫：既有候选日拒绝测试改为预置 verified cache；`test_overview_candidate_date_rejects_verified_cached_symbols` 在修复前后均通过，证明明确拒绝行不会进入 trusted merge。
+- 修复：候选请求完成四态清理后，先执行 `merged_fallback_rows = _merge_share_history(trusted_fallback_rows, fallback_rows)`；`_has_complete_core_coverage()` 和选中候选后的 `current_rows` 均使用该合并结果。
+- GREEN 命令：`cd apps/api && .venv/bin/pytest tests/test_capital_signals.py -k 'candidate_empty_uses_verified_cache_for_core_coverage or candidate_failure_uses_verified_cache_for_core_coverage or candidate_date_rejects_verified_cached_symbols' -q`
+- GREEN 结果：`3 passed, 51 deselected`。
+- 文件：`apps/api/app/services/capital_signals.py`、`apps/api/tests/test_capital_signals.py`。
+
+### 本轮验证
+
+- Service 全文件：`cd apps/api && .venv/bin/pytest tests/test_capital_signals.py -q` -> exit 0，`54 passed in 0.49s`。
+- 完整后端计划 suite 首轮：`267 passed, 2 failed`；失败为未改动的 auction 后台时序测试 `test_auction_snapshot_refresh_job_reuses_active_job` 和 `test_auction_timeline_returns_locked_observation_points`。
+- 两条 auction 测试分别在独立 pytest 进程复现：均 `1 passed, 135 deselected`。
+- 完整后端计划 suite 新进程重跑：`cd apps/api && .venv/bin/pytest tests/test_huijin_etf_activity.py tests/test_capital_signal_store.py tests/test_capital_signal_providers.py tests/test_capital_signals.py tests/test_capital_signal_sampler.py tests/test_api.py -q` -> exit 0，`269 passed in 10.75s`。
+- Ruff：`cd apps/api && .venv/bin/ruff check app/models.py app/providers/capital_signals.py app/services/huijin_etf_activity.py app/services/capital_signal_store.py app/services/capital_signals.py app/services/capital_signal_sampler.py app/main.py tests/test_huijin_etf_activity.py tests/test_capital_signal_store.py tests/test_capital_signal_providers.py tests/test_capital_signals.py tests/test_capital_signal_sampler.py tests/test_api.py` -> exit 0，`All checks passed!`。
+- `git diff --check`：exit 0，无输出。

@@ -52,9 +52,17 @@ def _baseline(
         report_period="2026Q2",
         baseline_total_shares=total_shares,
         confirmed_huijin_shares=25_200_000_000,
-        confirmed_huijin_holding_pct=15.873,
+        confirmed_huijin_holding_pct=80,
         source_kind="reported",
         source="基金定期报告",
+    )
+
+
+def test_baseline_fixture_holding_pct_matches_confirmed_shares() -> None:
+    baseline = _baseline()
+
+    assert baseline.confirmed_huijin_holding_pct == pytest.approx(
+        baseline.confirmed_huijin_shares / baseline.baseline_total_shares * 100
     )
 
 
@@ -290,7 +298,7 @@ def test_calculate_activity_matches_2026_07_17_chinext_fixture() -> None:
     assert result.report_period == "2026Q2"
     assert result.baseline_total_shares == 31_500_000_000
     assert result.confirmed_huijin_shares == 25_200_000_000
-    assert result.confirmed_huijin_holding_pct == 15.873
+    assert result.confirmed_huijin_holding_pct == 80
     assert result.baseline_source_kind == "reported"
 
 

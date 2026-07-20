@@ -47,6 +47,8 @@ class CapitalProviderResult(Generic[T]):
     source_status: list[StrongStockSourceStatus]
     request_failures: int = 0
     available_trade_dates: tuple[str, ...] = field(default_factory=tuple)
+    failed_symbols: tuple[str, ...] = field(default_factory=tuple)
+    rejected_symbols: tuple[str, ...] = field(default_factory=tuple)
 
 
 class OfficialCapitalDataProvider:
@@ -115,6 +117,8 @@ class OfficialCapitalDataProvider:
         statuses: list[StrongStockSourceStatus] = []
         request_failures = 0
         available_trade_dates: set[str] = set()
+        failed_symbols: set[str] = set()
+        rejected_symbols: set[str] = set()
         sse_symbols = [symbol for symbol in symbols if symbol.endswith(".SH")]
         szse_symbols = [symbol for symbol in symbols if symbol.endswith(".SZ")]
 
@@ -140,6 +144,7 @@ class OfficialCapitalDataProvider:
                 current_symbols = {
                     row.symbol for row in sse_rows if row.trade_date == trade_date
                 }
+                rejected_symbols.update(set(sse_symbols) - current_symbols)
                 missing_count = len(set(sse_symbols) - current_symbols)
                 returned_dates = sorted({row.trade_date for row in sse_rows})
                 mismatched_dates = [date for date in returned_dates if date != trade_date]
@@ -160,6 +165,7 @@ class OfficialCapitalDataProvider:
                 )
             except Exception as exc:
                 request_failures += 1
+                failed_symbols.update(sse_symbols)
                 statuses.append(_failure_status("上交所ETF份额", exc))
 
         if szse_symbols:
@@ -198,9 +204,11 @@ class OfficialCapitalDataProvider:
                         szse_rows.extend(symbol_rows)
                     else:
                         rejected += 1
+                        rejected_symbols.add(symbol)
                 except Exception as exc:
                     failures.append(exc)
                     request_failures += 1
+                    failed_symbols.add(symbol)
             rows.extend(szse_rows)
             actual_dates = sorted(szse_available_trade_dates)
             date_detail = f"；份额日期 {', '.join(actual_dates)}" if actual_dates else ""
@@ -232,6 +240,8 @@ class OfficialCapitalDataProvider:
             source_status=statuses,
             request_failures=request_failures,
             available_trade_dates=tuple(sorted(available_trade_dates)),
+            failed_symbols=tuple(symbol for symbol in symbols if symbol in failed_symbols),
+            rejected_symbols=tuple(symbol for symbol in symbols if symbol in rejected_symbols),
         )
 
 
@@ -427,11 +437,11 @@ def _szse_share_date(metadata: Any) -> str | None:
         return None
     columns = metadata.get("cols")
     title = columns.get("dqgm") if isinstance(columns, dict) else None
-    dates = {
-        parsed
-        for value in _ISO_DATE_PATTERN.findall(str(title or ""))
-        if (parsed := _date_text(value)) is not None
-    }
+    values = _ISO_DATE_PATTERN.findall(str(title or ""))
+    parsed_dates = [_date_text(value) for value in values]
+    if not values or any(parsed is None for parsed in parsed_dates):
+        return None
+    dates = set(parsed_dates)
     return next(iter(dates)) if len(dates) == 1 else None
 
 

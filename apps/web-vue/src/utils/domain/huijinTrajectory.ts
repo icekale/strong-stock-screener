@@ -21,8 +21,12 @@ export function buildHuijinTrajectory(
     points.filter(point => point.symbol === item.symbol)
       .map(point => [point.trade_date, point.cumulative_baseline_change_pct])
   );
-  const dates = [item.report_period, ...realDates.filter(date => date !== item.report_period)]
-    .filter((date): date is string => Boolean(date));
+  const dates = [
+    ...new Set([
+      ...(item.report_period ? [item.report_period] : []),
+      ...realDates.filter(date => !item.report_period || date > item.report_period)
+    ])
+  ].sort();
   return {
     dates,
     values: dates.map(date => date === item.report_period ? 0 : values.get(date) ?? null)

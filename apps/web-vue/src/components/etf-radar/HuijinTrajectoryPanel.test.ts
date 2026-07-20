@@ -194,7 +194,6 @@ describe('HuijinTrajectoryPanel', () => {
     expect(wrapper.text()).toContain('报告期 ETF 总份额');
     expect(wrapper.text()).toContain('最新 ETF 总份额');
     expect(wrapper.text()).toContain('累计偏离');
-    expect(wrapper.text()).toContain('日度历史积累中');
     expect(rankingRows[0]!.text()).toContain('▼ -75.55%');
     expect(rankingRows[0]!.text()).toContain('收缩');
     expect(rankingRows[1]!.text()).toContain('▲ +72.00%');
@@ -246,7 +245,46 @@ describe('HuijinTrajectoryPanel', () => {
     expect(source).toContain('max-width: 100%;');
     expect(source).toContain('min-width: 0;');
     expect(source).toContain('overflow-x: hidden;');
+    expect(source).toMatch(/\.huijin-trajectory__table\s*\{[^}]*overflow-x: auto;/s);
+    expect(source).toMatch(/\.huijin-trajectory__table-head,[^{]*\{[^}]*min-width: 760px;/s);
+    expect(source).not.toMatch(/\.huijin-trajectory__table-head\s*\{\s*display: none;/s);
     expect(source).toMatch(/\.huijin-ranking__zero\s*\{[^}]*z-index: 1;/s);
+  });
+
+  it('renders daily change, validation status, and data date in the detail table', () => {
+    const overview = overviewFixture();
+    overview.core_items[1]!.paired_symbol = '159919.SZ';
+    overview.validation_groups = [
+      {
+        index_name: '沪深300',
+        core_symbol: '510300.SH',
+        validator_symbol: '159919.SZ',
+        state: 'confirmed_increase',
+        conservative_daily_change_pct: 0.8,
+        conservative_baseline_change_pct: 72,
+        conservative_multiple: 1
+      }
+    ];
+    const wrapper = mountPanel({ overview });
+
+    expect(wrapper.findAll('.huijin-trajectory__table-head > span').map(cell => cell.text())).toEqual([
+      'ETF',
+      '确认持仓比例',
+      '累计偏离',
+      '最近日变化',
+      '验证状态',
+      '数据日期'
+    ]);
+    const detailRows = wrapper.findAll('[data-testid="huijin-detail-row"]');
+    expect(detailRows[0]!.findAll(':scope > span').map(cell => cell.text())).toEqual([
+      '华夏上证50ETF510050.SH',
+      '86.05%',
+      '▼ -75.55% · 收缩',
+      '▲ +1.07%',
+      '不适用',
+      '2026-07-18'
+    ]);
+    expect(detailRows[1]!.findAll(':scope > span')[4]!.text()).toBe('配对一致增加');
   });
 
   it('labels detail selection buttons with their field names and values', () => {
@@ -256,7 +294,9 @@ describe('HuijinTrajectoryPanel', () => {
     expect(detailLabel).toContain('华夏上证50ETF 510050.SH');
     expect(detailLabel).toContain('确认持仓比例 86.05%');
     expect(detailLabel).toContain('累计偏离 ▼ -75.55% · 收缩');
-    expect(detailLabel).toContain('数据状态 可计算');
+    expect(detailLabel).toContain('最近日变化 ▲ +1.07%');
+    expect(detailLabel).toContain('验证状态 不适用');
+    expect(detailLabel).toContain('数据日期 2026-07-18');
   });
 
   it('shows an empty state instead of a baseline-only chart for empty history points', () => {

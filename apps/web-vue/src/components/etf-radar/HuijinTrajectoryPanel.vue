@@ -4,9 +4,10 @@ import type { EChartsOption } from 'echarts';
 import type { EtfRadarHistoryResponse, EtfRadarOverviewResponse, HuijinEtfActivityItem } from '@/service/types';
 import {
   formatDirectionalPercent as formatDirectionalPercentValue,
-  formatPlainShares as formatPlainSharesValue
+  formatPlainShares as formatPlainSharesValue,
+  validationStateLabel
 } from '@/utils/domain/capitalSignals';
-import { buildHuijinRanking, buildHuijinTrajectory, huijinActivityDataState } from '@/utils/domain/huijinTrajectory';
+import { buildHuijinRanking, buildHuijinTrajectory } from '@/utils/domain/huijinTrajectory';
 
 defineOptions({ name: 'HuijinTrajectoryPanel' });
 
@@ -110,8 +111,18 @@ function rankingBarStyle(value: number | null | undefined) {
   return numericValue < 0 ? { right: '50%', width: `${width}%` } : { left: '50%', width: `${width}%` };
 }
 
+function itemValidationState(item: HuijinEtfActivityItem) {
+  if (!item.paired_symbol) return '不适用';
+  const group = props.overview.validation_groups.find(candidate => candidate.core_symbol === item.symbol);
+  return validationStateLabel(group?.state ?? 'incomplete');
+}
+
+function itemDataDate(item: HuijinEtfActivityItem) {
+  return item.total_shares === null ? '--' : item.trade_date;
+}
+
 function detailAriaLabel(item: HuijinEtfActivityItem) {
-  return `${item.name} ${item.symbol}，确认持仓比例 ${formatHoldingPct(item.confirmed_huijin_holding_pct)}，累计偏离 ${formatDirectionalPercent(item.cumulative_baseline_change_pct)} · ${deviationDirection(item.cumulative_baseline_change_pct)}，数据状态 ${huijinActivityDataState(item)}`;
+  return `${item.name} ${item.symbol}，确认持仓比例 ${formatHoldingPct(item.confirmed_huijin_holding_pct)}，累计偏离 ${formatDirectionalPercent(item.cumulative_baseline_change_pct)} · ${deviationDirection(item.cumulative_baseline_change_pct)}，最近日变化 ${formatDirectionalPercent(item.daily_change_pct)}，验证状态 ${itemValidationState(item)}，数据日期 ${itemDataDate(item)}`;
 }
 </script>
 
@@ -243,7 +254,9 @@ function detailAriaLabel(item: HuijinEtfActivityItem) {
         <span>ETF</span>
         <span>确认持仓比例</span>
         <span>累计偏离</span>
-        <span>数据状态</span>
+        <span>最近日变化</span>
+        <span>验证状态</span>
+        <span>数据日期</span>
       </div>
       <button
         v-for="item in overview.core_items"
@@ -264,7 +277,9 @@ function detailAriaLabel(item: HuijinEtfActivityItem) {
           {{ formatDirectionalPercent(item.cumulative_baseline_change_pct) }} ·
           {{ deviationDirection(item.cumulative_baseline_change_pct) }}
         </span>
-        <span>{{ huijinActivityDataState(item) }}</span>
+        <span :class="valueClass(item.daily_change_pct)">{{ formatDirectionalPercent(item.daily_change_pct) }}</span>
+        <span>{{ itemValidationState(item) }}</span>
+        <span>{{ itemDataDate(item) }}</span>
       </button>
     </section>
   </section>
@@ -544,16 +559,19 @@ function detailAriaLabel(item: HuijinEtfActivityItem) {
 
 .huijin-trajectory__table {
   min-width: 0;
+  overflow-x: auto;
   background: var(--wb-surface);
   border-block: 1px solid var(--wb-border);
+  -webkit-overflow-scrolling: touch;
 }
 
 .huijin-trajectory__table-head,
 .huijin-trajectory__table button {
   display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 0.7fr) minmax(0, 0.8fr) minmax(0, 0.75fr);
+  grid-template-columns: minmax(150px, 1.4fr) repeat(5, minmax(100px, 0.8fr));
   gap: 12px;
   align-items: center;
+  min-width: 760px;
 }
 
 .huijin-trajectory__table-head {
@@ -633,13 +651,5 @@ function detailAriaLabel(item: HuijinEtfActivityItem) {
     border-bottom: 0;
   }
 
-  .huijin-trajectory__table-head {
-    display: none;
-  }
-
-  .huijin-trajectory__table button {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    gap: 6px 12px;
-  }
 }
 </style>

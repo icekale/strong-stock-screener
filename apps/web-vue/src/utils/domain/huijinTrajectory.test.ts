@@ -95,6 +95,17 @@ describe('Huijin trajectory transforms', () => {
     expect(realDates).toEqual(originalRealDates);
   });
 
+  it('keeps only the selected report baseline period in strict date order', () => {
+    expect(buildHuijinTrajectory(
+      item('510050.SH', 2, '2026-06-30'),
+      [point('2026-06-27', -4), point('2026-07-01', 2)],
+      ['2026-07-01', '2026-06-27'],
+    )).toEqual({
+      dates: ['2026-06-30', '2026-07-01'],
+      values: [0, 2],
+    });
+  });
+
   it('distinguishes disclosure, daily-history, and baseline gaps', () => {
     expect(huijinActivityDataState(itemWith({ total_shares: null }))).toBe('交易所尚未披露');
     expect(huijinActivityDataState(itemWith({ previous_total_shares: null }))).toBe('日度历史积累中');

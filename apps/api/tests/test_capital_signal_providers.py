@@ -175,6 +175,17 @@ def test_szse_share_parser_rejects_missing_ambiguous_or_invalid_scale_date(
     ) == []
 
 
+def test_szse_share_parser_rejects_mixed_valid_and_invalid_scale_dates() -> None:
+    payload = deepcopy(SZSE_SHARE_FIXTURE)
+    payload[0]["metadata"]["cols"]["dqgm"] = "当前规模（2026-07-17）（2026-02-31）"
+
+    assert parse_szse_etf_share_payload(
+        payload,
+        trade_date="2026-07-17",
+        symbols=["159915.SZ"],
+    ) == []
+
+
 def test_szse_current_share_parser_rejects_missing_or_invalid_scale_date() -> None:
     missing_date = [{"metadata": {}, "data": SZSE_SHARE_FIXTURE[0]["data"]}]
     invalid_date = [
@@ -576,6 +587,8 @@ def test_share_provider_marks_partial_szse_coverage_stale() -> None:
     )
     assert result.request_failures == 1
     assert result.available_trade_dates == ("2026-07-16", "2026-07-17")
+    assert getattr(result, "failed_symbols", ()) == ("159922.SZ",)
+    assert getattr(result, "rejected_symbols", ()) == ("159919.SZ",)
 
 
 def test_share_provider_reports_all_date_rejected_szse_coverage_as_stale() -> None:

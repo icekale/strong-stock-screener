@@ -131,81 +131,65 @@ class CapitalSignalService:
                 if row.trade_date == trade_date and row.symbol in ALL_ETFS
             ]
             current_request_failed = _has_request_failures(current_result)
-            trusted_current_rows = (
-                stored_current_rows
-                if current_request_failed
-                else _exclude_unvalidated_cached_szse_rows(
-                    stored_current_rows, fetched_current_rows
-                )
-            )
+            failed_symbols = set(getattr(current_result, "failed_symbols", ()))
+            rejected_symbols = set(getattr(current_result, "rejected_symbols", ()))
+            if rejected_symbols:
+                history = [
+                    row
+                    for row in history
+                    if not (
+                        row.trade_date == trade_date and row.symbol in rejected_symbols
+                    )
+                ]
+                self.store.save_share_history(history)
+            trusted_current_rows = [
+                row for row in stored_current_rows if row.symbol in failed_symbols
+            ]
             current_rows = _merge_share_history(trusted_current_rows, fetched_current_rows)
             disclosure_status: list[StrongStockSourceStatus] = []
             fallback_status: list[StrongStockSourceStatus] = []
             if not current_request_failed and not _has_complete_core_coverage(fetched_current_rows):
-                candidate_date = _latest_available_trade_date(
+                candidate_dates = _available_trade_dates(
                     current_result.available_trade_dates,
                     before=preferred_trade_date,
                 )
-                if candidate_date is not None:
-                    fallback_result = self.provider.get_etf_share_rows(candidate_date, symbols)
-                    fallback_rows = [
-                        row
-                        for row in fallback_result.rows
-                        if row.trade_date == candidate_date and row.symbol in ALL_ETFS
-                    ]
-                    if _has_complete_core_coverage(fallback_rows):
-                        trade_date = candidate_date
-                        current_result = fallback_result
-                        fetched_current_rows = fallback_rows
-                        stored_current_rows = [
-                            row
-                            for row in history
-                            if row.trade_date == trade_date and row.symbol in ALL_ETFS
-                        ]
-                        current_rows = _merge_share_history(
-                            stored_current_rows, fallback_rows
+                if candidate_dates:
+                    attempted_dates: list[str] = []
+                    for candidate_date in candidate_dates:
+                        attempted_dates.append(candidate_date)
+                        fallback_result = self.provider.get_etf_share_rows(
+                            candidate_date, symbols
                         )
-                        disclosure_status.append(
-                            StrongStockSourceStatus(
-                                source="ETF份额披露日期",
-                                status="stale",
-                                detail=(
-                                    f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
-                                    f"使用官方披露日期 {trade_date}"
-                                ),
-                            )
-                        )
-                    else:
-                        fallback_status.extend(fallback_result.source_status)
-                        detail = (
-                            f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
-                            f"官方日期 {candidate_date} 重试未形成完整核心ETF披露"
-                        )
-                        if _has_request_failures(fallback_result):
-                            detail += "，请求失败后不继续回溯"
-                        disclosure_status.append(
-                            StrongStockSourceStatus(
-                                source="ETF份额披露日期", status="stale", detail=detail
-                            )
-                        )
-                elif not current_result.available_trade_dates:
-                    fallback_date = trade_date
-                    for _ in range(5):
-                        fallback_date = _previous_weekday(fallback_date)
-                        fallback_result = self.provider.get_etf_share_rows(fallback_date, symbols)
                         fallback_rows = [
                             row
                             for row in fallback_result.rows
-                            if row.trade_date == fallback_date and row.symbol in ALL_ETFS
+                            if row.trade_date == candidate_date and row.symbol in ALL_ETFS
                         ]
+                        fallback_rejected_symbols = set(
+                            getattr(fallback_result, "rejected_symbols", ())
+                        )
+                        if fallback_rejected_symbols:
+                            history = [
+                                row
+                                for row in history
+                                if not (
+                                    row.trade_date == candidate_date
+                                    and row.symbol in fallback_rejected_symbols
+                                )
+                            ]
+                            self.store.save_share_history(history)
                         if _has_complete_core_coverage(fallback_rows):
-                            trade_date = fallback_date
+                            trade_date = candidate_date
                             current_result = fallback_result
                             fetched_current_rows = fallback_rows
+                            fallback_failed_symbols = set(
+                                getattr(fallback_result, "failed_symbols", ())
+                            )
                             stored_current_rows = [
                                 row
                                 for row in history
-                                if row.trade_date == trade_date and row.symbol in ALL_ETFS
+                                if row.trade_date == trade_date
+                                and row.symbol in fallback_failed_symbols
                             ]
                             current_rows = _merge_share_history(
                                 stored_current_rows, fallback_rows
@@ -216,7 +200,7 @@ class CapitalSignalService:
                                     status="stale",
                                     detail=(
                                         f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
-                                        f"未提供实际日期，使用最近完整官方日期 {trade_date}"
+                                        f"使用官方披露日期 {trade_date}"
                                     ),
                                 )
                             )
@@ -229,7 +213,7 @@ class CapitalSignalService:
                                     status="stale",
                                     detail=(
                                         f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
-                                        f"回溯日期 {fallback_date} 请求失败后不继续回溯"
+                                        f"官方日期 {candidate_date} 请求失败后不继续回溯"
                                     ),
                                 )
                             )
@@ -241,10 +225,21 @@ class CapitalSignalService:
                                 status="stale",
                                 detail=(
                                     f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
-                                    "未提供实际日期且回溯范围内未找到完整官方披露"
+                                    f"官方候选日期 {', '.join(attempted_dates)} 均未形成完整核心ETF披露"
                                 ),
                             )
                         )
+                elif not current_result.available_trade_dates:
+                    disclosure_status.append(
+                        StrongStockSourceStatus(
+                            source="ETF份额披露日期",
+                            status="stale",
+                            detail=(
+                                f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
+                                "官方响应未提供实际日期，不执行全量日期回溯"
+                            ),
+                        )
+                    )
                 else:
                     disclosure_status.append(
                         StrongStockSourceStatus(
@@ -400,22 +395,28 @@ class CapitalSignalService:
             return result
 
     def history(self, *, days: int = 120) -> EtfRadarHistoryResponse:
-        now = self.clock()
-        trade_date = _latest_weekday(now)
-        history = self.store.load_share_history()
-        if any(row.symbol in ALL_ETFS and row.symbol.endswith(".SZ") for row in history):
-            snapshot = self.store.load_snapshot()
-            disclosed_trade_date = (
-                snapshot.trade_date
-                if snapshot is not None
-                and _is_compatible_snapshot(snapshot)
-                and _is_fresh(snapshot.generated_at, now, self.ttl_seconds)
-                else self.overview().trade_date
-            )
-            sanitized_history = _discard_future_szse_rows(history, disclosed_trade_date)
-            if sanitized_history != history:
-                self.store.save_share_history(sanitized_history)
-            history = sanitized_history
+        with self._lock:
+            now = self.clock()
+            trade_date = _latest_weekday(now)
+            history = self.store.load_share_history()
+            if not history:
+                self.overview()
+                history = self.store.load_share_history()
+            if any(row.symbol in ALL_ETFS and row.symbol.endswith(".SZ") for row in history):
+                snapshot = self.store.load_snapshot()
+                if (
+                    snapshot is not None
+                    and _is_compatible_snapshot(snapshot)
+                    and _is_fresh(snapshot.generated_at, now, self.ttl_seconds)
+                ):
+                    disclosed_trade_date = snapshot.trade_date
+                else:
+                    disclosed_trade_date = self.overview().trade_date
+                    history = self.store.load_share_history()
+                sanitized_history = _discard_future_szse_rows(history, disclosed_trade_date)
+                if sanitized_history != history:
+                    self.store.save_share_history(sanitized_history)
+                history = sanitized_history
         rows = [row for row in history if row.symbol in ALL_ETFS]
         dates = sorted({row.trade_date for row in rows})[-days:]
         baselines = self.store.load_huijin_baselines()
@@ -869,22 +870,13 @@ def _has_request_failures(result: CapitalProviderResult[EtfSharePoint]) -> bool:
     )
 
 
-def _latest_available_trade_date(
+def _available_trade_dates(
     available_trade_dates: tuple[str, ...], *, before: str
-) -> str | None:
-    candidates = [trade_date for trade_date in available_trade_dates if trade_date < before]
-    return max(candidates, default=None)
-
-
-def _exclude_unvalidated_cached_szse_rows(
-    stored_rows: list[EtfSharePoint], fetched_rows: list[EtfSharePoint]
-) -> list[EtfSharePoint]:
-    fetched_symbols = {row.symbol for row in fetched_rows}
-    return [
-        row
-        for row in stored_rows
-        if not (row.symbol.endswith(".SZ") and row.symbol not in fetched_symbols)
-    ]
+) -> list[str]:
+    return sorted(
+        {trade_date for trade_date in available_trade_dates if trade_date < before},
+        reverse=True,
+    )
 
 
 def _signal_stage(now: datetime, trade_date: str) -> str:
@@ -915,6 +907,12 @@ def _is_compatible_snapshot(snapshot: EtfRadarOverviewResponse) -> bool:
     if {item.symbol for item in snapshot.core_items} != set(CORE_ETFS):
         return False
     if {item.symbol for item in snapshot.validation_items} != set(VALIDATION_ETFS):
+        return False
+    required_activity_fields = {"baseline_total_shares", "confirmed_huijin_shares"}
+    if any(
+        not required_activity_fields.issubset(item.model_fields_set)
+        for item in [*snapshot.core_items, *snapshot.validation_items]
+    ):
         return False
     expected_groups = {
         (definition.index_name, symbol, definition.paired_symbol)

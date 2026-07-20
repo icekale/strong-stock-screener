@@ -7,11 +7,12 @@ import Components from 'unplugin-vue-components/vite';
 import { AntDesignVueResolver } from 'unplugin-vue-components/resolvers';
 import { FileSystemIconLoader } from 'unplugin-icons/loaders';
 import { createSvgIconsPlugin } from 'vite-plugin-svg-icons';
+import { DEFAULT_ICON_PREFIX, DEFAULT_LOCAL_ICON_PREFIX } from '../../src/constants/icon';
 
 export function setupUnplugin(viteEnv: Env.ImportMeta) {
   const {
-    VITE_ICON_PREFIX = 'icon',
-    VITE_ICON_LOCAL_PREFIX = 'local-icon'
+    VITE_ICON_PREFIX = DEFAULT_ICON_PREFIX,
+    VITE_ICON_LOCAL_PREFIX = DEFAULT_LOCAL_ICON_PREFIX
   } = viteEnv;
 
   const localIconPath = path.join(process.cwd(), 'src/assets/svg-icon');

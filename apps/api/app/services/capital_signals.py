@@ -130,46 +130,132 @@ class CapitalSignalService:
                 for row in history
                 if row.trade_date == trade_date and row.symbol in ALL_ETFS
             ]
-            current_rows = _merge_share_history(stored_current_rows, fetched_current_rows)
+            current_request_failed = _has_request_failures(current_result)
+            trusted_current_rows = (
+                stored_current_rows
+                if current_request_failed
+                else _exclude_unvalidated_cached_szse_rows(
+                    stored_current_rows, fetched_current_rows
+                )
+            )
+            current_rows = _merge_share_history(trusted_current_rows, fetched_current_rows)
             disclosure_status: list[StrongStockSourceStatus] = []
-            fallback_date = trade_date
-            for _ in range(5):
-                if _has_complete_core_coverage(current_rows) or not _has_disclosure_gap(
-                    current_result.source_status, fetched_current_rows
-                ):
-                    break
-                fallback_date = _previous_weekday(fallback_date)
-                fallback_result = self.provider.get_etf_share_rows(fallback_date, symbols)
-                fallback_rows = [
-                    row
-                    for row in fallback_result.rows
-                    if row.trade_date == fallback_date and row.symbol in ALL_ETFS
-                ]
-                fallback_stored_rows = [
-                    row
-                    for row in history
-                    if row.trade_date == fallback_date and row.symbol in ALL_ETFS
-                ]
-                fallback_current_rows = _merge_share_history(fallback_stored_rows, fallback_rows)
-                if _has_complete_core_coverage(fallback_rows):
-                    trade_date = fallback_date
-                    current_result = fallback_result
-                    fetched_current_rows = fallback_rows
-                    stored_current_rows = fallback_stored_rows
-                    current_rows = fallback_current_rows
+            fallback_status: list[StrongStockSourceStatus] = []
+            if not current_request_failed and not _has_complete_core_coverage(fetched_current_rows):
+                candidate_date = _latest_available_trade_date(
+                    current_result.available_trade_dates,
+                    before=preferred_trade_date,
+                )
+                if candidate_date is not None:
+                    fallback_result = self.provider.get_etf_share_rows(candidate_date, symbols)
+                    fallback_rows = [
+                        row
+                        for row in fallback_result.rows
+                        if row.trade_date == candidate_date and row.symbol in ALL_ETFS
+                    ]
+                    if _has_complete_core_coverage(fallback_rows):
+                        trade_date = candidate_date
+                        current_result = fallback_result
+                        fetched_current_rows = fallback_rows
+                        stored_current_rows = [
+                            row
+                            for row in history
+                            if row.trade_date == trade_date and row.symbol in ALL_ETFS
+                        ]
+                        current_rows = _merge_share_history(
+                            stored_current_rows, fallback_rows
+                        )
+                        disclosure_status.append(
+                            StrongStockSourceStatus(
+                                source="ETF份额披露日期",
+                                status="stale",
+                                detail=(
+                                    f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
+                                    f"使用官方披露日期 {trade_date}"
+                                ),
+                            )
+                        )
+                    else:
+                        fallback_status.extend(fallback_result.source_status)
+                        detail = (
+                            f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
+                            f"官方日期 {candidate_date} 重试未形成完整核心ETF披露"
+                        )
+                        if _has_request_failures(fallback_result):
+                            detail += "，请求失败后不继续回溯"
+                        disclosure_status.append(
+                            StrongStockSourceStatus(
+                                source="ETF份额披露日期", status="stale", detail=detail
+                            )
+                        )
+                elif not current_result.available_trade_dates:
+                    fallback_date = trade_date
+                    for _ in range(5):
+                        fallback_date = _previous_weekday(fallback_date)
+                        fallback_result = self.provider.get_etf_share_rows(fallback_date, symbols)
+                        fallback_rows = [
+                            row
+                            for row in fallback_result.rows
+                            if row.trade_date == fallback_date and row.symbol in ALL_ETFS
+                        ]
+                        if _has_complete_core_coverage(fallback_rows):
+                            trade_date = fallback_date
+                            current_result = fallback_result
+                            fetched_current_rows = fallback_rows
+                            stored_current_rows = [
+                                row
+                                for row in history
+                                if row.trade_date == trade_date and row.symbol in ALL_ETFS
+                            ]
+                            current_rows = _merge_share_history(
+                                stored_current_rows, fallback_rows
+                            )
+                            disclosure_status.append(
+                                StrongStockSourceStatus(
+                                    source="ETF份额披露日期",
+                                    status="stale",
+                                    detail=(
+                                        f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
+                                        f"未提供实际日期，使用最近完整官方日期 {trade_date}"
+                                    ),
+                                )
+                            )
+                            break
+                        fallback_status.extend(fallback_result.source_status)
+                        if _has_request_failures(fallback_result):
+                            disclosure_status.append(
+                                StrongStockSourceStatus(
+                                    source="ETF份额披露日期",
+                                    status="stale",
+                                    detail=(
+                                        f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
+                                        f"回溯日期 {fallback_date} 请求失败后不继续回溯"
+                                    ),
+                                )
+                            )
+                            break
+                    else:
+                        disclosure_status.append(
+                            StrongStockSourceStatus(
+                                source="ETF份额披露日期",
+                                status="stale",
+                                detail=(
+                                    f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
+                                    "未提供实际日期且回溯范围内未找到完整官方披露"
+                                ),
+                            )
+                        )
+                else:
                     disclosure_status.append(
                         StrongStockSourceStatus(
                             source="ETF份额披露日期",
                             status="stale",
                             detail=(
-                                f"目标交易日 {preferred_trade_date} 未形成完整核心ETF披露；"
-                                f"使用最近完整官方日期 {trade_date}"
+                                f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
+                                "官方响应未提供更早可重试日期"
                             ),
                         )
                     )
-                    break
-                if not _has_disclosure_gap(fallback_result.source_status, fallback_rows):
-                    break
             sanitized_history = _discard_future_szse_rows(history, trade_date)
             if sanitized_history != history:
                 self.store.save_share_history(sanitized_history)
@@ -181,7 +267,9 @@ class CapitalSignalService:
                             "source_status": [
                                 *cached.source_status,
                                 *baseline_status,
+                                *disclosure_status,
                                 *current_result.source_status,
+                                *fallback_status,
                                 StrongStockSourceStatus(
                                     source="ETF资金雷达缓存",
                                     status="stale",
@@ -206,7 +294,9 @@ class CapitalSignalService:
                     trade_date,
                     [
                         *baseline_status,
+                        *disclosure_status,
                         *current_result.source_status,
+                        *fallback_status,
                         *incompatible_cache_status,
                     ],
                     baselines,
@@ -215,9 +305,13 @@ class CapitalSignalService:
             previous_date = _previous_weekday(trade_date)
             fetched_keys = {(row.trade_date, row.symbol) for row in fetched_current_rows}
             retained_count = sum(
-                (row.trade_date, row.symbol) not in fetched_keys for row in stored_current_rows
+                (row.trade_date, row.symbol) not in fetched_keys for row in current_rows
             )
-            current_status = [*disclosure_status, *current_result.source_status]
+            current_status = [
+                *disclosure_status,
+                *current_result.source_status,
+                *fallback_status,
+            ]
             if retained_count > 0:
                 current_status.append(
                     StrongStockSourceStatus(
@@ -755,12 +849,28 @@ def _has_complete_core_coverage(rows: list[EtfSharePoint]) -> bool:
     return set(CORE_ETFS).issubset({row.symbol for row in rows})
 
 
-def _has_disclosure_gap(
-    source_status: list[StrongStockSourceStatus], rows: list[EtfSharePoint]
-) -> bool:
-    return not any(status.status == "failed" for status in source_status) and (
-        not rows or any(status.status == "stale" for status in source_status)
+def _has_request_failures(result: CapitalProviderResult[EtfSharePoint]) -> bool:
+    return result.request_failures > 0 or any(
+        status.status == "failed" for status in result.source_status
     )
+
+
+def _latest_available_trade_date(
+    available_trade_dates: tuple[str, ...], *, before: str
+) -> str | None:
+    candidates = [trade_date for trade_date in available_trade_dates if trade_date < before]
+    return max(candidates, default=None)
+
+
+def _exclude_unvalidated_cached_szse_rows(
+    stored_rows: list[EtfSharePoint], fetched_rows: list[EtfSharePoint]
+) -> list[EtfSharePoint]:
+    fetched_symbols = {row.symbol for row in fetched_rows}
+    return [
+        row
+        for row in stored_rows
+        if not (row.symbol.endswith(".SZ") and row.symbol not in fetched_symbols)
+    ]
 
 
 def _signal_stage(now: datetime, trade_date: str) -> str:

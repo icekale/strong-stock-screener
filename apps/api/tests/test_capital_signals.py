@@ -416,6 +416,122 @@ def test_overview_evening_fallback_discards_future_szse_rows_against_selected_da
     )
 
 
+def test_overview_does_not_probe_after_mixed_exchange_failure_and_rejection(
+    tmp_path: Path,
+) -> None:
+    class MixedFailureProvider(FakeCapitalProvider):
+        def get_etf_share_rows(
+            self,
+            trade_date: str,
+            symbols: list[str] | tuple[str, ...],
+        ) -> CapitalProviderResult[EtfSharePoint]:
+            self.share_calls.append((trade_date, tuple(symbols)))
+            return CapitalProviderResult(
+                rows=[
+                    EtfSharePoint(
+                        trade_date=trade_date,
+                        symbol=symbol,
+                        name=ALL_ETFS[symbol].name,
+                        total_shares=1_000,
+                    )
+                    for symbol in symbols
+                    if symbol.endswith(".SH")
+                ],
+                source_status=[
+                    StrongStockSourceStatus(source="上交所ETF份额", status="success", detail="fresh"),
+                    StrongStockSourceStatus(source="深交所ETF份额", status="stale", detail="partial"),
+                ],
+                request_failures=1,
+                available_trade_dates=("2026-07-17",),
+            )
+
+    provider = MixedFailureProvider()
+    service = CapitalSignalService(
+        provider=provider,
+        store=CapitalSignalStore(tmp_path),
+        holder_provider=FakeHolderProvider(),
+        clock=lambda: datetime(2026, 7, 20, 21, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+
+    service.overview(force=True)
+
+    assert [call for call in provider.share_calls if call[1] == tuple(ALL_ETFS)] == [
+        ("2026-07-20", tuple(ALL_ETFS))
+    ]
+    assert provider.share_calls[1][0] == "2026-07-17"
+    assert set(provider.share_calls[1][1]) == {
+        symbol for symbol in ALL_ETFS if symbol.endswith(".SH")
+    }
+
+
+def test_overview_uses_reported_actual_date_over_polluted_same_date_szse_cache(
+    tmp_path: Path,
+) -> None:
+    class CandidateDateProvider(FakeCapitalProvider):
+        def get_etf_share_rows(
+            self,
+            trade_date: str,
+            symbols: list[str] | tuple[str, ...],
+        ) -> CapitalProviderResult[EtfSharePoint]:
+            self.share_calls.append((trade_date, tuple(symbols)))
+            rows = [
+                EtfSharePoint(
+                    trade_date=trade_date,
+                    symbol=symbol,
+                    name=ALL_ETFS[symbol].name,
+                    total_shares=1_000,
+                )
+                for symbol in symbols
+                if trade_date == "2026-07-17" or symbol.endswith(".SH")
+            ]
+            return CapitalProviderResult(
+                rows=rows,
+                source_status=[StrongStockSourceStatus(source="ETF份额", status="stale", detail="delayed")],
+                available_trade_dates=("2026-07-17",) if trade_date == "2026-07-20" else (),
+            )
+
+    provider = CandidateDateProvider()
+    store = CapitalSignalStore(tmp_path)
+    store.save_share_history(
+        [
+            EtfSharePoint(
+                trade_date="2026-07-20",
+                symbol="159915.SZ",
+                name=ALL_ETFS["159915.SZ"].name,
+                total_shares=1_000,
+            ),
+            EtfSharePoint(
+                trade_date="2026-07-20",
+                symbol="600000.SH",
+                name="非ETF数据",
+                total_shares=1_000,
+            ),
+        ]
+    )
+    service = CapitalSignalService(
+        provider=provider,
+        store=store,
+        holder_provider=FakeHolderProvider(),
+        clock=lambda: datetime(2026, 7, 20, 21, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+
+    snapshot = service.overview(force=True)
+
+    assert snapshot.trade_date == "2026-07-17"
+    assert provider.share_calls[:2] == [
+        ("2026-07-20", tuple(ALL_ETFS)),
+        ("2026-07-17", tuple(ALL_ETFS)),
+    ]
+    assert not any(
+        row.symbol == "159915.SZ" and row.trade_date > snapshot.trade_date
+        for row in store.load_share_history()
+    )
+    assert any(
+        row.symbol == "600000.SH" and row.trade_date == "2026-07-20"
+        for row in store.load_share_history()
+    )
+
+
 def test_overview_does_not_search_back_when_current_exchange_requests_fail(
     tmp_path: Path,
 ) -> None:
@@ -794,6 +910,63 @@ def test_service_merges_partial_refresh_with_same_day_persisted_rows(tmp_path: P
         for row in store.load_share_history()
         if row.trade_date == "2026-07-17"
     } == set(ALL_ETFS)
+
+
+def test_service_keeps_cached_sh_but_rejects_unvalidated_cached_szse_rows(
+    tmp_path: Path,
+) -> None:
+    class PartialNoFailureProvider(FakeCapitalProvider):
+        def get_etf_share_rows(
+            self,
+            trade_date: str,
+            symbols: list[str] | tuple[str, ...],
+        ) -> CapitalProviderResult[EtfSharePoint]:
+            self.share_calls.append((trade_date, tuple(symbols)))
+            return CapitalProviderResult(
+                rows=[
+                    EtfSharePoint(
+                        trade_date=trade_date,
+                        symbol="510050.SH",
+                        name=ALL_ETFS["510050.SH"].name,
+                        total_shares=1_000,
+                    )
+                ],
+                source_status=[
+                    StrongStockSourceStatus(source="ETF份额", status="stale", detail="partial")
+                ],
+                available_trade_dates=(trade_date,),
+            )
+
+    store = CapitalSignalStore(tmp_path)
+    store.save_share_history(
+        [
+            EtfSharePoint(
+                trade_date="2026-07-17",
+                symbol="510300.SH",
+                name=ALL_ETFS["510300.SH"].name,
+                total_shares=2_000,
+            ),
+            EtfSharePoint(
+                trade_date="2026-07-17",
+                symbol="159915.SZ",
+                name=ALL_ETFS["159915.SZ"].name,
+                total_shares=2_000,
+            ),
+        ]
+    )
+    service = CapitalSignalService(
+        provider=PartialNoFailureProvider(),
+        store=store,
+        holder_provider=FakeHolderProvider(),
+        clock=_clock,
+    )
+
+    snapshot = service.overview(force=True)
+
+    assert next(item for item in snapshot.core_items if item.symbol == "510300.SH").total_shares == 2_000
+    assert next(item for item in snapshot.core_items if item.symbol == "159915.SZ").total_shares is None
+    cache_status = next(item for item in snapshot.source_status if item.source == "ETF份额缓存")
+    assert "保留 1 只" in cache_status.detail
 
 
 def test_service_returns_unavailable_snapshot_without_cache(tmp_path: Path) -> None:

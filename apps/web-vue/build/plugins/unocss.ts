@@ -5,7 +5,10 @@ import presetIcons from '@unocss/preset-icons';
 import { FileSystemIconLoader } from '@iconify/utils/lib/loader/node-loaders';
 
 export function setupUnocss(viteEnv: Env.ImportMeta) {
-  const { VITE_ICON_PREFIX, VITE_ICON_LOCAL_PREFIX } = viteEnv;
+  const {
+    VITE_ICON_PREFIX = 'icon',
+    VITE_ICON_LOCAL_PREFIX = 'local-icon'
+  } = viteEnv;
 
   const localIconPath = path.join(process.cwd(), 'src/assets/svg-icon');
 

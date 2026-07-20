@@ -4,7 +4,7 @@ import re
 from collections.abc import Mapping
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 from html.parser import HTMLParser
 from typing import Any, Generic, TypeVar
@@ -45,6 +45,8 @@ _ISO_DATE_PATTERN = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)")
 class CapitalProviderResult(Generic[T]):
     rows: list[T]
     source_status: list[StrongStockSourceStatus]
+    request_failures: int = 0
+    available_trade_dates: tuple[str, ...] = field(default_factory=tuple)
 
 
 class OfficialCapitalDataProvider:
@@ -111,6 +113,8 @@ class OfficialCapitalDataProvider:
     ) -> CapitalProviderResult[EtfSharePoint]:
         rows: list[EtfSharePoint] = []
         statuses: list[StrongStockSourceStatus] = []
+        request_failures = 0
+        available_trade_dates: set[str] = set()
         sse_symbols = [symbol for symbol in symbols if symbol.endswith(".SH")]
         szse_symbols = [symbol for symbol in symbols if symbol.endswith(".SZ")]
 
@@ -132,6 +136,7 @@ class OfficialCapitalDataProvider:
                 response.raise_for_status()
                 sse_rows = parse_sse_etf_share_payload(response.json(), symbols=sse_symbols)
                 rows.extend(sse_rows)
+                available_trade_dates.update(row.trade_date for row in sse_rows)
                 current_symbols = {
                     row.symbol for row in sse_rows if row.trade_date == trade_date
                 }
@@ -154,10 +159,12 @@ class OfficialCapitalDataProvider:
                     )
                 )
             except Exception as exc:
+                request_failures += 1
                 statuses.append(_failure_status("上交所ETF份额", exc))
 
         if szse_symbols:
             szse_rows: list[EtfSharePoint] = []
+            szse_available_trade_dates: set[str] = set()
             failures: list[Exception] = []
             current = 0
             rejected = 0
@@ -174,8 +181,15 @@ class OfficialCapitalDataProvider:
                         headers={**_HEADERS, "Referer": "https://www.szse.cn/"},
                     )
                     response.raise_for_status()
+                    payload = response.json()
+                    section = _first_section(payload)
+                    metadata = section.get("metadata") if isinstance(section, dict) else None
+                    exchange_date = _szse_share_date(metadata)
+                    if exchange_date is not None:
+                        available_trade_dates.add(exchange_date)
+                        szse_available_trade_dates.add(exchange_date)
                     symbol_rows = parse_szse_etf_share_payload(
-                        response.json(),
+                        payload,
                         trade_date=trade_date,
                         symbols=[symbol],
                     )
@@ -186,8 +200,9 @@ class OfficialCapitalDataProvider:
                         rejected += 1
                 except Exception as exc:
                     failures.append(exc)
+                    request_failures += 1
             rows.extend(szse_rows)
-            actual_dates = sorted({row.trade_date for row in szse_rows})
+            actual_dates = sorted(szse_available_trade_dates)
             date_detail = f"；份额日期 {', '.join(actual_dates)}" if actual_dates else ""
             if failures and not szse_rows and not rejected:
                 statuses.append(_failure_status("深交所ETF份额", failures[0]))
@@ -212,7 +227,12 @@ class OfficialCapitalDataProvider:
                     )
                 )
 
-        return CapitalProviderResult(rows=rows, source_status=statuses)
+        return CapitalProviderResult(
+            rows=rows,
+            source_status=statuses,
+            request_failures=request_failures,
+            available_trade_dates=tuple(sorted(available_trade_dates)),
+        )
 
 
 class SinaEtfHolderProvider:

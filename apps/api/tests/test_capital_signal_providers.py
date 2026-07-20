@@ -6,6 +6,7 @@ import httpx
 import pytest
 
 from app.providers.capital_signals import (
+    CapitalProviderResult,
     OfficialCapitalDataProvider,
     parse_sse_etf_share_payload,
     parse_sse_margin_payload,
@@ -108,6 +109,13 @@ def test_sse_share_parser_keeps_exchange_trade_date_without_utc_shift() -> None:
     assert rows[0].symbol == "510300.SH"
     assert rows[0].name == "300ETF"
     assert rows[0].total_shares == 8_369_897_700
+
+
+def test_provider_result_preserves_backward_compatible_metadata_defaults() -> None:
+    result = CapitalProviderResult(rows=[], source_status=[])
+
+    assert result.request_failures == 0
+    assert result.available_trade_dates == ()
 
 
 def test_szse_current_share_parser_does_not_invent_history() -> None:
@@ -487,6 +495,50 @@ def test_share_provider_collects_the_ten_etf_universe_without_live_calls() -> No
         ("深交所ETF份额", "success"),
     ]
     assert "份额日期 2026-07-17" in result.source_status[1].detail
+    assert result.request_failures == 0
+    assert result.available_trade_dates == ("2026-07-17",)
+
+
+def test_share_provider_exposes_strictly_rejected_official_metadata_dates() -> None:
+    symbols = ["510300.SH", "159915.SZ"]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "query.sse.com.cn":
+            return httpx.Response(
+                200,
+                json={
+                    "result": [
+                        {
+                            "STAT_DATE": "2026-07-17",
+                            "SEC_CODE": "510300",
+                            "TOT_VOL": "100",
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "metadata": {
+                        "subname": "2026-07-20",
+                        "cols": {"dqgm": "当前规模（2026-07-17）"},
+                    },
+                    "data": [{"sys_key": "159915", "dqgm": "100"}],
+                }
+            ],
+        )
+
+    provider = OfficialCapitalDataProvider(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+    result = provider.get_etf_share_rows("2026-07-20", symbols)
+
+    assert [row.symbol for row in result.rows] == ["510300.SH"]
+    assert result.request_failures == 0
+    assert result.available_trade_dates == ("2026-07-17",)
+    assert "份额日期 2026-07-17" in result.source_status[1].detail
 
 
 def test_share_provider_marks_partial_szse_coverage_stale() -> None:
@@ -520,8 +572,10 @@ def test_share_provider_marks_partial_szse_coverage_stale() -> None:
     assert result.source_status[0].status == "stale"
     assert result.source_status[0].detail == (
         "当日有效 1/3 只；1 只请求失败；1 只日期或空数据拒绝；"
-        "深市不补造历史；份额日期 2026-07-17"
+        "深市不补造历史；份额日期 2026-07-16, 2026-07-17"
     )
+    assert result.request_failures == 1
+    assert result.available_trade_dates == ("2026-07-16", "2026-07-17")
 
 
 def test_share_provider_reports_all_date_rejected_szse_coverage_as_stale() -> None:
@@ -552,7 +606,8 @@ def test_share_provider_reports_all_date_rejected_szse_coverage_as_stale() -> No
     assert result.rows == []
     assert result.source_status[0].status == "stale"
     assert result.source_status[0].detail == (
-        "当日有效 0/2 只；0 只请求失败；2 只日期或空数据拒绝；深市不补造历史"
+        "当日有效 0/2 只；0 只请求失败；2 只日期或空数据拒绝；"
+        "深市不补造历史；份额日期 2026-07-16"
     )
 
 

@@ -113,23 +113,67 @@ class CapitalSignalService:
                 return cached
 
             symbols = list(ALL_ETFS)
+            preferred_trade_date = trade_date
+            history = self.store.load_share_history()
+            sanitized_history = _discard_future_szse_rows(history, preferred_trade_date)
+            if sanitized_history != history:
+                self.store.save_share_history(sanitized_history)
+            history = sanitized_history
             current_result = self.provider.get_etf_share_rows(trade_date, symbols)
             fetched_current_rows = [
                 row
                 for row in current_result.rows
                 if row.trade_date == trade_date and row.symbol in ALL_ETFS
             ]
-            history = self.store.load_share_history()
-            sanitized_history = _discard_future_szse_rows(history, trade_date)
-            if sanitized_history != history:
-                self.store.save_share_history(sanitized_history)
-            history = sanitized_history
             stored_current_rows = [
                 row
                 for row in history
                 if row.trade_date == trade_date and row.symbol in ALL_ETFS
             ]
             current_rows = _merge_share_history(stored_current_rows, fetched_current_rows)
+            disclosure_status: list[StrongStockSourceStatus] = []
+            fallback_date = trade_date
+            for _ in range(5):
+                if _has_complete_core_coverage(current_rows) or not _has_disclosure_gap(
+                    current_result.source_status, fetched_current_rows
+                ):
+                    break
+                fallback_date = _previous_weekday(fallback_date)
+                fallback_result = self.provider.get_etf_share_rows(fallback_date, symbols)
+                fallback_rows = [
+                    row
+                    for row in fallback_result.rows
+                    if row.trade_date == fallback_date and row.symbol in ALL_ETFS
+                ]
+                fallback_stored_rows = [
+                    row
+                    for row in history
+                    if row.trade_date == fallback_date and row.symbol in ALL_ETFS
+                ]
+                fallback_current_rows = _merge_share_history(fallback_stored_rows, fallback_rows)
+                if _has_complete_core_coverage(fallback_rows):
+                    trade_date = fallback_date
+                    current_result = fallback_result
+                    fetched_current_rows = fallback_rows
+                    stored_current_rows = fallback_stored_rows
+                    current_rows = fallback_current_rows
+                    disclosure_status.append(
+                        StrongStockSourceStatus(
+                            source="ETF份额披露日期",
+                            status="stale",
+                            detail=(
+                                f"目标交易日 {preferred_trade_date} 未形成完整核心ETF披露；"
+                                f"使用最近完整官方日期 {trade_date}"
+                            ),
+                        )
+                    )
+                    break
+                if not _has_disclosure_gap(fallback_result.source_status, fallback_rows):
+                    break
+            sanitized_history = _discard_future_szse_rows(history, trade_date)
+            if sanitized_history != history:
+                self.store.save_share_history(sanitized_history)
+            history = sanitized_history
             if not current_rows:
                 if reusable_snapshot:
                     return cached.model_copy(
@@ -173,7 +217,7 @@ class CapitalSignalService:
             retained_count = sum(
                 (row.trade_date, row.symbol) not in fetched_keys for row in stored_current_rows
             )
-            current_status = list(current_result.source_status)
+            current_status = [*disclosure_status, *current_result.source_status]
             if retained_count > 0:
                 current_status.append(
                     StrongStockSourceStatus(
@@ -705,6 +749,18 @@ def _previous_weekday(trade_date: str) -> str:
     while value.weekday() >= 5:
         value -= timedelta(days=1)
     return value.isoformat()
+
+
+def _has_complete_core_coverage(rows: list[EtfSharePoint]) -> bool:
+    return set(CORE_ETFS).issubset({row.symbol for row in rows})
+
+
+def _has_disclosure_gap(
+    source_status: list[StrongStockSourceStatus], rows: list[EtfSharePoint]
+) -> bool:
+    return not any(status.status == "failed" for status in source_status) and (
+        not rows or any(status.status == "stale" for status in source_status)
+    )
 
 
 def _signal_stage(now: datetime, trade_date: str) -> str:

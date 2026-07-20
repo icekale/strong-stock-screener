@@ -352,6 +352,86 @@ def test_overview_before_disclosure_uses_latest_completed_trade_date(tmp_path: P
     assert sse_item.share_delta == 20
 
 
+def test_overview_evening_falls_back_to_latest_complete_official_share_date(
+    tmp_path: Path,
+) -> None:
+    provider = FakeCapitalProvider()
+    service = CapitalSignalService(
+        provider=provider,
+        store=CapitalSignalStore(tmp_path),
+        holder_provider=FakeHolderProvider(),
+        clock=lambda: datetime(2026, 7, 20, 21, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+
+    snapshot = service.overview(force=True)
+
+    assert snapshot.trade_date == "2026-07-17"
+    assert provider.share_calls[:2] == [
+        ("2026-07-20", tuple(ALL_ETFS)),
+        ("2026-07-17", tuple(ALL_ETFS)),
+    ]
+    assert all(item.total_shares is not None for item in snapshot.core_items)
+    assert all(item.cumulative_baseline_change_pct is not None for item in snapshot.core_items)
+    assert next(item for item in snapshot.core_items if item.symbol == "159915.SZ").daily_change_pct is None
+
+
+def test_overview_evening_fallback_discards_future_szse_rows_against_selected_date(
+    tmp_path: Path,
+) -> None:
+    provider = FakeCapitalProvider()
+    store = CapitalSignalStore(tmp_path)
+    store.save_share_history(
+        [
+            EtfSharePoint(
+                trade_date="2026-07-20",
+                symbol="159915.SZ",
+                name=ALL_ETFS["159915.SZ"].name,
+                total_shares=1_000,
+            ),
+            EtfSharePoint(
+                trade_date="2026-07-20",
+                symbol="600000.SH",
+                name="非ETF数据",
+                total_shares=1_000,
+            ),
+        ]
+    )
+    service = CapitalSignalService(
+        provider=provider,
+        store=store,
+        holder_provider=FakeHolderProvider(),
+        clock=lambda: datetime(2026, 7, 20, 21, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+
+    snapshot = service.overview(force=True)
+
+    assert snapshot.trade_date == "2026-07-17"
+    assert not any(
+        row.symbol == "159915.SZ" and row.trade_date > snapshot.trade_date
+        for row in store.load_share_history()
+    )
+    assert any(
+        row.symbol == "600000.SH" and row.trade_date == "2026-07-20"
+        for row in store.load_share_history()
+    )
+
+
+def test_overview_does_not_search_back_when_current_exchange_requests_fail(
+    tmp_path: Path,
+) -> None:
+    provider = FakeCapitalProvider(fail=True)
+    service = CapitalSignalService(
+        provider=provider,
+        store=CapitalSignalStore(tmp_path),
+        holder_provider=FakeHolderProvider(fail=True),
+        clock=lambda: datetime(2026, 7, 20, 21, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+
+    service.overview(force=True)
+
+    assert provider.share_calls == [("2026-07-20", tuple(ALL_ETFS))]
+
+
 def test_missing_validator_prior_history_makes_group_incomplete(tmp_path: Path) -> None:
     provider = FakeCapitalProvider()
     service, store = _service(tmp_path, provider=provider)

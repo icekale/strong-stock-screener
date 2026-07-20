@@ -120,6 +120,10 @@ class CapitalSignalService:
                 if row.trade_date == trade_date and row.symbol in ALL_ETFS
             ]
             history = self.store.load_share_history()
+            sanitized_history = _discard_future_szse_rows(history, trade_date)
+            if sanitized_history != history:
+                self.store.save_share_history(sanitized_history)
+            history = sanitized_history
             stored_current_rows = [
                 row
                 for row in history
@@ -742,6 +746,20 @@ def _is_compatible_snapshot(snapshot: EtfRadarOverviewResponse) -> bool:
         for group in snapshot.validation_groups
     }
     return actual_groups == expected_groups
+
+
+def _discard_future_szse_rows(
+    history: list[EtfSharePoint], disclosed_trade_date: str
+) -> list[EtfSharePoint]:
+    return [
+        row
+        for row in history
+        if not (
+            row.symbol in ALL_ETFS
+            and row.symbol.endswith(".SZ")
+            and row.trade_date > disclosed_trade_date
+        )
+    ]
 
 
 def _latest_share_before(

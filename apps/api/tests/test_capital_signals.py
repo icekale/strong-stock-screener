@@ -737,6 +737,39 @@ def test_service_returns_unavailable_snapshot_without_cache(tmp_path: Path) -> N
     assert service.store.load_share_history() == []
 
 
+def test_overview_discards_only_future_szse_rows_from_broken_date_parser(
+    tmp_path: Path,
+) -> None:
+    service, store = _service(tmp_path)
+    store.save_share_history([
+        EtfSharePoint(
+            trade_date="2026-07-16",
+            symbol="510300.SH",
+            name=ALL_ETFS["510300.SH"].name,
+            total_shares=900,
+        ),
+        EtfSharePoint(
+            trade_date="2026-07-20",
+            symbol="159915.SZ",
+            name=ALL_ETFS["159915.SZ"].name,
+            total_shares=1_000,
+        ),
+        EtfSharePoint(
+            trade_date="2026-07-20",
+            symbol="600000.SH",
+            name="非ETF数据",
+            total_shares=1_000,
+        ),
+    ])
+
+    result = service.overview(force=True)
+    history = store.load_share_history()
+
+    assert result.trade_date == "2026-07-17"
+    assert not any(row.symbol == "159915.SZ" and row.trade_date == "2026-07-20" for row in history)
+    assert any(row.symbol == "600000.SH" and row.trade_date == "2026-07-20" for row in history)
+
+
 def test_history_uses_only_real_dates_exact_pool_and_applicable_baseline(tmp_path: Path) -> None:
     service, store = _service(tmp_path)
     store.save_share_history(

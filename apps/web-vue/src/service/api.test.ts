@@ -166,6 +166,11 @@ describe('apiRequest', () => {
     expectTypeOf<Pick<EtfRadarHoldersResponse, 'baselines'>>().toEqualTypeOf<{
       baselines: HuijinEtfBaseline[];
     }>();
+    expectTypeOf<Pick<HuijinEtfActivityItem, 'baseline_total_shares' | 'confirmed_huijin_shares'>>()
+      .toEqualTypeOf<{
+        baseline_total_shares: number | null;
+        confirmed_huijin_shares: number | null;
+      }>();
 
     const activity = {
       core_count: 7,
@@ -196,6 +201,8 @@ describe('apiRequest', () => {
       direction: 'increase',
       is_tenfold: false,
       report_period: '2026Q2',
+      baseline_total_shares: 100,
+      confirmed_huijin_shares: 75,
       confirmed_huijin_holding_pct: 75,
       baseline_source_kind: 'reported'
     } satisfies HuijinEtfActivityItem;

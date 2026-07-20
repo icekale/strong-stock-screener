@@ -2056,6 +2056,8 @@ export type HuijinEtfActivityItem = {
   direction: EtfActivityDirection;
   is_tenfold: boolean;
   report_period: string | null;
+  baseline_total_shares: number | null;
+  confirmed_huijin_shares: number | null;
   confirmed_huijin_holding_pct: number | null;
   baseline_source_kind: HuijinBaselineSourceKind | null;
 };

@@ -181,6 +181,8 @@ def calculate_activity(
         direction=direction,
         is_tenfold=multiple is not None and multiple >= 10,
         report_period=baseline.report_period if baseline is not None else None,
+        baseline_total_shares=baseline.baseline_total_shares if baseline is not None else None,
+        confirmed_huijin_shares=baseline.confirmed_huijin_shares if baseline is not None else None,
         confirmed_huijin_holding_pct=(
             baseline.confirmed_huijin_holding_pct if baseline is not None else None
         ),

@@ -138,6 +138,8 @@ function activityItem(overrides: Partial<HuijinEtfActivityItem> = {}): HuijinEtf
     direction: 'increase',
     is_tenfold: true,
     report_period: '2025-12-31',
+    baseline_total_shares: null,
+    confirmed_huijin_shares: null,
     confirmed_huijin_holding_pct: 12.34,
     baseline_source_kind: 'reported',
     ...overrides

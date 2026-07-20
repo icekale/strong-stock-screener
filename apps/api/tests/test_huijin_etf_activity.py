@@ -51,7 +51,7 @@ def _baseline(
         paired_symbol=None,
         report_period="2026Q2",
         baseline_total_shares=total_shares,
-        confirmed_huijin_shares=5_000_000_000,
+        confirmed_huijin_shares=25_200_000_000,
         confirmed_huijin_holding_pct=15.873,
         source_kind="reported",
         source="基金定期报告",
@@ -288,6 +288,8 @@ def test_calculate_activity_matches_2026_07_17_chinext_fixture() -> None:
     assert result.is_tenfold is True
     assert result.paired_symbol is None
     assert result.report_period == "2026Q2"
+    assert result.baseline_total_shares == 31_500_000_000
+    assert result.confirmed_huijin_shares == 25_200_000_000
     assert result.confirmed_huijin_holding_pct == 15.873
     assert result.baseline_source_kind == "reported"
 
@@ -346,8 +348,8 @@ def test_cumulative_baseline_change_works_without_previous_day() -> None:
     assert result.cumulative_baseline_change_pct == pytest.approx(-52.6476, rel=1e-5)
 
 
-def test_missing_baseline_keeps_daily_delta_and_rate() -> None:
-    result = calculate_activity(
+def test_calculate_activity_without_baseline_keeps_daily_delta_and_rate() -> None:
+    result_without_baseline = calculate_activity(
         symbol="159915.SZ",
         name="创业板ETF易方达",
         index_name="创业板",
@@ -358,13 +360,15 @@ def test_missing_baseline_keeps_daily_delta_and_rate() -> None:
         baseline=None,
     )
 
-    assert result.share_delta == 1_000
-    assert result.daily_change_pct == pytest.approx(10)
-    assert result.baseline_change_pct is None
-    assert result.cumulative_baseline_change_pct is None
-    assert result.multiple is None
-    assert result.direction == "increase"
-    assert result.is_tenfold is False
+    assert result_without_baseline.share_delta == 1_000
+    assert result_without_baseline.daily_change_pct == pytest.approx(10)
+    assert result_without_baseline.baseline_change_pct is None
+    assert result_without_baseline.cumulative_baseline_change_pct is None
+    assert result_without_baseline.multiple is None
+    assert result_without_baseline.direction == "increase"
+    assert result_without_baseline.is_tenfold is False
+    assert result_without_baseline.baseline_total_shares is None
+    assert result_without_baseline.confirmed_huijin_shares is None
 
 
 def test_flat_delta_is_not_tenfold() -> None:

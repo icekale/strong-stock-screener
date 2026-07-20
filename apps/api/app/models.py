@@ -2102,6 +2102,8 @@ class HuijinEtfActivityItem(BaseModel):
     direction: EtfActivityDirection = "unknown"
     is_tenfold: bool = False
     report_period: str | None = None
+    baseline_total_shares: float | None = None
+    confirmed_huijin_shares: float | None = None
     confirmed_huijin_holding_pct: float | None = None
     baseline_source_kind: HuijinBaselineSourceKind | None = None
 

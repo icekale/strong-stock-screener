@@ -1023,6 +1023,42 @@ def test_overview_discards_only_future_szse_rows_from_broken_date_parser(
     assert any(row.symbol == "600000.SH" and row.trade_date == "2026-07-20" for row in history)
 
 
+def test_history_direct_call_discards_future_tracked_szse_cache_rows(tmp_path: Path) -> None:
+    store = CapitalSignalStore(tmp_path)
+    store.save_share_history(
+        [
+            EtfSharePoint(
+                trade_date="2026-07-20",
+                symbol="159915.SZ",
+                name=ALL_ETFS["159915.SZ"].name,
+                total_shares=1_000,
+            ),
+            EtfSharePoint(
+                trade_date="2026-07-20",
+                symbol="600000.SH",
+                name="非ETF数据",
+                total_shares=1_000,
+            ),
+        ]
+    )
+    service = CapitalSignalService(
+        provider=FakeCapitalProvider(),
+        store=store,
+        holder_provider=FakeHolderProvider(),
+        clock=lambda: datetime(2026, 7, 20, 21, 0, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+
+    result = service.history()
+
+    assert not any(
+        point.symbol == "159915.SZ" and point.trade_date == "2026-07-20"
+        for point in result.points
+    )
+    saved = store.load_share_history()
+    assert not any(row.symbol == "159915.SZ" and row.trade_date == "2026-07-20" for row in saved)
+    assert any(row.symbol == "600000.SH" and row.trade_date == "2026-07-20" for row in saved)
+
+
 def test_history_uses_only_real_dates_exact_pool_and_applicable_baseline(tmp_path: Path) -> None:
     service, store = _service(tmp_path)
     store.save_share_history(

@@ -402,7 +402,21 @@ class CapitalSignalService:
     def history(self, *, days: int = 120) -> EtfRadarHistoryResponse:
         now = self.clock()
         trade_date = _latest_weekday(now)
-        rows = [row for row in self.store.load_share_history() if row.symbol in ALL_ETFS]
+        history = self.store.load_share_history()
+        if any(row.symbol in ALL_ETFS and row.symbol.endswith(".SZ") for row in history):
+            snapshot = self.store.load_snapshot()
+            disclosed_trade_date = (
+                snapshot.trade_date
+                if snapshot is not None
+                and _is_compatible_snapshot(snapshot)
+                and _is_fresh(snapshot.generated_at, now, self.ttl_seconds)
+                else self.overview().trade_date
+            )
+            sanitized_history = _discard_future_szse_rows(history, disclosed_trade_date)
+            if sanitized_history != history:
+                self.store.save_share_history(sanitized_history)
+            history = sanitized_history
+        rows = [row for row in history if row.symbol in ALL_ETFS]
         dates = sorted({row.trade_date for row in rows})[-days:]
         baselines = self.store.load_huijin_baselines()
         points: list[EtfRadarHistoryPoint] = []

@@ -56,22 +56,43 @@ function point(tradeDate: string, cumulative: number | null): EtfRadarHistoryPoi
 
 describe('Huijin trajectory transforms', () => {
   it('sorts available core ETFs by absolute cumulative deviation', () => {
-    expect(buildHuijinRanking([
+    const items = [
       item('510300.SH', -75.55),
       item('159915.SZ', -52.63),
       item('510050.SH', -85.46),
-    ]).map(row => row.symbol)).toEqual(['510050.SH', '510300.SH', '159915.SZ']);
+    ];
+    const originalItems = items.map(row => ({ ...row }));
+
+    expect(buildHuijinRanking(items).map(row => row.symbol)).toEqual(['510050.SH', '510300.SH', '159915.SZ']);
+    expect(items).toEqual(originalItems);
+  });
+
+  it('excludes validators from ranking and default selection', () => {
+    const items = [
+      item('510050.SH', -85.46),
+      itemWith({ symbol: '159919.SZ', role: 'validator', cumulative_baseline_change_pct: -99.99 }),
+    ];
+
+    expect(buildHuijinRanking(items).map(row => row.symbol)).toEqual(['510050.SH']);
+    expect(pickDefaultHuijinSymbol(items)).toBe('510050.SH');
   });
 
   it('starts a trajectory at the report baseline and preserves real gaps', () => {
+    const points = [point('2026-07-16', -84), point('2026-07-18', -85.46)];
+    const realDates = ['2026-07-16', '2026-07-17', '2026-07-18'];
+    const originalPoints = points.map(row => ({ ...row }));
+    const originalRealDates = [...realDates];
+
     expect(buildHuijinTrajectory(
       item('510050.SH', -85.46, '2025-12-31'),
-      [point('2026-07-16', -84), point('2026-07-18', -85.46)],
-      ['2026-07-16', '2026-07-17', '2026-07-18'],
+      points,
+      realDates,
     )).toEqual({
       dates: ['2025-12-31', '2026-07-16', '2026-07-17', '2026-07-18'],
       values: [0, -84, null, -85.46],
     });
+    expect(points).toEqual(originalPoints);
+    expect(realDates).toEqual(originalRealDates);
   });
 
   it('distinguishes disclosure, daily-history, and baseline gaps', () => {

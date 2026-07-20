@@ -2,7 +2,7 @@ import type { EtfRadarHistoryPoint, HuijinEtfActivityItem } from '@/service/type
 
 export function buildHuijinRanking(items: HuijinEtfActivityItem[]) {
   return [...items]
-    .filter(item => item.cumulative_baseline_change_pct !== null)
+    .filter(item => item.role === 'core' && item.cumulative_baseline_change_pct !== null)
     .sort((left, right) =>
       Math.abs(right.cumulative_baseline_change_pct!) - Math.abs(left.cumulative_baseline_change_pct!)
     );

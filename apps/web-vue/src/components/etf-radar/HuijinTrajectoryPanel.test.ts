@@ -208,8 +208,10 @@ describe('HuijinTrajectoryPanel', () => {
     expect(tracks).toHaveLength(7);
     expect(bars).toHaveLength(7);
     expect(wrapper.findAll('[data-testid="huijin-ranking-zero"]')).toHaveLength(7);
-    expect(tracks[0]!.attributes('role')).toBe('img');
-    expect(tracks[0]!.attributes('aria-label')).toContain('▼ -75.55% · 收缩');
+    expect(tracks[0]!.attributes('aria-hidden')).toBe('true');
+    expect(tracks[0]!.attributes('role')).toBeUndefined();
+    expect(tracks[0]!.attributes('aria-label')).toBeUndefined();
+    expect(rankingRows[0]!.findAll('[aria-label]')).toHaveLength(0);
     expect(bars[0]!.classes()).toContain('huijin-ranking__bar--decrease');
     expect(bars[0]!.attributes('style')).toContain('right: 50%');
     expect(bars[0]!.attributes('style')).toContain('width: 50%');
@@ -245,6 +247,16 @@ describe('HuijinTrajectoryPanel', () => {
     expect(source).toContain('min-width: 0;');
     expect(source).toContain('overflow-x: hidden;');
     expect(source).toMatch(/\.huijin-ranking__zero\s*\{[^}]*z-index: 1;/s);
+  });
+
+  it('labels detail selection buttons with their field names and values', () => {
+    const wrapper = mountPanel();
+    const detailLabel = wrapper.get('[data-testid="huijin-detail-row"]').attributes('aria-label');
+
+    expect(detailLabel).toContain('华夏上证50ETF 510050.SH');
+    expect(detailLabel).toContain('确认持仓比例 86.05%');
+    expect(detailLabel).toContain('累计偏离 ▼ -75.55% · 收缩');
+    expect(detailLabel).toContain('数据状态 可计算');
   });
 
   it('shows an empty state instead of a baseline-only chart for empty history points', () => {
@@ -287,14 +299,16 @@ describe('HuijinTrajectoryPanel', () => {
     expect(wrapper.findComponent(ChartStub).exists()).toBe(true);
     expect(wrapper.get('[data-testid="huijin-history-status"]').text()).toContain('历史请求失败，显示已有数据');
     expect(wrapper.get('[data-testid="huijin-history-status"]').attributes('aria-live')).toBe('polite');
+    expect(wrapper.findAll('[aria-live="polite"]')).toHaveLength(1);
   });
 
   it('announces an error when no chart is available', () => {
     const wrapper = mountPanel({ history: null, historyError: '历史请求失败' });
 
     expect(wrapper.findComponent(ChartStub).exists()).toBe(false);
-    expect(wrapper.get('[data-testid="huijin-history-status"]').text()).toContain('历史请求失败');
-    expect(wrapper.get('[data-testid="huijin-history-status"]').attributes('aria-live')).toBe('polite');
-    expect(wrapper.find('[data-testid="huijin-trajectory-empty"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="huijin-history-status"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="huijin-trajectory-empty"]').text()).toBe('历史请求失败');
+    expect(wrapper.get('[data-testid="huijin-trajectory-empty"]').attributes('aria-live')).toBe('polite');
+    expect(wrapper.findAll('[aria-live="polite"]')).toHaveLength(1);
   });
 });

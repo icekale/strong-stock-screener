@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from 'vue';
 import type { EChartsOption } from 'echarts';
-import type { EtfRadarHistoryResponse, EtfRadarOverviewResponse } from '@/service/types';
+import type { EtfRadarHistoryResponse, EtfRadarOverviewResponse, HuijinEtfActivityItem } from '@/service/types';
 import {
   formatDirectionalPercent as formatDirectionalPercentValue,
   formatPlainShares as formatPlainSharesValue
@@ -109,6 +109,10 @@ function rankingBarStyle(value: number | null | undefined) {
   const width = rankingMaxMagnitude.value === 0 ? 0 : (Math.abs(numericValue) / rankingMaxMagnitude.value) * 50;
   return numericValue < 0 ? { right: '50%', width: `${width}%` } : { left: '50%', width: `${width}%` };
 }
+
+function detailAriaLabel(item: HuijinEtfActivityItem) {
+  return `${item.name} ${item.symbol}，确认持仓比例 ${formatHoldingPct(item.confirmed_huijin_holding_pct)}，累计偏离 ${formatDirectionalPercent(item.cumulative_baseline_change_pct)} · ${deviationDirection(item.cumulative_baseline_change_pct)}，数据状态 ${huijinActivityDataState(item)}`;
+}
 </script>
 
 <template>
@@ -159,12 +163,7 @@ function rankingBarStyle(value: number | null | undefined) {
               {{ formatDirectionalPercent(item.cumulative_baseline_change_pct) }} ·
               {{ deviationDirection(item.cumulative_baseline_change_pct) }}
             </span>
-            <span
-              data-testid="huijin-ranking-track"
-              class="huijin-ranking__track"
-              role="img"
-              :aria-label="`${item.name}累计偏离 ${formatDirectionalPercent(item.cumulative_baseline_change_pct)} · ${deviationDirection(item.cumulative_baseline_change_pct)}`"
-            >
+            <span data-testid="huijin-ranking-track" class="huijin-ranking__track" aria-hidden="true">
               <span data-testid="huijin-ranking-zero" class="huijin-ranking__zero" aria-hidden="true" />
               <span
                 data-testid="huijin-ranking-bar"
@@ -184,7 +183,7 @@ function rankingBarStyle(value: number | null | undefined) {
           <strong data-testid="huijin-selected-symbol">{{ selectedItem?.symbol }}</strong>
         </div>
         <p
-          v-if="historyError"
+          v-if="historyError && hasRealHistory"
           data-testid="huijin-history-status"
           class="huijin-trajectory__status huijin-trajectory__status--error"
           role="status"
@@ -200,7 +199,7 @@ function rankingBarStyle(value: number | null | undefined) {
           role="status"
           aria-live="polite"
         >
-          {{ historyLoading ? '历史加载中' : '暂无可用历史轨迹' }}
+          {{ historyError || (historyLoading ? '历史加载中' : '暂无可用历史轨迹') }}
         </div>
       </div>
     </div>
@@ -252,6 +251,7 @@ function rankingBarStyle(value: number | null | undefined) {
         data-testid="huijin-detail-row"
         type="button"
         :class="{ 'huijin-trajectory__table-row--selected': item.symbol === selectedItem?.symbol }"
+        :aria-label="detailAriaLabel(item)"
         :aria-pressed="item.symbol === selectedItem?.symbol"
         @click="emit('select', item.symbol)"
       >

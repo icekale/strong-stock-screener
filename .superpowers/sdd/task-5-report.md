@@ -62,3 +62,30 @@
 - The diff remains limited to the two Task 5 component files and this report. Generated `components.d.ts` changes were removed after verification, and `git diff --check` passes.
 - CSS keeps the approved desktop columns, switches to one column at `900px`, preserves `max-width: 100%`, `min-width: 0`, and component-local `overflow-x: hidden`, and uses only existing `--wb-*` color tokens.
 - No functional concerns remain. The existing Vitest icon-prefix environment requirement is unchanged.
+
+## Review Fix 2
+
+### RED Evidence
+
+- Command: `cd apps/web-vue && VITE_ICON_PREFIX=icon VITE_ICON_LOCAL_PREFIX=local-icon corepack pnpm@9.15.0 test:unit --run src/components/etf-radar/HuijinTrajectoryPanel.test.ts`
+- Initial output after adding the decorative-track and single-error-region assertions: `Test Files 1 failed (1)`, `Tests 2 failed | 5 passed (7)`. The track lacked `aria-hidden="true"`, and the no-history error path still rendered the independent banner plus the empty live region.
+- After isolating the detail-button requirement in its own test, the same command produced the final RED: `Test Files 1 failed (1)`, `Tests 3 failed | 5 passed (8)`. The additional failure received an undefined detail-button `aria-label`.
+
+### Implementation
+
+- Removed `role="img"` and the duplicate label from each ranking track and set the complete track subtree to `aria-hidden="true"`. The parent button keeps one accessible name from its visible ETF identity, signed percent, and `扩张`/`收缩` text.
+- The independent history error status now renders only when `hasRealHistory` is true. Without real history, the single empty live region displays `historyError` exactly; loading without an error remains `历史加载中`.
+- Every detail selection button now has an explicit label containing ETF name/symbol, `确认持仓比例`, signed and directional `累计偏离`, and `数据状态`. Visible content and selection behavior are unchanged.
+- The public prop/event contract, async chart loading, real-history eligibility, stale-chart behavior, responsive layout, and no-fetch boundary remain unchanged.
+
+### GREEN Evidence
+
+- Focused command: `VITE_ICON_PREFIX=icon VITE_ICON_LOCAL_PREFIX=local-icon corepack pnpm@9.15.0 test:unit --run src/components/etf-radar/HuijinTrajectoryPanel.test.ts` -> `Test Files 1 passed (1)`, `Tests 8 passed (8)`.
+- Final tests: `VITE_ICON_PREFIX=icon VITE_ICON_LOCAL_PREFIX=local-icon corepack pnpm@9.15.0 test:unit --run src/components/etf-radar/HuijinTrajectoryPanel.test.ts src/utils/domain/huijinTrajectory.test.ts` -> `Test Files 2 passed (2)`, `Tests 13 passed (13)`.
+- Final typecheck: `corepack pnpm@9.15.0 typecheck` -> `vue-tsc --noEmit --skipLibCheck`, exit 0.
+- Final lint: `corepack pnpm@9.15.0 exec eslint src/components/etf-radar/HuijinTrajectoryPanel.vue src/components/etf-radar/HuijinTrajectoryPanel.test.ts` -> exit 0 with no output.
+
+### Self-Review and Concerns
+
+- The diff is limited to the Task 5 component, test, and report. Generated `components.d.ts` changes were removed after verification, and `git diff --check` passes.
+- No functional concerns remain. The existing Vitest icon-prefix environment requirement is unchanged.

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, defineAsyncComponent } from 'vue';
 import type { EChartsOption } from 'echarts';
 import type { EtfRadarHistoryResponse, EtfRadarOverviewResponse } from '@/service/types';
 import {
@@ -7,9 +7,10 @@ import {
   formatPlainShares as formatPlainSharesValue
 } from '@/utils/domain/capitalSignals';
 import { buildHuijinRanking, buildHuijinTrajectory, huijinActivityDataState } from '@/utils/domain/huijinTrajectory';
-import EChart from '@/components/charts/EChart.vue';
 
 defineOptions({ name: 'HuijinTrajectoryPanel' });
+
+const EChart = defineAsyncComponent(() => import('@/components/charts/EChart.vue'));
 
 const props = defineProps<{
   overview: EtfRadarOverviewResponse;
@@ -46,7 +47,15 @@ const expansionCount = computed(
 const contractionCount = computed(
   () => props.overview.core_items.filter(item => (item.cumulative_baseline_change_pct ?? 0) < 0).length
 );
-const hasTrajectory = computed(() => trajectory.value.values.some(value => value !== null));
+const selectedHistoryPoints = computed(() =>
+  (props.history?.points ?? []).filter(point => point.symbol === selectedItem.value?.symbol)
+);
+const hasRealHistory = computed(() =>
+  selectedHistoryPoints.value.some(point => point.cumulative_baseline_change_pct !== null)
+);
+const rankingMaxMagnitude = computed(() =>
+  Math.max(0, ...ranking.value.map(item => Math.abs(item.cumulative_baseline_change_pct ?? 0)))
+);
 
 const chartOption = computed<EChartsOption>(() => ({
   animation: false,
@@ -89,6 +98,17 @@ function deviationDirection(value: number | null | undefined) {
   if (value < 0) return '收缩';
   return '持平';
 }
+
+function rankingBarClass(value: number | null | undefined) {
+  if (value === null || value === undefined || value === 0) return '';
+  return value > 0 ? 'huijin-ranking__bar--increase' : 'huijin-ranking__bar--decrease';
+}
+
+function rankingBarStyle(value: number | null | undefined) {
+  const numericValue = value ?? 0;
+  const width = rankingMaxMagnitude.value === 0 ? 0 : (Math.abs(numericValue) / rankingMaxMagnitude.value) * 50;
+  return numericValue < 0 ? { right: '50%', width: `${width}%` } : { left: '50%', width: `${width}%` };
+}
 </script>
 
 <template>
@@ -119,38 +139,68 @@ function deviationDirection(value: number | null | undefined) {
     </div>
 
     <div class="huijin-trajectory__main">
-      <div class="huijin-ranking" role="list" aria-label="核心 ETF 累计偏离排行">
-        <button
-          v-for="item in ranking"
-          :key="item.symbol"
-          data-testid="huijin-ranking-row"
-          type="button"
-          :class="[
-            valueClass(item.cumulative_baseline_change_pct),
-            { 'huijin-ranking__row--selected': item.symbol === selectedItem?.symbol }
-          ]"
-          :aria-pressed="item.symbol === selectedItem?.symbol"
-          @click="emit('select', item.symbol)"
-        >
-          <span class="huijin-ranking__identity">
-            <strong>{{ item.name }}</strong>
-            <small>{{ item.symbol }}</small>
-          </span>
-          <span class="huijin-ranking__value">
-            {{ formatDirectionalPercent(item.cumulative_baseline_change_pct) }} ·
-            {{ deviationDirection(item.cumulative_baseline_change_pct) }}
-          </span>
-        </button>
-      </div>
+      <ul class="huijin-ranking" aria-label="核心 ETF 累计偏离排行">
+        <li v-for="item in ranking" :key="item.symbol">
+          <button
+            data-testid="huijin-ranking-row"
+            type="button"
+            :class="[
+              valueClass(item.cumulative_baseline_change_pct),
+              { 'huijin-ranking__row--selected': item.symbol === selectedItem?.symbol }
+            ]"
+            :aria-pressed="item.symbol === selectedItem?.symbol"
+            @click="emit('select', item.symbol)"
+          >
+            <span class="huijin-ranking__identity">
+              <strong>{{ item.name }}</strong>
+              <small>{{ item.symbol }}</small>
+            </span>
+            <span class="huijin-ranking__value">
+              {{ formatDirectionalPercent(item.cumulative_baseline_change_pct) }} ·
+              {{ deviationDirection(item.cumulative_baseline_change_pct) }}
+            </span>
+            <span
+              data-testid="huijin-ranking-track"
+              class="huijin-ranking__track"
+              role="img"
+              :aria-label="`${item.name}累计偏离 ${formatDirectionalPercent(item.cumulative_baseline_change_pct)} · ${deviationDirection(item.cumulative_baseline_change_pct)}`"
+            >
+              <span data-testid="huijin-ranking-zero" class="huijin-ranking__zero" aria-hidden="true" />
+              <span
+                data-testid="huijin-ranking-bar"
+                class="huijin-ranking__bar"
+                :class="rankingBarClass(item.cumulative_baseline_change_pct)"
+                :style="rankingBarStyle(item.cumulative_baseline_change_pct)"
+                aria-hidden="true"
+              />
+            </span>
+          </button>
+        </li>
+      </ul>
 
       <div class="huijin-selected">
         <div class="huijin-selected__heading">
           <span>选中 ETF 累计轨迹</span>
           <strong data-testid="huijin-selected-symbol">{{ selectedItem?.symbol }}</strong>
         </div>
-        <EChart v-if="history && hasTrajectory" :option="chartOption" :height="286" :loading="historyLoading" />
-        <div v-else class="huijin-trajectory__empty">
-          {{ historyError || (historyLoading ? '历史加载中' : '历史积累中') }}
+        <p
+          v-if="historyError"
+          data-testid="huijin-history-status"
+          class="huijin-trajectory__status huijin-trajectory__status--error"
+          role="status"
+          aria-live="polite"
+        >
+          {{ historyError }}
+        </p>
+        <EChart v-if="history && hasRealHistory" :option="chartOption" :height="286" :loading="historyLoading" />
+        <div
+          v-else
+          data-testid="huijin-trajectory-empty"
+          class="huijin-trajectory__empty"
+          role="status"
+          aria-live="polite"
+        >
+          {{ historyLoading ? '历史加载中' : '暂无可用历史轨迹' }}
         </div>
       </div>
     </div>
@@ -189,18 +239,20 @@ function deviationDirection(value: number | null | undefined) {
 
     <p class="huijin-trajectory__note">累计份额变化不能直接证明汇金增减持，需由下一期基金报告确认。</p>
 
-    <div class="huijin-trajectory__table" role="table" aria-label="汇金核心 ETF 持仓轨迹明细">
-      <div class="huijin-trajectory__table-head" role="row">
-        <span role="columnheader">ETF</span>
-        <span role="columnheader">确认持仓比例</span>
-        <span role="columnheader">累计偏离</span>
-        <span role="columnheader">数据状态</span>
+    <section class="huijin-trajectory__table" aria-label="汇金核心 ETF 持仓轨迹明细">
+      <div class="huijin-trajectory__table-head" aria-hidden="true">
+        <span>ETF</span>
+        <span>确认持仓比例</span>
+        <span>累计偏离</span>
+        <span>数据状态</span>
       </div>
       <button
         v-for="item in overview.core_items"
         :key="item.symbol"
+        data-testid="huijin-detail-row"
         type="button"
         :class="{ 'huijin-trajectory__table-row--selected': item.symbol === selectedItem?.symbol }"
+        :aria-pressed="item.symbol === selectedItem?.symbol"
         @click="emit('select', item.symbol)"
       >
         <span class="huijin-trajectory__table-identity">
@@ -214,7 +266,7 @@ function deviationDirection(value: number | null | undefined) {
         </span>
         <span>{{ huijinActivityDataState(item) }}</span>
       </button>
-    </div>
+    </section>
   </section>
 </template>
 
@@ -294,6 +346,20 @@ function deviationDirection(value: number | null | undefined) {
 .huijin-ranking {
   display: flex;
   flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.huijin-ranking li {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  border-bottom: 1px solid var(--wb-border);
+}
+
+.huijin-ranking li:last-child {
+  border-bottom: 0;
 }
 
 .huijin-ranking button,
@@ -316,9 +382,9 @@ function deviationDirection(value: number | null | undefined) {
   align-items: center;
   flex: 1 1 0;
   padding: 8px 12px;
+  border-bottom: 0;
 }
 
-.huijin-ranking button:last-child,
 .huijin-trajectory__table button:last-child {
   border-bottom: 0;
 }
@@ -358,6 +424,38 @@ function deviationDirection(value: number | null | undefined) {
   text-align: end;
 }
 
+.huijin-ranking__track {
+  position: relative;
+  display: block;
+  grid-column: 1 / -1;
+  width: 100%;
+  height: 8px;
+  overflow: hidden;
+  background: var(--wb-primary-soft);
+}
+
+.huijin-ranking__zero {
+  position: absolute;
+  z-index: 1;
+  inset-block: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--wb-muted);
+}
+
+.huijin-ranking__bar {
+  position: absolute;
+  inset-block: 1px;
+}
+
+.huijin-ranking__bar--increase {
+  background: var(--wb-positive);
+}
+
+.huijin-ranking__bar--decrease {
+  background: var(--wb-negative);
+}
+
 .huijin-selected {
   padding: 10px 12px;
 }
@@ -382,6 +480,19 @@ function deviationDirection(value: number | null | undefined) {
   place-items: center;
   color: var(--wb-muted);
   font-size: 13px;
+}
+
+.huijin-trajectory__status {
+  margin: 8px 0 0;
+  padding: 7px 9px;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.huijin-trajectory__status--error {
+  color: var(--wb-positive);
+  background: var(--wb-status-error-soft);
+  border-inline-start: 2px solid var(--wb-positive);
 }
 
 .huijin-trajectory__details {

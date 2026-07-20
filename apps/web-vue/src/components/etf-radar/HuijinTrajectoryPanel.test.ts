@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 
+import process from 'node:process';
+import { readFileSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
 import { defineComponent } from 'vue';
 import { mount } from '@vue/test-utils';
 import type { EChartsOption } from 'echarts';
@@ -11,6 +14,8 @@ import type {
   HuijinEtfActivityItem
 } from '@/service/types';
 import HuijinTrajectoryPanel from './HuijinTrajectoryPanel.vue';
+
+const source = readFileSync(resolvePath(process.cwd(), 'src/components/etf-radar/HuijinTrajectoryPanel.vue'), 'utf8');
 
 const ChartStub = defineComponent({
   name: 'EChart',
@@ -138,7 +143,7 @@ function historyPoint(tradeDate: string, symbol: string, cumulative: number | nu
   };
 }
 
-function historyFixture(): EtfRadarHistoryResponse {
+function historyFixture(points?: EtfRadarHistoryPoint[]): EtfRadarHistoryResponse {
   return {
     generated_at: '2026-07-18T15:05:00+08:00',
     trade_date: '2026-07-18',
@@ -146,7 +151,7 @@ function historyFixture(): EtfRadarHistoryResponse {
     signal_stage: 'post_close',
     model_version: 'huijin-public-rule-v1',
     source_status: [],
-    points: [
+    points: points ?? [
       historyPoint('2026-07-16', '510050.SH', -74),
       historyPoint('2026-07-17', '510300.SH', 70),
       historyPoint('2026-07-18', '510050.SH', -75.55)
@@ -154,18 +159,31 @@ function historyFixture(): EtfRadarHistoryResponse {
   };
 }
 
+type MountOverrides = Partial<{
+  overview: EtfRadarOverviewResponse;
+  history: EtfRadarHistoryResponse | null;
+  selectedSymbol: string;
+  historyLoading: boolean;
+  historyError: string | null;
+}>;
+
+function mountPanel(overrides: MountOverrides = {}) {
+  return mount(HuijinTrajectoryPanel, {
+    props: {
+      overview: overviewFixture(),
+      history: historyFixture(),
+      selectedSymbol: '510050.SH',
+      historyLoading: false,
+      historyError: null,
+      ...overrides
+    },
+    global: { stubs: { EChart: ChartStub } }
+  });
+}
+
 describe('HuijinTrajectoryPanel', () => {
   it('renders the approved holdings trajectory and emits ranking selection', async () => {
-    const wrapper = mount(HuijinTrajectoryPanel, {
-      props: {
-        overview: overviewFixture(),
-        history: historyFixture(),
-        selectedSymbol: '510050.SH',
-        historyLoading: false,
-        historyError: null
-      },
-      global: { stubs: { EChart: ChartStub } }
-    });
+    const wrapper = mountPanel();
 
     const rankingRows = wrapper.findAll('[data-testid="huijin-ranking-row"]');
     expect(rankingRows).toHaveLength(7);
@@ -178,7 +196,25 @@ describe('HuijinTrajectoryPanel', () => {
     expect(wrapper.text()).toContain('累计偏离');
     expect(wrapper.text()).toContain('日度历史积累中');
     expect(rankingRows[0]!.text()).toContain('▼ -75.55%');
+    expect(rankingRows[0]!.text()).toContain('收缩');
     expect(rankingRows[1]!.text()).toContain('▲ +72.00%');
+    expect(rankingRows[1]!.text()).toContain('扩张');
+    expect(rankingRows[0]!.attributes('aria-pressed')).toBe('true');
+    expect(rankingRows[1]!.attributes('aria-pressed')).toBe('false');
+    expect(rankingRows[0]!.element.parentElement?.tagName).toBe('LI');
+
+    const tracks = wrapper.findAll('[data-testid="huijin-ranking-track"]');
+    const bars = wrapper.findAll('[data-testid="huijin-ranking-bar"]');
+    expect(tracks).toHaveLength(7);
+    expect(bars).toHaveLength(7);
+    expect(wrapper.findAll('[data-testid="huijin-ranking-zero"]')).toHaveLength(7);
+    expect(tracks[0]!.attributes('role')).toBe('img');
+    expect(tracks[0]!.attributes('aria-label')).toContain('▼ -75.55% · 收缩');
+    expect(bars[0]!.classes()).toContain('huijin-ranking__bar--decrease');
+    expect(bars[0]!.attributes('style')).toContain('right: 50%');
+    expect(bars[0]!.attributes('style')).toContain('width: 50%');
+    expect(bars[1]!.classes()).toContain('huijin-ranking__bar--increase');
+    expect(bars[1]!.attributes('style')).toContain('left: 50%');
 
     await rankingRows[1]!.trigger('click');
     expect(wrapper.emitted('select')?.at(-1)).toEqual(['510300.SH']);
@@ -191,5 +227,74 @@ describe('HuijinTrajectoryPanel', () => {
     expect(option.animation).toBe(false);
     expect(series.connectNulls).toBe(false);
     expect(series.data).toEqual([0, -74, null, -75.55]);
+
+    const detailRows = wrapper.findAll('[data-testid="huijin-detail-row"]');
+    expect(detailRows).toHaveLength(7);
+    expect(detailRows[0]!.attributes('aria-pressed')).toBe('true');
+    expect(detailRows[1]!.attributes('aria-pressed')).toBe('false');
+    expect(wrapper.find('[role="list"]').exists()).toBe(false);
+    expect(wrapper.find('[role="table"]').exists()).toBe(false);
+  });
+
+  it('uses an async chart component and keeps the responsive overflow contract', () => {
+    expect(source).toContain("defineAsyncComponent(() => import('@/components/charts/EChart.vue'))");
+    expect(source).not.toContain("import EChart from '@/components/charts/EChart.vue'");
+    expect(source).toContain('@media (max-width: 900px)');
+    expect(source).toContain('grid-template-columns: minmax(0, 1fr);');
+    expect(source).toContain('max-width: 100%;');
+    expect(source).toContain('min-width: 0;');
+    expect(source).toContain('overflow-x: hidden;');
+    expect(source).toMatch(/\.huijin-ranking__zero\s*\{[^}]*z-index: 1;/s);
+  });
+
+  it('shows an empty state instead of a baseline-only chart for empty history points', () => {
+    const wrapper = mountPanel({ history: historyFixture([]) });
+
+    expect(wrapper.findComponent(ChartStub).exists()).toBe(false);
+    expect(wrapper.get('[data-testid="huijin-trajectory-empty"]').text()).toContain('暂无可用历史轨迹');
+    expect(wrapper.get('[data-testid="huijin-trajectory-empty"]').attributes('aria-live')).toBe('polite');
+  });
+
+  it('shows an empty state when the selected symbol has only null history', () => {
+    const wrapper = mountPanel({
+      history: historyFixture([
+        historyPoint('2026-07-16', '510050.SH', null),
+        historyPoint('2026-07-17', '510300.SH', 70),
+        historyPoint('2026-07-18', '510050.SH', null)
+      ])
+    });
+
+    expect(wrapper.findComponent(ChartStub).exists()).toBe(false);
+    expect(wrapper.get('[data-testid="huijin-trajectory-empty"]').text()).toContain('暂无可用历史轨迹');
+  });
+
+  it('shows loading without history and keeps a stale chart visible while loading', async () => {
+    const wrapper = mountPanel({ history: null, historyLoading: true });
+
+    expect(wrapper.findComponent(ChartStub).exists()).toBe(false);
+    expect(wrapper.get('[data-testid="huijin-trajectory-empty"]').text()).toContain('历史加载中');
+    expect(wrapper.get('[data-testid="huijin-trajectory-empty"]').attributes('aria-live')).toBe('polite');
+
+    await wrapper.setProps({ history: historyFixture(), historyLoading: true });
+
+    expect(wrapper.getComponent(ChartStub).props('loading')).toBe(true);
+    expect(wrapper.find('[data-testid="huijin-trajectory-empty"]').exists()).toBe(false);
+  });
+
+  it('announces an error while retaining a stale chart', () => {
+    const wrapper = mountPanel({ historyError: '历史请求失败，显示已有数据' });
+
+    expect(wrapper.findComponent(ChartStub).exists()).toBe(true);
+    expect(wrapper.get('[data-testid="huijin-history-status"]').text()).toContain('历史请求失败，显示已有数据');
+    expect(wrapper.get('[data-testid="huijin-history-status"]').attributes('aria-live')).toBe('polite');
+  });
+
+  it('announces an error when no chart is available', () => {
+    const wrapper = mountPanel({ history: null, historyError: '历史请求失败' });
+
+    expect(wrapper.findComponent(ChartStub).exists()).toBe(false);
+    expect(wrapper.get('[data-testid="huijin-history-status"]').text()).toContain('历史请求失败');
+    expect(wrapper.get('[data-testid="huijin-history-status"]').attributes('aria-live')).toBe('polite');
+    expect(wrapper.find('[data-testid="huijin-trajectory-empty"]').exists()).toBe(true);
   });
 });

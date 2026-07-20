@@ -1,0 +1,91 @@
+import { describe, expect, it } from 'vitest';
+import type { EtfRadarHistoryPoint, HuijinEtfActivityItem } from '@/service/types';
+import {
+  buildHuijinRanking,
+  buildHuijinTrajectory,
+  huijinActivityDataState,
+  pickDefaultHuijinSymbol
+} from './huijinTrajectory';
+
+const baseItem: HuijinEtfActivityItem = {
+  symbol: '510050.SH',
+  name: '上证50ETF华夏',
+  index_name: '上证50',
+  role: 'core',
+  paired_symbol: null,
+  trade_date: '2026-07-18',
+  total_shares: 8_237_466_800,
+  previous_total_shares: 8_150_166_800,
+  share_delta: 87_300_000,
+  daily_change_pct: 1.07,
+  baseline_change_pct: 0.15,
+  cumulative_baseline_change_pct: -85.46,
+  multiple: 1.5,
+  direction: 'increase',
+  is_tenfold: false,
+  report_period: '2025-12-31',
+  baseline_total_shares: 56_663_567_693,
+  confirmed_huijin_shares: 48_759_000_000,
+  confirmed_huijin_holding_pct: 86.05,
+  baseline_source_kind: 'derived'
+};
+
+function itemWith(overrides: Partial<HuijinEtfActivityItem> = {}) {
+  return { ...baseItem, ...overrides };
+}
+
+function item(symbol: string, cumulative: number | null, reportPeriod = '2025-12-31') {
+  return itemWith({ symbol, cumulative_baseline_change_pct: cumulative, report_period: reportPeriod });
+}
+
+function point(tradeDate: string, cumulative: number | null): EtfRadarHistoryPoint {
+  return {
+    trade_date: tradeDate,
+    symbol: '510050.SH',
+    name: '上证50ETF华夏',
+    total_shares: 8_237_466_800,
+    share_change: null,
+    estimated_subscription_cny: null,
+    robust_score: null,
+    daily_change_pct: null,
+    baseline_change_pct: null,
+    cumulative_baseline_change_pct: cumulative,
+    multiple: null
+  };
+}
+
+describe('Huijin trajectory transforms', () => {
+  it('sorts available core ETFs by absolute cumulative deviation', () => {
+    expect(buildHuijinRanking([
+      item('510300.SH', -75.55),
+      item('159915.SZ', -52.63),
+      item('510050.SH', -85.46),
+    ]).map(row => row.symbol)).toEqual(['510050.SH', '510300.SH', '159915.SZ']);
+  });
+
+  it('starts a trajectory at the report baseline and preserves real gaps', () => {
+    expect(buildHuijinTrajectory(
+      item('510050.SH', -85.46, '2025-12-31'),
+      [point('2026-07-16', -84), point('2026-07-18', -85.46)],
+      ['2026-07-16', '2026-07-17', '2026-07-18'],
+    )).toEqual({
+      dates: ['2025-12-31', '2026-07-16', '2026-07-17', '2026-07-18'],
+      values: [0, -84, null, -85.46],
+    });
+  });
+
+  it('distinguishes disclosure, daily-history, and baseline gaps', () => {
+    expect(huijinActivityDataState(itemWith({ total_shares: null }))).toBe('交易所尚未披露');
+    expect(huijinActivityDataState(itemWith({ previous_total_shares: null }))).toBe('日度历史积累中');
+    expect(huijinActivityDataState(itemWith({ report_period: null }))).toBe('确认基线缺失');
+  });
+
+  it('picks the strongest available ETF and falls back to the first item', () => {
+    expect(pickDefaultHuijinSymbol([
+      item('510300.SH', null),
+      item('510050.SH', -85.46),
+    ])).toBe('510050.SH');
+    expect(pickDefaultHuijinSymbol([item('510300.SH', null)])).toBe('510300.SH');
+    expect(pickDefaultHuijinSymbol([])).toBe('');
+  });
+});

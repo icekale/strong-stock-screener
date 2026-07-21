@@ -158,3 +158,8 @@ def test_missing_or_corrupt_alerts_return_empty_response(tmp_path: Path) -> None
     store.root_dir.mkdir(parents=True)
     store.alerts_path.write_text("not json", encoding="utf-8")
     assert store.load_alerts() == []
+
+    alert = _alert("recovered")
+    assert store.upsert_alert(alert) is True
+    assert json.loads(store.alerts_path.read_text(encoding="utf-8")) == [alert.model_dump(mode="json")]
+    assert store.load_alerts() == [alert]

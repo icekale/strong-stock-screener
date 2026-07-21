@@ -112,6 +112,59 @@ describe('useEtfAlertNotifications', () => {
     mounted.unmount();
   });
 
+  it('keeps prior state and retries after a scheduled refresh fails', async () => {
+    const initialAlert = alert();
+    const refreshedAlert = alert({ alert_id: 'alert-2', read: true });
+    const getEtfActivityAlerts = vi
+      .fn()
+      .mockResolvedValueOnce({ unread_count: 1, alerts: [initialAlert] })
+      .mockRejectedValueOnce(new Error('scheduled refresh failed'))
+      .mockResolvedValueOnce({ unread_count: 0, alerts: [refreshedAlert] });
+    const mounted = await mountNotifications({
+      getEtfActivityAlerts,
+      markEtfAlertRead: vi.fn(),
+      markAllEtfAlertsRead: vi.fn(),
+      notify: vi.fn()
+    });
+
+    await flushPromises();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(mounted.notifications.alerts.value).toEqual([initialAlert]);
+    expect(mounted.notifications.unreadCount.value).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(mounted.notifications.alerts.value).toEqual([refreshedAlert]);
+    expect(mounted.notifications.unreadCount.value).toBe(0);
+    mounted.unmount();
+  });
+
+  it('shares one polling lifecycle and stops it after the final consumer unmounts', async () => {
+    const getEtfActivityAlerts = vi.fn().mockResolvedValue({ unread_count: 0, alerts: [] });
+    const dependencies = {
+      getEtfActivityAlerts,
+      markEtfAlertRead: vi.fn(),
+      markAllEtfAlertsRead: vi.fn(),
+      notify: vi.fn()
+    };
+    const first = await mountNotifications(dependencies);
+    await flushPromises();
+    const second = await mountNotifications(dependencies);
+    await flushPromises();
+
+    expect(getEtfActivityAlerts).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(getEtfActivityAlerts).toHaveBeenCalledTimes(2);
+
+    first.unmount();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(getEtfActivityAlerts).toHaveBeenCalledTimes(3);
+
+    second.unmount();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(getEtfActivityAlerts).toHaveBeenCalledTimes(3);
+  });
+
   it('updates unread state after marking one alert and all alerts read', async () => {
     const alerts = [alert(), alert({ alert_id: 'alert-2', symbol: null, alert_type: 'market_high' })];
     const markEtfAlertRead = vi.fn().mockResolvedValue({ status: 'ok' });

@@ -34,15 +34,32 @@ function evidenceText(alert: EtfActivityAlert) {
 }
 
 async function selectAlert(alert: EtfActivityAlert) {
-  if (!alert.read) await markRead(alert.alert_id);
+  if (!alert.read) {
+    try {
+      await markRead(alert.alert_id);
+    } catch {
+      // Navigation is still useful when the best-effort read request fails.
+    }
+  }
   if (!alert.symbol) return;
 
   open.value = false;
-  await router.push({ path: '/etf-radar', query: { tab: 'activity', symbol: alert.symbol } });
+  try {
+    await router.push({ path: '/etf-radar', query: { tab: 'activity', symbol: alert.symbol } });
+  } catch {
+    // Router failures should not surface from an event handler.
+  }
 }
 
 async function markAlertRead(alert: EtfActivityAlert) {
   if (!alert.read) await markRead(alert.alert_id);
+}
+
+function handleAlertKeydown(event: KeyboardEvent, alert: EtfActivityAlert) {
+  if (event.key !== 'Enter' && event.key !== ' ') return;
+
+  event.preventDefault();
+  void selectAlert(alert);
 }
 </script>
 
@@ -67,31 +84,38 @@ async function markAlertRead(alert: EtfActivityAlert) {
       <article
         v-for="alert in alerts"
         :key="alert.alert_id"
-        data-testid="etf-alert-row"
-        class="etf-alert-row cursor-pointer rd-4px p-12px"
+        class="etf-alert-row flex items-stretch gap-8px rd-4px p-12px"
         :class="{ 'etf-alert-row--unread': !alert.read }"
-        @click="selectAlert(alert)"
       >
-        <div class="flex items-center justify-between gap-8px">
-          <ATag :color="alert.level === 'high' ? 'red' : 'gold'">{{ alertTypeLabels[alert.alert_type] }}</ATag>
-          <span class="shrink-0 text-12px text-secondary">{{ formatTime(alert.triggered_at) }}</span>
-        </div>
-        <div class="mt-6px flex items-start gap-8px">
-          <div class="min-w-0 flex-1">
+        <div
+          :aria-label="`查看${alert.title}`"
+          class="min-w-0 flex-1 cursor-pointer"
+          data-testid="etf-alert-row"
+          role="button"
+          tabindex="0"
+          @click="selectAlert(alert)"
+          @keydown="handleAlertKeydown($event, alert)"
+        >
+          <div class="flex items-center justify-between gap-8px">
+            <ATag :color="alert.level === 'high' ? 'red' : 'gold'">{{ alertTypeLabels[alert.alert_type] }}</ATag>
+            <span class="shrink-0 text-12px text-secondary">{{ formatTime(alert.triggered_at) }}</span>
+          </div>
+          <div class="mt-6px min-w-0">
             <strong class="block truncate">{{ alert.title }}</strong>
             <p class="mb-0 mt-4px text-13px text-secondary">{{ alert.message }}</p>
             <p v-if="evidenceText(alert)" class="mb-0 mt-4px text-12px text-secondary">{{ evidenceText(alert) }}</p>
           </div>
-          <AButton
-            v-if="!alert.read"
-            type="link"
-            size="small"
-            :aria-label="`标记${alert.title}已读`"
-            @click.stop="markAlertRead(alert)"
-          >
-            已读
-          </AButton>
         </div>
+        <AButton
+          v-if="!alert.read"
+          class="shrink-0 self-end"
+          type="link"
+          size="small"
+          :aria-label="`标记${alert.title}已读`"
+          @click="markAlertRead(alert)"
+        >
+          已读
+        </AButton>
       </article>
     </div>
     <AEmpty v-else description="暂无通知" :image="Empty.PRESENTED_IMAGE_SIMPLE" />

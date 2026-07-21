@@ -2,7 +2,7 @@
 
 import { defineComponent, ref } from 'vue';
 import { mount } from '@vue/test-utils';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EtfActivityAlert } from '@/service/types';
 import EtfAlertCenter from './etf-alert-center.vue';
 
@@ -55,6 +55,31 @@ function mountCenter() {
 }
 
 describe('EtfAlertCenter', () => {
+  beforeEach(() => {
+    push.mockReset();
+    markRead.mockReset();
+    markRead.mockResolvedValue(undefined);
+    markAllRead.mockReset();
+    markAllRead.mockResolvedValue(undefined);
+    unreadCount.value = 1;
+    alerts.value = [
+      {
+        alert_id: 'alert-1',
+        trade_date: '2026-07-22',
+        alert_type: 'single_high',
+        level: 'high',
+        symbol: '510050.SH',
+        title: '沪深300ETF信号增强',
+        message: '量能和份额同步走强',
+        signal_score: 92,
+        triggered_at: '2026-07-22T10:00:00+08:00',
+        last_triggered_at: '2026-07-22T10:00:00+08:00',
+        evidence: { volume_ratio: 1.8 },
+        read: false
+      }
+    ];
+  });
+
   it('keeps a labelled bell visible, shows unread count, and opens a compact notification drawer', async () => {
     const wrapper = mountCenter();
 
@@ -78,6 +103,40 @@ describe('EtfAlertCenter', () => {
 
     expect(markRead).toHaveBeenCalledWith('alert-1');
     expect(push).toHaveBeenCalledWith({ path: '/etf-radar', query: { tab: 'activity', symbol: '510050.SH' } });
+  });
+
+  it('routes symbol alerts after a mark-read failure without leaving the drawer open', async () => {
+    markRead.mockRejectedValueOnce(new Error('mark read failed'));
+    const wrapper = mountCenter();
+    await wrapper.get('button[aria-label="ETF 活动通知"]').trigger('click');
+
+    await wrapper.get('[data-testid="etf-alert-row"]').trigger('click');
+    await Promise.resolve();
+
+    expect(markRead).toHaveBeenCalledWith('alert-1');
+    expect(push).toHaveBeenCalledWith({ path: '/etf-radar', query: { tab: 'activity', symbol: '510050.SH' } });
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+  });
+
+  it('makes alert rows keyboard-operable without nesting the read button', async () => {
+    const wrapper = mountCenter();
+    await wrapper.get('button[aria-label="ETF 活动通知"]').trigger('click');
+    const row = wrapper.get('[data-testid="etf-alert-row"]');
+
+    expect(row.attributes('role')).toBe('button');
+    expect(row.attributes('tabindex')).toBe('0');
+    expect(row.attributes('aria-label')).toContain('沪深300ETF信号增强');
+    expect(row.find('button').exists()).toBe(false);
+
+    await wrapper.get('button[aria-label="标记沪深300ETF信号增强已读"]').trigger('click');
+    expect(markRead).toHaveBeenCalledTimes(1);
+    expect(push).not.toHaveBeenCalled();
+
+    await row.trigger('keydown', { key: 'Enter' });
+    await row.trigger('keydown', { key: ' ' });
+
+    expect(push).toHaveBeenCalledTimes(2);
+    expect(markRead).toHaveBeenCalledTimes(3);
   });
 
   it('hides the badge at zero unread without hiding the bell', () => {

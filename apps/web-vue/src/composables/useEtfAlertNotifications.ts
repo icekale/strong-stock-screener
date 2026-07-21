@@ -53,7 +53,7 @@ function startPolling() {
   if (document.hidden) return;
 
   pollingTimer = setInterval(() => {
-    void refresh();
+    void refreshSilently();
   }, POLLING_INTERVAL_MS);
 }
 
@@ -76,6 +76,14 @@ async function refresh() {
     showNewAlertPopups(response.alerts);
   } finally {
     loading.value = false;
+  }
+}
+
+async function refreshSilently() {
+  try {
+    await refresh();
+  } catch {
+    // Scheduled refreshes retain the last successful alert state and retry on the next interval.
   }
 }
 
@@ -103,13 +111,13 @@ function handleVisibilityChange() {
     return;
   }
 
-  void refresh();
+  void refreshSilently();
   startPolling();
 }
 
 function start() {
   document.addEventListener('visibilitychange', handleVisibilityChange);
-  void refresh();
+  void refreshSilently();
   startPolling();
 }
 

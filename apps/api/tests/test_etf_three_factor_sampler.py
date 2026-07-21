@@ -70,6 +70,30 @@ def test_sampler_samples_only_trading_sessions_and_scheduled_refreshes() -> None
     ]
 
 
+def test_sampler_catches_up_overdue_refresh_windows() -> None:
+    calls: list[dict[str, object]] = []
+    current = Clock("2026-07-22T15:06:00")
+    sampler = EtfThreeFactorSampler(
+        scan=lambda **kwargs: calls.append(kwargs),
+        clock=current,
+    )
+
+    assert sampler.sample_once() is True
+    assert sampler.sample_once() is False
+    current.current = datetime.fromisoformat("2026-07-22T19:06:00")
+    assert sampler.sample_once() is True
+    assert sampler.sample_once() is False
+    current.current = datetime.fromisoformat("2026-07-22T19:36:00")
+    assert sampler.sample_once() is True
+    assert sampler.sample_once() is False
+
+    assert [call["now"].strftime("%H:%M") for call in calls] == [
+        "15:06",
+        "19:06",
+        "19:36",
+    ]
+
+
 def test_sampler_stops_and_joins_cleanly() -> None:
     started = Event()
     release = Event()
@@ -117,8 +141,8 @@ def test_sampler_thread_logs_scan_errors_and_retries() -> None:
     assert calls == 2
 
 
-def test_sampler_thread_reaches_close_refresh_after_1500(monkeypatch: object) -> None:
-    current = Clock("2026-07-22T14:59:00")
+def test_sampler_catches_close_refresh_after_a_slow_1500_scan(monkeypatch: object) -> None:
+    current = Clock("2026-07-22T15:00:00")
     close_reached = Event()
     calls: list[dict[str, object]] = []
 
@@ -134,7 +158,7 @@ def test_sampler_thread_reaches_close_refresh_after_1500(monkeypatch: object) ->
 
         def wait(self, seconds: float) -> bool:
             current.current += timedelta(seconds=seconds)
-            if current.current >= datetime.fromisoformat("2026-07-22T15:06:00"):
+            if close_reached.is_set():
                 self.set()
             return self.is_set()
 
@@ -142,7 +166,9 @@ def test_sampler_thread_reaches_close_refresh_after_1500(monkeypatch: object) ->
 
     def scan(**kwargs: object) -> None:
         calls.append(kwargs)
-        if kwargs["now"].strftime("%H:%M") == "15:05":
+        if kwargs["now"].strftime("%H:%M") == "15:00":
+            current.current += timedelta(minutes=6)
+        else:
             close_reached.set()
 
     sampler = EtfThreeFactorSampler(
@@ -157,7 +183,6 @@ def test_sampler_thread_reaches_close_refresh_after_1500(monkeypatch: object) ->
     sampler.stop_and_wait()
 
     assert [call["now"].strftime("%H:%M") for call in calls] == [
-        "14:59",
         "15:00",
-        "15:05",
+        "15:07",
     ]

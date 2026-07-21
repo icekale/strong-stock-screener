@@ -25,11 +25,11 @@ def _scan_kind(now: datetime) -> str | None:
     clock = (current.hour, current.minute)
     if (9, 30) <= clock <= (11, 30) or (13, 0) <= clock <= (15, 0):
         return "intraday"
-    if clock == (15, 5):
+    if (15, 5) <= clock < (19, 5):
         return "close"
-    if clock == (19, 5):
+    if (19, 5) <= clock < (19, 35):
         return "share_first"
-    if clock == (19, 35):
+    if clock >= (19, 35):
         return "share_second"
     return None
 

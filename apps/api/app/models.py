@@ -11,6 +11,10 @@ RiskAction = Literal["hold_watch", "reduce", "empty"]
 IntradayAction = Literal["watch", "low_buy_watch", "reduce", "avoid_chase", "data_incomplete"]
 GsgfIntradayConfirmation = Literal["盘中确认", "等待确认", "低吸确认", "减仓确认", "风险失效", "无GSGF上下文"]
 SourceStatusValue = Literal["success", "failed", "disabled", "missing_key", "stale"]
+EtfThreeFactorMode = Literal["three_factor", "two_factor", "incomplete"]
+EtfThreeFactorLevel = Literal["high", "medium", "low", "incomplete"]
+EtfFactorStatus = Literal["available", "pending", "missing", "stale"]
+EtfAlertType = Literal["single_high", "single_upgrade", "market_watch", "market_high"]
 CapitalFlowStatus = Literal["direct", "estimated", "unavailable"]
 SectorWorkbenchMode = Literal["strength", "main_flow"]
 SectorWorkbenchScope = Literal["theme", "industry"]
@@ -2059,6 +2063,92 @@ class CapitalSignalMetadata(BaseModel):
     source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
 
 
+class EtfFactorEvidence(BaseModel):
+    score: float | None = None
+    value: float | None = None
+    status: EtfFactorStatus
+    source: str
+    data_date: str | None = None
+    updated_at: str | None = None
+    detail: str | None = None
+
+
+class EtfThreeFactorItem(BaseModel):
+    symbol: str
+    name: str
+    index_name: str
+    index_symbol: str
+    close_change_pct: float | None = None
+    close_change_trade_date: str | None = None
+    intraday_change_pct: float | None = None
+    index_change_pct: float | None = None
+    current_volume: float | None = None
+    average_volume_20d: float | None = None
+    volume_ratio: float | None = None
+    share_change_pct: float | None = None
+    volume_factor: EtfFactorEvidence
+    direction_factor: EtfFactorEvidence
+    share_factor: EtfFactorEvidence
+    signal_score: float | None = None
+    mode: EtfThreeFactorMode
+    level: EtfThreeFactorLevel
+    updated_at: str
+
+
+class EtfThreeFactorSummary(BaseModel):
+    signal_score: float | None = None
+    level: EtfThreeFactorLevel = "incomplete"
+    valid_count: int = 0
+    high_count: int = 0
+    medium_count: int = 0
+    market_state: Literal["high", "watch", "normal", "incomplete"] = "incomplete"
+
+
+class EtfThreeFactorResponse(CapitalSignalMetadata):
+    summary: EtfThreeFactorSummary = Field(default_factory=EtfThreeFactorSummary)
+    items: list[EtfThreeFactorItem] = Field(default_factory=list)
+    monitor_running: bool = False
+    last_scan_at: str | None = None
+
+
+class EtfThreeFactorHistoryPoint(BaseModel):
+    trade_date: str
+    symbol: str
+    close_change_pct: float | None = None
+    volume: float | None = None
+    average_volume_20d: float | None = None
+    volume_ratio: float | None = None
+    total_shares: float | None = None
+    share_change_pct: float | None = None
+    signal_score: float | None = None
+    level: EtfThreeFactorLevel = "incomplete"
+
+
+class EtfThreeFactorHistoryResponse(CapitalSignalMetadata):
+    symbol: str
+    points: list[EtfThreeFactorHistoryPoint] = Field(default_factory=list)
+
+
+class EtfActivityAlert(BaseModel):
+    alert_id: str
+    trade_date: str
+    alert_type: EtfAlertType
+    level: Literal["watch", "high"]
+    symbol: str | None = None
+    title: str
+    message: str
+    signal_score: float
+    triggered_at: str
+    last_triggered_at: str
+    evidence: dict[str, float | str | None] = Field(default_factory=dict)
+    read: bool = False
+
+
+class EtfActivityAlertResponse(BaseModel):
+    unread_count: int = 0
+    alerts: list[EtfActivityAlert] = Field(default_factory=list)
+
+
 class MarginSummary(BaseModel):
     balance_cny: float | None = None
     financing_balance_cny: float | None = None
@@ -2099,6 +2189,8 @@ class HuijinEtfActivityItem(BaseModel):
     daily_change_pct: float | None = None
     baseline_change_pct: float | None = None
     cumulative_baseline_change_pct: float | None = None
+    close_change_pct: float | None = None
+    close_change_trade_date: str | None = None
     multiple: float | None = None
     direction: EtfActivityDirection = "unknown"
     is_tenfold: bool = False

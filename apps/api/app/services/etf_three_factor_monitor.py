@@ -299,8 +299,25 @@ class EtfThreeFactorMonitor:
         response: EtfThreeFactorResponse,
         share_values: dict[str, _ShareValue],
     ) -> None:
-        self.store.upsert_history(
-            [
+        points: list[EtfThreeFactorHistoryPoint] = []
+        for item in response.items:
+            share_value = share_values[item.symbol]
+            current = next(
+                (
+                    point
+                    for point in self.store.load_history(item.symbol, days=60)
+                    if point.trade_date == response.trade_date
+                ),
+                None,
+            )
+            total_shares = share_value.total_shares
+            share_change_pct = item.share_change_pct
+            if response.signal_stage == "post_close" and current is not None:
+                if total_shares is None and _valid_number(current.total_shares):
+                    total_shares = current.total_shares
+                if share_change_pct is None and _valid_number(current.share_change_pct):
+                    share_change_pct = current.share_change_pct
+            points.append(
                 EtfThreeFactorHistoryPoint(
                     trade_date=response.trade_date,
                     symbol=item.symbol,
@@ -308,13 +325,14 @@ class EtfThreeFactorMonitor:
                     volume=item.current_volume,
                     average_volume_20d=item.average_volume_20d,
                     volume_ratio=item.volume_ratio,
-                    total_shares=share_values[item.symbol].total_shares,
-                    share_change_pct=item.share_change_pct,
+                    total_shares=total_shares,
+                    share_change_pct=share_change_pct,
                     signal_score=item.signal_score,
                     level=item.level,
                 )
-                for item in response.items
-            ]
+            )
+        self.store.upsert_history(
+            points
         )
         self._upsert_alerts(previous, response)
         self.store.save_snapshot(response)

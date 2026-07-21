@@ -348,6 +348,22 @@ def test_post_close_marks_official_share_failure_failed_in_source_status(tmp_pat
     assert status.detail == "官方份额请求失败: RuntimeError"
 
 
+def test_failed_share_refresh_preserves_valid_post_close_history(tmp_path: Path) -> None:
+    monitor, _, _, shares = monitor_with(tmp_path, share_change_pct=5.0)
+    monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+    monitor.scan(now=shanghai("2026-07-22T19:05:00"))
+    shares.fail = True
+
+    failed_refresh = monitor.scan(now=shanghai("2026-07-22T19:35:00"))
+
+    item = by_symbol(failed_refresh, "510050.SH")
+    point = monitor.store.load_history("510050.SH", days=40)[0]
+    assert item.share_factor.status == "missing"
+    assert item.mode == "incomplete"
+    assert point.total_shares == 1_050
+    assert point.share_change_pct == 5
+
+
 @pytest.mark.parametrize("missing_symbol", ["510050.SH", "000016.SH"])
 def test_missing_quote_keeps_old_snapshot_and_creates_no_alert(
     tmp_path: Path, missing_symbol: str

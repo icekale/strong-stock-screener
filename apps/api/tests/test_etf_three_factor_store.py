@@ -124,9 +124,11 @@ def test_alert_cooldown_expires_and_market_key_is_type_and_level(tmp_path: Path)
 
 def test_alerts_retain_last_30_days_and_preserve_read_state(tmp_path: Path) -> None:
     store = EtfThreeFactorStore(tmp_path)
+    today = date.today()
     old = _alert("old")
-    old = old.model_copy(update={"trade_date": (date(2026, 7, 22) - timedelta(days=31)).isoformat()})
+    old = old.model_copy(update={"trade_date": (today - timedelta(days=31)).isoformat()})
     current = _alert("current", read=True)
+    current = current.model_copy(update={"trade_date": today.isoformat()})
     store.upsert_alert(old)
     store.upsert_alert(current)
 

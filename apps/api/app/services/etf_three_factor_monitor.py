@@ -216,6 +216,27 @@ class EtfThreeFactorMonitor:
         quote_detail: str,
     ) -> EtfThreeFactorResponse:
         generated_at = scan_at.isoformat(timespec="seconds")
+        kline_status = _factor_source_status(
+            source="ETF日K线",
+            factors=[item.volume_factor for item in items],
+            success_statuses={"available"},
+            failure_prefix="日K线请求失败:",
+            success_detail=f"核心ETF {len(items)} 只日K线完整",
+            degraded_detail="日K线部分不可用",
+        )
+        share_status = _factor_source_status(
+            source="交易所ETF份额",
+            factors=[item.share_factor for item in items],
+            success_statuses={"available", "pending"},
+            failure_prefix="官方份额请求失败:",
+            success_detail=f"核心ETF {len(items)} 只官方份额可用或待披露",
+            degraded_detail="官方份额部分不可用",
+        )
+        monitor_status = (
+            "failed"
+            if "failed" in {kline_status.status, share_status.status}
+            else ("stale" if "stale" in {kline_status.status, share_status.status} else "success")
+        )
         return EtfThreeFactorResponse(
             generated_at=generated_at,
             trade_date=trade_date,
@@ -228,10 +249,16 @@ class EtfThreeFactorMonitor:
                     status="success",
                     detail=quote_detail,
                 ),
+                kline_status,
+                share_status,
                 StrongStockSourceStatus(
                     source="ETF三因子监控",
-                    status="success",
-                    detail=f"核心ETF {len(items)} 只",
+                    status=monitor_status,
+                    detail=(
+                        f"核心ETF {len(items)} 只"
+                        if monitor_status == "success"
+                        else f"核心ETF {len(items)} 只，存在降级因子数据"
+                    ),
                 ),
             ],
             summary=summarize_three_factor(items),
@@ -273,6 +300,11 @@ class EtfThreeFactorMonitor:
         *,
         stage: str,
     ) -> _DailyBars:
+        failure_key = (trade_date, symbol)
+        cached_failure = self._daily_cache.get(failure_key)
+        if cached_failure is not None and cached_failure.error is not None:
+            return cached_failure
+
         lookup_key = (stage, trade_date, symbol)
         cache_key = self._daily_cache_lookup.get(lookup_key)
         if cache_key is not None:
@@ -283,6 +315,9 @@ class EtfThreeFactorMonitor:
             daily_bars = _DailyBars(self.daily_kline_provider.get_klines(symbol, count=40))
         except Exception as exc:
             daily_bars = _DailyBars([], f"日K线请求失败: {exc.__class__.__name__}")
+            self._daily_cache[failure_key] = daily_bars
+            self._daily_cache_lookup[lookup_key] = failure_key
+            return daily_bars
         completed_date = _latest_completed_bar_date(
             daily_bars.bars,
             trade_date,
@@ -691,6 +726,40 @@ def _latest_completed_bar_date(
         and (bar_date <= trade_date if include_current_day else bar_date < trade_date)
     ]
     return max(completed_dates, default=None)
+
+
+def _factor_source_status(
+    *,
+    source: str,
+    factors: list[EtfFactorEvidence],
+    success_statuses: set[str],
+    failure_prefix: str,
+    success_detail: str,
+    degraded_detail: str,
+) -> StrongStockSourceStatus:
+    failures = [
+        factor
+        for factor in factors
+        if factor.detail is not None and factor.detail.startswith(failure_prefix)
+    ]
+    if failures:
+        return StrongStockSourceStatus(
+            source=source,
+            status="failed",
+            detail=failures[0].detail or failure_prefix,
+        )
+    unavailable_symbols = [
+        symbol
+        for symbol, factor in zip(CORE_ETFS, factors, strict=True)
+        if factor.status not in success_statuses
+    ]
+    if unavailable_symbols:
+        return StrongStockSourceStatus(
+            source=source,
+            status="stale",
+            detail=f"{degraded_detail}: {', '.join(unavailable_symbols)}",
+        )
+    return StrongStockSourceStatus(source=source, status="success", detail=success_detail)
 
 
 def _close_change(completed: list[KlineBar]) -> tuple[float | None, str | None]:

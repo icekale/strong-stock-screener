@@ -54,9 +54,12 @@ class FakeShareSnapshotProvider:
     def __init__(self, overview: EtfRadarOverviewResponse) -> None:
         self.response = overview
         self.calls: list[bool] = []
+        self.fail = False
 
     def overview(self, *, force: bool = False) -> EtfRadarOverviewResponse:
         self.calls.append(force)
+        if self.fail:
+            raise RuntimeError("official shares unavailable")
         return self.response
 
 
@@ -226,6 +229,7 @@ def test_post_close_share_refresh_upgrades_to_three_factor(
     assert item.direction_factor.updated_at == intraday_item.direction_factor.updated_at
     assert len(quotes.calls) == 1
     assert shares.calls == [False]
+    assert all(status.status == "success" for status in result.source_status)
 
 
 @pytest.mark.parametrize("scan_time", ["2026-07-22T12:00:00", "2026-07-25T10:30:00"])
@@ -276,16 +280,41 @@ def test_insufficient_completed_history_leaves_volume_unavailable(tmp_path: Path
     assert item.mode == "incomplete"
 
 
-def test_daily_kline_provider_error_is_cached_for_completed_date_context(tmp_path: Path) -> None:
+def test_daily_kline_provider_error_is_cached_across_intraday_and_post_close(tmp_path: Path) -> None:
     monitor, _, daily, _ = monitor_with(tmp_path)
     daily.fail_symbols.add("510050.SH")
 
     item = by_symbol(monitor.scan(now=shanghai("2026-07-22T10:30:00")), "510050.SH")
-    monitor.scan(now=shanghai("2026-07-22T10:31:00"))
+    monitor.scan(now=shanghai("2026-07-22T15:05:00"))
 
     assert item.volume_factor.status == "missing"
     assert item.volume_factor.detail == "日K线请求失败: RuntimeError"
     assert daily.calls.count(("510050.SH", 40)) == 1
+    assert len(daily.calls) == 2 * len(CORE_ETFS) - 1
+
+
+def test_scan_marks_partial_daily_kline_data_stale_in_source_status(tmp_path: Path) -> None:
+    monitor, _, daily, _ = monitor_with(tmp_path)
+    daily.bars_by_symbol["510050.SH"] = _bars(volumes=[100] * 19, closes=[100] * 19)
+
+    result = monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+
+    status = next(status for status in result.source_status if status.source == "ETF日K线")
+    assert status.status == "stale"
+    assert "部分不可用" in status.detail
+    assert "510050.SH" in status.detail
+
+
+def test_post_close_marks_official_share_failure_failed_in_source_status(tmp_path: Path) -> None:
+    monitor, _, _, shares = monitor_with(tmp_path)
+    monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+    shares.fail = True
+
+    result = monitor.scan(now=shanghai("2026-07-22T19:05:00"))
+
+    status = next(status for status in result.source_status if status.source == "交易所ETF份额")
+    assert status.status == "failed"
+    assert status.detail == "官方份额请求失败: RuntimeError"
 
 
 @pytest.mark.parametrize("missing_symbol", ["510050.SH", "000016.SH"])

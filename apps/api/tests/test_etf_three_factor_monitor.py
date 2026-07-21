@@ -41,9 +41,12 @@ class FakeDailyKlineProvider:
     def __init__(self, bars_by_symbol: dict[str, list[KlineBar]]) -> None:
         self.bars_by_symbol = bars_by_symbol
         self.calls: list[tuple[str, int]] = []
+        self.fail_symbols: set[str] = set()
 
     def get_klines(self, symbol: str, count: int = 40) -> list[KlineBar]:
         self.calls.append((symbol, count))
+        if symbol in self.fail_symbols:
+            raise RuntimeError("daily Kline unavailable")
         return self.bars_by_symbol[symbol]
 
 
@@ -205,16 +208,52 @@ def test_scan_builds_two_factor_intraday_item(tmp_path: Path) -> None:
     assert shares.calls == []
 
 
-def test_post_close_share_refresh_upgrades_to_three_factor(tmp_path: Path) -> None:
-    monitor, _, _, shares = monitor_with(tmp_path, share_change_pct=5.0)
+@pytest.mark.parametrize("refresh_time", ["2026-07-22T19:05:00", "2026-07-22T19:35:00"])
+def test_post_close_share_refresh_upgrades_to_three_factor(
+    tmp_path: Path, refresh_time: str
+) -> None:
+    monitor, quotes, _, shares = monitor_with(tmp_path, volume=150, share_change_pct=5.0)
+    intraday = monitor.scan(now=shanghai("2026-07-22T10:30:00"))
 
-    result = monitor.scan(now=shanghai("2026-07-22T19:05:00"))
+    result = monitor.scan(now=shanghai(refresh_time))
 
     item = by_symbol(result, "510050.SH")
+    intraday_item = by_symbol(intraday, "510050.SH")
     assert item.share_factor.score == 100
     assert item.share_factor.status == "available"
     assert item.mode == "three_factor"
+    assert item.volume_ratio == intraday_item.volume_ratio
+    assert item.direction_factor.updated_at == intraday_item.direction_factor.updated_at
+    assert len(quotes.calls) == 1
     assert shares.calls == [False]
+
+
+@pytest.mark.parametrize("scan_time", ["2026-07-22T12:00:00", "2026-07-25T10:30:00"])
+def test_non_session_scan_reuses_snapshot_without_provider_calls_or_alerts(
+    tmp_path: Path, scan_time: str
+) -> None:
+    monitor, quotes, daily, shares = monitor_with(tmp_path)
+    previous = monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+    calls = (len(quotes.calls), len(daily.calls), len(shares.calls))
+    alerts = monitor.store.load_alerts()
+
+    result = monitor.scan(now=shanghai(scan_time))
+
+    assert result == previous
+    assert (len(quotes.calls), len(daily.calls), len(shares.calls)) == calls
+    assert monitor.store.load_alerts() == alerts
+
+
+def test_non_session_scan_without_snapshot_is_unavailable_without_quote_calls(tmp_path: Path) -> None:
+    monitor, quotes, daily, shares = monitor_with(tmp_path)
+
+    result = monitor.scan(now=shanghai("2026-07-22T12:00:00"))
+
+    assert not result.monitor_running
+    assert result.source_status[0].status == "failed"
+    assert quotes.calls == []
+    assert daily.calls == []
+    assert shares.calls == []
 
 
 def test_completed_day_baseline_excludes_current_partial_day(tmp_path: Path) -> None:
@@ -233,7 +272,18 @@ def test_insufficient_completed_history_leaves_volume_unavailable(tmp_path: Path
 
     assert item.average_volume_20d is None
     assert item.volume_factor.status == "missing"
+    assert item.volume_factor.detail == "当前成交量或20个已完成交易日成交量不足"
     assert item.mode == "incomplete"
+
+
+def test_daily_kline_provider_error_is_retained_in_volume_evidence(tmp_path: Path) -> None:
+    monitor, _, daily, _ = monitor_with(tmp_path)
+    daily.fail_symbols.add("510050.SH")
+
+    item = by_symbol(monitor.scan(now=shanghai("2026-07-22T10:30:00")), "510050.SH")
+
+    assert item.volume_factor.status == "missing"
+    assert item.volume_factor.detail == "日K线请求失败: RuntimeError"
 
 
 @pytest.mark.parametrize("missing_symbol", ["510050.SH", "000016.SH"])
@@ -270,6 +320,30 @@ def test_completed_close_change_uses_the_last_two_completed_bars(tmp_path: Path)
     assert item.close_change_trade_date == "2026-07-21"
 
 
+def test_post_close_close_change_uses_completed_current_day_not_cached_partial_bar(
+    tmp_path: Path,
+) -> None:
+    monitor, quotes, daily, _ = monitor_with(tmp_path)
+    monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+    for symbol, bars in daily.bars_by_symbol.items():
+        bars[-1] = KlineBar(
+            date="2026-07-22",
+            open=132,
+            high=132,
+            low=132,
+            close=132,
+            volume=300,
+        )
+
+    result = monitor.scan(now=shanghai("2026-07-22T15:05:00"))
+
+    item = by_symbol(result, "510050.SH")
+    assert item.close_change_pct == pytest.approx(20)
+    assert item.close_change_trade_date == "2026-07-22"
+    assert len(quotes.calls) == 1
+    assert len(daily.calls) == 2 * len(CORE_ETFS)
+
+
 def test_scan_caches_daily_bars_and_upserts_one_history_point_per_trade_date(tmp_path: Path) -> None:
     monitor, _, daily, _ = monitor_with(tmp_path)
 
@@ -282,6 +356,7 @@ def test_scan_caches_daily_bars_and_upserts_one_history_point_per_trade_date(tmp
 
 def test_latest_reads_persisted_snapshot_without_provider_calls(tmp_path: Path) -> None:
     monitor, quotes, daily, shares = monitor_with(tmp_path)
+    monitor.scan(now=shanghai("2026-07-22T10:30:00"))
     scanned = monitor.scan(now=shanghai("2026-07-22T19:05:00"))
     calls = (len(quotes.calls), len(daily.calls), len(shares.calls))
 
@@ -290,12 +365,10 @@ def test_latest_reads_persisted_snapshot_without_provider_calls(tmp_path: Path) 
 
 
 def test_alerts_are_created_only_on_high_entry_and_three_factor_upgrade(tmp_path: Path) -> None:
-    monitor, quotes, _, _ = monitor_with(tmp_path, volume=100)
+    monitor, quotes, _, _ = monitor_with(tmp_path, volume=150)
 
     monitor.scan(now=shanghai("2026-07-22T10:30:00"))
     initial_alerts = monitor.store.load_alerts()
-    for symbol in CORE_ETFS:
-        quotes.quotes[symbol].volume = 300
     monitor.scan(now=shanghai("2026-07-22T19:05:00"))
     alerts = monitor.store.load_alerts()
     monitor.scan(now=shanghai("2026-07-22T19:06:00"))
@@ -306,6 +379,11 @@ def test_alerts_are_created_only_on_high_entry_and_three_factor_upgrade(tmp_path
     assert monitor.store.load_alerts() == alerts
     assert all("疑似活动" in alert.title for alert in alerts)
     assert all("量比" in alert.message and "行情时间" in alert.message for alert in alerts)
+    market_alert = next(alert for alert in alerts if alert.alert_type == "market_high")
+    assert "量能时间 2026-07-22T10:30:00+08:00" in market_alert.message
+    assert "行情时间 2026-07-22T10:30:00+08:00" in market_alert.message
+    assert "份额时间 2026-07-22T19:05:00+08:00" in market_alert.message
+    assert len(quotes.calls) == 1
 
 
 def test_market_watch_alert_is_created_only_when_entering_watch(tmp_path: Path) -> None:
@@ -324,6 +402,7 @@ def test_market_watch_alert_is_created_only_when_entering_watch(tmp_path: Path) 
 
 def test_post_close_missing_share_data_is_not_marked_pending(tmp_path: Path) -> None:
     monitor, _, _, _ = monitor_with(tmp_path, share_change_pct=None)
+    monitor.scan(now=shanghai("2026-07-22T10:30:00"))
 
     item = by_symbol(monitor.scan(now=shanghai("2026-07-22T19:05:00")), "510050.SH")
 
@@ -333,6 +412,7 @@ def test_post_close_missing_share_data_is_not_marked_pending(tmp_path: Path) -> 
 
 def test_post_close_stale_share_data_is_not_marked_pending(tmp_path: Path) -> None:
     monitor, _, _, shares = monitor_with(tmp_path)
+    monitor.scan(now=shanghai("2026-07-22T10:30:00"))
     shares.response = _official_overview(trade_date="2026-07-21", share_change_pct=5.0)
 
     item = by_symbol(monitor.scan(now=shanghai("2026-07-22T19:05:00")), "510050.SH")

@@ -57,6 +57,12 @@ class _ShareValue:
     evidence: EtfFactorEvidence
 
 
+@dataclass(frozen=True)
+class _DailyBars:
+    bars: list[KlineBar]
+    error: str | None = None
+
+
 class EtfThreeFactorMonitor:
     def __init__(
         self,
@@ -73,16 +79,23 @@ class EtfThreeFactorMonitor:
         self.capital_store = capital_store
         self.store = store
         self._lock = RLock()
-        self._daily_cache: dict[tuple[str, str], list[KlineBar]] = {}
+        self._daily_cache: dict[tuple[str, str, bool], list[KlineBar]] = {}
 
     def scan(self, now: datetime | None = None, force: bool = False) -> EtfThreeFactorResponse:
         with self._lock:
             scan_at = _shanghai_now(now)
             trade_date = scan_at.date().isoformat()
             previous = self.store.load_snapshot()
+            if not _is_quote_session(scan_at):
+                if not _is_successful_snapshot(previous):
+                    return self._unavailable_response(scan_at, "非交易时段且尚无成功监控快照")
+                if previous.trade_date != trade_date or not _is_post_close(scan_at):
+                    return previous
+                return self._post_close_scan(previous, scan_at, trade_date, force)
+
             quote_by_symbol, quote_error = self._load_current_quotes(trade_date)
             if quote_error is not None:
-                return previous or self._unavailable_response(scan_at, quote_error)
+                return previous if _is_successful_snapshot(previous) else self._unavailable_response(scan_at, quote_error)
 
             share_values = self._share_values(scan_at, trade_date, force)
             items = [
@@ -95,49 +108,8 @@ class EtfThreeFactorMonitor:
                 )
                 for symbol in CORE_ETFS
             ]
-            generated_at = scan_at.isoformat(timespec="seconds")
-            response = EtfThreeFactorResponse(
-                generated_at=generated_at,
-                trade_date=trade_date,
-                as_of=generated_at,
-                signal_stage="intraday" if scan_at.hour < 19 else "post_close",
-                model_version=MONITOR_MODEL_VERSION,
-                source_status=[
-                    StrongStockSourceStatus(
-                        source="TickFlow行情",
-                        status="success",
-                        detail="ETF与指数实时行情均为当前交易日",
-                    ),
-                    StrongStockSourceStatus(
-                        source="ETF三因子监控",
-                        status="success",
-                        detail=f"核心ETF {len(items)} 只",
-                    ),
-                ],
-                summary=summarize_three_factor(items),
-                items=items,
-                monitor_running=True,
-                last_scan_at=generated_at,
-            )
-            self.store.upsert_history(
-                [
-                    EtfThreeFactorHistoryPoint(
-                        trade_date=trade_date,
-                        symbol=item.symbol,
-                        close_change_pct=item.close_change_pct,
-                        volume=item.current_volume,
-                        average_volume_20d=item.average_volume_20d,
-                        volume_ratio=item.volume_ratio,
-                        total_shares=share_values[item.symbol].total_shares,
-                        share_change_pct=item.share_change_pct,
-                        signal_score=item.signal_score,
-                        level=item.level,
-                    )
-                    for item in items
-                ]
-            )
-            self._upsert_alerts(previous, response)
-            self.store.save_snapshot(response)
+            response = self._response(scan_at, trade_date, items, "ETF与指数实时行情均为当前交易日")
+            self._save_scan(previous, response, share_values)
             return response
 
     def latest(self) -> EtfThreeFactorResponse:
@@ -201,14 +173,112 @@ class EtfThreeFactorMonitor:
                 return {}, f"TickFlow行情过期 {symbol}"
         return quote_by_symbol, None
 
-    def _daily_bars(self, trade_date: str, symbol: str) -> list[KlineBar]:
-        cache_key = (trade_date, symbol)
+    def _post_close_scan(
+        self,
+        previous: EtfThreeFactorResponse,
+        scan_at: datetime,
+        trade_date: str,
+        force: bool,
+    ) -> EtfThreeFactorResponse:
+        refresh_shares = _is_share_refresh(scan_at)
+        share_values = self._share_values(scan_at, trade_date, force) if refresh_shares else None
+        previous_items = {item.symbol: item for item in previous.items}
+        items = [
+            self._refresh_post_close_item(
+                previous_items[symbol],
+                share_values[symbol] if share_values is not None else None,
+                scan_at,
+                trade_date,
+            )
+            for symbol in CORE_ETFS
+            if symbol in previous_items
+        ]
+        if len(items) != len(CORE_ETFS):
+            return previous
+        response = self._response(
+            scan_at,
+            trade_date,
+            items,
+            "复用当日最后一次成功盘中行情",
+        )
+        if share_values is None:
+            self.store.save_snapshot(response)
+        else:
+            self._save_scan(previous, response, share_values)
+        return response
+
+    def _response(
+        self,
+        scan_at: datetime,
+        trade_date: str,
+        items: list[EtfThreeFactorItem],
+        quote_detail: str,
+    ) -> EtfThreeFactorResponse:
+        generated_at = scan_at.isoformat(timespec="seconds")
+        return EtfThreeFactorResponse(
+            generated_at=generated_at,
+            trade_date=trade_date,
+            as_of=generated_at,
+            signal_stage="post_close" if _is_post_close(scan_at) else "intraday",
+            model_version=MONITOR_MODEL_VERSION,
+            source_status=[
+                StrongStockSourceStatus(
+                    source="TickFlow行情",
+                    status="success",
+                    detail=quote_detail,
+                ),
+                StrongStockSourceStatus(
+                    source="ETF三因子监控",
+                    status="success",
+                    detail=f"核心ETF {len(items)} 只",
+                ),
+            ],
+            summary=summarize_three_factor(items),
+            items=items,
+            monitor_running=True,
+            last_scan_at=generated_at,
+        )
+
+    def _save_scan(
+        self,
+        previous: EtfThreeFactorResponse | None,
+        response: EtfThreeFactorResponse,
+        share_values: dict[str, _ShareValue],
+    ) -> None:
+        self.store.upsert_history(
+            [
+                EtfThreeFactorHistoryPoint(
+                    trade_date=response.trade_date,
+                    symbol=item.symbol,
+                    close_change_pct=item.close_change_pct,
+                    volume=item.current_volume,
+                    average_volume_20d=item.average_volume_20d,
+                    volume_ratio=item.volume_ratio,
+                    total_shares=share_values[item.symbol].total_shares,
+                    share_change_pct=item.share_change_pct,
+                    signal_score=item.signal_score,
+                    level=item.level,
+                )
+                for item in response.items
+            ]
+        )
+        self._upsert_alerts(previous, response)
+        self.store.save_snapshot(response)
+
+    def _daily_bars(
+        self,
+        trade_date: str,
+        symbol: str,
+        *,
+        include_current_day: bool,
+    ) -> _DailyBars:
+        cache_key = (trade_date, symbol, include_current_day)
         if cache_key not in self._daily_cache:
             try:
                 self._daily_cache[cache_key] = self.daily_kline_provider.get_klines(symbol, count=40)
-            except Exception:
-                self._daily_cache[cache_key] = []
-        return self._daily_cache[cache_key]
+            except Exception as exc:
+                return _DailyBars([], f"日K线请求失败: {exc.__class__.__name__}")
+        return _DailyBars(self._daily_cache[cache_key])
 
     def _build_item(
         self,
@@ -223,9 +293,10 @@ class EtfThreeFactorMonitor:
         index_symbol = INDEX_SYMBOL_BY_ETF[symbol]
         quote = quote_by_symbol[symbol]
         index_quote = quote_by_symbol[index_symbol]
+        daily_bars = self._daily_bars(trade_date, symbol, include_current_day=False)
         completed = [
             bar
-            for bar in self._daily_bars(trade_date, symbol)
+            for bar in daily_bars.bars
             if _bar_trade_date(bar.date) is not None and _bar_trade_date(bar.date) < trade_date
         ]
         completed.sort(key=lambda bar: _bar_trade_date(bar.date) or "")
@@ -254,6 +325,8 @@ class EtfThreeFactorMonitor:
             detail=(
                 "当前累计成交量与最近20个已完成交易日均量"
                 if volume_ratio is not None
+                else daily_bars.error
+                if daily_bars.error is not None
                 else "当前成交量或20个已完成交易日成交量不足"
             ),
         )
@@ -299,6 +372,45 @@ class EtfThreeFactorMonitor:
             mode=mode,
             level=signal_level(score),
             updated_at=scan_at.isoformat(timespec="seconds"),
+        )
+
+    def _refresh_post_close_item(
+        self,
+        previous: EtfThreeFactorItem,
+        share_value: _ShareValue | None,
+        scan_at: datetime,
+        trade_date: str,
+    ) -> EtfThreeFactorItem:
+        daily_bars = self._daily_bars(trade_date, previous.symbol, include_current_day=True)
+        completed = [
+            bar
+            for bar in daily_bars.bars
+            if _bar_trade_date(bar.date) is not None and _bar_trade_date(bar.date) <= trade_date
+        ]
+        completed.sort(key=lambda bar: _bar_trade_date(bar.date) or "")
+        close_change = _close_change(completed)
+        next_share = share_value or _ShareValue(
+            change_pct=previous.share_change_pct,
+            total_shares=None,
+            evidence=previous.share_factor,
+        )
+        score, mode = combine_factor_scores(
+            previous.volume_factor.score,
+            previous.direction_factor.score,
+            next_share.evidence.score,
+            next_share.evidence.status == "pending",
+        )
+        return previous.model_copy(
+            update={
+                "close_change_pct": close_change[0],
+                "close_change_trade_date": close_change[1],
+                "share_change_pct": next_share.change_pct,
+                "share_factor": next_share.evidence,
+                "signal_score": score,
+                "mode": mode,
+                "level": signal_level(score),
+                "updated_at": scan_at.isoformat(timespec="seconds"),
+            }
         )
 
     def _share_values(
@@ -480,7 +592,9 @@ class EtfThreeFactorMonitor:
                 f"{representative.intraday_change_pct if representative is not None else None}%; "
                 f"指数涨跌 {representative.index_change_pct if representative is not None else None}%; "
                 f"份额变动 {representative.share_change_pct if representative is not None else None}%; "
-                f"行情时间 {response.generated_at}"
+                f"量能时间 {representative.volume_factor.updated_at if representative is not None else None}; "
+                f"行情时间 {representative.direction_factor.updated_at if representative is not None else None}; "
+                f"份额时间 {representative.share_factor.updated_at if representative is not None else None}"
             ),
             signal_score=response.summary.signal_score or 0,
             triggered_at=response.generated_at,
@@ -494,7 +608,7 @@ class EtfThreeFactorMonitor:
             generated_at=generated_at,
             trade_date=now.date().isoformat(),
             as_of=generated_at,
-            signal_stage="intraday" if now.hour < 19 else "post_close",
+            signal_stage="post_close" if _is_post_close(now) else "intraday",
             model_version=MONITOR_MODEL_VERSION,
             source_status=[
                 StrongStockSourceStatus(source="ETF三因子监控", status="failed", detail=detail)
@@ -506,6 +620,25 @@ class EtfThreeFactorMonitor:
 def _shanghai_now(now: datetime | None) -> datetime:
     value = now or datetime.now(SHANGHAI)
     return value.replace(tzinfo=SHANGHAI) if value.tzinfo is None else value.astimezone(SHANGHAI)
+
+
+def _is_quote_session(now: datetime) -> bool:
+    if now.weekday() >= 5:
+        return False
+    clock = (now.hour, now.minute)
+    return (9, 30) <= clock <= (11, 30) or (13, 0) <= clock <= (15, 0)
+
+
+def _is_post_close(now: datetime) -> bool:
+    return (now.hour, now.minute) >= (15, 5)
+
+
+def _is_share_refresh(now: datetime) -> bool:
+    return now.weekday() < 5 and (now.hour, now.minute) in {(19, 5), (19, 35)}
+
+
+def _is_successful_snapshot(snapshot: EtfThreeFactorResponse | None) -> bool:
+    return snapshot is not None and snapshot.monitor_running and bool(snapshot.items)
 
 
 def _quote_trade_date(value: object) -> str | None:

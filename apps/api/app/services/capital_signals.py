@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import statistics
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
 from math import isclose
 from threading import RLock
@@ -1118,6 +1118,31 @@ def _calculate_activity_rows(
             baseline=baseline_by_symbol.get(symbol),
         )
     return output
+
+
+def enrich_etf_overview_close_changes(
+    overview: EtfRadarOverviewResponse,
+    close_changes: Mapping[str, tuple[float | None, str | None]],
+) -> EtfRadarOverviewResponse:
+    def enrich(items: list[HuijinEtfActivityItem]) -> list[HuijinEtfActivityItem]:
+        return [
+            item.model_copy(
+                update={
+                    "close_change_pct": close_changes[item.symbol][0],
+                    "close_change_trade_date": close_changes[item.symbol][1],
+                }
+            )
+            if item.symbol in close_changes
+            else item.model_copy()
+            for item in items
+        ]
+
+    return overview.model_copy(
+        update={
+            "core_items": enrich(overview.core_items),
+            "validation_items": enrich(overview.validation_items),
+        }
+    )
 
 
 def _validation_groups(

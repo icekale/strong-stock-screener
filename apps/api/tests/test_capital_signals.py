@@ -27,6 +27,7 @@ from app.services.capital_signal_store import CapitalSignalStore
 from app.services.capital_signals import (
     CapitalSignalService,
     build_share_change,
+    enrich_etf_overview_close_changes,
     robust_z_score,
     synchronization_ratio,
 )
@@ -288,6 +289,26 @@ def test_additive_response_models_keep_compatibility_defaults() -> None:
         trade_date="2026-07-17", symbol="510050.SH", name="上证50ETF华夏"
     ).daily_change_pct is None
     assert EtfRadarHoldersResponse(**metadata).baselines == []
+
+
+def test_close_change_enrichment_copies_activity_items_without_mutating_overview(
+    tmp_path: Path,
+) -> None:
+    service, _ = _service(tmp_path)
+    overview = service.overview(force=True)
+
+    enriched = enrich_etf_overview_close_changes(
+        overview,
+        {"510050.SH": (1.25, "2026-07-17")},
+    )
+
+    original = next(item for item in overview.core_items if item.symbol == "510050.SH")
+    updated = next(item for item in enriched.core_items if item.symbol == "510050.SH")
+    assert original.close_change_pct is None
+    assert updated.close_change_pct == pytest.approx(1.25)
+    assert updated.close_change_trade_date == "2026-07-17"
+    assert enriched.validation_items == overview.validation_items
+    assert enriched.items == overview.items
 
 
 def test_service_builds_complete_huijin_activity_and_legacy_mapping(tmp_path: Path) -> None:

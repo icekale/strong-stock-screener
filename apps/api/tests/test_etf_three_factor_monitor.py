@@ -232,6 +232,36 @@ def test_post_close_share_refresh_upgrades_to_three_factor(
     assert all(status.status == "success" for status in result.source_status)
 
 
+def test_non_exact_post_close_scan_refreshes_pending_shares_once(tmp_path: Path) -> None:
+    monitor, _, _, shares = monitor_with(tmp_path, volume=150, share_change_pct=5.0)
+    monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+
+    result = monitor.scan(now=shanghai("2026-07-22T19:06:00"))
+    subsequent = monitor.scan(now=shanghai("2026-07-22T19:07:00"))
+
+    assert by_symbol(result, "510050.SH").share_factor.status == "available"
+    assert by_symbol(result, "510050.SH").mode == "three_factor"
+    assert by_symbol(subsequent, "510050.SH").share_factor.status == "available"
+    assert shares.calls == [False]
+
+
+def test_non_exact_post_close_share_failure_replaces_pending_factor(tmp_path: Path) -> None:
+    monitor, _, _, shares = monitor_with(tmp_path)
+    monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+    shares.fail = True
+
+    result = monitor.scan(now=shanghai("2026-07-22T19:06:00"))
+    monitor.scan(now=shanghai("2026-07-22T19:07:00"))
+
+    item = by_symbol(result, "510050.SH")
+    status = next(status for status in result.source_status if status.source == "交易所ETF份额")
+    assert item.share_factor.status == "missing"
+    assert item.mode == "incomplete"
+    assert status.status == "failed"
+    assert status.detail == "官方份额请求失败: RuntimeError"
+    assert shares.calls == [False]
+
+
 @pytest.mark.parametrize("scan_time", ["2026-07-22T12:00:00", "2026-07-25T10:30:00"])
 def test_non_session_scan_reuses_snapshot_without_provider_calls_or_alerts(
     tmp_path: Path, scan_time: str
@@ -377,6 +407,26 @@ def test_post_close_close_change_uses_completed_current_day_not_cached_partial_b
     monitor.scan(now=shanghai("2026-07-22T15:06:00"))
 
     assert len(daily.calls) == 2 * len(CORE_ETFS)
+
+
+def test_post_close_kline_error_preserves_intraday_volume_evidence_and_marks_response_stale(
+    tmp_path: Path,
+) -> None:
+    monitor, _, daily, _ = monitor_with(tmp_path, volume=150)
+    intraday = monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+    daily.fail_symbols.add("510050.SH")
+
+    result = monitor.scan(now=shanghai("2026-07-22T15:05:00"))
+
+    intraday_item = by_symbol(intraday, "510050.SH")
+    item = by_symbol(result, "510050.SH")
+    kline_status = next(status for status in result.source_status if status.source == "ETF日K线")
+    monitor_status = next(status for status in result.source_status if status.source == "ETF三因子监控")
+    assert item.volume_factor == intraday_item.volume_factor
+    assert item.signal_score == intraday_item.signal_score
+    assert kline_status.status == "stale"
+    assert kline_status.detail == "日K线请求失败: RuntimeError"
+    assert monitor_status.status == "stale"
 
 
 def test_scan_caches_daily_bars_and_upserts_one_history_point_per_trade_date(tmp_path: Path) -> None:

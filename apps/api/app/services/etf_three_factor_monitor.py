@@ -181,10 +181,12 @@ class EtfThreeFactorMonitor:
         trade_date: str,
         force: bool,
     ) -> EtfThreeFactorResponse:
-        refresh_shares = _is_share_refresh(scan_at)
+        refresh_shares = _is_share_refresh(scan_at) or (
+            _is_after_share_disclosure(scan_at) and _has_pending_share_factors(previous)
+        )
         share_values = self._share_values(scan_at, trade_date, force) if refresh_shares else None
         previous_items = {item.symbol: item for item in previous.items}
-        items = [
+        refreshed_items = [
             self._refresh_post_close_item(
                 previous_items[symbol],
                 share_values[symbol] if share_values is not None else None,
@@ -194,6 +196,7 @@ class EtfThreeFactorMonitor:
             for symbol in CORE_ETFS
             if symbol in previous_items
         ]
+        items = [item for item, _ in refreshed_items]
         if len(items) != len(CORE_ETFS):
             return previous
         response = self._response(
@@ -201,6 +204,10 @@ class EtfThreeFactorMonitor:
             trade_date,
             items,
             "复用当日最后一次成功盘中行情",
+            post_close_kline_error=next(
+                (error for _, error in refreshed_items if error is not None),
+                None,
+            ),
         )
         if share_values is None:
             self.store.save_snapshot(response)
@@ -214,15 +221,25 @@ class EtfThreeFactorMonitor:
         trade_date: str,
         items: list[EtfThreeFactorItem],
         quote_detail: str,
+        *,
+        post_close_kline_error: str | None = None,
     ) -> EtfThreeFactorResponse:
         generated_at = scan_at.isoformat(timespec="seconds")
-        kline_status = _factor_source_status(
-            source="ETF日K线",
-            factors=[item.volume_factor for item in items],
-            success_statuses={"available"},
-            failure_prefix="日K线请求失败:",
-            success_detail=f"核心ETF {len(items)} 只日K线完整",
-            degraded_detail="日K线部分不可用",
+        kline_status = (
+            StrongStockSourceStatus(
+                source="ETF日K线",
+                status="stale",
+                detail=post_close_kline_error,
+            )
+            if post_close_kline_error is not None
+            else _factor_source_status(
+                source="ETF日K线",
+                factors=[item.volume_factor for item in items],
+                success_statuses={"available"},
+                failure_prefix="日K线请求失败:",
+                success_detail=f"核心ETF {len(items)} 只日K线完整",
+                degraded_detail="日K线部分不可用",
+            )
         )
         share_status = _factor_source_status(
             source="交易所ETF份额",
@@ -428,7 +445,7 @@ class EtfThreeFactorMonitor:
         share_value: _ShareValue | None,
         scan_at: datetime,
         trade_date: str,
-    ) -> EtfThreeFactorItem:
+    ) -> tuple[EtfThreeFactorItem, str | None]:
         daily_bars = self._daily_bars(trade_date, previous.symbol, stage="post_close")
         completed = [
             bar
@@ -448,17 +465,20 @@ class EtfThreeFactorMonitor:
             next_share.evidence.score,
             next_share.evidence.status == "pending",
         )
-        return previous.model_copy(
-            update={
-                "close_change_pct": close_change[0],
-                "close_change_trade_date": close_change[1],
-                "share_change_pct": next_share.change_pct,
-                "share_factor": next_share.evidence,
-                "signal_score": score,
-                "mode": mode,
-                "level": signal_level(score),
-                "updated_at": scan_at.isoformat(timespec="seconds"),
-            }
+        return (
+            previous.model_copy(
+                update={
+                    "close_change_pct": close_change[0],
+                    "close_change_trade_date": close_change[1],
+                    "share_change_pct": next_share.change_pct,
+                    "share_factor": next_share.evidence,
+                    "signal_score": score,
+                    "mode": mode,
+                    "level": signal_level(score),
+                    "updated_at": scan_at.isoformat(timespec="seconds"),
+                }
+            ),
+            daily_bars.error,
         )
 
     def _share_values(
@@ -683,6 +703,14 @@ def _is_post_close(now: datetime) -> bool:
 
 def _is_share_refresh(now: datetime) -> bool:
     return now.weekday() < 5 and (now.hour, now.minute) in {(19, 5), (19, 35)}
+
+
+def _is_after_share_disclosure(now: datetime) -> bool:
+    return now.weekday() < 5 and (now.hour, now.minute) >= (19, 0)
+
+
+def _has_pending_share_factors(snapshot: EtfThreeFactorResponse) -> bool:
+    return any(item.share_factor.status == "pending" for item in snapshot.items)
 
 
 def _is_successful_snapshot(snapshot: EtfThreeFactorResponse | None) -> bool:

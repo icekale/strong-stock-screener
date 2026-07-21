@@ -161,4 +161,22 @@ describe('EtfThreeFactorPanel', () => {
     expect(series(comparisonOption!)[1]!.data).toEqual([null, null, 0.3]);
     expect(series(comparisonOption!).every(item => item.connectNulls === false)).toBe(true);
   });
+
+  it('renders one chart-area state without usable history and retains prior charts during a stale reload', async () => {
+    const wrapper = mountPanel();
+
+    await wrapper.setProps({ history: { ...historyFixture(), points: [] } });
+    expect(wrapper.findAll('[data-testid="three-factor-chart"]')).toHaveLength(0);
+    expect(wrapper.get('[data-testid="three-factor-history-empty"]').text()).toContain('暂无可用历史信号');
+
+    await wrapper.setProps({ history: null, historyLoading: true });
+    expect(wrapper.get('[data-testid="three-factor-history-loading"]').text()).toContain('正在读取历史信号');
+
+    await wrapper.setProps({ historyLoading: false, historyError: '历史请求失败' });
+    expect(wrapper.get('[data-testid="three-factor-history-error"]').text()).toContain('历史请求失败');
+
+    await wrapper.setProps({ history: historyFixture(), historyLoading: true });
+    expect(wrapper.findAll('[data-testid="three-factor-chart"]')).toHaveLength(3);
+    expect(wrapper.get('.etf-three-factor__history-error').text()).toContain('历史请求失败');
+  });
 });

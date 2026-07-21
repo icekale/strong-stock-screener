@@ -291,6 +291,16 @@ function threeFactorHistoryFixture(symbol = '510050.SH'): EtfThreeFactorHistoryR
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 function setDefaultApiResponses() {
   api.getEtfRadarOverview.mockResolvedValue(overviewFixture());
   api.getEtfRadarHistory.mockResolvedValue(historyFixture());
@@ -426,6 +436,49 @@ describe('EtfRadarView', () => {
     expect(wrapper.get('[data-testid="etf-panel-error"]').text()).toContain('概览服务暂不可用');
     expect(wrapper.find('[data-testid="core-table"]').exists()).toBe(false);
     expect(wrapper.text()).toContain('今日份额活动概览暂不可用');
+    expect(wrapper.get('.wb-section-header .wb-status-tag').text()).toBe('成功');
+    wrapper.unmount();
+  });
+
+  it('keeps the selected symbol history when an earlier deferred response finishes last', async () => {
+    routeState.route.query = { tab: 'activity' };
+    setDefaultApiResponses();
+    const responses = new Map<string, ReturnType<typeof deferred<EtfThreeFactorHistoryResponse>>>();
+    api.getEtfThreeFactorHistory.mockImplementation((symbol: string) => {
+      const response = deferred<EtfThreeFactorHistoryResponse>();
+      responses.set(symbol, response);
+      return response.promise;
+    });
+    const wrapper = mountViewImmediately();
+
+    await vi.waitFor(() => {
+      expect(api.getEtfThreeFactorHistory).toHaveBeenCalledWith('510050.SH', 40);
+    });
+    await wrapper.findAll('[data-testid="dragon-status"]')[1]!.trigger('click');
+
+    await vi.waitFor(() => {
+      expect(api.getEtfThreeFactorHistory).toHaveBeenCalledWith('510300.SH', 40);
+    });
+    expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('三因子ETF2');
+    expect(wrapper.find('[data-testid="three-factor-history-loading"]').exists()).toBe(true);
+    responses.get('510300.SH')!.resolve({
+      ...threeFactorHistoryFixture('510300.SH'),
+      points: [{ ...threeFactorHistoryFixture('510300.SH').points[0]!, trade_date: 'B-HISTORY' }]
+    });
+    await flushPromises();
+    await nextTick();
+    expect(wrapper.get('[data-testid="signal-timeline"]').text()).toContain('B-HISTORY');
+
+    responses.get('510050.SH')!.resolve({
+      ...threeFactorHistoryFixture('510050.SH'),
+      points: [{ ...threeFactorHistoryFixture('510050.SH').points[0]!, trade_date: 'A-HISTORY' }]
+    });
+    await flushPromises();
+    await nextTick();
+
+    expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('三因子ETF2');
+    expect(wrapper.get('[data-testid="signal-timeline"]').text()).toContain('B-HISTORY');
+    expect(wrapper.get('[data-testid="signal-timeline"]').text()).not.toContain('A-HISTORY');
     wrapper.unmount();
   });
 

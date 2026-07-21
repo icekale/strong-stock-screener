@@ -42,8 +42,12 @@ const sortedItems = computed(() =>
     return sortDirection.value === 'desc' ? rightValue - leftValue : leftValue - rightValue;
   })
 );
-const historyDates = computed(() => props.history?.points.map(point => point.trade_date) ?? []);
-const timelinePoints = computed(() => [...(props.history?.points ?? [])].reverse());
+const selectedHistory = computed(() =>
+  props.history?.symbol === props.selectedSymbol ? props.history : null
+);
+const hasUsableHistory = computed(() => (selectedHistory.value?.points.length ?? 0) > 0);
+const historyDates = computed(() => selectedHistory.value?.points.map(point => point.trade_date) ?? []);
+const timelinePoints = computed(() => [...(selectedHistory.value?.points ?? [])].reverse());
 
 function resolveChartColor(token: string, fallback: string) {
   if (typeof window === 'undefined') return fallback;
@@ -73,8 +77,8 @@ const volumeOption = computed<EChartsOption>(() => ({
   xAxis: { type: 'category', data: historyDates.value },
   yAxis: { type: 'value', axisLabel: { formatter: compactNumber } },
   series: [
-    { name: '成交量', type: 'bar', data: props.history?.points.map(point => point.volume) ?? [] },
-    { name: '20日均量', type: 'line', connectNulls: false, data: props.history?.points.map(point => point.average_volume_20d) ?? [] }
+    { name: '成交量', type: 'bar', data: selectedHistory.value?.points.map(point => point.volume) ?? [] },
+    { name: '20日均量', type: 'line', connectNulls: false, data: selectedHistory.value?.points.map(point => point.average_volume_20d) ?? [] }
   ]
 }));
 
@@ -91,13 +95,13 @@ const shareOption = computed<EChartsOption>(() => ({
     { type: 'value', axisLabel: { formatter: (value: number) => `${value.toFixed(1)}%` } }
   ],
   series: [
-    { name: 'ETF份额', type: 'line', connectNulls: false, data: props.history?.points.map(point => point.total_shares) ?? [] },
-    { name: '份额日变化', type: 'line', yAxisIndex: 1, connectNulls: false, data: props.history?.points.map(point => point.share_change_pct) ?? [] }
+    { name: 'ETF份额', type: 'line', connectNulls: false, data: selectedHistory.value?.points.map(point => point.total_shares) ?? [] },
+    { name: '份额日变化', type: 'line', yAxisIndex: 1, connectNulls: false, data: selectedHistory.value?.points.map(point => point.share_change_pct) ?? [] }
   ]
 }));
 
 const comparisonOption = computed<EChartsOption>(() => {
-  const points = props.history?.points ?? [];
+  const points = selectedHistory.value?.points ?? [];
   const latestDate = points.at(-1)?.trade_date;
   return {
     animation: false,
@@ -261,12 +265,15 @@ function sortLabel(key: SortKey) {
           <small>{{ selectedItem ? factorStatusLabel(selectedItem.share_factor.status) : '--' }} · {{ selectedItem?.share_factor.detail || '--' }}</small>
         </div>
       </dl>
-      <p v-if="historyError" class="etf-three-factor__history-error" role="status" aria-live="polite">{{ historyError }}</p>
-      <div class="etf-three-factor__charts">
+      <p v-if="historyError && hasUsableHistory" class="etf-three-factor__history-error" role="status" aria-live="polite">{{ historyError }}</p>
+      <div v-if="hasUsableHistory" class="etf-three-factor__charts">
         <EChart :option="volumeOption" :height="236" :loading="historyLoading" />
         <EChart :option="shareOption" :height="236" :loading="historyLoading" />
         <EChart :option="comparisonOption" :height="236" :loading="historyLoading" />
       </div>
+      <p v-else-if="historyLoading" data-testid="three-factor-history-loading" class="etf-three-factor__history-state" role="status" aria-live="polite">正在读取历史信号</p>
+      <p v-else-if="historyError" data-testid="three-factor-history-error" class="etf-three-factor__history-state etf-three-factor__history-error" role="status" aria-live="polite">{{ historyError }}</p>
+      <p v-else data-testid="three-factor-history-empty" class="etf-three-factor__history-state">暂无可用历史信号</p>
     </div>
 
     <div data-testid="signal-timeline" class="etf-three-factor__timeline" aria-label="三因子信号时间线">
@@ -462,6 +469,13 @@ function sortLabel(key: SortKey) {
   padding: 8px 12px;
   color: var(--wb-warning);
   background: var(--wb-status-warning-soft);
+}
+
+.etf-three-factor__history-state {
+  margin: 0;
+  padding: 12px;
+  color: var(--wb-muted);
+  border-top: 1px solid var(--wb-border);
 }
 
 .etf-three-factor__charts {

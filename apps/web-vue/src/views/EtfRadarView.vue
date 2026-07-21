@@ -296,6 +296,20 @@ function activeStatus() {
   return activeData.value ? 'success' : 'unknown';
 }
 
+function activityStatus() {
+  if (threeFactorLoading.value) return 'running';
+  if (threeFactorError.value && threeFactor.value) return 'partial';
+  if (threeFactorError.value) return 'failed';
+  if (threeFactor.value?.source_status.some(source => source.status === 'stale' || source.status === 'failed')) {
+    return 'partial';
+  }
+  if (overview.value?.source_status.some(source => source.status === 'stale' || source.status === 'failed')) {
+    return 'partial';
+  }
+  if (threeFactor.value) return 'success';
+  return activeStatus();
+}
+
 function activeSources() {
   return activeMetadata.value?.source_status ?? [];
 }
@@ -386,15 +400,22 @@ async function loadThreeFactorHistory(symbol: string, force = false) {
   threeFactorHistoryLoading.value = true;
   threeFactorHistoryError.value = null;
   try {
-    threeFactorHistory.value = await requestCache.get(
+    const response = await requestCache.get(
       `etf-three-factor-history:${symbol}`,
       () => getEtfThreeFactorHistory(symbol, 40),
       { force }
     );
+    if (symbol === selectedThreeFactorSymbol.value) {
+      threeFactorHistory.value = response;
+    }
   } catch (error) {
-    threeFactorHistoryError.value = errorMessage(error, '读取ETF三因子历史失败');
+    if (symbol === selectedThreeFactorSymbol.value) {
+      threeFactorHistoryError.value = errorMessage(error, '读取ETF三因子历史失败');
+    }
   } finally {
-    threeFactorHistoryLoading.value = false;
+    if (symbol === selectedThreeFactorSymbol.value) {
+      threeFactorHistoryLoading.value = false;
+    }
   }
 }
 
@@ -502,7 +523,7 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
 
     <section v-else-if="activeTab === 'activity'" class="etf-panel">
       <SectionHeader title="今日份额活动" source="交易所份额与报告基线" :updated-at="formatAsOf(overview?.as_of)">
-        <StatusTag :status="activeStatus()" />
+        <StatusTag :status="activityStatus()" />
       </SectionHeader>
       <a-alert v-if="errors.overview" data-testid="etf-panel-error" type="warning" :message="activeErrorMessage()" show-icon />
       <a-alert v-if="threeFactorError" data-testid="three-factor-error" type="warning" :message="threeFactorErrorMessage()" show-icon />

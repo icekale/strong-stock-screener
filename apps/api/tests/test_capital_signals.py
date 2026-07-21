@@ -1658,6 +1658,139 @@ def test_history_uses_fresh_compatible_snapshot_without_refresh(tmp_path: Path) 
     assert any(point.trade_date == "2026-07-17" for point in result.points)
 
 
+def test_overview_backfills_szse_history_even_when_snapshot_is_fresh(tmp_path: Path) -> None:
+    store = CapitalSignalStore(tmp_path)
+    store.save_share_history(
+        [
+            EtfSharePoint(
+                trade_date="2026-07-16",
+                symbol=symbol,
+                name=definition.name,
+                total_shares=1_000,
+            )
+            for symbol, definition in ALL_ETFS.items()
+            if symbol.endswith(".SH")
+        ]
+    )
+    initial_service = CapitalSignalService(
+        provider=FakeCapitalProvider(),
+        store=store,
+        holder_provider=FakeHolderProvider(),
+        clock=_clock,
+    )
+    initial = initial_service.overview(force=True)
+    assert next(item for item in initial.core_items if item.symbol == "159915.SZ").share_delta is None
+    store.save_share_history(
+        [
+            *store.load_share_history(),
+            *[
+                EtfSharePoint(
+                    trade_date="2026-07-15",
+                    symbol=symbol,
+                    name=definition.name,
+                    total_shares=850,
+                )
+                for symbol, definition in ALL_ETFS.items()
+                if symbol.endswith(".SZ")
+            ],
+        ]
+    )
+
+    class HistoricalSzseProvider(FakeCapitalProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.history_calls: list[tuple[str, str, tuple[str, ...]]] = []
+
+        def get_etf_share_history_rows(
+            self,
+            start_date: str,
+            end_date: str,
+            symbols: list[str] | tuple[str, ...],
+        ) -> CapitalProviderResult[EtfSharePoint]:
+            self.history_calls.append((start_date, end_date, tuple(symbols)))
+            return CapitalProviderResult(
+                rows=[
+                    EtfSharePoint(
+                        trade_date="2026-07-16",
+                        symbol=symbol,
+                        name=ALL_ETFS[symbol].name,
+                        total_shares=900,
+                        date_validation="szse_daily_v1",
+                    )
+                    for symbol in symbols
+                ],
+                source_status=[
+                    StrongStockSourceStatus(
+                        source="深交所ETF份额历史",
+                        status="success",
+                        detail="fake",
+                    )
+                ],
+            )
+
+    provider = HistoricalSzseProvider()
+    service = CapitalSignalService(
+        provider=provider,
+        store=store,
+        holder_provider=FakeHolderProvider(),
+        clock=_clock,
+    )
+
+    refreshed = service.overview()
+
+    item = next(item for item in refreshed.core_items if item.symbol == "159915.SZ")
+    assert item.previous_total_shares == 900
+    assert item.share_delta == 100
+    assert provider.history_calls
+    assert any(
+        row.symbol == "159915.SZ" and row.trade_date == "2026-07-16"
+        for row in store.load_share_history()
+    )
+
+
+def test_history_does_not_repeat_failed_szse_backfill_inside_one_request(tmp_path: Path) -> None:
+    class FailingHistoricalProvider(FakeCapitalProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.history_calls: list[tuple[str, str, tuple[str, ...]]] = []
+
+        def get_etf_share_history_rows(
+            self,
+            start_date: str,
+            end_date: str,
+            symbols: list[str] | tuple[str, ...],
+        ) -> CapitalProviderResult[EtfSharePoint]:
+            self.history_calls.append((start_date, end_date, tuple(symbols)))
+            return CapitalProviderResult(
+                rows=[],
+                source_status=[
+                    StrongStockSourceStatus(
+                        source="深交所ETF份额历史",
+                        status="failed",
+                        detail="offline",
+                    )
+                ],
+                request_failures=1,
+                failed_symbols=tuple(symbols),
+            )
+
+    provider = FailingHistoricalProvider()
+    service = CapitalSignalService(
+        provider=provider,
+        store=CapitalSignalStore(tmp_path),
+        holder_provider=FakeHolderProvider(),
+        clock=_clock,
+    )
+
+    result = service.history()
+
+    assert len(provider.history_calls) == 1
+    assert any(
+        status.source == "深交所ETF份额历史" and status.status == "failed"
+        for status in result.source_status
+    )
+
+
 def test_history_uses_only_real_dates_exact_pool_and_applicable_baseline(tmp_path: Path) -> None:
     service, store = _service(tmp_path)
     service.overview(force=True)

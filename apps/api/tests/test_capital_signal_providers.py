@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import re
 from copy import deepcopy
+from io import BytesIO
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import httpx
 import pytest
+from openpyxl import Workbook
 
 from app.providers.capital_signals import (
     CapitalProviderResult,
@@ -509,6 +513,100 @@ def test_share_provider_collects_the_ten_etf_universe_without_live_calls() -> No
     assert "份额日期 2026-07-17" in result.source_status[1].detail
     assert result.request_failures == 0
     assert result.available_trade_dates == ("2026-07-17",)
+
+
+def test_share_provider_reads_official_szse_daily_history_for_requested_range() -> None:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["日期", "基金代码", "基金简称", "基金规模(份)"])
+    sheet.append(["2026-07-20", "159915", "创业板ETF易方达", 17_639_454_900])
+    sheet.append(["2026-07-21", "159915", "创业板ETF易方达", 17_043_454_900])
+    sheet.append(["2026-07-21", "159919", "沪深300ETF嘉实", 6_194_916_600])
+    payload = BytesIO()
+    workbook.save(payload)
+    broken_dimensions = BytesIO()
+    with ZipFile(BytesIO(payload.getvalue())) as source:
+        with ZipFile(broken_dimensions, "w", ZIP_DEFLATED) as target:
+            for filename in source.namelist():
+                content = source.read(filename)
+                if filename == "xl/worksheets/sheet1.xml":
+                    content = re.sub(
+                        br'<dimension ref="[^"]+"\s*/>',
+                        b'<dimension ref="A1"/>',
+                        content,
+                    )
+                target.writestr(filename, content)
+    payload = broken_dimensions
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/report/ShowReport"
+        assert request.url.params["CATALOGID"] == "scsj_fund_jjgm"
+        assert request.url.params["txtStart"] == "2026-07-20"
+        assert request.url.params["txtEnd"] == "2026-07-21"
+        return httpx.Response(200, content=payload.getvalue())
+
+    provider = OfficialCapitalDataProvider(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+    result = provider.get_etf_share_history_rows(
+        "2026-07-20",
+        "2026-07-21",
+        ["159915.SZ"],
+    )
+
+    assert [(row.trade_date, row.total_shares) for row in result.rows] == [
+        ("2026-07-20", 17_639_454_900),
+        ("2026-07-21", 17_043_454_900),
+    ]
+    assert {row.date_validation for row in result.rows} == {"szse_daily_v1"}
+    assert result.available_trade_dates == ("2026-07-20", "2026-07-21")
+    assert result.source_status[0].status == "success"
+
+
+def test_share_provider_reports_invalid_szse_history_workbook_as_failure() -> None:
+    provider = OfficialCapitalDataProvider(
+        http_client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(200, content=b"<html>rate limited</html>")
+            )
+        )
+    )
+
+    result = provider.get_etf_share_history_rows(
+        "2026-07-20",
+        "2026-07-21",
+        ["159915.SZ"],
+    )
+
+    assert result.rows == []
+    assert result.request_failures == 1
+    assert result.failed_symbols == ("159915.SZ",)
+    assert result.source_status[0].status == "failed"
+
+
+def test_share_provider_reports_changed_szse_history_columns_as_failure() -> None:
+    workbook = Workbook()
+    workbook.active.append(["未知日期", "未知代码", "未知规模"])
+    payload = BytesIO()
+    workbook.save(payload)
+    provider = OfficialCapitalDataProvider(
+        http_client=httpx.Client(
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(200, content=payload.getvalue())
+            )
+        )
+    )
+
+    result = provider.get_etf_share_history_rows(
+        "2026-07-20",
+        "2026-07-21",
+        ["159915.SZ"],
+    )
+
+    assert result.rows == []
+    assert result.request_failures == 1
+    assert result.source_status[0].status == "failed"
 
 
 def test_share_provider_exposes_strictly_rejected_official_metadata_dates() -> None:

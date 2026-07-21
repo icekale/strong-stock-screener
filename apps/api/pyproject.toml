@@ -10,6 +10,7 @@ dependencies = [
   "httpx>=0.25.0,<0.26.0",
   "lightgbm>=4.6.0",
   "mootdx==0.11.7",
+  "openpyxl>=3.1.5",
   "pyaes>=1.6.1",
   "pydantic>=2.10.0",
   "pydantic-settings>=2.7.0",

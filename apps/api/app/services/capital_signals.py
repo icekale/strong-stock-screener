@@ -47,11 +47,25 @@ from app.services.huijin_etf_activity import (
 )
 
 
+_SZSE_HISTORY_BACKFILL_DAYS = 150
+_SZSE_HISTORY_MIN_POINTS = 60
+_SZSE_HISTORY_OLDEST_TOLERANCE_DAYS = 30
+_SZSE_HISTORY_LATEST_TOLERANCE_DAYS = 7
+_SZSE_HISTORY_RETRY_SECONDS = 15 * 60
+
+
 class CapitalDataProvider(Protocol):
     def get_margin_rows(self, trade_date: str) -> CapitalProviderResult[MarginMarketPoint]: ...
 
     def get_etf_share_rows(
         self, trade_date: str, symbols: list[str] | tuple[str, ...]
+    ) -> CapitalProviderResult[EtfSharePoint]: ...
+
+    def get_etf_share_history_rows(
+        self,
+        start_date: str,
+        end_date: str,
+        symbols: list[str] | tuple[str, ...],
     ) -> CapitalProviderResult[EtfSharePoint]: ...
 
 
@@ -85,6 +99,10 @@ class CapitalSignalService:
         self._lock = RLock()
         self._homepage_cache: tuple[datetime, CapitalSummaryResponse] | None = None
         self._baseline_refresh_attempts: dict[tuple[str, str, bool], datetime] = {}
+        self._szse_history_refresh_attempts: dict[
+            str,
+            tuple[datetime, list[StrongStockSourceStatus]],
+        ] = {}
 
     def overview(self, *, force: bool = False) -> EtfRadarOverviewResponse:
         with self._lock:
@@ -101,20 +119,32 @@ class CapitalSignalService:
                 and cached.baseline_version == active_baseline_version
                 and cached.baseline_fingerprint == active_baseline_fingerprint
             )
+            history = self.store.load_share_history()
+            history, history_status, history_changed = self._ensure_szse_share_history(
+                history,
+                trade_date,
+                now,
+            )
             if (
                 not force
                 and reusable_snapshot
                 and _is_fresh(cached.generated_at, now, self.ttl_seconds)
+                and not history_changed
             ):
-                if any(status.status == "stale" for status in baseline_status):
+                if history_status or any(status.status == "stale" for status in baseline_status):
                     return cached.model_copy(
-                        update={"source_status": [*cached.source_status, *baseline_status]}
+                        update={
+                            "source_status": [
+                                *cached.source_status,
+                                *baseline_status,
+                                *history_status,
+                            ]
+                        }
                     )
                 return cached
 
             symbols = list(ALL_ETFS)
             preferred_trade_date = trade_date
-            history = self.store.load_share_history()
             sanitized_history = _discard_future_szse_rows(history, preferred_trade_date)
             if sanitized_history != history:
                 self.store.save_share_history(sanitized_history)
@@ -240,6 +270,7 @@ class CapitalSignalService:
                             "source_status": [
                                 *cached.source_status,
                                 *baseline_status,
+                                *history_status,
                                 *disclosure_status,
                                 *current_result.source_status,
                                 *fallback_status,
@@ -267,6 +298,7 @@ class CapitalSignalService:
                     trade_date,
                     [
                         *baseline_status,
+                        *history_status,
                         *disclosure_status,
                         *current_result.source_status,
                         *fallback_status,
@@ -281,6 +313,7 @@ class CapitalSignalService:
                 (row.trade_date, row.symbol) not in fetched_keys for row in current_rows
             )
             current_status = [
+                *history_status,
                 *disclosure_status,
                 *current_result.source_status,
                 *fallback_status,
@@ -349,6 +382,56 @@ class CapitalSignalService:
             self.store.save_snapshot(snapshot)
             return snapshot
 
+    def _ensure_szse_share_history(
+        self,
+        history: list[EtfSharePoint],
+        trade_date: str,
+        now: datetime,
+    ) -> tuple[list[EtfSharePoint], list[StrongStockSourceStatus], bool]:
+        szse_symbols = tuple(symbol for symbol in ALL_ETFS if symbol.endswith(".SZ"))
+        history_end_date = _previous_weekday(trade_date)
+        start_date = (
+            datetime.fromisoformat(history_end_date).date()
+            - timedelta(days=_SZSE_HISTORY_BACKFILL_DAYS)
+        ).isoformat()
+        if _has_szse_history_coverage(
+            history,
+            symbols=szse_symbols,
+            start_date=start_date,
+            end_date=history_end_date,
+        ):
+            return history, [], False
+
+        fetch_history = getattr(self.provider, "get_etf_share_history_rows", None)
+        if not callable(fetch_history):
+            return history, [], False
+
+        previous_attempt = self._szse_history_refresh_attempts.get(history_end_date)
+        if previous_attempt is not None:
+            attempted_at, previous_status = previous_attempt
+            elapsed = (now - attempted_at).total_seconds()
+            if 0 <= elapsed <= _SZSE_HISTORY_RETRY_SECONDS:
+                return history, list(previous_status), False
+
+        result = fetch_history(start_date, history_end_date, szse_symbols)
+        history_status = list(result.source_status)
+        self._szse_history_refresh_attempts[history_end_date] = (
+            now,
+            history_status,
+        )
+        fetched_rows = [
+            row
+            for row in result.rows
+            if row.symbol in szse_symbols
+            and start_date <= row.trade_date <= history_end_date
+            and row.date_validation == "szse_daily_v1"
+        ]
+        merged = _merge_share_history(history, fetched_rows)
+        changed = merged != history
+        if changed:
+            self.store.save_share_history(merged)
+        return merged, history_status, changed
+
     def homepage_summary(self, *, force: bool = False) -> CapitalSummaryResponse:
         with self._lock:
             now = self.clock()
@@ -377,6 +460,11 @@ class CapitalSignalService:
             now = self.clock()
             trade_date = _latest_weekday(now)
             history = self.store.load_share_history()
+            history, history_status, _ = self._ensure_szse_share_history(
+                history,
+                trade_date,
+                now,
+            )
             snapshot = self.store.load_snapshot()
             if (
                 snapshot is not None
@@ -440,6 +528,7 @@ class CapitalSignalService:
             signal_stage="post_close",
             model_version=MODEL_VERSION,
             source_status=[
+                *history_status,
                 StrongStockSourceStatus(
                     source="ETF份额历史缓存",
                     status="success" if latest_date == trade_date else "stale",
@@ -879,7 +968,7 @@ def _trusted_same_day_cache(
         if (
             row.symbol in transient_symbols
             and row.symbol.endswith(".SZ")
-            and row.date_validation != "szse_dqgm_v1"
+            and row.date_validation not in {"szse_dqgm_v1", "szse_daily_v1"}
         ):
             continue
         retained.append(row)
@@ -947,6 +1036,38 @@ def _discard_future_szse_rows(
             and row.trade_date > disclosed_trade_date
         )
     ]
+
+
+def _has_szse_history_coverage(
+    history: list[EtfSharePoint],
+    *,
+    symbols: tuple[str, ...],
+    start_date: str,
+    end_date: str,
+) -> bool:
+    oldest_cutoff = (
+        datetime.fromisoformat(start_date).date()
+        + timedelta(days=_SZSE_HISTORY_OLDEST_TOLERANCE_DAYS)
+    ).isoformat()
+    latest_cutoff = (
+        datetime.fromisoformat(end_date).date()
+        - timedelta(days=_SZSE_HISTORY_LATEST_TOLERANCE_DAYS)
+    ).isoformat()
+    for symbol in symbols:
+        dates = {
+            row.trade_date
+            for row in history
+            if row.symbol == symbol
+            and row.date_validation == "szse_daily_v1"
+            and start_date <= row.trade_date <= end_date
+        }
+        if (
+            len(dates) < _SZSE_HISTORY_MIN_POINTS
+            or min(dates, default=end_date) > oldest_cutoff
+            or max(dates, default=start_date) < latest_cutoff
+        ):
+            return False
+    return True
 
 
 def _latest_share_before(

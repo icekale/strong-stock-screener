@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import re
+import warnings
 from collections.abc import Mapping
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import date
 from html.parser import HTMLParser
+from io import BytesIO
 from typing import Any, Generic, TypeVar
 
 import httpx
+from openpyxl import load_workbook
 
 from app.models import (
     EtfHolderPosition,
@@ -260,6 +263,66 @@ class OfficialCapitalDataProvider:
             empty_symbols=tuple(symbol for symbol in symbols if symbol in empty_symbols),
         )
 
+    def get_etf_share_history_rows(
+        self,
+        start_date: str,
+        end_date: str,
+        symbols: Sequence[str],
+    ) -> CapitalProviderResult[EtfSharePoint]:
+        szse_symbols = [symbol for symbol in symbols if symbol.endswith(".SZ")]
+        if not szse_symbols:
+            return CapitalProviderResult(rows=[], source_status=[])
+
+        try:
+            response = self.http_client.get(
+                f"{_SZSE_BASE_URL}/api/report/ShowReport",
+                params={
+                    "SHOWTYPE": "xlsx",
+                    "CATALOGID": "scsj_fund_jjgm",
+                    "TABKEY": "tab1",
+                    "txtStart": start_date,
+                    "txtEnd": end_date,
+                    "jjlb": "ETF",
+                },
+                headers={
+                    **_HEADERS,
+                    "Referer": "https://www.szse.cn/market/fund/volume/etf/index.html",
+                },
+            )
+            response.raise_for_status()
+            rows = parse_szse_daily_share_workbook(response.content, symbols=szse_symbols)
+        except Exception as exc:
+            return CapitalProviderResult(
+                rows=[],
+                source_status=[_failure_status("深交所ETF份额历史", exc)],
+                request_failures=1,
+                failed_symbols=tuple(szse_symbols),
+            )
+
+        rows = [row for row in rows if start_date <= row.trade_date <= end_date]
+        covered_symbols = {row.symbol for row in rows}
+        missing_symbols = set(szse_symbols) - covered_symbols
+        available_dates = tuple(sorted({row.trade_date for row in rows}))
+        status = "success" if rows and not missing_symbols else "stale"
+        detail = (
+            f"官方日频 {len(available_dates)} 个交易日；"
+            f"覆盖 {len(covered_symbols)}/{len(szse_symbols)} 只"
+        )
+        return CapitalProviderResult(
+            rows=rows,
+            source_status=[
+                StrongStockSourceStatus(
+                    source="深交所ETF份额历史",
+                    status=status,
+                    detail=detail,
+                )
+            ],
+            available_trade_dates=available_dates,
+            empty_symbols=tuple(
+                symbol for symbol in szse_symbols if symbol in missing_symbols
+            ),
+        )
+
 
 class SinaEtfHolderProvider:
     def __init__(
@@ -449,6 +512,71 @@ def parse_szse_etf_share_payload(
     return output
 
 
+def parse_szse_daily_share_workbook(
+    payload: bytes,
+    *,
+    symbols: Sequence[str],
+) -> list[EtfSharePoint]:
+    allowed = set(symbols)
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", UserWarning)
+            workbook = load_workbook(BytesIO(payload), read_only=True, data_only=True)
+    except Exception as exc:
+        raise ValueError("深交所日频份额响应不是有效 XLSX") from exc
+
+    output: list[EtfSharePoint] = []
+    found_columns = False
+    try:
+        for sheet in workbook.worksheets:
+            sheet.reset_dimensions()
+            columns: dict[str, int] | None = None
+            for values in sheet.iter_rows(values_only=True):
+                normalized = [_normalized_excel_header(value) for value in values]
+                if columns is None:
+                    try:
+                        columns = {
+                            "date": normalized.index("日期"),
+                            "code": normalized.index("基金代码"),
+                            "name": normalized.index("基金简称"),
+                            "shares": next(
+                                index
+                                for index, value in enumerate(normalized)
+                                if value in {"基金规模(份)", "基金份额"}
+                            ),
+                        }
+                    except (ValueError, StopIteration):
+                        continue
+                    found_columns = True
+                    continue
+
+                trade_date = _workbook_date(values[columns["date"]])
+                code = _fund_code(values[columns["code"]])
+                symbol = f"{code}.SZ"
+                total_shares = _number(values[columns["shares"]])
+                if (
+                    trade_date is None
+                    or symbol not in allowed
+                    or total_shares is None
+                    or total_shares <= 0
+                ):
+                    continue
+                output.append(
+                    EtfSharePoint(
+                        trade_date=trade_date,
+                        symbol=symbol,
+                        name=str(values[columns["name"]] or "").strip() or None,
+                        total_shares=total_shares,
+                        date_validation="szse_daily_v1",
+                    )
+                )
+    finally:
+        workbook.close()
+    if not found_columns:
+        raise ValueError("深交所日频份额工作簿缺少必要列")
+    return sorted(output, key=lambda row: (row.trade_date, row.symbol))
+
+
 def _szse_share_date(metadata: Any) -> str | None:
     if not isinstance(metadata, dict):
         return None
@@ -526,6 +654,23 @@ def _date_text(value: Any) -> str | None:
         return date.fromisoformat(text).isoformat()
     except ValueError:
         return None
+
+
+def _workbook_date(value: Any) -> str | None:
+    if isinstance(value, date):
+        return value.date().isoformat() if hasattr(value, "date") else value.isoformat()
+    return _date_text(value)
+
+
+def _fund_code(value: Any) -> str:
+    text = str(value or "").strip()
+    if text.endswith(".0"):
+        text = text[:-2]
+    return text.zfill(6) if text.isdigit() else ""
+
+
+def _normalized_excel_header(value: Any) -> str:
+    return re.sub(r"\s+", "", str(value or "")).replace("（", "(").replace("）", ")")
 
 
 def _number(value: Any) -> float | None:

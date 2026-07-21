@@ -22,7 +22,14 @@ def test_volume_factor_score_boundaries(ratio, expected):
 
 @pytest.mark.parametrize(
     ("etf", "index", "expected"),
-    [(1, -1, 100), (1, 1, 70), (-1, 1, 20), (-1, -1, 0), (None, 1, None)],
+    [
+        (1, -1, 100),
+        (1, 1, 70),
+        (-1, 1, 20),
+        (-1, -1, 0),
+        (None, 1, None),
+        (1, None, None),
+    ],
 )
 def test_direction_factor_score_matrix(etf, index, expected):
     assert direction_factor_score(etf, index) == expected
@@ -46,6 +53,12 @@ def test_full_mode_uses_50_20_30_weights():
     score, mode = combine_factor_scores(100, 70, 60, share_pending=False)
     assert score == 82
     assert mode == "three_factor"
+
+
+def test_missing_share_score_is_incomplete_when_share_is_not_pending():
+    score, mode = combine_factor_scores(100, 70, None, share_pending=False)
+    assert score is None
+    assert mode == "incomplete"
 
 
 def test_non_share_failure_does_not_renormalize_one_factor():
@@ -101,6 +114,20 @@ def test_summary_is_watch_with_average_50_and_three_high_items():
     assert summary.high_count == 3
     assert summary.medium_count == 0
     assert summary.market_state == "watch"
+
+
+def test_summary_is_watch_with_high_average_but_fewer_than_five_high_items():
+    summary = summarize_three_factor([_item(100) for _ in range(4)] + [_item(40)])
+    assert summary.signal_score == 88
+    assert summary.high_count == 4
+    assert summary.market_state == "watch"
+
+
+def test_summary_is_normal_with_watch_average_but_fewer_than_three_high_items():
+    summary = summarize_three_factor([_item(100) for _ in range(2)] + [_item(40) for _ in range(3)])
+    assert summary.signal_score == 64
+    assert summary.high_count == 2
+    assert summary.market_state == "normal"
 
 
 def test_summary_is_normal_when_valid_but_below_watch_threshold():

@@ -32,6 +32,10 @@ def _point(trade_date: str, symbol: str = "510300.SH", score: float = 72) -> Etf
     )
 
 
+def _timestamp(time: str) -> str:
+    return f"{date.today().isoformat()}T{time}+08:00"
+
+
 def _alert(
     alert_id: str,
     alert_type: str = "single_high",
@@ -39,12 +43,13 @@ def _alert(
     symbol: str | None = "510300.SH",
     level: str = "high",
     score: float = 72,
-    triggered_at: str = "2026-07-22T10:00:00+08:00",
+    triggered_at: str | None = None,
     read: bool = False,
 ) -> EtfActivityAlert:
+    triggered_at = triggered_at or _timestamp("10:00:00")
     return EtfActivityAlert(
         alert_id=alert_id,
-        trade_date="2026-07-22",
+        trade_date=date.today().isoformat(),
         alert_type=alert_type,
         level=level,
         symbol=symbol,
@@ -103,9 +108,9 @@ def test_history_replaces_same_symbol_and_trade_date_and_ignores_corrupt_file(tm
 def test_store_deduplicates_same_level_but_keeps_upgrade(tmp_path: Path) -> None:
     store = EtfThreeFactorStore(tmp_path)
     first = _alert("a1", score=72)
-    duplicate = _alert("a2", score=75, triggered_at="2026-07-22T10:10:00+08:00")
+    duplicate = _alert("a2", score=75, triggered_at=_timestamp("10:10:00"))
     upgrade = _alert(
-        "a3", "single_upgrade", score=84, triggered_at="2026-07-22T10:11:00+08:00"
+        "a3", "single_upgrade", score=84, triggered_at=_timestamp("10:11:00")
     )
 
     assert store.upsert_alert(first) is True
@@ -117,9 +122,9 @@ def test_store_deduplicates_same_level_but_keeps_upgrade(tmp_path: Path) -> None
 def test_alert_cooldown_expires_and_market_key_is_type_and_level(tmp_path: Path) -> None:
     store = EtfThreeFactorStore(tmp_path)
     assert store.upsert_alert(_alert("a1")) is True
-    assert store.upsert_alert(_alert("a2", triggered_at="2026-07-22T10:30:01+08:00")) is True
+    assert store.upsert_alert(_alert("a2", triggered_at=_timestamp("10:30:01"))) is True
     assert store.upsert_alert(_alert("m1", "market_high", symbol=None)) is True
-    assert store.upsert_alert(_alert("m2", "market_high", symbol=None, triggered_at="2026-07-22T10:10:00+08:00")) is False
+    assert store.upsert_alert(_alert("m2", "market_high", symbol=None, triggered_at=_timestamp("10:10:00"))) is False
 
 
 def test_alerts_retain_last_30_days_and_preserve_read_state(tmp_path: Path) -> None:

@@ -129,5 +129,5 @@ class EtfThreeFactorSampler:
                 logger.exception("ETF three-factor scan failed")
                 wait_seconds = self._retry_seconds
             else:
-                wait_seconds = self._retry_seconds if sampled else self._idle_seconds
+                wait_seconds = self._retry_seconds if sampled else min(self._idle_seconds, 60)
             active_stop_event.wait(wait_seconds)

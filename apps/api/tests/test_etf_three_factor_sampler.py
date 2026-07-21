@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from threading import Event
 
+import app.services.etf_three_factor_sampler as sampler_module
 from app.services.etf_three_factor_sampler import EtfThreeFactorSampler
 
 
@@ -114,3 +115,49 @@ def test_sampler_thread_logs_scan_errors_and_retries() -> None:
     sampler.stop_and_wait()
 
     assert calls == 2
+
+
+def test_sampler_thread_reaches_close_refresh_after_1500(monkeypatch: object) -> None:
+    current = Clock("2026-07-22T14:59:00")
+    close_reached = Event()
+    calls: list[dict[str, object]] = []
+
+    class AdvancingStopEvent:
+        def __init__(self) -> None:
+            self._stopped = False
+
+        def is_set(self) -> bool:
+            return self._stopped
+
+        def set(self) -> None:
+            self._stopped = True
+
+        def wait(self, seconds: float) -> bool:
+            current.current += timedelta(seconds=seconds)
+            if current.current >= datetime.fromisoformat("2026-07-22T15:06:00"):
+                self.set()
+            return self.is_set()
+
+    monkeypatch.setattr(sampler_module, "Event", AdvancingStopEvent)
+
+    def scan(**kwargs: object) -> None:
+        calls.append(kwargs)
+        if kwargs["now"].strftime("%H:%M") == "15:05":
+            close_reached.set()
+
+    sampler = EtfThreeFactorSampler(
+        scan=scan,
+        clock=current,
+        retry_seconds=60,
+        idle_seconds=300,
+    )
+    sampler.start()
+
+    assert close_reached.wait(timeout=1)
+    sampler.stop_and_wait()
+
+    assert [call["now"].strftime("%H:%M") for call in calls] == [
+        "14:59",
+        "15:00",
+        "15:05",
+    ]

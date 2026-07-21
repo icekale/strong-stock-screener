@@ -449,6 +449,35 @@ def test_latest_reads_persisted_snapshot_without_provider_calls(tmp_path: Path) 
     assert (len(quotes.calls), len(daily.calls), len(shares.calls)) == calls
 
 
+def test_initial_high_snapshot_creates_no_single_or_market_alerts(tmp_path: Path) -> None:
+    monitor, _, _, _ = monitor_with(tmp_path, volume=300)
+
+    result = monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+
+    assert all(item.level == "high" for item in result.items)
+    assert result.summary.market_state == "high"
+    assert monitor.store.load_alerts() == []
+
+
+def test_high_two_factor_signal_emits_one_three_factor_upgrade(tmp_path: Path) -> None:
+    monitor, quotes, _, _ = monitor_with(tmp_path, volume=100)
+    monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+    for symbol in CORE_ETFS:
+        quotes.quotes[symbol].volume = 300
+    intraday = monitor.scan(now=shanghai("2026-07-22T10:31:00"))
+    before_upgrade = monitor.store.load_alerts()
+
+    upgraded = monitor.scan(now=shanghai("2026-07-22T19:05:00"))
+    alerts = monitor.store.load_alerts()
+    monitor.scan(now=shanghai("2026-07-22T19:06:00"))
+
+    assert all(item.level == "high" and item.mode == "two_factor" for item in intraday.items)
+    assert all(item.level == "high" and item.mode == "three_factor" for item in upgraded.items)
+    assert len(alerts) == len(before_upgrade) + len(CORE_ETFS)
+    assert [alert.alert_type for alert in alerts].count("single_upgrade") == len(CORE_ETFS)
+    assert monitor.store.load_alerts() == alerts
+
+
 def test_alerts_are_created_only_on_high_entry_and_three_factor_upgrade(tmp_path: Path) -> None:
     monitor, quotes, _, _ = monitor_with(tmp_path, volume=150)
 

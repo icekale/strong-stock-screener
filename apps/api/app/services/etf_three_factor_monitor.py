@@ -601,14 +601,22 @@ class EtfThreeFactorMonitor:
         previous: EtfThreeFactorResponse | None,
         current: EtfThreeFactorResponse,
     ) -> None:
+        if previous is None:
+            return
         previous_items = {item.symbol: item for item in previous.items} if previous else {}
         for item in current.items:
             old = previous_items.get(item.symbol)
-            if item.level != "high" or (old is not None and old.level == "high"):
+            if old is None or item.level != "high":
+                continue
+            entered_high = old.level != "high"
+            upgraded_to_three_factor = old.level == "high" and (
+                old.mode == "two_factor" and item.mode == "three_factor"
+            )
+            if not entered_high and not upgraded_to_three_factor:
                 continue
             alert_type = "single_upgrade" if item.mode == "three_factor" else "single_high"
             self.store.upsert_alert(self._single_alert(current, item, alert_type))
-        previous_state = previous.summary.market_state if previous is not None else None
+        previous_state = previous.summary.market_state
         if current.summary.market_state in {"watch", "high"} and previous_state != current.summary.market_state:
             self.store.upsert_alert(self._market_alert(current))
 

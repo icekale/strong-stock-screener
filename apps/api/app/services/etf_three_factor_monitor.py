@@ -79,7 +79,8 @@ class EtfThreeFactorMonitor:
         self.capital_store = capital_store
         self.store = store
         self._lock = RLock()
-        self._daily_cache: dict[tuple[str, str, bool], list[KlineBar]] = {}
+        self._daily_cache: dict[tuple[str, str], _DailyBars] = {}
+        self._daily_cache_lookup: dict[tuple[str, str, str], tuple[str, str]] = {}
 
     def scan(self, now: datetime | None = None, force: bool = False) -> EtfThreeFactorResponse:
         with self._lock:
@@ -270,15 +271,27 @@ class EtfThreeFactorMonitor:
         trade_date: str,
         symbol: str,
         *,
-        include_current_day: bool,
+        stage: str,
     ) -> _DailyBars:
-        cache_key = (trade_date, symbol, include_current_day)
-        if cache_key not in self._daily_cache:
-            try:
-                self._daily_cache[cache_key] = self.daily_kline_provider.get_klines(symbol, count=40)
-            except Exception as exc:
-                return _DailyBars([], f"日K线请求失败: {exc.__class__.__name__}")
-        return _DailyBars(self._daily_cache[cache_key])
+        lookup_key = (stage, trade_date, symbol)
+        cache_key = self._daily_cache_lookup.get(lookup_key)
+        if cache_key is not None:
+            return self._daily_cache[cache_key]
+
+        include_current_day = stage == "post_close"
+        try:
+            daily_bars = _DailyBars(self.daily_kline_provider.get_klines(symbol, count=40))
+        except Exception as exc:
+            daily_bars = _DailyBars([], f"日K线请求失败: {exc.__class__.__name__}")
+        completed_date = _latest_completed_bar_date(
+            daily_bars.bars,
+            trade_date,
+            include_current_day=include_current_day,
+        )
+        cache_key = (completed_date or trade_date, symbol)
+        self._daily_cache[cache_key] = daily_bars
+        self._daily_cache_lookup[lookup_key] = cache_key
+        return daily_bars
 
     def _build_item(
         self,
@@ -293,7 +306,7 @@ class EtfThreeFactorMonitor:
         index_symbol = INDEX_SYMBOL_BY_ETF[symbol]
         quote = quote_by_symbol[symbol]
         index_quote = quote_by_symbol[index_symbol]
-        daily_bars = self._daily_bars(trade_date, symbol, include_current_day=False)
+        daily_bars = self._daily_bars(trade_date, symbol, stage="intraday")
         completed = [
             bar
             for bar in daily_bars.bars
@@ -381,7 +394,7 @@ class EtfThreeFactorMonitor:
         scan_at: datetime,
         trade_date: str,
     ) -> EtfThreeFactorItem:
-        daily_bars = self._daily_bars(trade_date, previous.symbol, include_current_day=True)
+        daily_bars = self._daily_bars(trade_date, previous.symbol, stage="post_close")
         completed = [
             bar
             for bar in daily_bars.bars
@@ -663,6 +676,21 @@ def _bar_trade_date(value: str) -> str | None:
     if len(compact) != 8 or not compact.isdigit():
         return None
     return f"{compact[:4]}-{compact[4:6]}-{compact[6:]}"
+
+
+def _latest_completed_bar_date(
+    bars: list[KlineBar],
+    trade_date: str,
+    *,
+    include_current_day: bool,
+) -> str | None:
+    completed_dates = [
+        bar_date
+        for bar in bars
+        if (bar_date := _bar_trade_date(bar.date)) is not None
+        and (bar_date <= trade_date if include_current_day else bar_date < trade_date)
+    ]
+    return max(completed_dates, default=None)
 
 
 def _close_change(completed: list[KlineBar]) -> tuple[float | None, str | None]:

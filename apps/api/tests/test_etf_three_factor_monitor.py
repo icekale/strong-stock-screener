@@ -276,14 +276,16 @@ def test_insufficient_completed_history_leaves_volume_unavailable(tmp_path: Path
     assert item.mode == "incomplete"
 
 
-def test_daily_kline_provider_error_is_retained_in_volume_evidence(tmp_path: Path) -> None:
+def test_daily_kline_provider_error_is_cached_for_completed_date_context(tmp_path: Path) -> None:
     monitor, _, daily, _ = monitor_with(tmp_path)
     daily.fail_symbols.add("510050.SH")
 
     item = by_symbol(monitor.scan(now=shanghai("2026-07-22T10:30:00")), "510050.SH")
+    monitor.scan(now=shanghai("2026-07-22T10:31:00"))
 
     assert item.volume_factor.status == "missing"
     assert item.volume_factor.detail == "日K线请求失败: RuntimeError"
+    assert daily.calls.count(("510050.SH", 40)) == 1
 
 
 @pytest.mark.parametrize("missing_symbol", ["510050.SH", "000016.SH"])
@@ -341,6 +343,10 @@ def test_post_close_close_change_uses_completed_current_day_not_cached_partial_b
     assert item.close_change_pct == pytest.approx(20)
     assert item.close_change_trade_date == "2026-07-22"
     assert len(quotes.calls) == 1
+    assert len(daily.calls) == 2 * len(CORE_ETFS)
+
+    monitor.scan(now=shanghai("2026-07-22T15:06:00"))
+
     assert len(daily.calls) == 2 * len(CORE_ETFS)
 
 

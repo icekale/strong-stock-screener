@@ -1,7 +1,7 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from threading import Event
 from time import sleep
 from zoneinfo import ZoneInfo
@@ -24,9 +24,11 @@ from app.main import (
     _refresh_sector_theme_rows,
     shutdown_auction_sampler,
     shutdown_capital_signal_sampler,
+    shutdown_etf_three_factor_sampler,
     shutdown_sector_workbench_sampler,
     startup_auction_sampler,
     startup_capital_signal_sampler,
+    startup_etf_three_factor_sampler,
     startup_sector_workbench_sampler,
 )
 from app.models import (
@@ -46,6 +48,10 @@ from app.models import (
     EtfRadarHoldersResponse,
     EtfRadarMethodologyResponse,
     EtfRadarOverviewResponse,
+    EtfActivityAlert,
+    EtfThreeFactorHistoryResponse,
+    EtfThreeFactorResponse,
+    HuijinEtfActivityItem,
     KlineBar,
     MarketAdvanceDeclineSummary,
     MarketIndexSnapshot,
@@ -71,7 +77,9 @@ from app.services.plate_rotation_reference import (
     PlateRotationReferenceResponse,
     PlateRotationThemeItem,
 )
+from app.services.capital_signal_store import CapitalSignalStore
 from app.services.sector_workbench_store import SectorThemeRowsStore
+from app.services.etf_three_factor_store import EtfThreeFactorStore
 from app.providers.news_risk import NegativeNewsRisk
 
 
@@ -1480,7 +1488,8 @@ class FailingSectorReplicaLiveProvider:
 
 
 class FakeCapitalSignalService:
-    def __init__(self) -> None:
+    def __init__(self, data_dir: Path) -> None:
+        self.store = CapitalSignalStore(data_dir)
         self.summary_calls = 0
         self.overview_calls = 0
         self.history_calls = 0
@@ -1527,6 +1536,55 @@ class FakeCapitalSignalService:
         )
 
 
+class FakeEtfThreeFactorMonitor:
+    def __init__(self, tmp_path: Path) -> None:
+        self.store = EtfThreeFactorStore(tmp_path)
+        self.latest_calls = 0
+        self.history_calls: list[tuple[str, int]] = []
+        self.enrich_overview_calls = 0
+        self.scan_calls: list[dict[str, object]] = []
+
+    @staticmethod
+    def _metadata() -> dict[str, str]:
+        return {
+            "generated_at": "2026-07-22T15:05:00+08:00",
+            "trade_date": "2026-07-22",
+            "as_of": "2026-07-22T15:05:00+08:00",
+            "signal_stage": "post_close",
+            "model_version": "three-factor-v1",
+        }
+
+    def latest(self) -> EtfThreeFactorResponse:
+        self.latest_calls += 1
+        return EtfThreeFactorResponse(**self._metadata())
+
+    def history(self, symbol: str, days: int = 40) -> EtfThreeFactorHistoryResponse:
+        self.history_calls.append((symbol, days))
+        return EtfThreeFactorHistoryResponse(**self._metadata(), symbol=symbol)
+
+    def enrich_overview(self, overview: EtfRadarOverviewResponse) -> EtfRadarOverviewResponse:
+        self.enrich_overview_calls += 1
+        return overview.model_copy(
+            update={
+                "core_items": [
+                    HuijinEtfActivityItem(
+                        symbol="510050.SH",
+                        name="上证50ETF华夏",
+                        index_name="上证50",
+                        role="core",
+                        trade_date="2026-07-22",
+                        close_change_pct=1.25,
+                        close_change_trade_date="2026-07-21",
+                    )
+                ]
+            }
+        )
+
+    def scan(self, **kwargs: object) -> EtfThreeFactorResponse:
+        self.scan_calls.append(kwargs)
+        return self.latest()
+
+
 def _client(
     tmp_path: Path,
     candidate_provider: object | None = None,
@@ -1544,6 +1602,7 @@ def _client(
     chanlun_rc8_client: object | None = None,
     chanlun_shadow_scheduler: object | None = None,
     capital_signal_service: object | None = None,
+    etf_three_factor_monitor: object | None = None,
 ) -> TestClient:
     shutdown_research = getattr(main_module, "shutdown_chanlun_research", None)
     if shutdown_research is not None:
@@ -1564,6 +1623,12 @@ def _client(
         app.state.capital_signal_service = capital_signal_service
     elif hasattr(app.state, "capital_signal_service"):
         delattr(app.state, "capital_signal_service")
+    if etf_three_factor_monitor is not None:
+        app.state.etf_three_factor_monitor = etf_three_factor_monitor
+    elif hasattr(app.state, "etf_three_factor_monitor"):
+        delattr(app.state, "etf_three_factor_monitor")
+    if hasattr(app.state, "default_etf_three_factor_monitor"):
+        delattr(app.state, "default_etf_three_factor_monitor")
     if hasattr(app.state, "valuation_quote_provider"):
         delattr(app.state, "valuation_quote_provider")
     if concept_provider is not None:
@@ -1599,6 +1664,7 @@ def _client(
     app.state.chanlun_screening_summarizer = chanlun_screening_summarizer
     app.state.auction_sampler_disabled = True
     app.state.capital_signal_sampler_disabled = True
+    app.state.etf_three_factor_sampler_disabled = True
     app.state.sector_workbench_sampler_disabled = True
     AUCTION_SNAPSHOT_CACHE.clear()
     MARKET_RANKINGS_CACHE.clear()
@@ -2509,7 +2575,7 @@ def test_market_overview_endpoint_reuses_cached_snapshot(tmp_path: Path) -> None
 
 
 def test_capital_summary_returns_shared_metadata_and_reuses_cache(tmp_path: Path) -> None:
-    service = FakeCapitalSignalService()
+    service = FakeCapitalSignalService(tmp_path)
     client = _client(tmp_path, capital_signal_service=service)
 
     first = client.get("/api/market/capital-summary")
@@ -2528,7 +2594,7 @@ def test_capital_summary_returns_shared_metadata_and_reuses_cache(tmp_path: Path
 
 
 def test_etf_radar_read_endpoints_return_shared_metadata(tmp_path: Path) -> None:
-    service = FakeCapitalSignalService()
+    service = FakeCapitalSignalService(tmp_path)
     client = _client(tmp_path, capital_signal_service=service)
 
     responses = [
@@ -2557,8 +2623,91 @@ def test_etf_radar_read_endpoints_return_shared_metadata(tmp_path: Path) -> None
     assert service.methodology_calls == 1
 
 
+def test_etf_three_factor_read_routes_use_snapshot_store_and_enrich_overview(
+    tmp_path: Path,
+) -> None:
+    capital_service = FakeCapitalSignalService(tmp_path)
+    monitor = FakeEtfThreeFactorMonitor(tmp_path)
+    today = date.today().isoformat()
+    for alert in (
+        EtfActivityAlert(
+            alert_id="a1",
+            trade_date=today,
+            alert_type="single_high",
+            level="high",
+            symbol="510050.SH",
+            title="ETF alert",
+            message="ETF activity changed",
+            signal_score=72,
+            triggered_at=f"{today}T10:00:00+08:00",
+            last_triggered_at=f"{today}T10:00:00+08:00",
+        ),
+        EtfActivityAlert(
+            alert_id="a2",
+            trade_date=today,
+            alert_type="single_high",
+            level="high",
+            symbol="510300.SH",
+            title="ETF alert",
+            message="ETF activity changed",
+            signal_score=72,
+            triggered_at=f"{today}T10:01:00+08:00",
+            last_triggered_at=f"{today}T10:01:00+08:00",
+        ),
+        EtfActivityAlert(
+            alert_id="a3",
+            trade_date=today,
+            alert_type="market_watch",
+            level="watch",
+            title="ETF alert",
+            message="ETF activity changed",
+            signal_score=62,
+            triggered_at=f"{today}T10:02:00+08:00",
+            last_triggered_at=f"{today}T10:02:00+08:00",
+            read=True,
+        ),
+    ):
+        assert monitor.store.upsert_alert(alert)
+    client = _client(
+        tmp_path,
+        capital_signal_service=capital_service,
+        etf_three_factor_monitor=monitor,
+    )
+
+    overview = client.get("/api/etf-radar/overview")
+    latest = client.get("/api/etf-radar/three-factor")
+    history = client.get("/api/etf-radar/three-factor/510050.SH/history?days=40")
+    unknown_symbol = client.get("/api/etf-radar/three-factor/600000.SH/history")
+    alerts = client.get("/api/etf-radar/alerts?unread_only=true")
+    read_one = client.post("/api/etf-radar/alerts/a1/read")
+    read_all = client.post("/api/etf-radar/alerts/read-all")
+
+    assert overview.status_code == 200
+    assert overview.json()["core_items"][0]["close_change_pct"] == 1.25
+    assert monitor.enrich_overview_calls == 1
+    assert latest.status_code == 200
+    assert history.status_code == 200
+    assert monitor.history_calls == [("510050.SH", 40)]
+    assert unknown_symbol.status_code == 404
+    assert alerts.status_code == 200
+    assert alerts.json()["unread_count"] == 2
+    assert read_one.status_code == 200
+    assert read_all.status_code == 200
+    assert all(alert.read for alert in monitor.store.load_alerts())
+    assert monitor.scan_calls == []
+
+
+def test_etf_three_factor_alert_read_returns_not_found_for_unknown_alert(tmp_path: Path) -> None:
+    monitor = FakeEtfThreeFactorMonitor(tmp_path)
+    client = _client(tmp_path, etf_three_factor_monitor=monitor)
+
+    response = client.post("/api/etf-radar/alerts/missing/read")
+
+    assert response.status_code == 404
+
+
 def test_etf_radar_history_rejects_out_of_range_days(tmp_path: Path) -> None:
-    client = _client(tmp_path, capital_signal_service=FakeCapitalSignalService())
+    client = _client(tmp_path, capital_signal_service=FakeCapitalSignalService(tmp_path))
 
     assert client.get("/api/etf-radar/history?days=0").status_code == 422
     assert client.get("/api/etf-radar/history?days=366").status_code == 422
@@ -2902,6 +3051,34 @@ def test_lifespan_starts_and_stops_injected_capital_signal_sampler(tmp_path: Pat
     assert sampler.stop_calls == 1
 
 
+def test_lifespan_starts_and_stops_injected_etf_three_factor_sampler(tmp_path: Path) -> None:
+    class FakeSampler:
+        def __init__(self) -> None:
+            self.start_calls = 0
+            self.stop_and_wait_calls = 0
+
+        def start(self) -> None:
+            self.start_calls += 1
+
+        def stop_and_wait(self) -> None:
+            self.stop_and_wait_calls += 1
+
+    client = _client(tmp_path)
+    sampler = FakeSampler()
+    app.state.etf_three_factor_sampler = sampler
+    app.state.etf_three_factor_sampler_disabled = False
+
+    try:
+        with client:
+            pass
+    finally:
+        app.state.etf_three_factor_sampler_disabled = True
+        delattr(app.state, "etf_three_factor_sampler")
+
+    assert sampler.start_calls == 1
+    assert sampler.stop_and_wait_calls == 1
+
+
 def test_shutdown_capital_signal_sampler_uses_explicit_wait_path() -> None:
     class FakeSampler:
         def __init__(self) -> None:
@@ -3029,6 +3206,25 @@ def test_startup_capital_signal_sampler_respects_disabled_state(
     startup_capital_signal_sampler()
 
     assert not hasattr(app.state, "capital_signal_sampler")
+
+
+def test_startup_etf_three_factor_sampler_respects_disabled_state(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _client(tmp_path)
+    if hasattr(app.state, "etf_three_factor_sampler"):
+        delattr(app.state, "etf_three_factor_sampler")
+
+    def fail_if_constructed(**_kwargs):
+        raise AssertionError("disabled sampler must not be constructed")
+
+    monkeypatch.setattr(main_module, "EtfThreeFactorSampler", fail_if_constructed)
+
+    startup_etf_three_factor_sampler()
+
+    assert not hasattr(app.state, "etf_three_factor_sampler")
+    shutdown_etf_three_factor_sampler()
 
 
 def test_shutdown_capital_signal_sampler_does_not_construct_service(monkeypatch) -> None:

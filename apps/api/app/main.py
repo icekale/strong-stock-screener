@@ -39,6 +39,9 @@ from app.models import (
     EtfRadarHoldersResponse,
     EtfRadarMethodologyResponse,
     EtfRadarOverviewResponse,
+    EtfActivityAlertResponse,
+    EtfThreeFactorHistoryResponse,
+    EtfThreeFactorResponse,
     GsgfAnalysis,
     GsgfBacktestSummary,
     GsgfModelHealth,
@@ -108,6 +111,10 @@ from app.services.intraday import IntradayMonitor
 from app.services.capital_signal_sampler import CapitalSignalSampler
 from app.services.capital_signal_store import CapitalSignalStore
 from app.services.capital_signals import CapitalSignalService
+from app.services.etf_three_factor_monitor import EtfThreeFactorMonitor
+from app.services.etf_three_factor_sampler import EtfThreeFactorSampler
+from app.services.etf_three_factor_store import EtfThreeFactorStore
+from app.services.huijin_etf_activity import CORE_ETFS
 from app.services.background_jobs import BackgroundJobStore, CancelCheck, ProgressCallback
 from app.services.cache_registry import CacheRegistry
 from app.services.chanlun.adapter import ChanlunAdapter
@@ -314,8 +321,10 @@ async def lifespan(_app: FastAPI):
         startup_auction_sampler()
         startup_sector_workbench_sampler()
         startup_capital_signal_sampler()
+        startup_etf_three_factor_sampler()
         yield
     finally:
+        shutdown_etf_three_factor_sampler()
         shutdown_capital_signal_sampler()
         shutdown_chanlun_research()
         shutdown_sector_workbench_sampler()
@@ -455,6 +464,29 @@ def startup_capital_signal_sampler() -> None:
 
 def shutdown_capital_signal_sampler() -> None:
     sampler = getattr(app.state, "capital_signal_sampler", None)
+    if sampler is not None:
+        stop_and_wait = getattr(sampler, "stop_and_wait", None)
+        if callable(stop_and_wait):
+            stop_and_wait()
+        else:
+            sampler.stop()
+
+
+def startup_etf_three_factor_sampler() -> None:
+    if getattr(app.state, "etf_three_factor_sampler_disabled", False):
+        return
+    sampler = getattr(app.state, "etf_three_factor_sampler", None)
+    if sampler is None:
+        sampler = EtfThreeFactorSampler(
+            scan=_etf_three_factor_monitor().scan,
+            clock=getattr(app.state, "etf_three_factor_sampler_clock", None),
+        )
+        app.state.etf_three_factor_sampler = sampler
+    sampler.start()
+
+
+def shutdown_etf_three_factor_sampler() -> None:
+    sampler = getattr(app.state, "etf_three_factor_sampler", None)
     if sampler is not None:
         stop_and_wait = getattr(sampler, "stop_and_wait", None)
         if callable(stop_and_wait):
@@ -1168,7 +1200,7 @@ def get_market_capital_summary() -> CapitalSummaryResponse:
 
 @app.get("/api/etf-radar/overview", response_model=EtfRadarOverviewResponse)
 def get_etf_radar_overview() -> EtfRadarOverviewResponse:
-    return _capital_signal_service().overview()
+    return _etf_three_factor_monitor().enrich_overview(_capital_signal_service().overview())
 
 
 @app.get("/api/etf-radar/history", response_model=EtfRadarHistoryResponse)
@@ -1186,6 +1218,49 @@ def get_etf_radar_holders() -> EtfRadarHoldersResponse:
 @app.get("/api/etf-radar/methodology", response_model=EtfRadarMethodologyResponse)
 def get_etf_radar_methodology() -> EtfRadarMethodologyResponse:
     return _capital_signal_service().methodology()
+
+
+@app.get("/api/etf-radar/three-factor", response_model=EtfThreeFactorResponse)
+def get_etf_three_factor() -> EtfThreeFactorResponse:
+    return _etf_three_factor_monitor().latest()
+
+
+@app.get(
+    "/api/etf-radar/three-factor/{symbol}/history",
+    response_model=EtfThreeFactorHistoryResponse,
+)
+def get_etf_three_factor_history(
+    symbol: str,
+    days: int = Query(default=40, ge=1, le=60),
+) -> EtfThreeFactorHistoryResponse:
+    if symbol not in CORE_ETFS:
+        raise HTTPException(status_code=404, detail="ETF不在核心监控池")
+    return _etf_three_factor_monitor().history(symbol, days)
+
+
+@app.get("/api/etf-radar/alerts", response_model=EtfActivityAlertResponse)
+def get_etf_activity_alerts(unread_only: bool = False) -> EtfActivityAlertResponse:
+    alerts = _etf_three_factor_monitor().store.load_alerts()
+    unread_count = sum(not alert.read for alert in alerts)
+    return EtfActivityAlertResponse(
+        unread_count=unread_count,
+        alerts=[alert for alert in alerts if not alert.read] if unread_only else alerts,
+    )
+
+
+@app.post("/api/etf-radar/alerts/{alert_id}/read")
+def mark_etf_activity_alert_read(alert_id: str) -> dict[str, str]:
+    store = _etf_three_factor_monitor().store
+    if not any(alert.alert_id == alert_id for alert in store.load_alerts()):
+        raise HTTPException(status_code=404, detail="告警不存在")
+    store.mark_read(alert_id)
+    return {"status": "ok"}
+
+
+@app.post("/api/etf-radar/alerts/read-all")
+def mark_all_etf_activity_alerts_read() -> dict[str, str]:
+    _etf_three_factor_monitor().store.mark_all_read()
+    return {"status": "ok"}
 
 
 @app.get("/api/market/rankings")
@@ -3387,6 +3462,10 @@ def _kline_provider() -> object:
     )
 
 
+def _daily_kline_provider() -> object:
+    return _kline_provider()
+
+
 def _chanlun_daily_provider() -> object:
     injected = getattr(app.state, "kline_provider", None)
     if injected is not None:
@@ -3430,6 +3509,25 @@ def _capital_signal_service() -> CapitalSignalService:
             ),
         )
         app.state.default_capital_signal_service = cached
+    return cached
+
+
+def _etf_three_factor_monitor() -> EtfThreeFactorMonitor:
+    injected = getattr(app.state, "etf_three_factor_monitor", None)
+    if injected is not None:
+        return injected
+    cached = getattr(app.state, "default_etf_three_factor_monitor", None)
+    if cached is None:
+        settings = get_settings()
+        capital_service = _capital_signal_service()
+        cached = EtfThreeFactorMonitor(
+            quote_provider=_quote_provider(),
+            daily_kline_provider=_daily_kline_provider(),
+            share_snapshot_provider=capital_service,
+            capital_store=capital_service.store,
+            store=EtfThreeFactorStore(settings.data_dir),
+        )
+        app.state.default_etf_three_factor_monitor = cached
     return cached
 
 

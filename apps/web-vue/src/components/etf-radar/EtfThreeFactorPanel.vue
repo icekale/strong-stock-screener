@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref } from 'vue';
+import { computed, defineAsyncComponent, onMounted, ref } from 'vue';
 import type { EChartsOption } from 'echarts';
 import type { EtfFactorEvidence, EtfThreeFactorHistoryResponse, EtfThreeFactorItem, EtfThreeFactorResponse } from '@/service/types';
 import { closeChangeTone, factorStatusLabel, formatVolumeRatio, signalLevelLabel } from '@/utils/domain/etfThreeFactor';
@@ -24,6 +24,14 @@ type SortKey = 'signal_score' | 'close_change_pct' | 'volume_ratio' | 'share_cha
 
 const sortKey = ref<SortKey>('signal_score');
 const sortDirection = ref<'asc' | 'desc'>('desc');
+const panelElement = ref<HTMLElement | null>(null);
+const chartColors = ref({
+  primary: '#2563eb',
+  warning: '#a16207',
+  negative: '#b91c1c',
+  positive: '#15803d',
+  muted: '#64748b'
+});
 const selectedItem = computed(() =>
   props.snapshot.items.find(item => item.symbol === props.selectedSymbol) ?? props.snapshot.items[0] ?? null
 );
@@ -37,10 +45,28 @@ const sortedItems = computed(() =>
 const historyDates = computed(() => props.history?.points.map(point => point.trade_date) ?? []);
 const timelinePoints = computed(() => [...(props.history?.points ?? [])].reverse());
 
+function resolveChartColor(token: string, fallback: string) {
+  if (typeof window === 'undefined') return fallback;
+  const color = window.getComputedStyle(panelElement.value ?? document.documentElement).getPropertyValue(token).trim();
+  return color && !color.includes('var(') ? color : fallback;
+}
+
+function resolveChartColors() {
+  chartColors.value = {
+    primary: resolveChartColor('--wb-primary', chartColors.value.primary),
+    warning: resolveChartColor('--wb-warning', chartColors.value.warning),
+    negative: resolveChartColor('--wb-negative', chartColors.value.negative),
+    positive: resolveChartColor('--wb-positive', chartColors.value.positive),
+    muted: resolveChartColor('--wb-muted', chartColors.value.muted)
+  };
+}
+
+onMounted(resolveChartColors);
+
 const volumeOption = computed<EChartsOption>(() => ({
   animation: false,
   aria: { enabled: true, description: `${selectedItem.value?.name ?? 'ETF'}成交量与20日均量` },
-  color: ['var(--wb-primary)', 'var(--wb-warning)'],
+  color: [chartColors.value.primary, chartColors.value.warning],
   grid: { left: 54, right: 18, top: 32, bottom: 32 },
   legend: { data: ['成交量', '20日均量'], top: 2 },
   tooltip: { trigger: 'axis' },
@@ -55,7 +81,7 @@ const volumeOption = computed<EChartsOption>(() => ({
 const shareOption = computed<EChartsOption>(() => ({
   animation: false,
   aria: { enabled: true, description: `${selectedItem.value?.name ?? 'ETF'}份额与日变化` },
-  color: ['var(--wb-primary)', 'var(--wb-negative)'],
+  color: [chartColors.value.primary, chartColors.value.negative],
   grid: { left: 54, right: 54, top: 32, bottom: 32 },
   legend: { data: ['ETF份额', '份额日变化'], top: 2 },
   tooltip: { trigger: 'axis' },
@@ -76,7 +102,7 @@ const comparisonOption = computed<EChartsOption>(() => {
   return {
     animation: false,
     aria: { enabled: true, description: `${selectedItem.value?.name ?? 'ETF'}收盘涨跌与指数最新涨跌对照` },
-    color: ['var(--wb-positive)', 'var(--wb-muted)'],
+    color: [chartColors.value.positive, chartColors.value.muted],
     grid: { left: 48, right: 18, top: 32, bottom: 32 },
     legend: { data: ['ETF收盘涨跌', '指数涨跌（最新）'], top: 2 },
     tooltip: { trigger: 'axis' },
@@ -138,7 +164,7 @@ function sortLabel(key: SortKey) {
 </script>
 
 <template>
-  <section data-testid="etf-three-factor-panel" class="etf-three-factor">
+  <section ref="panelElement" data-testid="etf-three-factor-panel" class="etf-three-factor">
     <div data-testid="three-factor-summary" class="etf-three-factor__summary">
       <div>
         <span>综合信号强度</span>

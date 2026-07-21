@@ -506,22 +506,22 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
       </SectionHeader>
       <a-alert v-if="errors.overview" data-testid="etf-panel-error" type="warning" :message="activeErrorMessage()" show-icon />
       <a-alert v-if="threeFactorError" data-testid="three-factor-error" type="warning" :message="threeFactorErrorMessage()" show-icon />
+      <div v-if="threeFactorLoading && !threeFactor" class="etf-loading" aria-label="正在读取ETF三因子活动">
+        <a-skeleton active :paragraph="{ rows: 6 }" />
+      </div>
+      <EtfThreeFactorPanel
+        v-else-if="threeFactor"
+        :snapshot="threeFactor"
+        :history="selectedThreeFactorHistory"
+        :selected-symbol="selectedThreeFactorSymbol"
+        :history-loading="threeFactorHistoryLoading"
+        :history-error="threeFactorHistoryError"
+        @select="selectThreeFactorSymbol"
+      />
       <div v-if="loading.activity && !overview" class="etf-loading" aria-label="正在读取今日活动">
         <a-skeleton active :paragraph="{ rows: 7 }" />
       </div>
       <div v-else-if="overview" class="etf-panel-content">
-        <div v-if="threeFactorLoading && !threeFactor" class="etf-loading" aria-label="正在读取ETF三因子活动">
-          <a-skeleton active :paragraph="{ rows: 6 }" />
-        </div>
-        <EtfThreeFactorPanel
-          v-else-if="threeFactor"
-          :snapshot="threeFactor"
-          :history="selectedThreeFactorHistory"
-          :selected-symbol="selectedThreeFactorSymbol"
-          :history-loading="threeFactorHistoryLoading"
-          :history-error="threeFactorHistoryError"
-          @select="selectThreeFactorSymbol"
-        />
         <div class="etf-metrics" aria-label="今日活动摘要">
           <div v-for="metric in overviewMetrics" :key="metric.label" class="etf-metric">
             <span class="etf-metric__label">{{ metric.label }}</span>
@@ -611,7 +611,8 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
         </div>
         <div v-else class="etf-state etf-state--compact">暂无配对验证数据</div>
       </div>
-      <div v-else-if="!errors.overview" class="etf-state">暂无今日活动数据</div>
+      <div v-else-if="errors.overview" class="etf-state">今日份额活动概览暂不可用，旧版概览表与交叉验证已降级。</div>
+      <div v-else class="etf-state">暂无今日活动数据</div>
     </section>
 
     <section v-else-if="activeTab === 'holders'" class="etf-panel">

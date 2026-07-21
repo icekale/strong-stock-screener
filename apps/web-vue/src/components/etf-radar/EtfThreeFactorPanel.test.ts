@@ -3,6 +3,7 @@
 import { defineComponent } from 'vue';
 import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
+import type { EChartsOption } from 'echarts';
 import type {
   EtfFactorEvidence,
   EtfThreeFactorHistoryResponse,
@@ -126,5 +127,38 @@ describe('EtfThreeFactorPanel', () => {
     await wrapper.setProps({ selectedSymbol: '159915.SZ', history: historyFixture('159915.SZ') });
     expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('核心ETF5');
     expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('待盘后');
+  });
+
+  it('sorts the factor table by the selected numeric column', async () => {
+    const wrapper = mountPanel();
+    const names = () => wrapper.findAll('[data-testid="three-factor-table"] tbody strong').map(cell => cell.text());
+
+    expect(names()[0]).toBe('核心ETF1');
+    await wrapper.get('button[aria-label="信号强度 降序"]').trigger('click');
+
+    expect(names()[0]).toBe('核心ETF7');
+    expect(wrapper.find('button[aria-label="信号强度 升序"]').exists()).toBe(true);
+  });
+
+  it('passes concrete, synchronized, gap-preserving options to ECharts', () => {
+    const wrapper = mountPanel();
+    const [volumeOption, shareOption, comparisonOption] = wrapper
+      .findAllComponents(ChartStub)
+      .map(chart => chart.props('option') as EChartsOption);
+    const expectedDates = ['2026-07-16', '2026-07-17', '2026-07-18'];
+    const xAxisDates = (option: EChartsOption) => (option.xAxis as { data: string[] }).data;
+    const series = (option: EChartsOption) => option.series as Array<{ connectNulls?: boolean; data: unknown[] }>;
+
+    expect([volumeOption, shareOption, comparisonOption].every(option => option!.animation === false)).toBe(true);
+    expect([volumeOption, shareOption, comparisonOption].map(option => xAxisDates(option!))).toEqual([
+      expectedDates,
+      expectedDates,
+      expectedDates
+    ]);
+    expect(JSON.stringify([volumeOption, shareOption, comparisonOption])).not.toContain('var(--');
+    expect(series(shareOption!)[0]!.data).toContain(null);
+    expect(series(comparisonOption!)[0]!.data).toContain(null);
+    expect(series(comparisonOption!)[1]!.data).toEqual([null, null, 0.3]);
+    expect(series(comparisonOption!).every(item => item.connectNulls === false)).toBe(true);
   });
 });

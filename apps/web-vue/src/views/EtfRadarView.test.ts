@@ -3,7 +3,7 @@
 import process from 'node:process';
 import { readFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
-import { defineComponent } from 'vue';
+import { defineComponent, nextTick } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
@@ -29,7 +29,11 @@ const api = vi.hoisted(() => ({
 }));
 
 vi.mock('@/service/product-api', () => api);
-vi.mock('vue-router', () => ({ useRoute: () => routeState.route }));
+vi.mock('vue-router', async () => {
+  const { reactive } = await import('vue');
+  routeState.route = reactive(routeState.route);
+  return { useRoute: () => routeState.route };
+});
 
 const TabsStub = defineComponent({
   name: 'ATabs',
@@ -408,6 +412,62 @@ describe('EtfRadarView', () => {
     expect(api.getEtfThreeFactorHistory).toHaveBeenCalledWith('159915.SZ', 40);
     expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('三因子ETF5');
     wrapper.unmount();
+  });
+
+  it('keeps the workbench usable when the overview request fails and degrades its legacy tables', async () => {
+    routeState.route.query = { tab: 'activity' };
+    setDefaultApiResponses();
+    api.getEtfRadarOverview.mockRejectedValueOnce(new Error('概览服务暂不可用'));
+
+    const wrapper = await mountView();
+
+    expect(wrapper.find('[data-testid="etf-three-factor-panel"]').exists()).toBe(true);
+    expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('三因子ETF1');
+    expect(wrapper.get('[data-testid="etf-panel-error"]').text()).toContain('概览服务暂不可用');
+    expect(wrapper.find('[data-testid="core-table"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain('今日份额活动概览暂不可用');
+    wrapper.unmount();
+  });
+
+  it('ignores an invalid route symbol and follows a later valid query symbol', async () => {
+    routeState.route.query = { tab: 'activity', symbol: 'not-a-core-etf' };
+    setDefaultApiResponses();
+    const wrapper = await mountView();
+
+    expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('三因子ETF1');
+    expect(api.getEtfThreeFactorHistory).toHaveBeenCalledWith('510050.SH', 40);
+
+    routeState.route.query = { tab: 'activity', symbol: '159915.SZ' };
+    await nextTick();
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('三因子ETF5');
+    expect(api.getEtfThreeFactorHistory).toHaveBeenCalledWith('159915.SZ', 40);
+    wrapper.unmount();
+  });
+
+  it('reuses factor data for 15 seconds, then retains it when the expired request fails', async () => {
+    vi.useFakeTimers();
+    routeState.route.query = { tab: 'activity' };
+    setDefaultApiResponses();
+    const wrapper = await mountView();
+
+    await openTab(wrapper, 0);
+    await openTab(wrapper, 1);
+    expect(api.getEtfThreeFactor).toHaveBeenCalledTimes(1);
+    expect(api.getEtfThreeFactorHistory).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(15_001);
+    api.getEtfThreeFactor.mockRejectedValueOnce(new Error('三因子刷新失败'));
+    await openTab(wrapper, 0);
+    await openTab(wrapper, 1);
+
+    expect(api.getEtfThreeFactor).toHaveBeenCalledTimes(2);
+    expect(api.getEtfThreeFactorHistory).toHaveBeenCalledTimes(2);
+    expect(wrapper.find('[data-testid="etf-three-factor-panel"]').exists()).toBe(true);
+    expect(wrapper.get('[data-testid="three-factor-error"]').text()).toContain('当前显示上次成功数据');
+    wrapper.unmount();
+    vi.useRealTimers();
   });
 
   it('shows backend stale source status as partial and preserves its detail', async () => {

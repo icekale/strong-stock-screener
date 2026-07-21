@@ -116,7 +116,10 @@ class EtfThreeFactorSampler:
             completion_key = key if kind == "intraday" else f"{current.date().isoformat()}:{kind}"
             if completion_key in completed:
                 return False
-            self._scan(now=current)
+            if kind in {"share_first", "share_second"}:
+                self._scan(now=current, force=True)
+            else:
+                self._scan(now=current)
             completed.add(completion_key)
             return True
 

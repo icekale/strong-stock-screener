@@ -189,7 +189,7 @@ class EtfThreeFactorMonitor:
         trade_date: str,
         force: bool,
     ) -> EtfThreeFactorResponse:
-        refresh_shares = _is_share_refresh(scan_at) or (
+        refresh_shares = (force and _is_after_share_disclosure(scan_at)) or _is_share_refresh(scan_at) or (
             _is_after_share_disclosure(scan_at) and _has_pending_share_factors(previous)
         )
         share_values = self._share_values(scan_at, trade_date, force) if refresh_shares else None

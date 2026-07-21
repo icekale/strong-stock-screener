@@ -68,6 +68,15 @@ def test_sampler_samples_only_trading_sessions_and_scheduled_refreshes() -> None
         "19:05",
         "19:35",
     ]
+    assert [call.get("force", False) for call in calls] == [
+        False,
+        False,
+        False,
+        False,
+        False,
+        True,
+        True,
+    ]
 
 
 def test_sampler_catches_up_overdue_refresh_windows() -> None:
@@ -92,6 +101,7 @@ def test_sampler_catches_up_overdue_refresh_windows() -> None:
         "19:06",
         "19:36",
     ]
+    assert [call.get("force", False) for call in calls] == [False, True, True]
 
 
 def test_sampler_stops_and_joins_cleanly() -> None:

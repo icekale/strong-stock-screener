@@ -263,6 +263,50 @@ def test_non_exact_post_close_share_failure_replaces_pending_factor(tmp_path: Pa
     assert shares.calls == [False]
 
 
+def test_forced_overdue_share_second_retries_after_failed_first_disclosure(tmp_path: Path) -> None:
+    monitor, _, _, shares = monitor_with(tmp_path, share_change_pct=5.0)
+    monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+    shares.fail = True
+
+    failed = monitor.scan(now=shanghai("2026-07-22T19:06:00"), force=True)
+    shares.fail = False
+    retried = monitor.scan(now=shanghai("2026-07-22T19:36:00"), force=True)
+    monitor.scan(now=shanghai("2026-07-22T19:37:00"))
+
+    assert by_symbol(failed, "510050.SH").share_factor.status == "missing"
+    assert by_symbol(retried, "510050.SH").share_factor.status == "available"
+    assert shares.calls == [True, True]
+
+
+def test_forced_overdue_share_second_refreshes_available_first_disclosure(tmp_path: Path) -> None:
+    monitor, _, _, shares = monitor_with(tmp_path, share_change_pct=5.0)
+    monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+
+    first = monitor.scan(now=shanghai("2026-07-22T19:06:00"), force=True)
+    second = monitor.scan(now=shanghai("2026-07-22T19:36:00"), force=True)
+    monitor.scan(now=shanghai("2026-07-22T19:37:00"))
+
+    assert by_symbol(first, "510050.SH").share_factor.status == "available"
+    assert by_symbol(second, "510050.SH").share_factor.status == "available"
+    assert shares.calls == [True, True]
+
+
+def test_forced_overdue_share_second_retries_after_failed_second_disclosure(tmp_path: Path) -> None:
+    monitor, _, _, shares = monitor_with(tmp_path, share_change_pct=5.0)
+    monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+    monitor.scan(now=shanghai("2026-07-22T19:06:00"), force=True)
+    shares.fail = True
+
+    failed = monitor.scan(now=shanghai("2026-07-22T19:35:00"), force=True)
+    shares.fail = False
+    retried = monitor.scan(now=shanghai("2026-07-22T19:36:00"), force=True)
+    monitor.scan(now=shanghai("2026-07-22T19:37:00"))
+
+    assert by_symbol(failed, "510050.SH").share_factor.status == "missing"
+    assert by_symbol(retried, "510050.SH").share_factor.status == "available"
+    assert shares.calls == [True, True, True]
+
+
 @pytest.mark.parametrize("scan_time", ["2026-07-22T12:00:00", "2026-07-25T10:30:00"])
 def test_non_session_scan_reuses_snapshot_without_provider_calls_or_alerts(
     tmp_path: Path, scan_time: str

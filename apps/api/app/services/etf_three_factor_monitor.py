@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from math import isfinite
 from threading import RLock
 from typing import Protocol
@@ -99,6 +99,13 @@ class EtfThreeFactorMonitor:
                 return previous if _is_successful_snapshot(previous) else self._unavailable_response(scan_at, quote_error)
 
             share_values = self._share_values(scan_at, trade_date, force)
+            prior_post_close_trade_date = (
+                previous.trade_date
+                if previous is not None
+                and previous.signal_stage == "post_close"
+                and previous.trade_date == _previous_weekday_trade_date(trade_date)
+                else None
+            )
             items = [
                 self._build_item(
                     symbol=symbol,
@@ -106,6 +113,7 @@ class EtfThreeFactorMonitor:
                     share_value=share_values[symbol],
                     scan_at=scan_at,
                     trade_date=trade_date,
+                    prior_post_close_trade_date=prior_post_close_trade_date,
                 )
                 for symbol in CORE_ETFS
             ]
@@ -210,6 +218,7 @@ class EtfThreeFactorMonitor:
             ),
         )
         if share_values is None:
+            self._upsert_post_close_history(response)
             self.store.save_snapshot(response)
         else:
             self._save_scan(previous, response, share_values)
@@ -310,12 +319,32 @@ class EtfThreeFactorMonitor:
         self._upsert_alerts(previous, response)
         self.store.save_snapshot(response)
 
+    def _upsert_post_close_history(self, response: EtfThreeFactorResponse) -> None:
+        points: list[EtfThreeFactorHistoryPoint] = []
+        for item in response.items:
+            current = next(
+                (
+                    point
+                    for point in self.store.load_history(item.symbol, days=60)
+                    if point.trade_date == response.trade_date
+                ),
+                None,
+            )
+            if current is None:
+                current = EtfThreeFactorHistoryPoint(
+                    trade_date=response.trade_date,
+                    symbol=item.symbol,
+                )
+            points.append(current.model_copy(update={"close_change_pct": item.close_change_pct}))
+        self.store.upsert_history(points)
+
     def _daily_bars(
         self,
         trade_date: str,
         symbol: str,
         *,
         stage: str,
+        prior_post_close_trade_date: str | None = None,
     ) -> _DailyBars:
         failure_key = (trade_date, symbol)
         cached_failure = self._daily_cache.get(failure_key)
@@ -326,6 +355,13 @@ class EtfThreeFactorMonitor:
         cache_key = self._daily_cache_lookup.get(lookup_key)
         if cache_key is not None:
             return self._daily_cache[cache_key]
+
+        if stage == "intraday" and prior_post_close_trade_date is not None:
+            prior_lookup_key = ("post_close", prior_post_close_trade_date, symbol)
+            prior_cache_key = self._daily_cache_lookup.get(prior_lookup_key)
+            if prior_cache_key is not None and prior_cache_key[0] == prior_post_close_trade_date:
+                self._daily_cache_lookup[lookup_key] = prior_cache_key
+                return self._daily_cache[prior_cache_key]
 
         include_current_day = stage == "post_close"
         try:
@@ -353,12 +389,18 @@ class EtfThreeFactorMonitor:
         share_value: _ShareValue,
         scan_at: datetime,
         trade_date: str,
+        prior_post_close_trade_date: str | None,
     ) -> EtfThreeFactorItem:
         definition = CORE_ETFS[symbol]
         index_symbol = INDEX_SYMBOL_BY_ETF[symbol]
         quote = quote_by_symbol[symbol]
         index_quote = quote_by_symbol[index_symbol]
-        daily_bars = self._daily_bars(trade_date, symbol, stage="intraday")
+        daily_bars = self._daily_bars(
+            trade_date,
+            symbol,
+            stage="intraday",
+            prior_post_close_trade_date=prior_post_close_trade_date,
+        )
         completed = [
             bar
             for bar in daily_bars.bars
@@ -723,6 +765,16 @@ def _has_pending_share_factors(snapshot: EtfThreeFactorResponse) -> bool:
 
 def _is_successful_snapshot(snapshot: EtfThreeFactorResponse | None) -> bool:
     return snapshot is not None and snapshot.monitor_running and bool(snapshot.items)
+
+
+def _previous_weekday_trade_date(trade_date: str) -> str | None:
+    try:
+        value = datetime.fromisoformat(trade_date).date() - timedelta(days=1)
+    except ValueError:
+        return None
+    while value.weekday() >= 5:
+        value -= timedelta(days=1)
+    return value.isoformat()
 
 
 def _quote_trade_date(value: object) -> str | None:

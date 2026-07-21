@@ -10,6 +10,7 @@ import pytest
 from app.models import (
     EtfRadarOverviewResponse,
     EtfSharePoint,
+    EtfThreeFactorHistoryPoint,
     EtfThreeFactorResponse,
     HuijinEtfActivityItem,
     KlineBar,
@@ -407,6 +408,75 @@ def test_post_close_close_change_uses_completed_current_day_not_cached_partial_b
     monitor.scan(now=shanghai("2026-07-22T15:06:00"))
 
     assert len(daily.calls) == 2 * len(CORE_ETFS)
+
+
+def test_next_trade_date_intraday_reuses_prior_post_close_completed_bars(tmp_path: Path) -> None:
+    monitor, quotes, daily, _ = monitor_with(tmp_path)
+    monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+    for symbol, bars in daily.bars_by_symbol.items():
+        bars[-1] = KlineBar(
+            date="2026-07-22",
+            open=132,
+            high=132,
+            low=132,
+            close=132,
+            volume=300,
+        )
+    monitor.scan(now=shanghai("2026-07-22T15:05:00"))
+    for quote in quotes.quotes.values():
+        quote.quote_time = "2026-07-23T10:30:00+08:00"
+
+    item = by_symbol(monitor.scan(now=shanghai("2026-07-23T10:30:00")), "510050.SH")
+
+    assert item.close_change_pct == pytest.approx(20)
+    assert item.close_change_trade_date == "2026-07-22"
+    assert len(daily.calls) == 2 * len(CORE_ETFS)
+
+
+def test_next_trade_date_intraday_reuses_prior_post_close_kline_failure(tmp_path: Path) -> None:
+    monitor, quotes, daily, _ = monitor_with(tmp_path)
+    monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+    daily.fail_symbols.add("510050.SH")
+    monitor.scan(now=shanghai("2026-07-22T15:05:00"))
+    for quote in quotes.quotes.values():
+        quote.quote_time = "2026-07-23T10:30:00+08:00"
+
+    item = by_symbol(monitor.scan(now=shanghai("2026-07-23T10:30:00")), "510050.SH")
+
+    assert item.volume_factor.detail == "日K线请求失败: RuntimeError"
+    assert daily.calls.count(("510050.SH", 40)) == 2
+
+
+def test_post_close_without_share_refresh_merges_close_change_into_history(tmp_path: Path) -> None:
+    monitor, _, daily, _ = monitor_with(tmp_path)
+    monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+    monitor.store.upsert_history(
+        [
+            EtfThreeFactorHistoryPoint(
+                trade_date="2026-07-22",
+                symbol=symbol,
+                total_shares=1_050,
+                share_change_pct=5,
+            )
+            for symbol in CORE_ETFS
+        ]
+    )
+    for symbol, bars in daily.bars_by_symbol.items():
+        bars[-1] = KlineBar(
+            date="2026-07-22",
+            open=132,
+            high=132,
+            low=132,
+            close=132,
+            volume=300,
+        )
+
+    monitor.scan(now=shanghai("2026-07-22T15:05:00"))
+
+    point = monitor.store.load_history("510050.SH", days=40)[0]
+    assert point.close_change_pct == pytest.approx(20)
+    assert point.total_shares == 1_050
+    assert point.share_change_pct == 5
 
 
 def test_post_close_kline_error_preserves_intraday_volume_evidence_and_marks_response_stale(

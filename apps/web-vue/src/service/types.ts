@@ -1998,6 +1998,10 @@ export type SystemCacheClearResponse = {
 
 export type CapitalSignalStage = "intraday" | "post_close" | "disclosure";
 export type CapitalEvidenceLevel = "常规" | "观察" | "疑似" | "较强";
+export type EtfThreeFactorMode = "three_factor" | "two_factor" | "incomplete";
+export type EtfThreeFactorLevel = "high" | "medium" | "low" | "incomplete";
+export type EtfFactorStatus = "available" | "pending" | "missing" | "stale";
+export type EtfAlertType = "single_high" | "single_upgrade" | "market_watch" | "market_high";
 export type HuijinEtfRole = "core" | "validator";
 export type EtfActivityDirection = "increase" | "decrease" | "flat" | "unknown";
 export type EtfValidationState = "confirmed_increase" | "confirmed_decrease" | "divergent" | "incomplete";
@@ -2052,6 +2056,8 @@ export type HuijinEtfActivityItem = {
   daily_change_pct: number | null;
   baseline_change_pct: number | null;
   cumulative_baseline_change_pct: number | null;
+  close_change_pct: number | null;
+  close_change_trade_date: string | null;
   multiple: number | null;
   direction: EtfActivityDirection;
   is_tenfold: boolean;
@@ -2179,4 +2185,94 @@ export type EtfRadarMethodologyResponse = CapitalSignalMetadata & {
   thresholds: Record<string, number>;
   factors: EtfRadarFactorDefinition[];
   limitations: string[];
+};
+
+export type EtfFactorEvidence = {
+  score: number | null;
+  value: number | null;
+  status: EtfFactorStatus;
+  source: string;
+  data_date: string | null;
+  updated_at: string | null;
+  detail: string | null;
+};
+
+export type EtfThreeFactorItem = {
+  symbol: string;
+  name: string;
+  index_name: string;
+  index_symbol: string;
+  close_change_pct: number | null;
+  close_change_trade_date: string | null;
+  intraday_change_pct: number | null;
+  index_change_pct: number | null;
+  current_volume: number | null;
+  average_volume_20d: number | null;
+  volume_ratio: number | null;
+  share_change_pct: number | null;
+  volume_factor: EtfFactorEvidence;
+  direction_factor: EtfFactorEvidence;
+  share_factor: EtfFactorEvidence;
+  signal_score: number | null;
+  mode: EtfThreeFactorMode;
+  level: EtfThreeFactorLevel;
+  updated_at: string;
+};
+
+export type EtfThreeFactorSummary = {
+  signal_score: number | null;
+  level: EtfThreeFactorLevel;
+  valid_count: number;
+  high_count: number;
+  medium_count: number;
+  market_state: "high" | "watch" | "normal" | "incomplete";
+};
+
+export type EtfThreeFactorResponse = CapitalSignalMetadata & {
+  summary: EtfThreeFactorSummary;
+  items: EtfThreeFactorItem[];
+  monitor_running: boolean;
+  last_scan_at: string | null;
+};
+
+export type EtfThreeFactorHistoryPoint = {
+  trade_date: string;
+  symbol: string;
+  close_change_pct: number | null;
+  volume: number | null;
+  average_volume_20d: number | null;
+  volume_ratio: number | null;
+  total_shares: number | null;
+  share_change_pct: number | null;
+  signal_score: number | null;
+  level: EtfThreeFactorLevel;
+};
+
+export type EtfThreeFactorHistoryResponse = CapitalSignalMetadata & {
+  symbol: string;
+  points: EtfThreeFactorHistoryPoint[];
+};
+
+export type EtfActivityAlert = {
+  alert_id: string;
+  trade_date: string;
+  alert_type: EtfAlertType;
+  level: "watch" | "high";
+  symbol: string | null;
+  title: string;
+  message: string;
+  signal_score: number;
+  triggered_at: string;
+  last_triggered_at: string;
+  evidence: Record<string, number | string | null>;
+  read: boolean;
+};
+
+export type EtfActivityAlertResponse = {
+  unread_count: number;
+  alerts: EtfActivityAlert[];
+};
+
+export type EtfAlertReadResponse = {
+  status: string;
 };

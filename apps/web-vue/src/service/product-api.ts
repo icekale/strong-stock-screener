@@ -25,10 +25,14 @@ import type {
   CzscResearchSnapshot,
   CzscShadowScreeningJobResponse,
   DataSourceStatusResponse,
+  EtfActivityAlertResponse,
+  EtfAlertReadResponse,
   EtfRadarHistoryResponse,
   EtfRadarHoldersResponse,
   EtfRadarMethodologyResponse,
   EtfRadarOverviewResponse,
+  EtfThreeFactorHistoryResponse,
+  EtfThreeFactorResponse,
   GsgfAnalysis,
   GsgfAutoReviewConfig,
   GsgfBacktestSummary,
@@ -199,6 +203,55 @@ export async function getEtfRadarMethodology(): Promise<EtfRadarMethodologyRespo
     throw new Error(`读取ETF资金雷达方法失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<EtfRadarMethodologyResponse>;
+}
+
+export async function getEtfThreeFactor(): Promise<EtfThreeFactorResponse> {
+  const response = await apiFetch(`${API_BASE_URL}/api/etf-radar/three-factor`);
+  if (!response.ok) {
+    throw new Error(`读取ETF三因子信号失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<EtfThreeFactorResponse>;
+}
+
+export async function getEtfThreeFactorHistory(
+  symbol: string,
+  days = 40,
+): Promise<EtfThreeFactorHistoryResponse> {
+  const params = new URLSearchParams({ days: String(days) });
+  const response = await apiFetch(
+    `${API_BASE_URL}/api/etf-radar/three-factor/${encodeURIComponent(symbol)}/history?${params.toString()}`,
+  );
+  if (!response.ok) {
+    throw new Error(`读取ETF三因子历史失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<EtfThreeFactorHistoryResponse>;
+}
+
+export async function getEtfActivityAlerts(unreadOnly = false): Promise<EtfActivityAlertResponse> {
+  const params = new URLSearchParams({ unread_only: String(unreadOnly) });
+  const response = await apiFetch(`${API_BASE_URL}/api/etf-radar/alerts?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取ETF活动提醒失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<EtfActivityAlertResponse>;
+}
+
+export async function markEtfAlertRead(alertId: string): Promise<EtfAlertReadResponse> {
+  const response = await apiFetch(`${API_BASE_URL}/api/etf-radar/alerts/${encodeURIComponent(alertId)}/read`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`标记ETF活动提醒已读失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<EtfAlertReadResponse>;
+}
+
+export async function markAllEtfAlertsRead(): Promise<EtfAlertReadResponse> {
+  const response = await apiFetch(`${API_BASE_URL}/api/etf-radar/alerts/read-all`, { method: "POST" });
+  if (!response.ok) {
+    throw new Error(`标记全部ETF活动提醒已读失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<EtfAlertReadResponse>;
 }
 
 export async function getMarketRankings(limit = 30): Promise<MarketRankingsResponse> {

@@ -2,10 +2,15 @@ import { beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
   getAuctionModelTop3,
   getCapitalSummary,
+  getEtfActivityAlerts,
   getEtfRadarHistory,
   getEtfRadarHolders,
   getEtfRadarMethodology,
   getEtfRadarOverview,
+  getEtfThreeFactor,
+  getEtfThreeFactorHistory,
+  markAllEtfAlertsRead,
+  markEtfAlertRead,
   getSectorReplicaRadar,
   getStockKline
 } from './product-api';
@@ -13,12 +18,24 @@ import type { ApiRequestError } from './product-request';
 import { apiRequest } from './product-request';
 import type {
   CapitalSummaryResponse,
+  EtfActivityAlert,
+  EtfActivityAlertResponse,
   EtfActivityDirection,
+  EtfAlertType,
+  EtfFactorEvidence,
+  EtfFactorStatus,
   EtfRadarHistoryPoint,
   EtfRadarHistoryResponse,
   EtfRadarHoldersResponse,
   EtfRadarOverviewResponse,
   EtfRadarSummary,
+  EtfThreeFactorHistoryPoint,
+  EtfThreeFactorHistoryResponse,
+  EtfThreeFactorItem,
+  EtfThreeFactorLevel,
+  EtfThreeFactorMode,
+  EtfThreeFactorResponse,
+  EtfThreeFactorSummary,
   EtfValidationState,
   HuijinBaselineSourceKind,
   HuijinEtfActivityItem,
@@ -122,6 +139,144 @@ describe('apiRequest', () => {
     ]);
   });
 
+  it('requests ETF three-factor routes with encoded identifiers and exact request methods', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(() => Promise.resolve(new Response(JSON.stringify({}), { status: 200 })));
+
+    await getEtfThreeFactor();
+    await getEtfThreeFactorHistory('510050.SH', 40);
+    await getEtfActivityAlerts(true);
+    await markEtfAlertRead('alert/2026 07');
+    await markAllEtfAlertsRead();
+
+    expect(fetchMock.mock.calls.map(call => [String(call[0]), call[1]])).toEqual([
+      [expect.stringContaining('/api/etf-radar/three-factor'), undefined],
+      [expect.stringContaining('/api/etf-radar/three-factor/510050.SH/history?days=40'), undefined],
+      [expect.stringContaining('/api/etf-radar/alerts?unread_only=true'), undefined],
+      [
+        expect.stringContaining('/api/etf-radar/alerts/alert%2F2026%2007/read'),
+        expect.objectContaining({ method: 'POST' })
+      ],
+      [
+        expect.stringContaining('/api/etf-radar/alerts/read-all'),
+        expect.objectContaining({ method: 'POST' })
+      ]
+    ]);
+  });
+
+  it('keeps ETF three-factor contracts aligned with backend payloads', () => {
+    expectTypeOf<EtfThreeFactorMode>().toEqualTypeOf<'three_factor' | 'two_factor' | 'incomplete'>();
+    expectTypeOf<EtfThreeFactorLevel>().toEqualTypeOf<'high' | 'medium' | 'low' | 'incomplete'>();
+    expectTypeOf<EtfFactorStatus>().toEqualTypeOf<'available' | 'pending' | 'missing' | 'stale'>();
+    expectTypeOf<EtfAlertType>().toEqualTypeOf<
+      'single_high' | 'single_upgrade' | 'market_watch' | 'market_high'
+    >();
+    expectTypeOf<EtfFactorEvidence>().toEqualTypeOf<{
+      score: number | null;
+      value: number | null;
+      status: EtfFactorStatus;
+      source: string;
+      data_date: string | null;
+      updated_at: string | null;
+      detail: string | null;
+    }>();
+    expectTypeOf<Pick<HuijinEtfActivityItem, 'close_change_pct' | 'close_change_trade_date'>>().toEqualTypeOf<{
+      close_change_pct: number | null;
+      close_change_trade_date: string | null;
+    }>();
+
+    const metadata = {
+      generated_at: '2026-07-22T15:05:00+08:00',
+      trade_date: '2026-07-22',
+      as_of: '2026-07-22T15:05:00+08:00',
+      signal_stage: 'post_close' as const,
+      model_version: 'three-factor-v1',
+      source_status: []
+    };
+    const factor = {
+      score: null,
+      value: null,
+      status: 'pending',
+      source: 'official-share-history',
+      data_date: null,
+      updated_at: null,
+      detail: null
+    } satisfies EtfFactorEvidence;
+    const item = {
+      symbol: '510050.SH',
+      name: '华夏上证50ETF',
+      index_name: '上证50',
+      index_symbol: '000016.SH',
+      close_change_pct: null,
+      close_change_trade_date: null,
+      intraday_change_pct: null,
+      index_change_pct: null,
+      current_volume: null,
+      average_volume_20d: null,
+      volume_ratio: null,
+      share_change_pct: null,
+      volume_factor: factor,
+      direction_factor: factor,
+      share_factor: factor,
+      signal_score: null,
+      mode: 'incomplete',
+      level: 'incomplete',
+      updated_at: '2026-07-22T15:05:00+08:00'
+    } satisfies EtfThreeFactorItem;
+    const summary = {
+      signal_score: null,
+      level: 'incomplete',
+      valid_count: 0,
+      high_count: 0,
+      medium_count: 0,
+      market_state: 'incomplete'
+    } satisfies EtfThreeFactorSummary;
+    const response = {
+      ...metadata,
+      summary,
+      items: [item],
+      monitor_running: false,
+      last_scan_at: null
+    } satisfies EtfThreeFactorResponse;
+    const historyPoint = {
+      trade_date: '2026-07-22',
+      symbol: '510050.SH',
+      close_change_pct: null,
+      volume: null,
+      average_volume_20d: null,
+      volume_ratio: null,
+      total_shares: null,
+      share_change_pct: null,
+      signal_score: null,
+      level: 'incomplete'
+    } satisfies EtfThreeFactorHistoryPoint;
+    const history = {
+      ...metadata,
+      symbol: '510050.SH',
+      points: [historyPoint]
+    } satisfies EtfThreeFactorHistoryResponse;
+    const alert = {
+      alert_id: 'alert-1',
+      trade_date: '2026-07-22',
+      alert_type: 'single_high',
+      level: 'high',
+      symbol: null,
+      title: 'ETF activity',
+      message: 'Signal upgraded',
+      signal_score: 82,
+      triggered_at: '2026-07-22T15:05:00+08:00',
+      last_triggered_at: '2026-07-22T15:05:00+08:00',
+      evidence: { volume_ratio: 3, factor: 'volume', missing: null },
+      read: false
+    } satisfies EtfActivityAlert;
+    const alerts = { unread_count: 1, alerts: [alert] } satisfies EtfActivityAlertResponse;
+
+    expect(response.items[0]?.volume_factor.status).toBe('pending');
+    expect(history.points[0]?.volume_ratio).toBeNull();
+    expect(alerts.alerts[0]?.evidence.missing).toBeNull();
+  });
+
   it('keeps Huijin ETF response contracts aligned with backend payloads', () => {
     expectTypeOf<HuijinEtfRole>().toEqualTypeOf<'core' | 'validator'>();
     expectTypeOf<EtfActivityDirection>().toEqualTypeOf<'increase' | 'decrease' | 'flat' | 'unknown'>();
@@ -197,6 +352,8 @@ describe('apiRequest', () => {
       daily_change_pct: 9.09,
       baseline_change_pct: 20,
       cumulative_baseline_change_pct: 20,
+      close_change_pct: 1.25,
+      close_change_trade_date: '2026-07-18',
       multiple: 2,
       direction: 'increase',
       is_tenfold: false,

@@ -20,6 +20,8 @@ const baseItem: HuijinEtfActivityItem = {
   daily_change_pct: 1.07,
   baseline_change_pct: 0.15,
   cumulative_baseline_change_pct: -85.46,
+  close_change_pct: null,
+  close_change_trade_date: null,
   multiple: 1.5,
   direction: 'increase',
   is_tenfold: false,

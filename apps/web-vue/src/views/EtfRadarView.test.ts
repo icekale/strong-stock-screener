@@ -131,7 +131,9 @@ function activityItem(overrides: Partial<HuijinEtfActivityItem> = {}): HuijinEtf
     confirmed_huijin_shares: 1_234_000_000,
     confirmed_huijin_holding_pct: 12.34,
     baseline_source_kind: 'reported',
-    ...overrides
+    ...overrides,
+    close_change_pct: overrides.close_change_pct ?? null,
+    close_change_trade_date: overrides.close_change_trade_date ?? null
   };
 }
 

@@ -11,18 +11,25 @@ import type {
   EtfRadarHoldersResponse,
   EtfRadarMethodologyResponse,
   EtfRadarOverviewResponse,
+  EtfThreeFactorHistoryResponse,
+  EtfThreeFactorItem,
+  EtfThreeFactorResponse,
   HuijinEtfActivityItem
 } from '@/service/types';
 import EtfRadarView from './EtfRadarView.vue';
 
+const routeState = vi.hoisted(() => ({ route: { query: {} as Record<string, string> } }));
 const api = vi.hoisted(() => ({
   getEtfRadarOverview: vi.fn(),
   getEtfRadarHistory: vi.fn(),
   getEtfRadarHolders: vi.fn(),
-  getEtfRadarMethodology: vi.fn()
+  getEtfRadarMethodology: vi.fn(),
+  getEtfThreeFactor: vi.fn(),
+  getEtfThreeFactorHistory: vi.fn()
 }));
 
 vi.mock('@/service/product-api', () => api);
+vi.mock('vue-router', () => ({ useRoute: () => routeState.route }));
 
 const TabsStub = defineComponent({
   name: 'ATabs',
@@ -231,11 +238,62 @@ function methodologyFixture(): EtfRadarMethodologyResponse {
   };
 }
 
+function threeFactorItem(overrides: Partial<EtfThreeFactorItem> = {}): EtfThreeFactorItem {
+  return {
+    symbol: '510050.SH',
+    name: '华夏上证50ETF',
+    index_name: '上证50',
+    index_symbol: '000016.SH',
+    close_change_pct: 1.25,
+    close_change_trade_date: '2026-07-18',
+    intraday_change_pct: 0.8,
+    index_change_pct: 0.3,
+    current_volume: 1_200_000_000,
+    average_volume_20d: 800_000_000,
+    volume_ratio: 1.5,
+    share_change_pct: 0.6,
+    volume_factor: { score: 90, value: 1.5, status: 'available', source: '交易所日线', data_date: '2026-07-18', updated_at: '2026-07-18T15:00:00+08:00', detail: '数据完整' },
+    direction_factor: { score: 90, value: 0.8, status: 'available', source: '行情日线', data_date: '2026-07-18', updated_at: '2026-07-18T15:00:00+08:00', detail: '数据完整' },
+    share_factor: { score: 90, value: 0.6, status: 'available', source: '交易所份额', data_date: '2026-07-18', updated_at: '2026-07-18T15:00:00+08:00', detail: '数据完整' },
+    signal_score: 90,
+    mode: 'three_factor',
+    level: 'high',
+    updated_at: '2026-07-18T15:00:00+08:00',
+    ...overrides
+  };
+}
+
+function threeFactorFixture(): EtfThreeFactorResponse {
+  const symbols = ['510050.SH', '510300.SH', '510500.SH', '512100.SH', '159915.SZ', '510230.SH', '588080.SH'];
+  return {
+    ...metadata(),
+    model_version: 'three-factor-v1',
+    summary: { signal_score: 90, level: 'high', valid_count: 7, high_count: 1, medium_count: 6, market_state: 'high' },
+    items: symbols.map((symbol, index) => threeFactorItem({ symbol, name: `三因子ETF${index + 1}`, level: index === 0 ? 'high' : 'medium', signal_score: 90 - index })),
+    monitor_running: true,
+    last_scan_at: '2026-07-18T15:00:00+08:00'
+  };
+}
+
+function threeFactorHistoryFixture(symbol = '510050.SH'): EtfThreeFactorHistoryResponse {
+  return {
+    ...metadata(),
+    model_version: 'three-factor-v1',
+    symbol,
+    points: [
+      { trade_date: '2026-07-17', symbol, close_change_pct: 0.5, volume: 800_000_000, average_volume_20d: 750_000_000, volume_ratio: 1.07, total_shares: 1_000_000_000, share_change_pct: 0.2, signal_score: 80, level: 'medium' },
+      { trade_date: '2026-07-18', symbol, close_change_pct: 1.25, volume: 1_200_000_000, average_volume_20d: 800_000_000, volume_ratio: 1.5, total_shares: 1_006_000_000, share_change_pct: 0.6, signal_score: 90, level: 'high' }
+    ]
+  };
+}
+
 function setDefaultApiResponses() {
   api.getEtfRadarOverview.mockResolvedValue(overviewFixture());
   api.getEtfRadarHistory.mockResolvedValue(historyFixture());
   api.getEtfRadarHolders.mockResolvedValue(holdersFixture());
   api.getEtfRadarMethodology.mockResolvedValue(methodologyFixture());
+  api.getEtfThreeFactor.mockResolvedValue(threeFactorFixture());
+  api.getEtfThreeFactorHistory.mockImplementation((symbol: string) => Promise.resolve(threeFactorHistoryFixture(symbol)));
 }
 
 function mountViewImmediately() {
@@ -267,6 +325,7 @@ async function openTab(wrapper: Awaited<ReturnType<typeof mountView>>, index: nu
 
 afterEach(() => {
   vi.clearAllMocks();
+  routeState.route.query = {};
 });
 
 describe('EtfRadarView', () => {
@@ -316,6 +375,38 @@ describe('EtfRadarView', () => {
     expect(wrapper.get('[data-testid="core-etf-row"] strong').attributes('title')).toBe('华夏上证50ETF');
     expect(wrapper.text()).not.toContain('OLD_GENERIC_SENTINEL');
     expect(wrapper.text()).not.toMatch(/证据强度|稳健分|同时间成交|相对指数|估算申购/);
+    wrapper.unmount();
+  });
+
+  it('loads the three-factor workbench lazily and renders completed close changes with directional classes', async () => {
+    setDefaultApiResponses();
+    const overview = overviewFixture();
+    overview.core_items[0]!.close_change_pct = 1.25;
+    overview.core_items[1]!.close_change_pct = -0.75;
+    api.getEtfRadarOverview.mockResolvedValue(overview);
+    const wrapper = await mountView();
+
+    expect(api.getEtfThreeFactor).not.toHaveBeenCalled();
+    await openTab(wrapper, 1);
+
+    expect(api.getEtfThreeFactor).toHaveBeenCalledTimes(1);
+    expect(api.getEtfThreeFactorHistory).toHaveBeenCalledWith('510050.SH', 40);
+    const table = wrapper.get('[data-testid="core-table"]');
+    expect(table.text()).toContain('收盘涨跌');
+    expect(table.html()).toContain('etf-value--positive');
+    expect(table.html()).toContain('etf-value--negative');
+    expect(table.text()).toContain('份额日变化');
+    wrapper.unmount();
+  });
+
+  it('honors an activity symbol query only after validating it against the latest seven items', async () => {
+    routeState.route.query = { symbol: '159915.SZ', tab: 'activity' };
+    setDefaultApiResponses();
+    const wrapper = await mountView();
+
+    expect(api.getEtfThreeFactor).toHaveBeenCalledTimes(1);
+    expect(api.getEtfThreeFactorHistory).toHaveBeenCalledWith('159915.SZ', 40);
+    expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('三因子ETF5');
     wrapper.unmount();
   });
 

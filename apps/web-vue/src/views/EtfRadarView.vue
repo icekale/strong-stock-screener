@@ -1,13 +1,17 @@
 <script setup lang="ts">
 import { Skeleton as ASkeleton } from 'ant-design-vue';
 import dayjs from 'dayjs';
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import IconIcRoundRefresh from '~icons/ic/round-refresh';
 import PageHeader from '@/components/common/workbench/page-header.vue';
 import SectionHeader from '@/components/common/workbench/section-header.vue';
 import StatusTag from '@/components/common/workbench/status-tag.vue';
 import HuijinTrajectoryPanel from '@/components/etf-radar/HuijinTrajectoryPanel.vue';
+import EtfThreeFactorPanel from '@/components/etf-radar/EtfThreeFactorPanel.vue';
 import {
+  getEtfThreeFactor,
+  getEtfThreeFactorHistory,
   getEtfRadarHistory,
   getEtfRadarHolders,
   getEtfRadarMethodology,
@@ -21,6 +25,8 @@ import type {
   EtfRadarHoldersResponse,
   EtfRadarMethodologyResponse,
   EtfRadarOverviewResponse,
+  EtfThreeFactorHistoryResponse,
+  EtfThreeFactorResponse,
   EtfValidationState,
   HuijinEtfActivityItem,
   HuijinEtfBaseline,
@@ -40,6 +46,7 @@ import {
   validationStateTone
 } from '@/utils/domain/capitalSignals';
 import { huijinActivityDataState, pickDefaultHuijinSymbol } from '@/utils/domain/huijinTrajectory';
+import { closeChangeTone } from '@/utils/domain/etfThreeFactor';
 
 defineOptions({ name: 'EtfRadarView' });
 
@@ -51,12 +58,23 @@ type EtfResponse =
   | EtfRadarHoldersResponse
   | EtfRadarMethodologyResponse;
 
+const route = useRoute();
 const activeTab = ref<EtfTab>('trajectory');
 const overview = ref<EtfRadarOverviewResponse | null>(null);
 const history = ref<EtfRadarHistoryResponse | null>(null);
 const holders = ref<EtfRadarHoldersResponse | null>(null);
 const methodology = ref<EtfRadarMethodologyResponse | null>(null);
 const selectedTrajectorySymbol = ref('');
+const threeFactor = ref<EtfThreeFactorResponse | null>(null);
+const threeFactorHistory = ref<EtfThreeFactorHistoryResponse | null>(null);
+const selectedThreeFactorSymbol = ref('');
+const threeFactorLoading = ref(false);
+const threeFactorHistoryLoading = ref(false);
+const threeFactorError = ref<string | null>(null);
+const threeFactorHistoryError = ref<string | null>(null);
+const selectedThreeFactorHistory = computed(() =>
+  threeFactorHistory.value?.symbol === selectedThreeFactorSymbol.value ? threeFactorHistory.value : null
+);
 const historyLoading = ref(false);
 const loading = reactive<Record<EtfTab, boolean>>({ trajectory: false, activity: false, holders: false, methodology: false });
 const errors = reactive<Record<EtfDataKey, string | null>>({ overview: null, history: null, holders: null, methodology: null });
@@ -65,9 +83,10 @@ const requestCache = createMemoryRequestCache({ ttlMs: 15_000 });
 
 const coreColumns = [
   { title: 'ETF', dataIndex: 'symbol', key: 'etf', width: 188, fixed: 'left' as const },
+  { title: '收盘涨跌', dataIndex: 'close_change_pct', key: 'close_change_pct', width: 112 },
   { title: '指数', dataIndex: 'index_name', key: 'index_name', width: 110 },
   { title: '份额变化', dataIndex: 'share_delta', key: 'share_delta', width: 130 },
-  { title: '日变化', dataIndex: 'daily_change_pct', key: 'daily_change_pct', width: 112 },
+  { title: '份额日变化', dataIndex: 'daily_change_pct', key: 'daily_change_pct', width: 112 },
   { title: '报告基线变化', dataIndex: 'baseline_change_pct', key: 'baseline_change_pct', width: 132 },
   { title: '倍数', dataIndex: 'multiple', key: 'multiple', width: 88 },
   { title: '方向', dataIndex: 'direction', key: 'direction', width: 136 },
@@ -145,7 +164,7 @@ function formatAsOf(value: string | undefined) {
 }
 
 function valueTone(value: number | null | undefined) {
-  const tone = directionTone(value ?? null);
+  const tone = closeChangeTone(value ?? null) === 'rise' ? 'rise' : closeChangeTone(value ?? null) === 'fall' ? 'fall' : directionTone(value ?? null);
   return tone === 'rise' ? 'etf-value--positive' : tone === 'fall' ? 'etf-value--negative' : '';
 }
 
@@ -179,6 +198,7 @@ function directionClass(direction: EtfActivityDirection) {
 
 function coreCell(key: string, record: unknown) {
   const item = record as HuijinEtfActivityItem;
+  if (key === 'close_change_pct') return formatPercent(item.close_change_pct);
   if (key === 'share_delta') return formatDirectionalShares(item.share_delta);
   if (key === 'daily_change_pct') return formatPercent(item.daily_change_pct);
   if (key === 'baseline_change_pct') return formatPercent(item.baseline_change_pct);
@@ -260,6 +280,11 @@ function activeErrorMessage() {
   return dataErrorMessage(activeDataKey(), activeData.value);
 }
 
+function threeFactorErrorMessage() {
+  if (!threeFactorError.value) return '';
+  return threeFactor.value ? `${threeFactorError.value}；当前显示上次成功数据` : threeFactorError.value;
+}
+
 function activeStatus() {
   if (loading[activeTab.value]) return 'running';
   const error = errors[activeDataKey()];
@@ -323,17 +348,107 @@ async function loadLazyTab(tab: 'holders' | 'methodology', force = false) {
   }
 }
 
+function queryValue(value: unknown) {
+  return Array.isArray(value) ? value[0] : typeof value === 'string' ? value : undefined;
+}
+
+function requestedThreeFactorSymbol() {
+  return queryValue(route.query.symbol);
+}
+
+function updateThreeFactorSelection() {
+  const items = threeFactor.value?.items ?? [];
+  const requested = requestedThreeFactorSymbol();
+  if (requested && items.some(item => item.symbol === requested)) {
+    selectedThreeFactorSymbol.value = requested;
+    return;
+  }
+  if (!items.some(item => item.symbol === selectedThreeFactorSymbol.value)) {
+    selectedThreeFactorSymbol.value = items[0]?.symbol ?? '';
+  }
+}
+
+async function loadThreeFactor(force = false) {
+  threeFactorLoading.value = true;
+  threeFactorError.value = null;
+  try {
+    threeFactor.value = await requestCache.get('etf-three-factor', getEtfThreeFactor, { force });
+    updateThreeFactorSelection();
+  } catch (error) {
+    threeFactorError.value = errorMessage(error, '读取ETF三因子活动失败');
+  } finally {
+    threeFactorLoading.value = false;
+  }
+}
+
+async function loadThreeFactorHistory(symbol: string, force = false) {
+  if (!symbol) return;
+  threeFactorHistoryLoading.value = true;
+  threeFactorHistoryError.value = null;
+  try {
+    threeFactorHistory.value = await requestCache.get(
+      `etf-three-factor-history:${symbol}`,
+      () => getEtfThreeFactorHistory(symbol, 40),
+      { force }
+    );
+  } catch (error) {
+    threeFactorHistoryError.value = errorMessage(error, '读取ETF三因子历史失败');
+  } finally {
+    threeFactorHistoryLoading.value = false;
+  }
+}
+
+async function loadActivityWorkbench(force = false) {
+  await loadThreeFactor(force);
+  if (selectedThreeFactorSymbol.value) {
+    await loadThreeFactorHistory(selectedThreeFactorSymbol.value, force);
+  }
+}
+
+function selectThreeFactorSymbol(symbol: string) {
+  if (!threeFactor.value?.items.some(item => item.symbol === symbol) || symbol === selectedThreeFactorSymbol.value) return;
+  selectedThreeFactorSymbol.value = symbol;
+  void loadThreeFactorHistory(symbol);
+}
+
 function loadTab(tab: EtfTab, force = false) {
   if (tab === 'trajectory') return loadTrajectory(force);
-  if (tab === 'activity') return force ? loadOverview(true) : Promise.resolve();
+  if (tab === 'activity') {
+    if (force) return Promise.allSettled([loadOverview(true), loadActivityWorkbench(true)]);
+    return loadActivityWorkbench();
+  }
   return loadLazyTab(tab, force);
 }
 
 function changeTab(tab: unknown) {
+  if (tab === 'activity') void loadActivityWorkbench();
   if (tab === 'holders' || tab === 'methodology') void loadLazyTab(tab);
 }
 
-onMounted(() => void loadTrajectory());
+function syncRouteQuery() {
+  const tab = queryValue(route.query.tab);
+  if (tab === 'trajectory' || tab === 'activity' || tab === 'holders' || tab === 'methodology') {
+    activeTab.value = tab;
+  }
+  if (activeTab.value === 'activity') {
+    if (threeFactor.value) {
+      const previous = selectedThreeFactorSymbol.value;
+      updateThreeFactorSelection();
+      if (selectedThreeFactorSymbol.value && selectedThreeFactorSymbol.value !== previous) {
+        void loadThreeFactorHistory(selectedThreeFactorSymbol.value);
+      }
+    } else {
+      void loadActivityWorkbench();
+    }
+  }
+}
+
+onMounted(() => {
+  syncRouteQuery();
+  void loadTrajectory();
+});
+
+watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
 </script>
 
 <template>
@@ -390,10 +505,23 @@ onMounted(() => void loadTrajectory());
         <StatusTag :status="activeStatus()" />
       </SectionHeader>
       <a-alert v-if="errors.overview" data-testid="etf-panel-error" type="warning" :message="activeErrorMessage()" show-icon />
+      <a-alert v-if="threeFactorError" data-testid="three-factor-error" type="warning" :message="threeFactorErrorMessage()" show-icon />
       <div v-if="loading.activity && !overview" class="etf-loading" aria-label="正在读取今日活动">
         <a-skeleton active :paragraph="{ rows: 7 }" />
       </div>
       <div v-else-if="overview" class="etf-panel-content">
+        <div v-if="threeFactorLoading && !threeFactor" class="etf-loading" aria-label="正在读取ETF三因子活动">
+          <a-skeleton active :paragraph="{ rows: 6 }" />
+        </div>
+        <EtfThreeFactorPanel
+          v-else-if="threeFactor"
+          :snapshot="threeFactor"
+          :history="selectedThreeFactorHistory"
+          :selected-symbol="selectedThreeFactorSymbol"
+          :history-loading="threeFactorHistoryLoading"
+          :history-error="threeFactorHistoryError"
+          @select="selectThreeFactorSymbol"
+        />
         <div class="etf-metrics" aria-label="今日活动摘要">
           <div v-for="metric in overviewMetrics" :key="metric.label" class="etf-metric">
             <span class="etf-metric__label">{{ metric.label }}</span>
@@ -434,7 +562,7 @@ onMounted(() => void loadTrajectory());
             :columns="coreColumns"
             :data-source="overview.core_items"
             :pagination="false"
-            :scroll="{ x: 1184 }"
+            :scroll="{ x: 1296 }"
             row-key="symbol"
             size="small"
           >
@@ -450,7 +578,7 @@ onMounted(() => void loadTrajectory());
               <span
                 v-else
                 :class="[
-                  ['share_delta', 'daily_change_pct', 'baseline_change_pct'].includes(columnKey(column.key)) ? valueTone(recordNumber(record, column.key)) : '',
+                  ['close_change_pct', 'share_delta', 'daily_change_pct', 'baseline_change_pct'].includes(columnKey(column.key)) ? valueTone(recordNumber(record, column.key)) : '',
                   columnKey(column.key) === 'direction' ? directionClass(record.direction) : ''
                 ]"
               >

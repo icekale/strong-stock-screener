@@ -52,7 +52,10 @@ class EtfThreeFactorStore:
 
     def load_alerts(self, unread_only: bool = False) -> list[EtfActivityAlert]:
         with _STORE_LOCK:
-            alerts = self._retained_alerts(self._load_list(self.alerts_path, _ALERT_LIST))
+            stored_alerts = self._load_list(self.alerts_path, _ALERT_LIST)
+            alerts = self._retained_alerts(stored_alerts)
+            if len(alerts) != len(stored_alerts):
+                self._save_alerts(alerts)
             if unread_only:
                 alerts = [alert for alert in alerts if not alert.read]
             return sorted(alerts, key=lambda alert: alert.triggered_at, reverse=True)

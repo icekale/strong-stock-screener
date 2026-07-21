@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+import json
 from pathlib import Path
 
 from app.models import (
@@ -127,18 +128,22 @@ def test_alert_cooldown_expires_and_market_key_is_type_and_level(tmp_path: Path)
     assert store.upsert_alert(_alert("m2", "market_high", symbol=None, triggered_at=_timestamp("10:10:00"))) is False
 
 
-def test_alerts_retain_last_30_days_and_preserve_read_state(tmp_path: Path) -> None:
+def test_load_alerts_prunes_expired_rows_from_disk_and_preserves_read_state(tmp_path: Path) -> None:
     store = EtfThreeFactorStore(tmp_path)
     today = date.today()
     old = _alert("old")
     old = old.model_copy(update={"trade_date": (today - timedelta(days=31)).isoformat()})
     current = _alert("current", read=True)
     current = current.model_copy(update={"trade_date": today.isoformat()})
-    store.upsert_alert(old)
-    store.upsert_alert(current)
+    store.root_dir.mkdir(parents=True)
+    store.alerts_path.write_text(
+        json.dumps([old.model_dump(), current.model_dump()]), encoding="utf-8"
+    )
 
     assert [alert.alert_id for alert in store.load_alerts()] == ["current"]
     assert store.load_alerts(unread_only=True) == []
+    assert [alert["alert_id"] for alert in json.loads(store.alerts_path.read_text())] == ["current"]
+    assert json.loads(store.alerts_path.read_text())[0]["read"] is True
 
     store.mark_read("current")
     assert store.load_alerts()[0].read is True
@@ -151,5 +156,5 @@ def test_missing_or_corrupt_alerts_return_empty_response(tmp_path: Path) -> None
     assert store.load_alerts() == []
 
     store.root_dir.mkdir(parents=True)
-    store.alerts_path.write_text("[]", encoding="utf-8")
+    store.alerts_path.write_text("not json", encoding="utf-8")
     assert store.load_alerts() == []

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal, Mapping
 
-from pydantic import BaseModel, Field, field_serializer, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, field_validator, model_validator
 
 
 ScreenStatus = Literal["focus", "wait_pullback", "reduce_risk", "data_incomplete"]
@@ -409,6 +409,8 @@ class StrongStockSourceStatus(BaseModel):
 
 SentimentPercentileLevel = Literal["冰点", "偏冷", "中性", "偏热", "过热"]
 SentimentPercentileCacheStatus = Literal["fresh", "cached", "stale"]
+SentimentAnalysisStatus = Literal["not_generated", "unconfigured", "pending", "ready", "failed"]
+SentimentRiskPosture = Literal["attack", "balanced", "defensive", "wait"]
 
 
 class SentimentPercentileFactor(BaseModel):
@@ -446,6 +448,40 @@ class SentimentPercentileResponse(BaseModel):
     source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
     generated_at: str
     notes: list[str] = Field(default_factory=list)
+
+
+class SentimentAnalysisResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    market_conclusion: str = Field(min_length=1, max_length=240)
+    key_drivers: list[str] = Field(min_length=2, max_length=4)
+    factor_divergence: str = Field(min_length=1, max_length=240)
+    historical_context: str = Field(min_length=1, max_length=240)
+    risk_posture: SentimentRiskPosture
+    next_session_watch: list[str] = Field(min_length=2, max_length=4)
+    risk_note: str = Field(min_length=1, max_length=160)
+
+    @field_validator("key_drivers", "next_session_watch")
+    @classmethod
+    def _require_numeric_evidence(cls, value: list[str]) -> list[str]:
+        if any(not any("0" <= character <= "9" for character in item) for item in value):
+            raise ValueError("each item must cite an ASCII digit")
+        return value
+
+
+class SentimentPercentileAnalysisResponse(BaseModel):
+    trade_date: str
+    status: SentimentAnalysisStatus
+    model_version: str = "market-sentiment-percentile-v1"
+    provider: str | None = None
+    llm_model: str | None = None
+    input_hash: str | None = None
+    attempts: int = 0
+    requested_at: str | None = None
+    completed_at: str | None = None
+    retry_after: str | None = None
+    error: str | None = None
+    result: SentimentAnalysisResult | None = None
 
 
 class CzscResearchSnapshot(BaseModel):

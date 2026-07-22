@@ -59,8 +59,8 @@ def analyze_model_maintenance_packet(
         )
         response.raise_for_status()
         payload = response.json()
-        content = _extract_chat_content(payload)
-        report_payload = _extract_json_object(content)
+        content = extract_chat_content(payload)
+        report_payload = extract_json_object(content)
         return _report_from_ai_payload(packet, config, report_payload)
     except Exception:
         return build_offline_model_maintenance_report(packet)
@@ -149,7 +149,7 @@ def _auction_top3_findings(packet: ModelMaintenancePacket) -> list[str]:
     return findings
 
 
-def _extract_chat_content(payload: dict[str, Any]) -> str:
+def extract_chat_content(payload: dict[str, Any]) -> str:
     choices = payload.get("choices")
     if not isinstance(choices, list) or not choices:
         raise ValueError("AI response missing choices")
@@ -160,7 +160,7 @@ def _extract_chat_content(payload: dict[str, Any]) -> str:
     return content
 
 
-def _extract_json_object(content: str) -> dict[str, Any]:
+def extract_json_object(content: str) -> dict[str, Any]:
     stripped = content.strip()
     fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", stripped, flags=re.DOTALL)
     if fenced:

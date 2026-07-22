@@ -49,12 +49,15 @@ def analysis(
 def test_sampler_waits_until_1515_then_completes_current_date() -> None:
     clock = Clock("2026-07-22T15:14:00+08:00")
     calls: list[datetime] = []
+    resolved: list[datetime] = []
     sampler = MarketSentimentAnalysisSampler(
+        latest_completed_trade_date=lambda now: resolved.append(now) or "2026-07-22",
         generate_latest=lambda now: calls.append(now) or analysis("2026-07-22", "ready"),
         clock=clock,
     )
 
     assert sampler.sample_once() is False
+    assert resolved == []
     clock.current = datetime.fromisoformat("2026-07-22T15:15:00+08:00")
     assert sampler.sample_once() is True
     assert sampler.sample_once() is False
@@ -65,6 +68,7 @@ def test_sampler_catches_up_latest_completed_friday_after_weekend_restart() -> N
     clock = Clock("2026-07-26T10:00:00+08:00")
     calls: list[datetime] = []
     sampler = MarketSentimentAnalysisSampler(
+        latest_completed_trade_date=lambda _now: "2026-07-24",
         generate_latest=lambda now: calls.append(now) or analysis("2026-07-24", "ready"),
         clock=clock,
     )
@@ -72,6 +76,21 @@ def test_sampler_catches_up_latest_completed_friday_after_weekend_restart() -> N
     assert sampler.sample_once() is True
     assert sampler.sample_once() is False
     assert calls == [clock.current]
+
+
+def test_sampler_dedupes_consecutive_exchange_holidays_by_completed_trade_date() -> None:
+    clock = Clock("2026-10-01T15:15:00+08:00")
+    calls: list[datetime] = []
+    sampler = MarketSentimentAnalysisSampler(
+        latest_completed_trade_date=lambda _now: "2026-09-30",
+        generate_latest=lambda now: calls.append(now) or analysis("2026-09-30", "ready"),
+        clock=clock,
+    )
+
+    assert sampler.sample_once() is True
+    clock.current = datetime.fromisoformat("2026-10-02T15:15:00+08:00")
+    assert sampler.sample_once() is False
+    assert calls == [datetime.fromisoformat("2026-10-01T15:15:00+08:00")]
 
 
 def test_sampler_defers_failed_retry_until_persisted_retry_after() -> None:
@@ -87,7 +106,11 @@ def test_sampler_defers_failed_retry_until_persisted_retry_after() -> None:
         calls.append(now)
         return responses.pop(0)
 
-    sampler = MarketSentimentAnalysisSampler(generate_latest=generate_latest, clock=clock)
+    sampler = MarketSentimentAnalysisSampler(
+        latest_completed_trade_date=lambda _now: "2026-07-22",
+        generate_latest=generate_latest,
+        clock=clock,
+    )
 
     assert sampler.sample_once() is True
     clock.current += timedelta(minutes=29)
@@ -114,6 +137,7 @@ def test_sampler_thread_logs_exception_and_keeps_running(caplog: pytest.LogCaptu
         return analysis("2026-07-22", "ready")
 
     sampler = MarketSentimentAnalysisSampler(
+        latest_completed_trade_date=lambda _now: "2026-07-22",
         generate_latest=generate_latest,
         clock=clock,
         poll_seconds=0.01,
@@ -138,6 +162,7 @@ def test_sampler_stop_and_wait_joins_cleanly() -> None:
         return analysis("2026-07-22", "ready")
 
     sampler = MarketSentimentAnalysisSampler(
+        latest_completed_trade_date=lambda _now: "2026-07-22",
         generate_latest=generate_latest,
         clock=clock,
         poll_seconds=0.01,
@@ -174,6 +199,7 @@ def test_sampler_thread_uses_its_own_stop_event_after_restart(monkeypatch: pytes
 
     monkeypatch.setattr(sampler_module, "Event", ImmediateStopEvent)
     sampler = MarketSentimentAnalysisSampler(
+        latest_completed_trade_date=lambda _now: "2026-07-22",
         generate_latest=lambda _now: completed.set() or analysis("2026-07-22", "ready"),
         clock=clock,
     )

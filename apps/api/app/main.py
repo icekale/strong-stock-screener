@@ -2030,7 +2030,7 @@ def get_market_sentiment_percentile_analysis(
     trade_date: date,
 ) -> SentimentPercentileAnalysisResponse:
     trade_date_text = trade_date.isoformat()
-    _percentile_point_for_trade_date(trade_date_text)
+    _persisted_percentile_point_for_trade_date(trade_date_text)
     existing = _market_sentiment_analysis_store().load(trade_date_text)
     if existing is not None:
         return existing
@@ -3600,6 +3600,7 @@ def _market_sentiment_analysis_sampler() -> MarketSentimentAnalysisSampler:
     if injected is not None:
         return injected
     sampler = MarketSentimentAnalysisSampler(
+        latest_completed_trade_date=_latest_completed_market_sentiment_trade_date,
         generate_latest=_generate_latest_market_sentiment_analysis,
         clock=getattr(app.state, "market_sentiment_analysis_sampler_clock", None),
     )
@@ -3617,6 +3618,21 @@ def _percentile_point_for_trade_date(
     response: SentimentPercentileResponse | None = None,
 ) -> tuple[SentimentPercentileResponse, SentimentPercentilePoint]:
     percentile = response or _market_sentiment_percentile_service().get(as_of=trade_date)
+    point = next(
+        (item for item in percentile.history if item.trade_date == trade_date),
+        None,
+    )
+    if point is None:
+        raise HTTPException(status_code=404, detail="该日期不在市场情绪分位历史中")
+    return percentile, point
+
+
+def _persisted_percentile_point_for_trade_date(
+    trade_date: str,
+) -> tuple[SentimentPercentileResponse, SentimentPercentilePoint]:
+    percentile = _market_sentiment_percentile_store().load()
+    if percentile is None:
+        raise HTTPException(status_code=404, detail="该日期不在市场情绪分位历史中")
     point = next(
         (item for item in percentile.history if item.trade_date == trade_date),
         None,
@@ -3665,6 +3681,11 @@ def _generate_latest_market_sentiment_analysis(
         percentile.latest_complete_trade_date,
         percentile_response=percentile,
     )
+
+
+def _latest_completed_market_sentiment_trade_date(now: datetime) -> str:
+    percentile = _market_sentiment_percentile_service().get(now=now)
+    return percentile.latest_complete_trade_date
 
 
 def _optional_sentiment_analysis_context(
@@ -3737,6 +3758,9 @@ def _schedule_market_sentiment_analysis_catchup(
             _generate_latest_market_sentiment_analysis(now)
         except Exception:
             logger.exception("market sentiment analysis catch-up failed")
+        finally:
+            with _MARKET_SENTIMENT_ANALYSIS_CATCHUP_LOCK:
+                _MARKET_SENTIMENT_ANALYSIS_CATCHUP_DATES.discard(selected.trade_date)
 
     try:
         Thread(

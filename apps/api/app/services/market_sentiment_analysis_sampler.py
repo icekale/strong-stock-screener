@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, time, timedelta
+from datetime import datetime, time
 from threading import Event, Lock, Thread
 from typing import Callable
 from zoneinfo import ZoneInfo
@@ -18,15 +18,17 @@ class MarketSentimentAnalysisSampler:
     def __init__(
         self,
         *,
+        latest_completed_trade_date: Callable[[datetime], str | None],
         generate_latest: Callable[[datetime], SentimentPercentileAnalysisResponse | None],
         clock: Callable[[], datetime] | None = None,
         poll_seconds: float = 300,
     ) -> None:
+        self._latest_completed_trade_date = latest_completed_trade_date
         self._generate_latest = generate_latest
         self._clock = clock or (lambda: datetime.now(SHANGHAI))
         self._poll_seconds = poll_seconds
-        self._completed_keys: set[str] = set()
-        self._retry_after_by_key: dict[str, datetime] = {}
+        self._completed_trade_dates: set[str] = set()
+        self._retry_after_by_trade_date: dict[str, datetime] = {}
         self._stop_event = Event()
         self._thread: Thread | None = None
         self._lifecycle_lock = Lock()
@@ -80,27 +82,30 @@ class MarketSentimentAnalysisSampler:
 
     def sample_once(self) -> bool:
         current = _local_now(self._clock())
-        completion_key = _eligible_completion_key(current)
-        if completion_key is None:
+        if not _is_generation_time(current):
+            return False
+        trade_date = self._latest_completed_trade_date(current)
+        if trade_date is None:
             return False
 
         with self._sample_lock:
-            if completion_key in self._completed_keys:
+            if trade_date in self._completed_trade_dates:
                 return False
-            retry_after = self._retry_after_by_key.get(completion_key)
+            retry_after = self._retry_after_by_trade_date.get(trade_date)
             if retry_after is not None and current < retry_after:
                 return False
 
             response = self._generate_latest(current)
             if response is None:
                 return True
+            response_trade_date = response.trade_date
             if response.status == "ready":
-                self._completed_keys.add(completion_key)
-                self._retry_after_by_key.pop(completion_key, None)
+                self._completed_trade_dates.add(response_trade_date)
+                self._retry_after_by_trade_date.pop(response_trade_date, None)
             elif response.status == "failed" and response.retry_after:
                 parsed_retry_after = _parse_local_datetime(response.retry_after)
                 if parsed_retry_after is not None:
-                    self._retry_after_by_key[completion_key] = parsed_retry_after
+                    self._retry_after_by_trade_date[response_trade_date] = parsed_retry_after
             return True
 
     def _run(self, stop_event: Event | None = None) -> None:
@@ -118,13 +123,10 @@ def _local_now(value: datetime) -> datetime:
     return value.astimezone(SHANGHAI)
 
 
-def _eligible_completion_key(current: datetime) -> str | None:
+def _is_generation_time(current: datetime) -> bool:
     if current.weekday() < 5:
-        if current.timetz().replace(tzinfo=None) < GENERATION_CUTOFF:
-            return None
-        return current.date().isoformat()
-    days_since_friday = current.weekday() - 4
-    return (current.date() - timedelta(days=days_since_friday)).isoformat()
+        return current.timetz().replace(tzinfo=None) >= GENERATION_CUTOFF
+    return True
 
 
 def _parse_local_datetime(value: str) -> datetime | None:

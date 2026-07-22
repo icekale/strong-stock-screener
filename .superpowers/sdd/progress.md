@@ -9,6 +9,6 @@ Plan: `docs/superpowers/plans/2026-07-22-market-sentiment-percentile.md`
 - Task 4: complete (commit f38eb8a, review clean; local --as-of limitation documented)
 - Task 5: complete (commits 3e02a6f..de4ac4f, focused review clean; 100 combined tests passed)
 - Task 6: complete (commits a5fc6b2..539016e; review approved after local-only GET, trade-date scheduling, and catch-up retry fixes; 154 selected tests passed)
-- Task 7: in progress
-- Task 8: pending
+- Task 7: complete (commits 2e93bc6..531e58d; review approved after Canvas-color and latest-point test fixes; 18 focused tests and typecheck passed)
+- Task 8: in progress
 - Task 9: pending

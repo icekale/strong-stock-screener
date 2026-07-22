@@ -148,29 +148,37 @@ class _SentimentAnalysisInput(_StrictAnalysisInput):
 _A_SHARE_CODE_PATTERN = re.compile(
     r"(?<!\d)(?:[034689]\d{5})(?:\.(?:SH|SZ|BJ))?(?!\d)", re.IGNORECASE
 )
+_NUMBER_TEXT = r"[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
 _PROHIBITED_RESULT_TEXT_PATTERN = re.compile(
     r"(?:个股|股票(?:代码)?|证券代码|标的|"
     r"\b(?:individual\s+stock|stock\s+code|security\s+recommendation|ticker)\b|"
     r"仓位|轻仓|重仓|满仓|半仓|加仓|减仓|建仓|持仓|空仓|"
     r"控制资金比例|资金(?:使用|投入|配置|分配|安排)?(?:比例|占比)|"
+    rf"(?:建议|计划|可以|可)?\s*(?:投入|配置|分配|安排)\s*{_NUMBER_TEXT}\s*(?:%|％)?\s*资金|"
     r"\b(?:position\s+sizing|position\s+size|portfolio\s+allocation|"
     r"capital\s+allocation|fund\s+allocation|portfolio\s+exposure)\b|"
-    r"买入|卖出|下单|挂单|开仓|平仓|止盈|止损|做多|做空|追涨|抄底|低吸|卖不追|"
+    r"买入|卖出|申购|认购|赎回|下单|挂单|撤单|报单|委托|开仓|平仓|"
+    r"止盈|止损|做多|做空|追涨|抄底|低吸|卖不追|"
     r"\b(?:buy|sell|orders?|go\s+long|go\s+short|stop[- ]?loss|take[- ]?profit)\b)",
     re.IGNORECASE,
 )
 _TRADE_PERMISSION_CLAIM_PATTERN = re.compile(
     r"(?:交易|操作|买卖)\s*(?:权限|许可|准入)|\b(?:trade|operation)\s+permission\b|"
+    r"(?:当前|目前)?\s*(?:策略|操作)\s*(?:允许|许可|可以|可)\s*"
+    r"(?:积极|谨慎|适度|重点)?\s*(?:参与|操作|交易|进场)|"
     r"空仓等待|轻仓试错|强势进攻|只低吸|只卖不追",
     re.IGNORECASE,
 )
-_NUMBER_TEXT = r"[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
 _NUMERIC_CLAIM_PATTERN = re.compile(
     rf"(?<![\d.])(?P<number>{_NUMBER_TEXT})(?P<unit>\s*(?:%|％|万亿|亿|万))?(?![\d.])"
 )
 _DATE_VALUE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
+_NUMBERED_INDEX_ENTITY_PATTERN = re.compile(
+    r"(?:沪深|中证|上证|深证|国证|科创|北证|创业板)\d+(?:指数|指)?",
+    re.IGNORECASE,
+)
 _CLAUSE_SPLIT_PATTERN = re.compile(r"[，,。；;！？!?\n]+")
-_CONDITIONAL_ITEM_PATTERN = re.compile(r"^\s*(?:如果|若|一旦|当|只要|\bif\b|\bwhen\b)", re.IGNORECASE)
+_CONSEQUENCE_SPLIT_PATTERN = re.compile(r"\s*(?:(?<!否)则|那么|届时|\bthen\b)\s*", re.IGNORECASE)
 _THRESHOLD_PREFIX_PATTERN = re.compile(
     r"(?:如果|若|一旦|当|只要|高于|低于|超过|不超过|少于|不少于|至少|至多|"
     r"突破|跌破|达到|维持在|>=|<=|>|<|\bif\b|\bwhen\b|\babove\b|\bbelow\b|"
@@ -186,13 +194,14 @@ _OVERALL_SCORE_CLAIM_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _LEVEL_VALUE = (
-    r"冰点(?:区|区域|区间)?|偏冷(?:区|区域|区间)?|冷区|中性(?:区|区域|区间)?|"
-    r"偏热(?:区|区域|区间)?|热区|过热(?:区|区域|区间)?|ice|cold|neutral|hot|overheated"
+    r"冰点(?:区|区域|区间|水平|层级)?|偏冷(?:区|区域|区间|水平|层级)?|冷区|"
+    r"中性(?:区|区域|区间|水平|层级)?|偏热(?:区|区域|区间|水平|层级)?|热区|"
+    r"过热(?:区|区域|区间|水平|层级)?|ice|cold|neutral|hot|overheated"
 )
 _CURRENT_LEVEL_CLAIM_PATTERN = re.compile(
     rf"(?:\b(?:current\s+)?(?:sentiment\s+)?(?:level|zone)\b\s*(?:is|=|:)?\s*|"
     rf"(?:当前|目前)?(?:市场|情绪)?(?:等级|级别|分层|区域|区间|位置)?\s*"
-    rf"(?:为|是|处于|位于|落在|进入|转为|升至|降至)\s*)"
+    rf"(?:为|是|呈|呈现|处于|位于|落在|进入|转为|升至|降至)\s*)"
     rf"(?P<level>{_LEVEL_VALUE})",
     re.IGNORECASE,
 )
@@ -223,34 +232,39 @@ _LEVEL_ALIASES = {
 _WEIGHT_CLAIM_SUFFIX = (
     rf"\s*(?:are|is|=|:|：|为|是|达到)?\s*(?P<number>{_NUMBER_TEXT})\s*(?P<percent>%|％)?"
 )
+_WEIGHT_TERM = r"(?:权重|系数|占比|比重|贡献度|贡献率)"
 _FACTOR_WEIGHT_CLAIM_PATTERNS = (
     (
         "volume",
         re.compile(
-            r"(?:成交量|量能)(?:因子)?(?:权重|系数|占比)" + _WEIGHT_CLAIM_SUFFIX,
+            r"(?:成交量|量能)(?:因子)?" + _WEIGHT_TERM + _WEIGHT_CLAIM_SUFFIX,
             re.IGNORECASE,
         ),
     ),
     (
         "index_move_5d",
-        re.compile(r"(?:指数)?5日(?:涨跌|涨幅)(?:因子)?(?:权重|系数)" + _WEIGHT_CLAIM_SUFFIX),
+        re.compile(
+            r"(?:指数)?5日(?:涨跌|涨幅)(?:因子)?" + _WEIGHT_TERM + _WEIGHT_CLAIM_SUFFIX
+        ),
     ),
     (
         "price_position",
-        re.compile(r"(?:价格位置|价格位阶)(?:因子)?(?:权重|系数)" + _WEIGHT_CLAIM_SUFFIX),
+        re.compile(r"(?:价格位置|价格位阶)(?:因子)?" + _WEIGHT_TERM + _WEIGHT_CLAIM_SUFFIX),
     ),
     (
         "amplitude_5d",
-        re.compile(r"(?:5日)?振幅(?:因子)?(?:权重|系数)" + _WEIGHT_CLAIM_SUFFIX),
+        re.compile(r"(?:5日)?振幅(?:因子)?" + _WEIGHT_TERM + _WEIGHT_CLAIM_SUFFIX),
     ),
     (
         "volume_trend",
-        re.compile(r"(?:成交量|量能)趋势(?:因子)?(?:权重|系数)" + _WEIGHT_CLAIM_SUFFIX),
+        re.compile(
+            r"(?:成交量|量能)趋势(?:因子)?" + _WEIGHT_TERM + _WEIGHT_CLAIM_SUFFIX
+        ),
     ),
 )
 _GENERAL_WEIGHT_CLAIM_PATTERN = re.compile(
     r"(?:\b(?:current\s+)?(?:factor\s+)?weights?\b|"
-    r"(?:当前|目前)?(?:各项?)?(?:因子)?(?:权重|系数|占比))"
+    r"(?:当前|目前)?(?:各项?)?(?:因子)?" + _WEIGHT_TERM + r")"
     + _WEIGHT_CLAIM_SUFFIX,
     re.IGNORECASE,
 )
@@ -276,6 +290,9 @@ _RECOMMENDATION_AFTER_PATTERN = re.compile(r"(?:推荐|看好|关注|首选)\s*(
 _RECOMMENDATION_BEFORE_PATTERN = re.compile(
     r"(?P<target>[^，,。；;！？!?\n]+?)(?:值得关注|可重点关注)"
 )
+_VALUATION_CLAIM_PATTERN = re.compile(
+    r"(?P<target>[^，,。；;！？!?\n]+?)(?:估值|价值)\s*(?:偏高|偏低|高估|低估|合理|昂贵|便宜)"
+)
 _SUBJECT_QUALIFIER_PATTERN = re.compile(
     r"^(?:(?:若|如果|一旦|当|则|但|而|且|今日|当前|目前|明日|次日|"
     r"下一交易日|较前日|环比|近\s*\d+\s*日|过去\s*\d+\s*日|"
@@ -283,16 +300,87 @@ _SUBJECT_QUALIFIER_PATTERN = re.compile(
 )
 _AGGREGATE_ENTITY_PATTERN = re.compile(
     r"^(?:A股市场|全市场|市场(?:整体)?|沪深两市|两市|大盘|指数|沪指|深成指|深证成指|"
-    r"创业板指|科创\d+|北证\d+|上证[\w\d]{0,8}(?:指数)?|深证[\w\d]{0,8}(?:指数|成指)|"
+    r"沪深\d+(?:指数)?|创业板(?:指)?|科创50(?:指数)?|北证\d+|"
+    r"上证[\w\d]{0,8}(?:指数)?|深证[\w\d]{0,8}(?:指数|成指)|"
     r"中证[\w\d]{0,8}(?:指数|指)?|国证[\w\d]{0,8}(?:指数|指)?|"
     r"市场情绪|情绪|综合(?:得)?分|综合评分|评分|得分)$",
     re.IGNORECASE,
 )
 _GENERIC_METRIC_ENTITY_PATTERN = re.compile(
-    r"^(?:涨停|跌停|炸板|破板|封板率|连板(?:数|高度)?|成交额|成交量|量能(?:趋势)?|"
+    r"^(?:涨停(?:数|家数|数量)?|跌停(?:数|家数|数量)?|炸板(?:数|家数|数量)?|"
+    r"破板(?:数|家数|数量)?|封板率|连板(?:数|高度)?|成交额|成交量|量能(?:趋势)?|"
     r"价格位置|5日振幅|振幅|市场宽度|历史样本|样本(?:数|数量)?|上涨家数|下跌家数|"
     r"板块|行业|题材)$"
 )
+_CLAIM_NUMBER = rf"(?P<number>{_NUMBER_TEXT})(?P<unit>\s*(?:%|％|万亿|亿|万))?"
+_VALUE_LINK = (
+    r"\s*(?:能否|是否|仅|约)?\s*"
+    r"(?:为|是|达(?:到)?|录得|升至|上升至|增至|降至|下降至|回落至|"
+    r"维持在|高于|低于|超过|不超过|少于|不少于|至少|至多|突破|跌破|=|:|：)?"
+    r"\s*(?:仅|约)?\s*"
+)
+_MARKET_FIELD_CLAIM_PATTERNS = (
+    ("limit_up_count", re.compile(r"涨停(?:数|家数|数量)?" + _VALUE_LINK + _CLAIM_NUMBER)),
+    ("limit_down_count", re.compile(r"跌停(?:数|家数|数量)?" + _VALUE_LINK + _CLAIM_NUMBER)),
+    (
+        "break_board_count",
+        re.compile(r"(?:炸板|破板)(?:数|家数|数量)?" + _VALUE_LINK + _CLAIM_NUMBER),
+    ),
+    ("seal_rate_pct", re.compile(r"封板率" + _VALUE_LINK + _CLAIM_NUMBER)),
+    ("turnover_cny", re.compile(r"成交额" + _VALUE_LINK + _CLAIM_NUMBER)),
+    ("advance_count", re.compile(r"上涨(?:家数|数量)" + _VALUE_LINK + _CLAIM_NUMBER)),
+    ("decline_count", re.compile(r"下跌(?:家数|数量)" + _VALUE_LINK + _CLAIM_NUMBER)),
+    (
+        "max_consecutive_boards",
+        re.compile(r"连板(?:数|高度)?" + _VALUE_LINK + _CLAIM_NUMBER),
+    ),
+)
+_FACTOR_SCORE_CLAIM_PATTERNS = tuple(
+    (name, re.compile(label + r"(?:因子)?(?:得分|评分|分数)" + _VALUE_LINK + _CLAIM_NUMBER))
+    for name, label in (
+        ("volume", r"(?:成交量|量能)(?!趋势)"),
+        ("index_move_5d", r"(?:指数)?5日(?:涨跌|涨幅)"),
+        ("price_position", r"(?:价格位置|价格位阶)"),
+        ("amplitude_5d", r"(?:5日)?振幅"),
+        ("volume_trend", r"(?:成交量|量能)趋势"),
+    )
+)
+_FACTOR_RAW_CLAIM_PATTERNS = (
+    ("volume", re.compile(r"(?:成交量|量能)(?!趋势)(?:原始值|数值|值)?" + _VALUE_LINK + _CLAIM_NUMBER)),
+    (
+        "index_move_5d",
+        re.compile(r"(?:指数)?5日(?:涨跌幅?|涨幅|表现)" + _VALUE_LINK + _CLAIM_NUMBER),
+    ),
+    (
+        "price_position",
+        re.compile(r"(?:价格位置|价格位阶)(?:原始值|数值|值)?" + _VALUE_LINK + _CLAIM_NUMBER),
+    ),
+    (
+        "amplitude_5d",
+        re.compile(r"(?:5日)?振幅(?:原始值|数值|值)?" + _VALUE_LINK + _CLAIM_NUMBER),
+    ),
+    (
+        "volume_trend",
+        re.compile(r"(?:成交量|量能)趋势(?:原始值|数值|值)?" + _VALUE_LINK + _CLAIM_NUMBER),
+    ),
+)
+_SCORE_CHANGE_1D_CLAIM_PATTERN = re.compile(
+    r"(?:(?:市场|情绪|综合)?(?:得分|评分|分数)\s*(?:较|比)\s*"
+    r"(?:前一日|前日|昨日|上日)|(?:单日|一日|1日)\s*(?:市场|情绪|综合)?"
+    r"(?:得分|评分|分数))\s*(?P<direction>变化|变动|上升|下降|增加|减少)"
+    r"\s*(?:为|至|了)?\s*" + _CLAIM_NUMBER
+)
+_SCORE_CHANGE_5D_CLAIM_PATTERN = re.compile(
+    r"(?:(?:市场|情绪|综合)?(?:得分|评分|分数)\s*(?:较|比)\s*5日前|"
+    r"(?:5日|五日)\s*(?:市场|情绪|综合)?(?:得分|评分|分数))\s*"
+    r"(?P<direction>变化|变动|上升|下降|增加|减少)\s*(?:为|至|了)?\s*"
+    + _CLAIM_NUMBER
+)
+_DECISION_SCORE_CHANGE_CLAIM_PATTERN = re.compile(
+    r"决策(?:得分|评分|分数)?(?:变化|变动)" + _VALUE_LINK + _CLAIM_NUMBER
+)
+_ONE_DAY_LEVEL_CUE_PATTERN = re.compile(r"前一日|前日|昨日|上日")
+_FIVE_DAY_LEVEL_CUE_PATTERN = re.compile(r"5日前|五日前")
 
 
 def build_sentiment_analysis_input(
@@ -582,10 +670,12 @@ def _validate_result_semantics(
         _validate_protected_claims(text, analysis_input)
         _validate_movement_subjects(text, sector_names)
 
-        for clause in _CLAUSE_SPLIT_PATTERN.split(text):
-            if not clause:
-                continue
-            allows_watch_thresholds = field_name == "next_session_watch"
+        for clause, allows_watch_thresholds in _validation_segments(field_name, text):
+            _validate_field_specific_claims(
+                clause,
+                analysis_input,
+                allow_thresholds=allows_watch_thresholds,
+            )
             _validate_source_availability(
                 clause,
                 analysis_input,
@@ -610,6 +700,23 @@ def _result_text_items(result: SentimentAnalysisResult) -> tuple[tuple[str, str]
         *(("next_session_watch", item) for item in result.next_session_watch),
         ("risk_note", result.risk_note),
     )
+
+
+def _validation_segments(field_name: str, text: str) -> tuple[tuple[str, bool], ...]:
+    segments: list[tuple[str, bool]] = []
+    for clause in _CLAUSE_SPLIT_PATTERN.split(text):
+        if not clause:
+            continue
+        if field_name != "next_session_watch":
+            segments.append((clause, False))
+            continue
+
+        parts = [part for part in _CONSEQUENCE_SPLIT_PATTERN.split(clause) if part]
+        if not parts:
+            continue
+        segments.append((parts[0], True))
+        segments.extend((part, False) for part in parts[1:])
+    return tuple(segments)
 
 
 def _canonical_numbers(analysis_input: _SentimentAnalysisInput) -> set[Decimal]:
@@ -662,6 +769,9 @@ def _validate_prohibited_semantics(text: str, sector_names: Sequence[str]) -> No
         for match in pattern.finditer(text):
             if not _is_allowed_entity_reference(match.group("target"), sector_names):
                 raise ValueError("AI response recommends a non-aggregate security")
+    for match in _VALUATION_CLAIM_PATTERN.finditer(text):
+        if not _is_allowed_entity_reference(match.group("target"), sector_names):
+            raise ValueError("AI response evaluates a non-aggregate security")
 
 
 def _validate_protected_claims(
@@ -674,11 +784,10 @@ def _validate_protected_claims(
             raise ValueError("AI response changes the current score")
 
     for match in _CURRENT_LEVEL_CLAIM_PATTERN.finditer(text):
+        expected_level = analysis_input.percentile.level
         if _is_historical_level_claim(text, match):
-            continue
-        raw_level = match.group("level").lower()
-        claimed_level = _LEVEL_ALIASES.get(raw_level, raw_level)
-        if claimed_level != analysis_input.percentile.level:
+            expected_level = _prior_level_for_claim(text, match, analysis_input)
+        if expected_level is None or _canonical_level(match.group("level")) != expected_level:
             raise ValueError("AI response changes the current level")
 
     weights = analysis_input.percentile.weights.model_dump()
@@ -691,6 +800,118 @@ def _validate_protected_claims(
     for match in _GENERAL_WEIGHT_CLAIM_PATTERN.finditer(text):
         if _weight_value(match) not in expected_weights:
             raise ValueError("AI response changes the current weights")
+
+
+def _validate_field_specific_claims(
+    clause: str,
+    analysis_input: _SentimentAnalysisInput,
+    *,
+    allow_thresholds: bool,
+) -> None:
+    for field_name, pattern in _MARKET_FIELD_CLAIM_PATTERNS:
+        value = _market_field_value(field_name, clause, analysis_input)
+        _validate_claim_matches(
+            pattern,
+            clause,
+            value,
+            allow_thresholds=allow_thresholds,
+            error="AI response changes a market metric",
+        )
+
+    for factor_name, pattern in _FACTOR_SCORE_CLAIM_PATTERNS:
+        value = Decimal(str(getattr(analysis_input.percentile.factors, factor_name).score))
+        _validate_claim_matches(
+            pattern,
+            clause,
+            value,
+            allow_thresholds=allow_thresholds,
+            error="AI response changes a factor score",
+        )
+    for factor_name, pattern in _FACTOR_RAW_CLAIM_PATTERNS:
+        value = Decimal(str(getattr(analysis_input.percentile.factors, factor_name).raw_value))
+        _validate_claim_matches(
+            pattern,
+            clause,
+            value,
+            allow_thresholds=allow_thresholds,
+            error="AI response changes a factor value",
+        )
+
+    _validate_claim_matches(
+        _SCORE_CHANGE_1D_CLAIM_PATTERN,
+        clause,
+        _decimal_or_none(analysis_input.score_change_1d),
+        allow_thresholds=allow_thresholds,
+        error="AI response claims an unavailable one-day score change",
+        signed_change=True,
+    )
+    _validate_claim_matches(
+        _SCORE_CHANGE_5D_CLAIM_PATTERN,
+        clause,
+        _decimal_or_none(analysis_input.score_change_5d),
+        allow_thresholds=allow_thresholds,
+        error="AI response claims an unavailable five-day score change",
+        signed_change=True,
+    )
+    decision_change = (
+        _decimal_or_none(analysis_input.decision.score_change)
+        if analysis_input.decision.status == "available"
+        else None
+    )
+    _validate_claim_matches(
+        _DECISION_SCORE_CHANGE_CLAIM_PATTERN,
+        clause,
+        decision_change,
+        allow_thresholds=allow_thresholds,
+        error="AI response claims an unavailable decision score change",
+    )
+
+
+def _market_field_value(
+    field_name: str,
+    clause: str,
+    analysis_input: _SentimentAnalysisInput,
+) -> Decimal | None:
+    sector = next((item for item in analysis_input.main_sectors.items if item.name in clause), None)
+    if sector is not None and field_name in {
+        "limit_up_count",
+        "break_board_count",
+        "max_consecutive_boards",
+    }:
+        if analysis_input.main_sectors.status == "unavailable":
+            return None
+        return Decimal(str(getattr(sector, field_name)))
+
+    if analysis_input.market.status == "unavailable":
+        return None
+    if field_name in {"advance_count", "decline_count"}:
+        value = getattr(analysis_input.market.breadth, field_name)
+    elif field_name in {"limit_up_count", "limit_down_count", "break_board_count"}:
+        value = getattr(analysis_input.market.limits, field_name)
+    elif field_name == "max_consecutive_boards":
+        value = analysis_input.market.boards.max_consecutive_boards
+    else:
+        value = getattr(analysis_input.market, field_name)
+    return _decimal_or_none(value)
+
+
+def _validate_claim_matches(
+    pattern: re.Pattern[str],
+    clause: str,
+    expected_value: Decimal | None,
+    *,
+    allow_thresholds: bool,
+    error: str,
+    signed_change: bool = False,
+) -> None:
+    for match in pattern.finditer(clause):
+        if allow_thresholds and _number_is_threshold(clause, match):
+            continue
+        claimed_value = _normalized_claim_number(match)
+        if signed_change:
+            claimed_value = _signed_claim_value(match, claimed_value)
+        if expected_value is None or claimed_value != expected_value:
+            raise ValueError(error)
 
 
 def _validate_movement_subjects(text: str, sector_names: Sequence[str]) -> None:
@@ -709,7 +930,11 @@ def _movement_subject(prefix: str) -> str:
 
 def _is_allowed_entity_reference(text: str, sector_names: Sequence[str]) -> bool:
     reference = text.strip().rstrip("的 ")
-    reference = re.split(r"(?:为|是|处于|位于|维持|高于|低于|达到|超过|\d)", reference, maxsplit=1)[0]
+    reference = re.split(
+        r"(?:为|是|呈|处于|位于|维持|能否|是否|高于|低于|达到|超过)",
+        reference,
+        maxsplit=1,
+    )[0]
     reference = reference.strip().rstrip("的 ")
     if not reference:
         return True
@@ -760,7 +985,7 @@ def _validate_numeric_evidence(
     *,
     allow_thresholds: bool,
 ) -> None:
-    factual_text = clause
+    factual_text = _NUMBERED_INDEX_ENTITY_PATTERN.sub("", clause)
     for date in canonical_dates:
         factual_text = factual_text.replace(date, "")
 
@@ -778,20 +1003,19 @@ def _is_threshold_clause(clause: str) -> bool:
 
 
 def _number_is_threshold(clause: str, match: re.Match[str]) -> bool:
-    if _CONDITIONAL_ITEM_PATTERN.search(clause):
-        return True
-
+    number_start = match.start("number")
+    number_end = match.end("number")
     previous_end = 0
     next_start = len(clause)
     for candidate in _NUMERIC_CLAIM_PATTERN.finditer(clause):
-        if candidate.end() <= match.start():
+        if candidate.end() <= number_start:
             previous_end = candidate.end()
-        elif candidate.start() > match.start():
+        elif candidate.start() > number_start:
             next_start = candidate.start()
             break
 
-    prefix = clause[previous_end : match.start()]
-    suffix = clause[match.end() : next_start]
+    prefix = clause[previous_end:number_start]
+    suffix = clause[number_end:next_start]
     return bool(_THRESHOLD_PREFIX_PATTERN.search(prefix) or _THRESHOLD_SUFFIX_PATTERN.search(suffix))
 
 
@@ -801,6 +1025,29 @@ def _is_historical_level_claim(text: str, match: re.Match[str]) -> bool:
     return bool(_HISTORICAL_LEVEL_CUE_PATTERN.search(prefix)) and not bool(
         _CURRENT_CUE_PATTERN.search(prefix)
     )
+
+
+def _prior_level_for_claim(
+    text: str,
+    match: re.Match[str],
+    analysis_input: _SentimentAnalysisInput,
+) -> str | None:
+    clause_start = max(text.rfind(delimiter, 0, match.start()) for delimiter in "，,。；;！？!?\n") + 1
+    prefix = text[clause_start : match.start()]
+    if _FIVE_DAY_LEVEL_CUE_PATTERN.search(prefix):
+        return analysis_input.zone_transitions.five_day.from_
+    if _ONE_DAY_LEVEL_CUE_PATTERN.search(prefix):
+        return analysis_input.zone_transitions.one_day.from_
+    return None
+
+
+def _canonical_level(raw_level: str) -> str:
+    normalized = raw_level.lower()
+    if normalized in _LEVEL_ALIASES:
+        return _LEVEL_ALIASES[normalized]
+    for suffix in ("区域", "区间", "水平", "层级", "区"):
+        normalized = normalized.removesuffix(suffix)
+    return _LEVEL_ALIASES.get(normalized, normalized)
 
 
 def _normalized_claim_number(match: re.Match[str]) -> Decimal:
@@ -815,6 +1062,15 @@ def _normalized_claim_number(match: re.Match[str]) -> Decimal:
     return number
 
 
+def _signed_claim_value(match: re.Match[str], value: Decimal) -> Decimal:
+    direction = match.groupdict().get("direction")
+    if direction in {"下降", "减少"}:
+        return -abs(value)
+    if direction in {"上升", "增加"}:
+        return abs(value)
+    return value
+
+
 def _weight_value(match: re.Match[str]) -> Decimal:
     value = _decimal(match.group("number"))
     return value / Decimal("100") if match.group("percent") else value
@@ -822,6 +1078,10 @@ def _weight_value(match: re.Match[str]) -> Decimal:
 
 def _decimal(value: str) -> Decimal:
     return Decimal(value.replace(",", ""))
+
+
+def _decimal_or_none(value: int | float | None) -> Decimal | None:
+    return Decimal(str(value)) if value is not None else None
 
 
 def _trade_date(input_payload: Mapping[str, object]) -> str:

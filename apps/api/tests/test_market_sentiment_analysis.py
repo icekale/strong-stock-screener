@@ -456,6 +456,13 @@ def test_malformed_or_invalid_llm_output_retries_exactly_three_times(
         ("factor_divergence", "量能占比为 60%，量能趋势为 1.2%。"),
         ("market_conclusion", "当前操作权限为强势进攻，市场结构分化。"),
         ("market_conclusion", "推荐贵州茅台，市场结构分化。"),
+        ("market_conclusion", "贵州茅台估值偏高"),
+        ("key_drivers", ["建议投入 20% 资金", "涨停 68 家"]),
+        ("risk_note", "可申购"),
+        ("market_conclusion", "当前策略允许积极参与"),
+        ("market_conclusion", "市场情绪呈偏冷"),
+        ("factor_divergence", "量能贡献度为 60%"),
+        ("market_conclusion", "跌停 68 家"),
     ],
 )
 def test_semantically_invalid_llm_output_retries_exactly_three_times(
@@ -506,9 +513,57 @@ def test_semantic_contract_rejects_ungrounded_factual_numbers_in_every_result_te
     assert client.post.call_count == 3
 
 
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "单日得分变化为 4.0 分",
+        "前一日市场处于中性",
+    ],
+)
+def test_semantic_contract_rejects_prior_claims_without_history(
+    tmp_path: Path,
+    claim: str,
+) -> None:
+    payload = build_sentiment_analysis_input(
+        _point(),
+        [_point()],
+        _summary(),
+        _decision(),
+        _validation(),
+    )
+    result = _result_payload()
+    result["historical_context"] = claim
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content), _Response(content), _Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(payload, _config())
+
+    assert response.status == "failed"
+    assert response.attempts == 3
+    assert client.post.call_count == 3
+
+
 def test_semantic_contract_rejects_invented_key_driver_threshold(tmp_path: Path) -> None:
     result = _result_payload()
     result["key_drivers"] = ["综合分 62.0，处于偏热", "若涨停家数高于 69 家"]
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content), _Response(content), _Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "failed"
+    assert response.attempts == 3
+    assert client.post.call_count == 3
+
+
+def test_semantic_contract_validates_conditional_consequence_numbers(tmp_path: Path) -> None:
+    result = _result_payload()
+    result["next_session_watch"] = [
+        "若封板率低于 60% 则成交额为 69 亿元",
+        "跌停数量低于 10 家",
+    ]
     content = json.dumps(result, ensure_ascii=False)
     client = _Client([_Response(content), _Response(content), _Response(content)])
     service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
@@ -537,6 +592,35 @@ def test_semantic_contract_does_not_apply_watch_threshold_to_an_unrelated_number
     assert response.status == "failed"
     assert response.attempts == 3
     assert client.post.call_count == 3
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("market_conclusion", "沪深300上涨 2.5%"),
+        ("key_drivers", ["涨停数上升至 68 家", "量能趋势 1.2%"]),
+        (
+            "next_session_watch",
+            ["关注封板率能否维持在 60% 以上", "跌停数量低于 10 家"],
+        ),
+    ],
+)
+def test_semantic_contract_allows_reviewer_grounded_prose(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    result = _result_payload()
+    result[field] = value
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+    assert response.result is not None
+    assert client.post.call_count == 1
 
 
 def test_semantic_contract_rejects_unavailable_market_metric_claim(tmp_path: Path) -> None:

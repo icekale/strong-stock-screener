@@ -14,7 +14,7 @@ DONE_WITH_CONCERNS
 
 ## Commit SHA(s)
 
-- Implementation commit: pending commit
+- Implementation commit: `87f5444` (`feat: calculate market sentiment percentile`)
 
 ## RED Evidence
 

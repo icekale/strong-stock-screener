@@ -122,7 +122,7 @@ def test_directional_amplitude_preserves_return_direction(direction: int) -> Non
     assert directional_amplitude(100, 110, 90, 100 + direction) * direction >= 0
 ```
 
-Add `pytest.raises(ValueError)` cases for a zero 500-day high/low range and non-positive OHLC/amount, plus assertions that duplicate dates keep the last record and `WEIGHTS == {key: 0.2 for key in WEIGHTS}`.
+Add a case proving that a zero 500-day high/low range makes that factor unavailable and skips only the affected composite date. Add `pytest.raises(ValueError)` cases for non-positive OHLC/amount, plus assertions that duplicate dates keep the last record and `WEIGHTS == {key: 0.2 for key in WEIGHTS}`.
 
 - [ ] **Step 2: Run the new test module and verify it fails**
 

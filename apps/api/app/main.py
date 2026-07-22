@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 from contextlib import asynccontextmanager
 from datetime import date, datetime, time, timedelta
@@ -74,7 +75,10 @@ from app.models import (
     SectorReplicaRadarResponse,
     SectorReplicaStocksResponse,
     SentimentDetailResponse,
+    SentimentPercentileAnalysisResponse,
+    SentimentPercentilePoint,
     SentimentPercentileResponse,
+    SentimentSummaryResponse,
     ShortTermIntradaySentimentResponse,
     ShortTermIntradaySignalDigest,
     ShortTermSentimentResponse,
@@ -171,6 +175,12 @@ from app.services.sector_workbench_sampler import (
 )
 from app.services.auction_snapshot_store import AuctionSnapshotStore
 from app.services.market_emotion_history import MarketEmotionHistoryStore
+from app.services.market_sentiment_analysis import (
+    MarketSentimentAnalysisService,
+    build_sentiment_analysis_input,
+)
+from app.services.market_sentiment_analysis_sampler import MarketSentimentAnalysisSampler
+from app.services.market_sentiment_analysis_store import MarketSentimentAnalysisStore
 from app.services.model_maintenance_packet import build_model_maintenance_packet
 from app.services.model_maintenance_store import ModelMaintenanceStore
 from app.services.plate_rotation_reference import (
@@ -209,6 +219,7 @@ from app.services.sector_workbench_store import SectorThemeRowsStore, SectorWork
 from app.services.short_term_cache import TtlCache
 from app.services.market_sentiment_percentile_service import MarketSentimentPercentileService
 from app.services.market_sentiment_percentile_store import MarketSentimentPercentileStore
+from app.services.market_sentiment_validation import SentimentValidationReport
 from app.services.sentiment_snapshot_store import SentimentSnapshotStore
 from app.services.sentiment_monitor import (
     SentimentMonitor,
@@ -325,8 +336,10 @@ async def lifespan(_app: FastAPI):
         startup_sector_workbench_sampler()
         startup_capital_signal_sampler()
         startup_etf_three_factor_sampler()
+        startup_market_sentiment_analysis_sampler()
         yield
     finally:
+        shutdown_market_sentiment_analysis_sampler()
         shutdown_etf_three_factor_sampler()
         shutdown_capital_signal_sampler()
         shutdown_chanlun_research()
@@ -340,6 +353,9 @@ app = FastAPI(title="强势股选股 API", version="0.1.0", lifespan=lifespan)
 _CHANLUN_RESEARCH_LOCK = RLock()
 _MARKET_EMOTION_HISTORY_WRITE_LOCK = RLock()
 _MARKET_EMOTION_SAMPLE_INTERVAL = timedelta(minutes=3)
+_MARKET_SENTIMENT_ANALYSIS_CATCHUP_LOCK = RLock()
+_MARKET_SENTIMENT_ANALYSIS_CATCHUP_DATES: set[str] = set()
+logger = logging.getLogger(__name__)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_allow_origins(),
@@ -490,6 +506,20 @@ def startup_etf_three_factor_sampler() -> None:
 
 def shutdown_etf_three_factor_sampler() -> None:
     sampler = getattr(app.state, "etf_three_factor_sampler", None)
+    if sampler is not None:
+        stop_and_wait = getattr(sampler, "stop_and_wait", None)
+        if callable(stop_and_wait):
+            stop_and_wait()
+        else:
+            sampler.stop()
+
+
+def startup_market_sentiment_analysis_sampler() -> None:
+    _market_sentiment_analysis_sampler().start()
+
+
+def shutdown_market_sentiment_analysis_sampler() -> None:
+    sampler = getattr(app.state, "market_sentiment_analysis_sampler", None)
     if sampler is not None:
         stop_and_wait = getattr(sampler, "stop_and_wait", None)
         if callable(stop_and_wait):
@@ -1982,12 +2012,47 @@ def get_market_sentiment_percentile(
     refresh: bool = False,
 ) -> SentimentPercentileResponse:
     try:
-        return _market_sentiment_percentile_service().get(
+        result = _market_sentiment_percentile_service().get(
             as_of=as_of.isoformat() if as_of else None,
             refresh=refresh,
         )
     except StrongStockDataUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    _schedule_market_sentiment_analysis_catchup(result)
+    return result
+
+
+@app.get(
+    "/api/short-term/sentiment/percentile/analysis",
+    response_model=SentimentPercentileAnalysisResponse,
+)
+def get_market_sentiment_percentile_analysis(
+    trade_date: date,
+) -> SentimentPercentileAnalysisResponse:
+    trade_date_text = trade_date.isoformat()
+    _percentile_point_for_trade_date(trade_date_text)
+    existing = _market_sentiment_analysis_store().load(trade_date_text)
+    if existing is not None:
+        return existing
+
+    config = _effective_settings().ai_analysis
+    return SentimentPercentileAnalysisResponse(
+        trade_date=trade_date_text,
+        status=("not_generated" if config.enabled and config.api_key else "unconfigured"),
+        provider=config.provider,
+        llm_model=config.model,
+    )
+
+
+@app.post(
+    "/api/short-term/sentiment/percentile/analysis/generate",
+    response_model=SentimentPercentileAnalysisResponse,
+)
+def generate_market_sentiment_percentile_analysis(
+    trade_date: date,
+    force: bool = False,
+) -> SentimentPercentileAnalysisResponse:
+    return _generate_market_sentiment_analysis(trade_date.isoformat(), force=force)
 
 
 @app.get("/api/short-term/sentiment/summary")
@@ -3506,6 +3571,183 @@ def _market_sentiment_percentile_service() -> MarketSentimentPercentileService:
     )
     app.state.market_sentiment_percentile_service = service
     return service
+
+
+def _market_sentiment_analysis_store() -> MarketSentimentAnalysisStore:
+    injected = getattr(app.state, "market_sentiment_analysis_store", None)
+    if injected is not None:
+        return injected
+    data_dir = Path(getattr(app.state, "runs_dir", get_settings().data_dir))
+    store = MarketSentimentAnalysisStore(data_dir)
+    app.state.market_sentiment_analysis_store = store
+    return store
+
+
+def _market_sentiment_analysis_service() -> MarketSentimentAnalysisService:
+    injected = getattr(app.state, "market_sentiment_analysis_service", None)
+    if injected is not None:
+        return injected
+    service = MarketSentimentAnalysisService(
+        _market_sentiment_analysis_store(),
+        http_client=getattr(app.state, "market_sentiment_analysis_http_client", None),
+    )
+    app.state.market_sentiment_analysis_service = service
+    return service
+
+
+def _market_sentiment_analysis_sampler() -> MarketSentimentAnalysisSampler:
+    injected = getattr(app.state, "market_sentiment_analysis_sampler", None)
+    if injected is not None:
+        return injected
+    sampler = MarketSentimentAnalysisSampler(
+        generate_latest=_generate_latest_market_sentiment_analysis,
+        clock=getattr(app.state, "market_sentiment_analysis_sampler_clock", None),
+    )
+    app.state.market_sentiment_analysis_sampler = sampler
+    return sampler
+
+
+def _market_sentiment_analysis_now() -> datetime:
+    return datetime.now(ZoneInfo("Asia/Shanghai"))
+
+
+def _percentile_point_for_trade_date(
+    trade_date: str,
+    *,
+    response: SentimentPercentileResponse | None = None,
+) -> tuple[SentimentPercentileResponse, SentimentPercentilePoint]:
+    percentile = response or _market_sentiment_percentile_service().get(as_of=trade_date)
+    point = next(
+        (item for item in percentile.history if item.trade_date == trade_date),
+        None,
+    )
+    if point is None:
+        raise HTTPException(status_code=404, detail="该日期不在市场情绪分位历史中")
+    return percentile, point
+
+
+def _generate_market_sentiment_analysis(
+    trade_date: str,
+    *,
+    force: bool = False,
+    percentile_response: SentimentPercentileResponse | None = None,
+) -> SentimentPercentileAnalysisResponse:
+    percentile, point = _percentile_point_for_trade_date(
+        trade_date,
+        response=percentile_response,
+    )
+    summary, market_emotion = _optional_sentiment_analysis_context(trade_date)
+    decision = None
+    if summary is not None:
+        try:
+            decision = build_sentiment_decision(summary, market_emotion)
+        except Exception:
+            decision = None
+    input_payload = build_sentiment_analysis_input(
+        point,
+        percentile.history,
+        summary,
+        decision,
+        _load_sentiment_validation(),
+    )
+    return _market_sentiment_analysis_service().generate(
+        input_payload,
+        _effective_settings().ai_analysis,
+        force=force,
+    )
+
+
+def _generate_latest_market_sentiment_analysis(
+    now: datetime,
+) -> SentimentPercentileAnalysisResponse:
+    percentile = _market_sentiment_percentile_service().get(now=now)
+    return _generate_market_sentiment_analysis(
+        percentile.latest_complete_trade_date,
+        percentile_response=percentile,
+    )
+
+
+def _optional_sentiment_analysis_context(
+    trade_date: str,
+) -> tuple[SentimentSummaryResponse | None, MarketEmotionSnapshotResponse | None]:
+    snapshot_store = _sentiment_snapshot_store()
+    try:
+        summary = snapshot_store.load_summary(trade_date)
+    except Exception:
+        summary = None
+    try:
+        market_emotion = snapshot_store.load_market_emotion(trade_date)
+    except Exception:
+        market_emotion = None
+
+    if summary is not None and market_emotion is not None:
+        return summary, market_emotion
+    try:
+        sentiment, refreshed_emotion = _build_and_persist_sentiment_snapshots(
+            trade_date,
+            80,
+            refresh=True,
+        )
+        refreshed_summary = build_sentiment_summary(
+            sentiment,
+            refreshed_emotion,
+            snapshot_status="fresh",
+        )
+    except Exception:
+        return summary, market_emotion
+    return refreshed_summary, refreshed_emotion
+
+
+def _load_sentiment_validation() -> dict[str, object]:
+    unavailable = {"status": "unavailable", "sample_count": 0}
+    data_dir = Path(getattr(app.state, "runs_dir", get_settings().data_dir))
+    path = data_dir / "sentiment-percentile" / "validation-v1.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return SentimentValidationReport.model_validate(payload).model_dump(mode="json")
+    except Exception:
+        return unavailable
+
+
+def _schedule_market_sentiment_analysis_catchup(
+    percentile: SentimentPercentileResponse,
+) -> None:
+    selected = percentile.selected
+    if selected is None or selected.trade_date != percentile.latest_complete_trade_date:
+        return
+    config = _effective_settings().ai_analysis
+    if not config.enabled or not config.api_key:
+        return
+    now = _market_sentiment_analysis_now()
+    if now.timetz().replace(tzinfo=None) < time(15, 15):
+        return
+    try:
+        if _market_sentiment_analysis_store().load(selected.trade_date) is not None:
+            return
+    except Exception:
+        return
+
+    with _MARKET_SENTIMENT_ANALYSIS_CATCHUP_LOCK:
+        if selected.trade_date in _MARKET_SENTIMENT_ANALYSIS_CATCHUP_DATES:
+            return
+        _MARKET_SENTIMENT_ANALYSIS_CATCHUP_DATES.add(selected.trade_date)
+
+    def run() -> None:
+        try:
+            _generate_latest_market_sentiment_analysis(now)
+        except Exception:
+            logger.exception("market sentiment analysis catch-up failed")
+
+    try:
+        Thread(
+            target=run,
+            name="market-sentiment-analysis-catchup",
+            daemon=True,
+        ).start()
+    except Exception:
+        with _MARKET_SENTIMENT_ANALYSIS_CATCHUP_LOCK:
+            _MARKET_SENTIMENT_ANALYSIS_CATCHUP_DATES.discard(selected.trade_date)
+        raise
 
 
 def _chanlun_daily_provider() -> object:

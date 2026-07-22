@@ -35,13 +35,6 @@ function selectRow(symbol: string) {
   emit('select', symbol);
 }
 
-function handleRowKeydown(event: KeyboardEvent, symbol: string) {
-  if (event.key === 'Enter' || event.key === ' ') {
-    event.preventDefault();
-    selectRow(symbol);
-  }
-}
-
 function sortBy(key: SortKey) {
   if (sortKey.value === key) sortDirection.value = sortDirection.value === 'desc' ? 'asc' : 'desc';
   else {
@@ -88,6 +81,15 @@ function statusText(row: UnifiedEtfActivityRow) {
   <div data-testid="etf-activity-table" class="etf-activity-table">
     <div class="etf-activity-table__scroll" role="region" aria-label="ETF活动统一表" tabindex="0">
       <table class="etf-activity-table__table">
+        <colgroup>
+          <col class="etf-activity-table__col--identity" />
+          <col class="etf-activity-table__col--numeric" />
+          <col class="etf-activity-table__col--numeric" />
+          <col class="etf-activity-table__col--numeric" />
+          <col class="etf-activity-table__col--numeric" />
+          <col class="etf-activity-table__col--numeric" />
+          <col class="etf-activity-table__col--status" />
+        </colgroup>
         <thead>
           <tr>
             <th scope="col">ETF / 指数</th>
@@ -142,13 +144,19 @@ function statusText(row: UnifiedEtfActivityRow) {
             data-testid="activity-etf-row"
             :data-symbol="row.symbol"
             :class="{ 'etf-activity-table__row--selected': row.symbol === selectedSymbol }"
-            tabindex="0"
             @click="selectRow(row.symbol)"
-            @keydown="handleRowKeydown($event, row.symbol)"
           >
             <th scope="row">
-              <strong>{{ row.name }}</strong>
-              <span>{{ row.symbol }} · {{ row.indexName }}</span>
+              <button
+                data-testid="activity-etf-select"
+                type="button"
+                :aria-label="`选择 ${row.name} ${row.symbol}`"
+                :aria-pressed="row.symbol === selectedSymbol"
+                @click.stop="selectRow(row.symbol)"
+              >
+                <strong :title="row.name">{{ row.name }}</strong>
+                <span :title="`${row.symbol} · ${row.indexName}`">{{ row.symbol }} · {{ row.indexName }}</span>
+              </button>
             </th>
             <td :class="valueClass(row.closeChangePct)">{{ formatPercent(row.closeChangePct) }}</td>
             <td :class="valueClass(row.dailyChangePct)">{{ formatPercent(row.dailyChangePct) }}</td>
@@ -177,9 +185,21 @@ function statusText(row: UnifiedEtfActivityRow) {
 
 .etf-activity-table__table {
   width: 100%;
-  min-width: 760px;
+  min-width: 1010px;
   border-collapse: collapse;
   table-layout: fixed;
+}
+
+.etf-activity-table__col--identity {
+  width: 230px;
+}
+
+.etf-activity-table__col--numeric {
+  width: 130px;
+}
+
+.etf-activity-table__col--status {
+  width: 120px;
 }
 
 th,
@@ -212,12 +232,10 @@ thead button {
 
 tbody tr {
   cursor: pointer;
-  outline: 0;
 }
 
-tbody tr:focus-visible {
-  outline: 2px solid var(--wb-primary, #2563eb);
-  outline-offset: -2px;
+tbody tr:not(.etf-activity-table__row--selected):hover {
+  background: var(--wb-surface-muted, #f8fafc);
 }
 
 .etf-activity-table__row--selected {
@@ -227,6 +245,27 @@ tbody tr:focus-visible {
 tbody th strong,
 tbody th span {
   display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+tbody th button {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+tbody th button:focus-visible {
+  outline: 2px solid var(--wb-primary, #2563eb);
+  outline-offset: 2px;
 }
 
 tbody th span {

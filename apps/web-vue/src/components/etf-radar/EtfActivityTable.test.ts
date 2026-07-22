@@ -28,6 +28,20 @@ const rows = [
   row({ symbol: '159915.SZ', name: '创业板ETF', signalScore: null, closeChangePct: null })
 ];
 
+const sortableRows = [
+  row({ symbol: 'A', closeChangePct: 3, dailyChangePct: -3, baselineChangePct: 30, volumeRatio: 3, signalScore: 90 }),
+  row({ symbol: 'B', closeChangePct: 1, dailyChangePct: 1, baselineChangePct: 10, volumeRatio: 1, signalScore: 70 }),
+  row({ symbol: 'C', closeChangePct: -1, dailyChangePct: -1, baselineChangePct: -10, volumeRatio: 2, signalScore: 50 }),
+  row({
+    symbol: 'NULL',
+    closeChangePct: null,
+    dailyChangePct: null,
+    baselineChangePct: null,
+    volumeRatio: null,
+    signalScore: null
+  })
+];
+
 function mountTable() {
   return mount(EtfActivityTable, { props: { rows, selectedSymbol: '510050.SH' } });
 }
@@ -52,31 +66,58 @@ describe('EtfActivityTable', () => {
     expect(rowSymbols(wrapper)).toEqual(['510300.SH', '510050.SH', '159915.SZ']);
   });
 
-  it('sorts numeric columns with null values last in both directions', async () => {
-    const wrapper = mountTable();
-    const header = wrapper.get('button[aria-label="收盘涨跌 可排序"]');
+  it('sorts every numeric column with null values last in both directions', async () => {
+    const cases = [
+      ['收盘涨跌', ['A', 'B', 'C', 'NULL'], ['C', 'B', 'A', 'NULL']],
+      ['份额日变化', ['B', 'C', 'A', 'NULL'], ['A', 'C', 'B', 'NULL']],
+      ['报告基线偏离', ['A', 'B', 'C', 'NULL'], ['C', 'B', 'A', 'NULL']],
+      ['20日量比', ['A', 'C', 'B', 'NULL'], ['B', 'C', 'A', 'NULL']],
+      ['三因子评分', ['A', 'B', 'C', 'NULL'], ['C', 'B', 'A', 'NULL']]
+    ] as const;
 
-    await header.trigger('click');
-    expect(rowSymbols(wrapper)).toEqual(['510300.SH', '510050.SH', '159915.SZ']);
-    await header.trigger('click');
-    expect(rowSymbols(wrapper)).toEqual(['510050.SH', '510300.SH', '159915.SZ']);
+    await Promise.all(
+      cases.map(async ([label, descending, ascending]) => {
+        const wrapper = mount(EtfActivityTable, { props: { rows: sortableRows, selectedSymbol: 'A' } });
+        const header = wrapper.get(`button[aria-label^="${label}"]`);
 
-    await wrapper.get('button[aria-label="份额日变化 可排序"]').trigger('click');
-    expect(rowSymbols(wrapper)).toEqual(['510300.SH', '510050.SH', '159915.SZ']);
+        if (label === '三因子评分') {
+          expect(rowSymbols(wrapper), `${label} default descending`).toEqual(descending);
+        }
+        await header.trigger('click');
+        expect(rowSymbols(wrapper), `${label} first sort`).toEqual(label === '三因子评分' ? ascending : descending);
+        await header.trigger('click');
+        expect(rowSymbols(wrapper), `${label} second sort`).toEqual(label === '三因子评分' ? descending : ascending);
+      })
+    );
   });
 
-  it('marks the selected row and emits selection from click and keyboard activation', async () => {
+  it('uses a selected identity button with native keyboard semantics and no duplicate bubbling emission', async () => {
     const wrapper = mountTable();
     const selected = wrapper.find('[data-testid="activity-etf-row"][data-symbol="510050.SH"]');
+    const selectedButton = selected.get('button[data-testid="activity-etf-select"]');
 
     expect(selected.classes()).toContain('etf-activity-table__row--selected');
-    await wrapper.find('[data-testid="activity-etf-row"][data-symbol="510300.SH"]').trigger('click');
-    await wrapper
-      .find('[data-testid="activity-etf-row"][data-symbol="159915.SZ"]')
-      .trigger('keydown', { key: 'Enter' });
-    await wrapper.find('[data-testid="activity-etf-row"][data-symbol="510050.SH"]').trigger('keydown', { key: ' ' });
+    expect(selectedButton.attributes('type')).toBe('button');
+    expect(selectedButton.attributes('aria-pressed')).toBe('true');
+    expect(selectedButton.attributes('aria-label')).toContain('上证50ETF');
 
-    expect(wrapper.emitted('select')).toEqual([['510300.SH'], ['159915.SZ'], ['510050.SH']]);
+    const unselectedButton = wrapper
+      .find('[data-testid="activity-etf-row"][data-symbol="510300.SH"]')
+      .get('button[data-testid="activity-etf-select"]');
+    expect(unselectedButton.attributes('aria-pressed')).toBe('false');
+
+    await wrapper.find('[data-testid="activity-etf-row"][data-symbol="510300.SH"]').trigger('click');
+    expect(wrapper.emitted('select')).toEqual([['510300.SH']]);
+
+    await unselectedButton.trigger('click');
+    expect(wrapper.emitted('select')).toEqual([['510300.SH'], ['510300.SH']]);
+
+    await unselectedButton.trigger('keydown', { key: 'Enter' });
+    await unselectedButton.trigger('click');
+    await unselectedButton.trigger('keydown', { key: ' ' });
+    await unselectedButton.trigger('click');
+
+    expect(wrapper.emitted('select')).toEqual([['510300.SH'], ['510300.SH'], ['510300.SH'], ['510300.SH']]);
   });
 
   it('renders signed direction values and explicit rise/fall classes', () => {

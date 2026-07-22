@@ -19,6 +19,7 @@ import type {
 import EtfRadarView from './EtfRadarView.vue';
 
 const routeState = vi.hoisted(() => ({ route: { query: {} as Record<string, string> } }));
+const breakpointState = vi.hoisted(() => ({ compact: false }));
 const api = vi.hoisted(() => ({
   getEtfRadarOverview: vi.fn(),
   getEtfRadarHistory: vi.fn(),
@@ -29,6 +30,13 @@ const api = vi.hoisted(() => ({
 }));
 
 vi.mock('@/service/product-api', () => api);
+vi.mock('@vueuse/core', async () => {
+  const { ref } = await import('vue');
+  return {
+    breakpointsTailwind: {},
+    useBreakpoints: () => ({ smaller: () => ref(breakpointState.compact) })
+  };
+});
 vi.mock('vue-router', async () => {
   const { reactive } = await import('vue');
   routeState.route = reactive(routeState.route);
@@ -348,6 +356,7 @@ async function openTab(wrapper: Awaited<ReturnType<typeof mountView>>, index: nu
 afterEach(() => {
   vi.clearAllMocks();
   routeState.route.query = {};
+  breakpointState.compact = false;
 });
 
 describe('EtfRadarView', () => {
@@ -491,7 +500,7 @@ describe('EtfRadarView', () => {
     expect(wrapper.get('[data-testid="etf-panel-error"]').text()).toContain('概览服务暂不可用');
     await wrapper.find('[data-testid="activity-etf-row"][data-symbol="600000.SH"]').trigger('click');
     expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('仅三因子ETF');
-    expect(wrapper.get('.wb-section-header .wb-status-tag').text()).toBe('成功');
+    expect(wrapper.get('.wb-section-header .wb-status-tag').text()).toBe('部分');
     wrapper.unmount();
   });
 
@@ -511,7 +520,72 @@ describe('EtfRadarView', () => {
         .attributes('aria-pressed')
     ).toBe('true');
     expect(wrapper.get('[data-testid="three-factor-error"]').text()).toContain('三因子服务暂不可用');
+    expect(wrapper.get('.wb-section-header .wb-status-tag').text()).toBe('部分');
     expect(wrapper.find('[data-testid="factor-detail"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('opens selected detail in a desktop drawer', async () => {
+    breakpointState.compact = false;
+    routeState.route.query = { tab: 'activity' };
+    setDefaultApiResponses();
+    const wrapper = await mountView();
+
+    await wrapper.find('[data-testid="activity-etf-row"][data-symbol="510300.SH"]').trigger('click');
+
+    expect(wrapper.find('[data-testid="etf-detail-drawer"]').exists()).toBe(true);
+    expect(wrapper.get('[data-testid="etf-detail-drawer"]').get('[data-testid="factor-detail"]').text()).toContain('三因子ETF2');
+    expect(wrapper.find('[data-testid="etf-inline-detail"]').exists()).toBe(false);
+    wrapper.unmount();
+  });
+
+  it('renders selected detail inline below the table below md', async () => {
+    breakpointState.compact = true;
+    routeState.route.query = { tab: 'activity' };
+    setDefaultApiResponses();
+    const wrapper = await mountView();
+
+    await wrapper.find('[data-testid="activity-etf-row"][data-symbol="510300.SH"]').trigger('click');
+
+    expect(wrapper.find('[data-testid="etf-detail-drawer"]').exists()).toBe(false);
+    expect(wrapper.get('[data-testid="etf-inline-detail"]').get('[data-testid="factor-detail"]').text()).toContain('三因子ETF2');
+    expect(wrapper.get('[data-testid="etf-inline-detail"]').element.previousElementSibling).toBe(
+      wrapper.get('[data-testid="etf-activity-table"]').element
+    );
+    wrapper.unmount();
+  });
+
+  it('opens an activity-only row without requesting or showing another symbol history', async () => {
+    routeState.route.query = { tab: 'activity' };
+    setDefaultApiResponses();
+    const factorResponse = threeFactorFixture();
+    factorResponse.items = factorResponse.items.filter(item => item.symbol !== '510300.SH');
+    api.getEtfThreeFactor.mockResolvedValueOnce(factorResponse);
+    const wrapper = await mountView();
+
+    await wrapper.find('[data-testid="activity-etf-row"][data-symbol="510300.SH"]').trigger('click');
+
+    expect(api.getEtfThreeFactorHistory).not.toHaveBeenCalledWith('510300.SH', 40);
+    expect(wrapper.get('[data-testid="factor-unavailable"]').text()).toContain('510300.SH');
+    expect(wrapper.get('[data-testid="factor-unavailable"]').text()).toContain('暂无三因子证据');
+    expect(wrapper.find('[data-testid="three-factor-history-loading"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('三因子ETF2');
+    wrapper.unmount();
+  });
+
+  it('retains prior factor charts and shows a localized error when forced history refresh fails', async () => {
+    routeState.route.query = { tab: 'activity', symbol: '510050.SH' };
+    setDefaultApiResponses();
+    const wrapper = await mountView();
+
+    expect(wrapper.findAll('[data-testid="huijin-trajectory-chart"]')).toHaveLength(3);
+    api.getEtfThreeFactorHistory.mockRejectedValueOnce(new Error('历史刷新失败：暂不可用'));
+    await wrapper.get('[data-testid="etf-refresh"]').trigger('click');
+    await flushPromises();
+
+    expect(wrapper.findAll('[data-testid="huijin-trajectory-chart"]')).toHaveLength(3);
+    expect(wrapper.get('.etf-three-factor__history-error').text()).toContain('历史刷新失败：暂不可用');
+    expect(wrapper.get('[data-testid="signal-timeline"]').text()).toContain('2026-07-18');
     wrapper.unmount();
   });
 

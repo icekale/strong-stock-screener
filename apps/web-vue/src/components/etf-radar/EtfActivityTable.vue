@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import type { UnifiedEtfActivityRow } from '@/utils/domain/etfThreeFactor';
-import { activityDirectionLabel } from '@/utils/domain/capitalSignals';
 import { closeChangeTone, signalLevelLabel } from '@/utils/domain/etfThreeFactor';
 
 defineOptions({ name: 'EtfActivityTable' });
@@ -68,12 +67,12 @@ function valueClass(value: number | null) {
 }
 
 function statusText(row: UnifiedEtfActivityRow) {
-  if (!row.activity) return signalLevelLabel(row.signalLevel);
-  const direction = row.activity.direction;
-  let sign = '';
-  if (direction === 'increase') sign = '+';
-  if (direction === 'decrease') sign = '-';
-  return `${signalLevelLabel(row.signalLevel)} · ${sign}${activityDirectionLabel(direction)}`;
+  const level = signalLevelLabel(row.signalLevel);
+  if (!row.activity) return level;
+  if (row.activity.direction === 'increase') return `${level} · +增加（申购代理）`;
+  if (row.activity.direction === 'decrease') return `${level} · -减少（赎回代理）`;
+  if (row.activity.direction === 'flat') return `${level} · 持平`;
+  return `${level} · 待确认`;
 }
 </script>
 

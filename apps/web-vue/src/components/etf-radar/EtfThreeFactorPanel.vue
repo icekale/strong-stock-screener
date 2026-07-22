@@ -29,9 +29,7 @@ const chartColors = ref({
   positive: '#15803d',
   muted: '#64748b'
 });
-const selectedItem = computed(() =>
-  props.snapshot.items.find(item => item.symbol === props.selectedSymbol) ?? props.snapshot.items[0] ?? null
-);
+const selectedItem = computed(() => props.snapshot.items.find(item => item.symbol === props.selectedSymbol) ?? null);
 const selectedHistory = computed(() =>
   props.history?.symbol === props.selectedSymbol ? props.history : null
 );
@@ -142,7 +140,11 @@ function levelClass(level: EtfThreeFactorItem['level']) {
 
 <template>
   <section ref="panelElement" data-testid="etf-three-factor-panel" class="etf-three-factor">
-    <div data-testid="factor-detail" class="etf-three-factor__detail">
+    <div v-if="!selectedItem" data-testid="factor-unavailable" class="etf-three-factor__unavailable" role="status">
+      {{ selectedSymbol }} 暂无三因子证据
+    </div>
+    <template v-else>
+      <div data-testid="factor-detail" class="etf-three-factor__detail">
       <div class="etf-three-factor__detail-heading">
         <span>ETF 活动证据</span>
         <strong>{{ selectedItem?.name || '--' }}</strong>
@@ -216,16 +218,17 @@ function levelClass(level: EtfThreeFactorItem['level']) {
         {{ historyError }}
       </p>
       <p v-else data-testid="three-factor-history-empty" class="etf-three-factor__history-state">暂无可用历史信号</p>
-    </div>
-
-    <div data-testid="signal-timeline" class="etf-three-factor__timeline" aria-label="三因子信号时间线">
-      <div v-for="point in timelinePoints" :key="point.trade_date" class="etf-three-factor__timeline-item">
-        <time>{{ point.trade_date }}</time>
-        <strong :class="levelClass(point.level)">{{ point.level.toUpperCase() }}</strong>
-        <span>评分 {{ formatScore(point.signal_score) }} · 收盘 {{ formatPercent(point.close_change_pct) }}</span>
       </div>
-      <p v-if="timelinePoints.length === 0">暂无历史信号</p>
-    </div>
+
+      <div data-testid="signal-timeline" class="etf-three-factor__timeline" aria-label="三因子信号时间线">
+        <div v-for="point in timelinePoints" :key="point.trade_date" class="etf-three-factor__timeline-item">
+          <time>{{ point.trade_date }}</time>
+          <strong :class="levelClass(point.level)">{{ point.level.toUpperCase() }}</strong>
+          <span>评分 {{ formatScore(point.signal_score) }} · 收盘 {{ formatPercent(point.close_change_pct) }}</span>
+        </div>
+        <p v-if="timelinePoints.length === 0">暂无历史信号</p>
+      </div>
+    </template>
   </section>
 </template>
 

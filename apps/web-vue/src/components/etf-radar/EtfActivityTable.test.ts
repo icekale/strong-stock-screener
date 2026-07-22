@@ -2,6 +2,7 @@
 
 import { mount } from '@vue/test-utils';
 import { describe, expect, it } from 'vitest';
+import type { HuijinEtfActivityItem } from '@/service/types';
 import type { UnifiedEtfActivityRow } from '@/utils/domain/etfThreeFactor';
 import EtfActivityTable from './EtfActivityTable.vue';
 
@@ -64,6 +65,29 @@ describe('EtfActivityTable', () => {
     expect(wrapper.get('[data-testid="etf-activity-table"]').text()).toContain('20日量比');
     expect(wrapper.get('[data-testid="etf-activity-table"]').text()).toContain('状态');
     expect(rowSymbols(wrapper)).toEqual(['510300.SH', '510050.SH', '159915.SZ']);
+  });
+
+  it('keeps activity directions explicit as non-confirmatory proxies', () => {
+    const activity = (direction: HuijinEtfActivityItem['direction']) => ({ direction }) as HuijinEtfActivityItem;
+    const wrapper = mount(EtfActivityTable, {
+      props: {
+        rows: [
+          row({ symbol: 'INCREASE', activity: activity('increase') }),
+          row({ symbol: 'DECREASE', activity: activity('decrease') }),
+          row({ symbol: 'FLAT', activity: activity('flat') }),
+          row({ symbol: 'UNKNOWN', activity: activity('unknown') })
+        ],
+        selectedSymbol: 'INCREASE'
+      }
+    });
+
+    const text = wrapper.get('[data-testid="etf-activity-table"]').text();
+    expect(text).toContain('高确信 · +增加（申购代理）');
+    expect(text).toContain('高确信 · -减少（赎回代理）');
+    expect(text).not.toMatch(/· \+申购(?:\s|$)/);
+    expect(text).not.toMatch(/· -赎回(?:\s|$)/);
+    expect(text).toContain('高确信 · 持平');
+    expect(text).toContain('高确信 · 待确认');
   });
 
   it('sorts every numeric column with null values last in both directions', async () => {

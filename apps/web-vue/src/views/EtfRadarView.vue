@@ -274,15 +274,16 @@ function activeStatus() {
 
 function activityStatus() {
   if (threeFactorLoading.value) return 'running';
-  if (threeFactorError.value && threeFactor.value) return 'partial';
-  if (threeFactorError.value) return 'failed';
+  const hasUsableRows = activityRows.value.length > 0;
+  if ((errors.overview || threeFactorError.value) && hasUsableRows) return 'partial';
+  if (errors.overview || threeFactorError.value) return 'failed';
   if (threeFactor.value?.source_status.some(source => source.status === 'stale' || source.status === 'failed')) {
     return 'partial';
   }
   if (overview.value?.source_status.some(source => source.status === 'stale' || source.status === 'failed')) {
     return 'partial';
   }
-  if (threeFactor.value) return 'success';
+  if (hasUsableRows) return 'success';
   return activeStatus();
 }
 
@@ -416,6 +417,14 @@ async function loadThreeFactor(force = false) {
 
 async function loadThreeFactorHistory(symbol: string, force = false) {
   if (!symbol) return;
+  if (!threeFactor.value?.items.some(item => item.symbol === symbol)) {
+    if (symbol === selectedThreeFactorSymbol.value) {
+      threeFactorHistory.value = null;
+      threeFactorHistoryLoading.value = false;
+      threeFactorHistoryError.value = null;
+    }
+    return;
+  }
   threeFactorHistoryLoading.value = true;
   threeFactorHistoryError.value = null;
   try {
@@ -628,14 +637,15 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
         <div v-else class="etf-state">暂无今日活动数据</div>
 
         <template v-if="threeFactor && activityDetailOpen">
-          <EtfThreeFactorPanel
-            v-if="isCompact"
-            :snapshot="threeFactor"
-            :history="selectedThreeFactorHistory"
-            :selected-symbol="selectedThreeFactorSymbol"
-            :history-loading="threeFactorHistoryLoading"
-            :history-error="threeFactorHistoryError"
-          />
+          <div v-if="isCompact" data-testid="etf-inline-detail">
+            <EtfThreeFactorPanel
+              :snapshot="threeFactor"
+              :history="selectedThreeFactorHistory"
+              :selected-symbol="selectedThreeFactorSymbol"
+              :history-loading="threeFactorHistoryLoading"
+              :history-error="threeFactorHistoryError"
+            />
+          </div>
           <ADrawer v-else v-model:open="activityDetailOpen" title="ETF 活动证据" placement="right" :width="560">
             <EtfThreeFactorPanel
               :snapshot="threeFactor"

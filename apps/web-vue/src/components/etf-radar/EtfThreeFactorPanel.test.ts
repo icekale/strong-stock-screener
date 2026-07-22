@@ -126,6 +126,19 @@ describe('EtfThreeFactorPanel', () => {
     expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('待盘后');
   });
 
+  it('renders selected-symbol-specific unavailability without another ETF evidence or charts', async () => {
+    const wrapper = mountPanel();
+
+    await wrapper.setProps({ selectedSymbol: '600000.SH', history: historyFixture('600000.SH') });
+
+    expect(wrapper.get('[data-testid="factor-unavailable"]').text()).toContain('600000.SH');
+    expect(wrapper.get('[data-testid="factor-unavailable"]').text()).toContain('暂无三因子证据');
+    expect(wrapper.find('[data-testid="factor-detail"]').exists()).toBe(false);
+    expect(wrapper.findAll('[data-testid="three-factor-chart"]')).toHaveLength(0);
+    expect(wrapper.find('[data-testid="signal-timeline"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('核心ETF1');
+  });
+
   it('passes concrete, synchronized, gap-preserving options to ECharts', () => {
     const wrapper = mountPanel();
     const [volumeOption, shareOption, comparisonOption] = wrapper

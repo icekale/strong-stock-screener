@@ -103,42 +103,27 @@ function mountPanel() {
 }
 
 describe('EtfThreeFactorPanel', () => {
-  it('renders the approved three-factor information hierarchy without confirmation language', () => {
+  it('renders selected ETF activity evidence without a repeated ETF list', () => {
     const wrapper = mountPanel();
 
-    expect(wrapper.get('[data-testid="three-factor-summary"]').text()).toContain('综合信号强度');
-    expect(wrapper.findAll('[data-testid="dragon-status"]')).toHaveLength(7);
-    expect(wrapper.findAll('[data-testid="dragon-status"]').every(status => status.classes().includes('etf-three-factor__dragon'))).toBe(true);
-    expect(wrapper.get('[data-testid="three-factor-table"]').text()).toContain('收盘涨跌');
-    expect(wrapper.get('[data-testid="three-factor-table"]').text()).toContain('20日均量');
     expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('量能因子');
     expect(wrapper.findAll('[data-testid="three-factor-chart"]')).toHaveLength(3);
     expect(wrapper.get('[data-testid="signal-timeline"]').text()).toContain('HIGH');
-    expect(wrapper.text()).toContain('疑似活动');
+    expect(wrapper.text()).toContain('三因子同向仅表示疑似活动');
     expect(wrapper.text()).not.toContain('确认买入');
+    expect(wrapper.find('[data-testid="three-factor-summary"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="dragon-status"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="three-factor-table"]').exists()).toBe(false);
+    expect(wrapper.find('.etf-three-factor__monitor').exists()).toBe(false);
+    expect(wrapper.findAll('button')).toHaveLength(0);
   });
 
-  it('emits selection from the status strip and renders pending share evidence as post-close', async () => {
+  it('renders parent-selected ETF identity and pending share evidence as post-close', async () => {
     const wrapper = mountPanel();
-    const statuses = wrapper.findAll('[data-testid="dragon-status"]');
-
-    await statuses[4]!.trigger('click');
-    expect(wrapper.emitted('select')).toEqual([['159915.SZ']]);
 
     await wrapper.setProps({ selectedSymbol: '159915.SZ', history: historyFixture('159915.SZ') });
     expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('核心ETF5');
     expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('待盘后');
-  });
-
-  it('sorts the factor table by the selected numeric column', async () => {
-    const wrapper = mountPanel();
-    const names = () => wrapper.findAll('[data-testid="three-factor-table"] tbody strong').map(cell => cell.text());
-
-    expect(names()[0]).toBe('核心ETF1');
-    await wrapper.get('button[aria-label="信号强度 降序"]').trigger('click');
-
-    expect(names()[0]).toBe('核心ETF7');
-    expect(wrapper.find('button[aria-label="信号强度 升序"]').exists()).toBe(true);
   });
 
   it('passes concrete, synchronized, gap-preserving options to ECharts', () => {
@@ -160,7 +145,7 @@ describe('EtfThreeFactorPanel', () => {
     expect(series(shareOption!)[0]!.data).toContain(null);
     expect(series(comparisonOption!)[0]!.data).toContain(null);
     expect(series(comparisonOption!)[1]!.data).toEqual([null, null, 0.3]);
-    expect(series(comparisonOption!).every(item => item.connectNulls === false)).toBe(true);
+    expect(series(comparisonOption!).every(seriesItem => seriesItem.connectNulls === false)).toBe(true);
   });
 
   it('renders one chart-area state without usable history and retains prior charts during a stale reload', async () => {

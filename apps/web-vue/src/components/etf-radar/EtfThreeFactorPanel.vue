@@ -1,8 +1,13 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, ref } from 'vue';
 import type { EChartsOption } from 'echarts';
-import type { EtfFactorEvidence, EtfThreeFactorHistoryResponse, EtfThreeFactorItem, EtfThreeFactorResponse } from '@/service/types';
-import { closeChangeTone, factorStatusLabel, formatVolumeRatio, signalLevelLabel } from '@/utils/domain/etfThreeFactor';
+import type {
+  EtfFactorEvidence,
+  EtfThreeFactorHistoryResponse,
+  EtfThreeFactorItem,
+  EtfThreeFactorResponse
+} from '@/service/types';
+import { factorStatusLabel, signalLevelLabel } from '@/utils/domain/etfThreeFactor';
 
 defineOptions({ name: 'EtfThreeFactorPanel' });
 
@@ -16,14 +21,6 @@ const props = defineProps<{
   historyError: string | null;
 }>();
 
-const emit = defineEmits<{
-  select: [symbol: string];
-}>();
-
-type SortKey = 'signal_score' | 'close_change_pct' | 'volume_ratio' | 'share_change_pct';
-
-const sortKey = ref<SortKey>('signal_score');
-const sortDirection = ref<'asc' | 'desc'>('desc');
 const panelElement = ref<HTMLElement | null>(null);
 const chartColors = ref({
   primary: '#2563eb',
@@ -34,13 +31,6 @@ const chartColors = ref({
 });
 const selectedItem = computed(() =>
   props.snapshot.items.find(item => item.symbol === props.selectedSymbol) ?? props.snapshot.items[0] ?? null
-);
-const sortedItems = computed(() =>
-  [...props.snapshot.items].sort((left, right) => {
-    const leftValue = left[sortKey.value] ?? Number.NEGATIVE_INFINITY;
-    const rightValue = right[sortKey.value] ?? Number.NEGATIVE_INFINITY;
-    return sortDirection.value === 'desc' ? rightValue - leftValue : leftValue - rightValue;
-  })
 );
 const selectedHistory = computed(() =>
   props.history?.symbol === props.selectedSymbol ? props.history : null
@@ -131,149 +121,100 @@ function compactNumber(value: number) {
 }
 
 function formatPercent(value: number | null | undefined) {
-  if (value == null) return '--';
+  if (value === null || value === undefined) return '--';
   return `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
 }
 
 function formatScore(value: number | null | undefined) {
-  return value == null ? '--' : value.toFixed(0);
+  return value === null || value === undefined ? '--' : value.toFixed(0);
 }
 
 function formatFactorValue(factor: EtfFactorEvidence) {
   if (factor.status === 'pending') return '待盘后';
-  if (factor.value == null) return '--';
+  if (factor.value === null || factor.value === undefined) return '--';
   return factor.value.toFixed(2);
-}
-
-function valueClass(value: number | null | undefined) {
-  const tone = closeChangeTone(value ?? null);
-  return tone === 'rise' ? 'etf-three-factor__value--rise' : tone === 'fall' ? 'etf-three-factor__value--fall' : '';
 }
 
 function levelClass(level: EtfThreeFactorItem['level']) {
   return `etf-three-factor__level--${level}`;
 }
-
-function sortBy(key: SortKey) {
-  if (sortKey.value === key) sortDirection.value = sortDirection.value === 'desc' ? 'asc' : 'desc';
-  else {
-    sortKey.value = key;
-    sortDirection.value = 'desc';
-  }
-}
-
-function sortLabel(key: SortKey) {
-  return sortKey.value === key ? (sortDirection.value === 'desc' ? '降序' : '升序') : '可排序';
-}
 </script>
 
 <template>
   <section ref="panelElement" data-testid="etf-three-factor-panel" class="etf-three-factor">
-    <div data-testid="three-factor-summary" class="etf-three-factor__summary">
-      <div>
-        <span>综合信号强度</span>
-        <strong :class="levelClass(snapshot.summary.level)">{{ formatScore(snapshot.summary.signal_score) }}</strong>
-        <small>{{ signalLevelLabel(snapshot.summary.level) }} · 疑似活动</small>
-      </div>
-      <div>
-        <span>高确信</span>
-        <strong>{{ snapshot.summary.high_count }}</strong>
-        <small>7只核心ETF</small>
-      </div>
-      <div>
-        <span>中确信</span>
-        <strong>{{ snapshot.summary.medium_count }}</strong>
-        <small>可用 {{ snapshot.summary.valid_count }} 只</small>
-      </div>
-      <div>
-        <span>市场状态</span>
-        <strong>{{ snapshot.summary.market_state.toUpperCase() }}</strong>
-        <small>{{ snapshot.trade_date }}</small>
-      </div>
-    </div>
-
-    <div class="etf-three-factor__dragons" role="region" aria-label="核心ETF状态条">
-      <button
-        v-for="item in snapshot.items"
-        :key="item.symbol"
-        data-testid="dragon-status"
-        type="button"
-        class="etf-three-factor__dragon"
-        :class="[{ 'etf-three-factor__dragon--selected': item.symbol === selectedItem?.symbol }, levelClass(item.level)]"
-        :aria-pressed="item.symbol === selectedItem?.symbol"
-        @click="emit('select', item.symbol)"
-      >
-        <strong>{{ item.name }}</strong>
-        <span>{{ item.symbol }}</span>
-        <b>{{ item.level.toUpperCase() }}</b>
-      </button>
-    </div>
-
-    <div class="etf-three-factor__monitor">
-      <span>活动监测 {{ snapshot.monitor_running ? '运行中' : '待启动' }}</span>
-      <span>最近扫描 {{ snapshot.last_scan_at || '--' }}</span>
-      <span>高确信信号 {{ snapshot.summary.high_count }} 项</span>
-      <span>提示：三因子同向仅表示疑似活动</span>
-    </div>
-
-    <div class="etf-three-factor__table-scroll" tabindex="0" role="region" aria-label="ETF三因子信号表">
-      <table data-testid="three-factor-table" class="etf-three-factor__table">
-        <thead>
-          <tr>
-            <th>ETF</th>
-            <th><button type="button" :aria-label="`信号强度 ${sortLabel('signal_score')}`" @click="sortBy('signal_score')">信号强度</button></th>
-            <th><button type="button" :aria-label="`收盘涨跌 ${sortLabel('close_change_pct')}`" @click="sortBy('close_change_pct')">收盘涨跌</button></th>
-            <th><button type="button" :aria-label="`量能比 ${sortLabel('volume_ratio')}`" @click="sortBy('volume_ratio')">量能比</button></th>
-            <th>20日均量</th>
-            <th><button type="button" :aria-label="`份额日变化 ${sortLabel('share_change_pct')}`" @click="sortBy('share_change_pct')">份额日变化</button></th>
-            <th>状态</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="item in sortedItems" :key="item.symbol" :class="{ 'etf-three-factor__row--selected': item.symbol === selectedItem?.symbol }">
-            <td><button type="button" @click="emit('select', item.symbol)"><strong>{{ item.name }}</strong><span>{{ item.symbol }}</span></button></td>
-            <td>{{ formatScore(item.signal_score) }}</td>
-            <td :class="valueClass(item.close_change_pct)">{{ formatPercent(item.close_change_pct) }}</td>
-            <td>{{ formatVolumeRatio(item.volume_ratio) }}</td>
-            <td>{{ item.average_volume_20d == null ? '--' : compactNumber(item.average_volume_20d) }}</td>
-            <td :class="valueClass(item.share_change_pct)">{{ formatPercent(item.share_change_pct) }}</td>
-            <td><span :class="levelClass(item.level)">{{ item.level.toUpperCase() }}</span></td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-
     <div data-testid="factor-detail" class="etf-three-factor__detail">
       <div class="etf-three-factor__detail-heading">
-        <span>选中ETF</span>
+        <span>ETF 活动证据</span>
         <strong>{{ selectedItem?.name || '--' }}</strong>
-        <small>{{ selectedItem?.symbol || '--' }} · {{ selectedItem?.index_name || '--' }}</small>
+        <small>
+          {{ selectedItem?.symbol || '--' }} · {{ selectedItem?.index_name || '--' }} · 信号
+          {{ formatScore(selectedItem?.signal_score) }} ·
+          {{ selectedItem ? signalLevelLabel(selectedItem.level) : '--' }}
+        </small>
       </div>
       <dl>
         <div>
           <dt>量能因子</dt>
-          <dd>{{ formatFactorValue(selectedItem?.volume_factor || { status: 'missing' } as EtfFactorEvidence) }}</dd>
-          <small>{{ selectedItem ? factorStatusLabel(selectedItem.volume_factor.status) : '--' }} · {{ selectedItem?.volume_factor.detail || '--' }}</small>
+          <dd>{{ formatFactorValue(selectedItem?.volume_factor || ({ status: 'missing' } as EtfFactorEvidence)) }}</dd>
+          <small>
+            {{ selectedItem?.volume_factor.source || '--' }} ·
+            {{ selectedItem ? factorStatusLabel(selectedItem.volume_factor.status) : '--' }} ·
+            {{ selectedItem?.volume_factor.detail || '--' }}
+          </small>
         </div>
         <div>
           <dt>方向因子</dt>
-          <dd>{{ formatFactorValue(selectedItem?.direction_factor || { status: 'missing' } as EtfFactorEvidence) }}</dd>
-          <small>{{ selectedItem ? factorStatusLabel(selectedItem.direction_factor.status) : '--' }} · {{ selectedItem?.direction_factor.detail || '--' }}</small>
+          <dd>
+            {{ formatFactorValue(selectedItem?.direction_factor || ({ status: 'missing' } as EtfFactorEvidence)) }}
+          </dd>
+          <small>
+            {{ selectedItem?.direction_factor.source || '--' }} ·
+            {{ selectedItem ? factorStatusLabel(selectedItem.direction_factor.status) : '--' }} ·
+            {{ selectedItem?.direction_factor.detail || '--' }}
+          </small>
         </div>
         <div>
           <dt>份额因子</dt>
-          <dd>{{ formatFactorValue(selectedItem?.share_factor || { status: 'missing' } as EtfFactorEvidence) }}</dd>
-          <small>{{ selectedItem ? factorStatusLabel(selectedItem.share_factor.status) : '--' }} · {{ selectedItem?.share_factor.detail || '--' }}</small>
+          <dd>{{ formatFactorValue(selectedItem?.share_factor || ({ status: 'missing' } as EtfFactorEvidence)) }}</dd>
+          <small>
+            {{ selectedItem?.share_factor.source || '--' }} ·
+            {{ selectedItem ? factorStatusLabel(selectedItem.share_factor.status) : '--' }} ·
+            {{ selectedItem?.share_factor.detail || '--' }}
+          </small>
         </div>
       </dl>
-      <p v-if="historyError && hasUsableHistory" class="etf-three-factor__history-error" role="status" aria-live="polite">{{ historyError }}</p>
+      <p class="etf-three-factor__disclaimer">三因子同向仅表示疑似活动</p>
+      <p
+        v-if="historyError && hasUsableHistory"
+        class="etf-three-factor__history-error"
+        role="status"
+        aria-live="polite"
+      >
+        {{ historyError }}
+      </p>
       <div v-if="hasUsableHistory" class="etf-three-factor__charts">
         <EChart :option="volumeOption" :height="236" :loading="historyLoading" />
         <EChart :option="shareOption" :height="236" :loading="historyLoading" />
         <EChart :option="comparisonOption" :height="236" :loading="historyLoading" />
       </div>
-      <p v-else-if="historyLoading" data-testid="three-factor-history-loading" class="etf-three-factor__history-state" role="status" aria-live="polite">正在读取历史信号</p>
-      <p v-else-if="historyError" data-testid="three-factor-history-error" class="etf-three-factor__history-state etf-three-factor__history-error" role="status" aria-live="polite">{{ historyError }}</p>
+      <p
+        v-else-if="historyLoading"
+        data-testid="three-factor-history-loading"
+        class="etf-three-factor__history-state"
+        role="status"
+        aria-live="polite"
+      >
+        正在读取历史信号
+      </p>
+      <p
+        v-else-if="historyError"
+        data-testid="three-factor-history-error"
+        class="etf-three-factor__history-state etf-three-factor__history-error"
+        role="status"
+        aria-live="polite"
+      >
+        {{ historyError }}
+      </p>
       <p v-else data-testid="three-factor-history-empty" class="etf-three-factor__history-state">暂无可用历史信号</p>
     </div>
 
@@ -298,28 +239,22 @@ function sortLabel(key: SortKey) {
   font-variant-numeric: tabular-nums;
 }
 
-.etf-three-factor__summary,
 .etf-three-factor__detail > dl {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
-.etf-three-factor__summary > div,
 .etf-three-factor__detail > dl > div {
   min-width: 0;
   padding: 12px;
   border-inline-end: 1px solid var(--wb-border);
 }
 
-.etf-three-factor__summary > div:last-child,
 .etf-three-factor__detail > dl > div:last-child {
   border-inline-end: 0;
 }
 
-.etf-three-factor__summary span,
-.etf-three-factor__summary small,
 .etf-three-factor__detail small,
-.etf-three-factor__dragon span,
 .etf-three-factor__detail-heading span,
 .etf-three-factor__detail-heading small {
   display: block;
@@ -327,110 +262,6 @@ function sortLabel(key: SortKey) {
   color: var(--wb-muted);
   font-size: 12px;
   line-height: 1.4;
-}
-
-.etf-three-factor__summary strong {
-  display: block;
-  margin: 3px 0;
-  font-size: 20px;
-  line-height: 1.2;
-}
-
-.etf-three-factor__dragons {
-  display: flex;
-  min-width: 0;
-  overflow-x: auto;
-  border-top: 1px solid var(--wb-border);
-  border-bottom: 1px solid var(--wb-border);
-}
-
-.etf-three-factor__dragon {
-  flex: 0 0 154px;
-  min-width: 0;
-  padding: 9px 10px;
-  color: var(--wb-ink);
-  text-align: left;
-  background: var(--wb-surface);
-  border: 0;
-  border-inline-end: 1px solid var(--wb-border);
-  cursor: pointer;
-}
-
-.etf-three-factor__dragon strong {
-  display: block;
-  overflow: hidden;
-  font-size: 12px;
-  line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.etf-three-factor__dragon b {
-  display: inline-block;
-  margin-top: 4px;
-  font-size: 11px;
-}
-
-.etf-three-factor__dragon--selected,
-.etf-three-factor__row--selected {
-  background: var(--wb-primary-soft);
-}
-
-.etf-three-factor__monitor {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 16px;
-  padding: 9px 12px;
-  color: var(--wb-muted);
-  font-size: 12px;
-  line-height: 1.4;
-  border-bottom: 1px solid var(--wb-border);
-}
-
-.etf-three-factor__table-scroll {
-  min-width: 0;
-  overflow-x: auto;
-  border-bottom: 1px solid var(--wb-border);
-}
-
-.etf-three-factor__table {
-  width: 100%;
-  min-width: 910px;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-.etf-three-factor__table th,
-.etf-three-factor__table td {
-  padding: 9px 10px;
-  text-align: right;
-  border-bottom: 1px solid var(--wb-border);
-}
-
-.etf-three-factor__table th:first-child,
-.etf-three-factor__table td:first-child {
-  width: 220px;
-  text-align: left;
-}
-
-.etf-three-factor__table th button,
-.etf-three-factor__table td button {
-  padding: 0;
-  color: inherit;
-  font: inherit;
-  text-align: inherit;
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-}
-
-.etf-three-factor__table td button strong,
-.etf-three-factor__table td button span {
-  display: block;
-}
-
-.etf-three-factor__table td button span {
-  color: var(--wb-muted);
 }
 
 .etf-three-factor__detail {
@@ -463,6 +294,14 @@ function sortLabel(key: SortKey) {
   margin: 4px 0;
   font-size: 16px;
   font-weight: 700;
+}
+
+.etf-three-factor__disclaimer {
+  margin: 0;
+  padding: 8px 12px;
+  color: var(--wb-muted);
+  font-size: 12px;
+  border-top: 1px solid var(--wb-border);
 }
 
 .etf-three-factor__history-error {
@@ -521,13 +360,8 @@ function sortLabel(key: SortKey) {
   color: var(--wb-muted);
 }
 
-.etf-three-factor__value--rise,
 .etf-three-factor__level--high {
   color: var(--wb-positive);
-}
-
-.etf-three-factor__value--fall {
-  color: var(--wb-negative);
 }
 
 .etf-three-factor__level--medium {
@@ -558,17 +392,14 @@ function sortLabel(key: SortKey) {
 }
 
 @media (max-width: 640px) {
-  .etf-three-factor__summary,
   .etf-three-factor__detail > dl {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .etf-three-factor__summary > div:nth-child(2),
   .etf-three-factor__detail > dl > div:nth-child(2) {
     border-inline-end: 0;
   }
 
-  .etf-three-factor__summary > div:nth-child(-n + 2),
   .etf-three-factor__detail > dl > div:nth-child(-n + 2) {
     border-bottom: 1px solid var(--wb-border);
   }

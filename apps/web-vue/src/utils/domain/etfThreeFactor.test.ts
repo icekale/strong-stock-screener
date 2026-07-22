@@ -64,6 +64,35 @@ function factorItem(overrides: Partial<EtfThreeFactorItem> = {}): EtfThreeFactor
 }
 
 describe('ETF three-factor display helpers', () => {
+  it('deduplicates symbols while preserving first-seen source order and data', () => {
+    const firstActivity = activityItem({ symbol: '510050.SH', name: '首个活动' });
+    const duplicateActivity = activityItem({ symbol: '510050.SH', name: '重复活动' });
+    const firstFactorOnly = factorItem({ symbol: '510300.SH', name: '首个因子独有' });
+    const duplicateFactorOnly = factorItem({ symbol: '510300.SH', name: '重复因子独有' });
+    const rows = buildUnifiedEtfActivityRows(
+      [firstActivity, duplicateActivity],
+      [firstFactorOnly, duplicateFactorOnly]
+    );
+
+    expect(rows.map(row => row.symbol)).toEqual(['510050.SH', '510300.SH']);
+    expect(rows[0]).toMatchObject({ name: '首个活动', activity: firstActivity });
+    expect(rows[1]).toMatchObject({ name: '首个因子独有', factor: firstFactorOnly });
+  });
+
+  it('prefers negative scores over null scores and falls back to the first all-null row', () => {
+    const negativeRows = buildUnifiedEtfActivityRows([], [
+      factorItem({ symbol: '510050.SH', signal_score: -5 }),
+      factorItem({ symbol: '510300.SH', signal_score: null })
+    ]);
+    const nullRows = buildUnifiedEtfActivityRows([], [
+      factorItem({ symbol: '510050.SH', signal_score: null }),
+      factorItem({ symbol: '510300.SH', signal_score: null })
+    ]);
+
+    expect(pickDefaultEtfActivitySymbol(negativeRows)).toBe('510050.SH');
+    expect(pickDefaultEtfActivitySymbol(nullRows)).toBe('510050.SH');
+  });
+
   it('merges activity and factor rows and selects the highest scored ETF', () => {
     const activity = activityItem({ symbol: '510050.SH', name: '活动身份', close_change_pct: 1.2 });
     const activityOnly = activityItem({ symbol: '510500.SH', name: '活动独有', close_change_pct: null });

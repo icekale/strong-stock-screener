@@ -18,10 +18,24 @@ export function buildUnifiedEtfActivityRows(
   activityItems: HuijinEtfActivityItem[],
   factorItems: EtfThreeFactorItem[]
 ): UnifiedEtfActivityRow[] {
-  const activityBySymbol = new Map(activityItems.map(item => [item.symbol, item]));
-  const factorBySymbol = new Map(factorItems.map(item => [item.symbol, item]));
-  const symbols = [...activityItems.map(item => item.symbol)];
-  for (const item of factorItems) if (!activityBySymbol.has(item.symbol)) symbols.push(item.symbol);
+  const activityBySymbol = new Map<string, HuijinEtfActivityItem>();
+  for (const item of activityItems) if (!activityBySymbol.has(item.symbol)) activityBySymbol.set(item.symbol, item);
+  const factorBySymbol = new Map<string, EtfThreeFactorItem>();
+  for (const item of factorItems) if (!factorBySymbol.has(item.symbol)) factorBySymbol.set(item.symbol, item);
+  const symbols: string[] = [];
+  const seenSymbols = new Set<string>();
+  for (const item of activityItems) {
+    if (!seenSymbols.has(item.symbol)) {
+      seenSymbols.add(item.symbol);
+      symbols.push(item.symbol);
+    }
+  }
+  for (const item of factorItems) {
+    if (!seenSymbols.has(item.symbol)) {
+      seenSymbols.add(item.symbol);
+      symbols.push(item.symbol);
+    }
+  }
 
   return symbols.map(symbol => {
     const activity = activityBySymbol.get(symbol) ?? null;
@@ -43,7 +57,13 @@ export function buildUnifiedEtfActivityRows(
 }
 
 export function pickDefaultEtfActivitySymbol(rows: UnifiedEtfActivityRow[]): string {
-  return [...rows].sort((left, right) => (right.signalScore ?? -1) - (left.signalScore ?? -1))[0]?.symbol ?? '';
+  let best = rows[0];
+  for (const row of rows) {
+    if (row.signalScore !== null && (best?.signalScore === null || best?.signalScore === undefined || row.signalScore > best.signalScore)) {
+      best = row;
+    }
+  }
+  return best?.symbol ?? '';
 }
 
 export type EtfSignalTone = "danger" | "warning" | "info" | "neutral";

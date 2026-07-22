@@ -164,3 +164,26 @@ The focused tests cover canonical allowlisted input and stable SHA-256 hashing, 
 ### Concerns
 
 - Persisted pending, ready, or failed records without an input hash now fail response validation and are treated as cache misses by the existing store loader, as required by the stricter lifecycle contract.
+
+## Fix 5
+
+### RED Evidence
+
+- Added exactly four focused regressions for English position sizing, ungrounded Chinese 点 quantities, unavailable decision-state transitions, and canonical sector strength binding.
+- Targeted RED run: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py -q -k 'english_position_sizing or ungrounded_chinese_point or unavailable_decision_state_transitions or binds_sector_strength'` -> `4 failed, 84 deselected`.
+- The failures reproduced `Maintain a 20% position.`, `市场上涨两点`, all three `转入`/`转为`/`进入` decision-state forms, and an incorrect `板块强度为 62.0` claim when the supplied sector strength was `92`.
+
+### GREEN Evidence
+
+- Targeted regressions: `4 passed`.
+- Required regression: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py tests/test_model_maintenance.py -q` -> `100 passed in 0.90s`.
+- Ruff: `cd apps/api && uv run ruff check app tests` -> `All checks passed!`.
+- `git diff --check` completed without errors.
+
+### Fix Scope And Self-Review
+
+- English sizing sentences that maintain, hold, or keep a numeric percentage position are rejected without affecting factor wording.
+- Chinese quantitative parsing now recognizes 点 and 个点 with a non-greedy numeric span; temporal `前一点` wording remains accepted.
+- Decision source checks recognize state transitions with 转入, 转为, and 进入 before conditional thresholds are exempted.
+- Sector strength claims resolve the named sector, or the sole supplied sector for an unqualified claim, and compare against its canonical `strength_score`; the correct sector-name/value claim remains accepted.
+- The dirty `.superpowers/sdd/task-4-report.md` was not modified, staged, or included in the Task 5 commit.

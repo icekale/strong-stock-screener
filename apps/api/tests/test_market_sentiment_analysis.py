@@ -842,6 +842,79 @@ def test_semantic_contract_allows_conditional_watch_thresholds_without_market_sn
     assert client.post.call_count == 1
 
 
+def test_semantic_contract_rejects_english_position_sizing_claim(tmp_path: Path) -> None:
+    result = _result_payload()
+    result["risk_note"] = "Maintain a 20% position."
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content)] * 3)
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "failed"
+    assert response.attempts == 3
+    assert client.post.call_count == 3
+
+
+def test_semantic_contract_rejects_ungrounded_chinese_point_claim(tmp_path: Path) -> None:
+    result = _result_payload()
+    result["market_conclusion"] = "市场上涨两点，结构仍有分化。"
+    result["historical_context"] = "前一点的市场背景无需另行量化。"
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content)] * 3)
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "failed"
+    assert response.attempts == 3
+    assert client.post.call_count == 3
+
+
+def test_semantic_contract_rejects_unavailable_decision_state_transitions(
+    tmp_path: Path,
+) -> None:
+    for index, state_verb in enumerate(("转入", "转为", "进入")):
+        payload = build_sentiment_analysis_input(_point(), [_point()], _summary(), None, _validation())
+        result = _result_payload()
+        result["next_session_watch"] = [
+            f"若市场情绪{state_verb}主升且涨停家数高于 70 家",
+            "若封板率低于 60%",
+        ]
+        content = json.dumps(result, ensure_ascii=False)
+        client = _Client([_Response(content)] * 3)
+        service = MarketSentimentAnalysisService(
+            MarketSentimentAnalysisStore(tmp_path / str(index)),
+            http_client=client,
+        )
+
+        response = service.generate(payload, _config())
+
+        assert response.status == "failed", state_verb
+        assert response.attempts == 3
+        assert client.post.call_count == 3
+
+
+def test_semantic_contract_binds_sector_strength_to_canonical_value(tmp_path: Path) -> None:
+    result = _result_payload()
+    result["market_conclusion"] = "存储芯片板块强度为 62.0，结构仍有分化。"
+    wrong_content = json.dumps(result, ensure_ascii=False)
+    correct_result = _result_payload()
+    correct_result["market_conclusion"] = "存储芯片板块强度为 92.0，结构仍有分化。"
+    correct_content = json.dumps(correct_result, ensure_ascii=False)
+    client = _Client([_Response(wrong_content)] * 3 + [_Response(correct_content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    rejected = service.generate(_input_payload(), _config(), force=True)
+    accepted = service.generate(_input_payload(), _config(), force=True)
+
+    assert rejected.status == "failed"
+    assert rejected.attempts == 3
+    assert accepted.status == "ready"
+    assert accepted.result is not None
+    assert client.post.call_count == 4
+
+
 def test_matching_failed_request_waits_for_retry_cooldown(tmp_path: Path) -> None:
     client = _Client([RuntimeError("network unavailable")] * 3)
     service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)

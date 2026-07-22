@@ -88,3 +88,28 @@ The focused tests cover canonical allowlisted input and stable SHA-256 hashing, 
 - Missing summary snapshots are explicit unavailable market context. Semantic violations in any result text retry through the existing three-attempt path and persist `failed` rather than `ready`.
 - Malformed analysis records remain cache misses, while filesystem read failures propagate.
 - Reviewed cache identity and failure persistence: identity remains trade date, model version, provider, model, and validated-input hash; provider errors and API keys are not persisted. The pre-existing dirty Task 4 report was not modified.
+
+## Fix 2
+
+### RED Evidence
+
+- `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py -q` after adding the second semantic-hardening cases: `14 failed, 39 passed`.
+- The failures included the reviewer's exact bypasses: `贵州茅台上涨 2%`, `控制资金比例为 30%`, `当前综合得分为 61.0`, `市场位于冷区`, `量能系数为 30%`, and `当前操作权限为强势进攻`.
+- Separate failures proved that invented `69` facts passed in every free-text result field, a conditional-looking key driver could invent `69`, and `涨停 68 家` passed while the canonical market section was unavailable.
+- A focused self-review RED run then found `3 failed, 53 passed`: a threshold cue could mask an unrelated number in the same watch clause, factor `占比` could reuse a different grounded value, and historical zone prose was treated as a current-level override.
+
+### GREEN Evidence
+
+- Focused analysis suite: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py -q` -> `56 passed in 0.40s`.
+- Required regression: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py tests/test_model_maintenance.py -q` -> `68 passed in 0.76s`.
+- Ruff: `cd apps/api && uv run ruff check app tests` -> `All checks passed!`.
+
+### Fix Scope And Self-Review
+
+- Semantic validation now operates per result item and clause. It normalizes canonical numeric evidence, percentage-form weights, and `万`/`亿`/`万亿` claims; factual numbers must match canonical input values.
+- Only an explicitly conditional or threshold clause in `next_session_watch` may introduce a new number. Key drivers and all other fields remain grounded-only.
+- Unavailable market, decision, sector, and validation metric claims are rejected, while conditional next-session thresholds remain allowed.
+- Overall score, current level/zone, named factor coefficients, and trade/operation permission claims use context-aware checks. Permission claims are rejected even when they repeat canonical decision text.
+- A-share codes, individual-security recommendations, position/fund sizing, and order actions are rejected. Movement subjects must be a market aggregate, index, generic aggregate metric, or a sector name present in canonical input.
+- False-positive review covered grounded market prose, `中证全指上涨 2.5%`, `存储芯片上涨 2%`, correct `62.0`/`热区`/`20%` protected claims, and unavailable-market watch thresholds; all remain accepted.
+- Retry, failed persistence, cache identity, and sanitized errors are unchanged. The pre-existing dirty Task 4 report was not modified.

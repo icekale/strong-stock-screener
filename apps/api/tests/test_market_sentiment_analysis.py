@@ -448,6 +448,14 @@ def test_malformed_or_invalid_llm_output_retries_exactly_three_times(
         ("market_conclusion", "Current level is neutral."),
         ("market_conclusion", "当前权重为 30%，市场结构分化。"),
         ("market_conclusion", "当前交易许可为空仓等待，市场结构分化。"),
+        ("market_conclusion", "贵州茅台上涨 2%，市场结构分化。"),
+        ("market_conclusion", "控制资金比例为 30%，市场结构分化。"),
+        ("market_conclusion", "当前综合得分为 61.0，市场结构分化。"),
+        ("market_conclusion", "市场位于冷区，市场结构分化。"),
+        ("factor_divergence", "量能系数为 30%，量能趋势为 1.2%。"),
+        ("factor_divergence", "量能占比为 60%，量能趋势为 1.2%。"),
+        ("market_conclusion", "当前操作权限为强势进攻，市场结构分化。"),
+        ("market_conclusion", "推荐贵州茅台，市场结构分化。"),
     ],
 )
 def test_semantically_invalid_llm_output_retries_exactly_three_times(
@@ -467,6 +475,134 @@ def test_semantically_invalid_llm_output_retries_exactly_three_times(
     assert response.attempts == 3
     assert response.result is None
     assert client.post.call_count == 3
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("market_conclusion", "涨停 69 家，市场结构分化。"),
+        ("key_drivers", ["综合分 62.0，处于偏热", "涨停 69 家"]),
+        ("factor_divergence", "封板率 69%，量能趋势为 1.2%。"),
+        ("historical_context", "历史样本为 69 个。"),
+        ("next_session_watch", ["涨停 69 家", "跌停数量低于 10 家"]),
+        ("risk_note", "市场风险参考涨停 69 家。"),
+    ],
+)
+def test_semantic_contract_rejects_ungrounded_factual_numbers_in_every_result_text_field(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    result = _result_payload()
+    result[field] = value
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content), _Response(content), _Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "failed"
+    assert response.attempts == 3
+    assert client.post.call_count == 3
+
+
+def test_semantic_contract_rejects_invented_key_driver_threshold(tmp_path: Path) -> None:
+    result = _result_payload()
+    result["key_drivers"] = ["综合分 62.0，处于偏热", "若涨停家数高于 69 家"]
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content), _Response(content), _Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "failed"
+    assert response.attempts == 3
+    assert client.post.call_count == 3
+
+
+def test_semantic_contract_does_not_apply_watch_threshold_to_an_unrelated_number(
+    tmp_path: Path,
+) -> None:
+    result = _result_payload()
+    result["next_session_watch"] = [
+        "涨停 69 家且若封板率低于 60%",
+        "跌停数量低于 10 家",
+    ]
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content), _Response(content), _Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "failed"
+    assert response.attempts == 3
+    assert client.post.call_count == 3
+
+
+def test_semantic_contract_rejects_unavailable_market_metric_claim(tmp_path: Path) -> None:
+    payload = build_sentiment_analysis_input(
+        _point(),
+        [_point()],
+        None,
+        _decision(),
+        _validation(),
+    )
+    result = _result_payload()
+    result["market_conclusion"] = "涨停 68 家，市场结构分化。"
+    result["key_drivers"] = ["综合分 62.0，处于偏热", "量能趋势为 1.2%"]
+    result["factor_divergence"] = "量能趋势为 1.2%。"
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content), _Response(content), _Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(payload, _config())
+
+    assert response.status == "failed"
+    assert response.attempts == 3
+    assert client.post.call_count == 3
+
+
+def test_semantic_contract_allows_grounded_aggregate_index_sector_and_threshold_prose(
+    tmp_path: Path,
+) -> None:
+    result = _result_payload()
+    result["market_conclusion"] = "当前综合得分为 62.0，前一日市场处于中性，当前市场位于热区。"
+    result["factor_divergence"] = "量能系数为 20%，量能趋势为 1.2%。"
+    result["historical_context"] = "中证全指上涨 2.5%，存储芯片上涨 2%。"
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+    assert response.result is not None
+    assert client.post.call_count == 1
+
+
+def test_semantic_contract_allows_conditional_watch_thresholds_without_market_snapshot(
+    tmp_path: Path,
+) -> None:
+    payload = build_sentiment_analysis_input(
+        _point(),
+        [_point()],
+        None,
+        _decision(),
+        _validation(),
+    )
+    result = _result_payload()
+    result["key_drivers"] = ["综合分 62.0，处于偏热", "量能趋势为 1.2%"]
+    result["factor_divergence"] = "量能趋势为 1.2%。"
+    result["next_session_watch"] = ["若涨停家数高于 70 家", "若封板率低于 60%"]
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(payload, _config())
+
+    assert response.status == "ready"
+    assert response.result is not None
+    assert client.post.call_count == 1
 
 
 def test_matching_failed_request_waits_for_retry_cooldown(tmp_path: Path) -> None:

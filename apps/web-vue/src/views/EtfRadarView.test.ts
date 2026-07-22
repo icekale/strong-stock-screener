@@ -351,6 +351,8 @@ describe('EtfRadarView', () => {
       '持仓轨迹', '日度活动', '确认持仓', '方法与数据'
     ]);
     expect(wrapper.text()).toContain('汇金持仓追踪');
+    expect(wrapper.get('[data-testid="daily-activity-home"]').text()).toContain('日度活动摘要');
+    expect(wrapper.get('[data-testid="daily-activity-home"]').text()).toContain('十倍量增加');
     expect(wrapper.find('[data-testid="huijin-trajectory-panel"]').exists()).toBe(true);
     expect(api.getEtfRadarOverview).toHaveBeenCalledTimes(1);
     expect(api.getEtfRadarHistory).toHaveBeenCalledTimes(1);
@@ -362,6 +364,7 @@ describe('EtfRadarView', () => {
     expect(wrapper.text()).toContain('十倍量增加');
     expect(wrapper.text()).toContain('十倍量减少');
     expect(wrapper.text()).toContain('交叉验证');
+    expect(wrapper.find('[data-testid="validation-row"]').text()).toContain('收盘涨跌');
     expect(wrapper.text()).toContain('方向分歧');
     expect(wrapper.findAll('[data-testid="core-etf-row"]')).toHaveLength(7);
     expect(wrapper.findAll('[data-testid="validation-row"]')).toHaveLength(3);

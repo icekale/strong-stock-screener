@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent } from 'vue';
 import type { EChartsOption } from 'echarts';
-import type { EtfRadarHistoryResponse, EtfRadarOverviewResponse, HuijinEtfActivityItem } from '@/service/types';
+import type {
+  EtfRadarHistoryResponse,
+  EtfRadarOverviewResponse,
+  EtfThreeFactorHistoryResponse,
+  HuijinEtfActivityItem
+} from '@/service/types';
 import {
   formatDirectionalPercent as formatDirectionalPercentValue,
   formatPlainShares as formatPlainSharesValue,
@@ -16,9 +21,12 @@ const EChart = defineAsyncComponent(() => import('@/components/charts/EChart.vue
 const props = defineProps<{
   overview: EtfRadarOverviewResponse;
   history: EtfRadarHistoryResponse | null;
+  indexHistory?: EtfThreeFactorHistoryResponse | null;
   selectedSymbol: string;
   historyLoading: boolean;
+  indexHistoryLoading?: boolean;
   historyError: string | null;
+  indexHistoryError?: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -29,12 +37,31 @@ const ranking = computed(() => buildHuijinRanking(props.overview.core_items));
 const selectedItem = computed(
   () => props.overview.core_items.find(item => item.symbol === props.selectedSymbol) ?? ranking.value[0] ?? null
 );
-const realDates = computed(() => [...new Set((props.history?.points ?? []).map(point => point.trade_date))].sort());
+const realDates = computed(() =>
+  [
+    ...(props.history?.points ?? []).map(point => point.trade_date),
+    ...(props.indexHistory?.points ?? []).map(point => point.trade_date)
+  ]
+    .filter((date, index, dates) => dates.indexOf(date) === index)
+    .sort()
+);
 const trajectory = computed(() =>
   selectedItem.value
     ? buildHuijinTrajectory(selectedItem.value, props.history?.points ?? [], realDates.value)
     : { dates: [], values: [] }
 );
+const indexTrend = computed(() => {
+  const pointsByDate = new Map(
+    (props.indexHistory?.points ?? []).map(point => [point.trade_date, point.index_change_pct ?? null])
+  );
+  let cumulative = 0;
+  return realDates.value.map(date => {
+    const change = pointsByDate.get(date);
+    if (change === null || change === undefined) return null;
+    cumulative = ((1 + cumulative / 100) * (1 + change / 100) - 1) * 100;
+    return cumulative;
+  });
+});
 const baselineDate = computed(
   () =>
     selectedItem.value?.report_period ??
@@ -52,27 +79,40 @@ const selectedHistoryPoints = computed(() =>
   (props.history?.points ?? []).filter(point => point.symbol === selectedItem.value?.symbol)
 );
 const hasRealHistory = computed(() =>
-  selectedHistoryPoints.value.some(point => point.cumulative_baseline_change_pct !== null)
+  selectedHistoryPoints.value.some(point => point.cumulative_baseline_change_pct !== null) || hasIndexTrend.value
 );
+const hasIndexTrend = computed(() => indexTrend.value.some(value => value !== null));
 const rankingMaxMagnitude = computed(() =>
   Math.max(0, ...ranking.value.map(item => Math.abs(item.cumulative_baseline_change_pct ?? 0)))
 );
 
 const chartOption = computed<EChartsOption>(() => ({
   animation: false,
-  aria: { enabled: true, description: `${selectedItem.value?.name ?? 'ETF'}相对报告基线的累计份额轨迹` },
+  aria: { enabled: true, description: `${selectedItem.value?.name ?? 'ETF'}持仓趋势与指数走势对比` },
   grid: { left: 58, right: 18, top: 20, bottom: 34 },
+  legend: { show: hasIndexTrend.value, top: 0 },
   tooltip: { trigger: 'axis' },
   xAxis: { type: 'category', boundaryGap: false, data: trajectory.value.dates },
   yAxis: { type: 'value', axisLabel: { formatter: (value: number) => `${value.toFixed(0)}%` } },
   series: [
     {
-      name: selectedItem.value?.name ?? '累计偏离',
+      name: '持仓趋势',
       type: 'line',
       connectNulls: false,
       showSymbol: true,
       data: trajectory.value.values
-    }
+    },
+    ...(hasIndexTrend.value
+      ? [
+          {
+            name: '指数走势',
+            type: 'line' as const,
+            connectNulls: false,
+            showSymbol: true,
+            data: indexTrend.value
+          }
+        ]
+      : [])
   ]
 }));
 
@@ -190,7 +230,7 @@ function detailAriaLabel(item: HuijinEtfActivityItem) {
 
       <div class="huijin-selected">
         <div class="huijin-selected__heading">
-          <span>选中 ETF 累计轨迹</span>
+          <span>选中 ETF 持仓与指数走势</span>
           <strong data-testid="huijin-selected-symbol">{{ selectedItem?.symbol }}</strong>
         </div>
         <p
@@ -202,7 +242,21 @@ function detailAriaLabel(item: HuijinEtfActivityItem) {
         >
           {{ historyError }}
         </p>
-        <EChart v-if="history && hasRealHistory" :option="chartOption" :height="286" :loading="historyLoading" />
+        <p
+          v-if="indexHistoryError && hasRealHistory"
+          data-testid="huijin-index-history-status"
+          class="huijin-trajectory__status huijin-trajectory__status--error"
+          role="status"
+          aria-live="polite"
+        >
+          {{ indexHistoryError }}
+        </p>
+        <EChart
+          v-if="(history || indexHistory) && hasRealHistory"
+          :option="chartOption"
+          :height="286"
+          :loading="historyLoading || Boolean(indexHistoryLoading)"
+        />
         <div
           v-else
           data-testid="huijin-trajectory-empty"

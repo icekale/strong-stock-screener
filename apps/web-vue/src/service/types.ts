@@ -2239,6 +2239,7 @@ export type EtfThreeFactorHistoryPoint = {
   trade_date: string;
   symbol: string;
   close_change_pct: number | null;
+  index_change_pct?: number | null;
   volume: number | null;
   average_volume_20d: number | null;
   volume_ratio: number | null;

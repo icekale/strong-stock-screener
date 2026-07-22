@@ -31,7 +31,7 @@ from app.services.etf_three_factor import (
     volume_factor_score,
 )
 from app.services.etf_three_factor_store import EtfThreeFactorStore
-from app.services.huijin_etf_activity import CORE_ETFS
+from app.services.huijin_etf_activity import CORE_ETFS, VALIDATION_ETFS
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -133,9 +133,20 @@ class EtfThreeFactorMonitor:
             now = _shanghai_now(None)
             snapshot = self.store.load_snapshot()
             generated_at = now.isoformat(timespec="seconds")
+            trade_date = snapshot.trade_date if snapshot is not None else now.date().isoformat()
+            points = self.store.load_history(symbol, days)
+            index_changes: dict[str, float] = {}
+            index_symbol = INDEX_SYMBOL_BY_ETF.get(symbol)
+            if index_symbol is not None:
+                index_bars = self._daily_bars(trade_date, index_symbol, stage="post_close")
+                index_changes = _close_changes_by_date(index_bars.bars, trade_date)
+            points = [
+                point.model_copy(update={"index_change_pct": index_changes.get(point.trade_date)})
+                for point in points
+            ]
             return EtfThreeFactorHistoryResponse(
                 generated_at=generated_at,
-                trade_date=snapshot.trade_date if snapshot is not None else now.date().isoformat(),
+                trade_date=trade_date,
                 as_of=generated_at,
                 signal_stage=snapshot.signal_stage if snapshot is not None else "post_close",
                 model_version=MONITOR_MODEL_VERSION,
@@ -147,7 +158,7 @@ class EtfThreeFactorMonitor:
                     )
                 ],
                 symbol=symbol,
-                points=self.store.load_history(symbol, days),
+                points=points,
             )
 
     def enrich_overview(self, overview: EtfRadarOverviewResponse) -> EtfRadarOverviewResponse:
@@ -155,12 +166,27 @@ class EtfThreeFactorMonitor:
             snapshot = self.store.load_snapshot()
             if snapshot is None:
                 return overview
+            close_changes = {
+                item.symbol: (item.close_change_pct, item.close_change_trade_date)
+                for item in snapshot.items
+            }
+            for symbol in VALIDATION_ETFS:
+                daily_bars = self._daily_bars(
+                    overview.trade_date,
+                    symbol,
+                    stage=snapshot.signal_stage,
+                )
+                completed = [
+                    bar
+                    for bar in daily_bars.bars
+                    if (bar_date := _bar_trade_date(bar.date)) is not None
+                    and (bar_date <= overview.trade_date if snapshot.signal_stage == "post_close" else bar_date < overview.trade_date)
+                ]
+                completed.sort(key=lambda bar: _bar_trade_date(bar.date) or "")
+                close_changes[symbol] = _close_change(completed)
             return enrich_etf_overview_close_changes(
                 overview,
-                {
-                    item.symbol: (item.close_change_pct, item.close_change_trade_date)
-                    for item in snapshot.items
-                },
+                close_changes,
             )
 
     def _load_current_quotes(self, trade_date: str) -> tuple[dict[str, object], str | None]:
@@ -877,6 +903,29 @@ def _close_change(completed: list[KlineBar]) -> tuple[float | None, str | None]:
         (completed[-1].close / completed[-2].close - 1) * 100,
         _bar_trade_date(completed[-1].date),
     )
+
+
+def _close_changes_by_date(bars: list[KlineBar], trade_date: str) -> dict[str, float]:
+    completed = [
+        bar
+        for bar in bars
+        if (bar_date := _bar_trade_date(bar.date)) is not None and bar_date <= trade_date
+    ]
+    completed.sort(key=lambda bar: _bar_trade_date(bar.date) or "")
+    changes: dict[str, float] = {}
+    for previous, current in zip(completed, completed[1:]):
+        previous_close = previous.close
+        current_close = current.close
+        current_date = _bar_trade_date(current.date)
+        if (
+            current_date is None
+            or not _valid_number(previous_close)
+            or not _valid_number(current_close)
+            or previous_close == 0
+        ):
+            continue
+        changes[current_date] = (current_close / previous_close - 1) * 100
+    return changes
 
 
 def _number(value: object) -> float | None:

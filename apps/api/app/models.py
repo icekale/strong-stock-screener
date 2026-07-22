@@ -2115,6 +2115,7 @@ class EtfThreeFactorHistoryPoint(BaseModel):
     trade_date: str
     symbol: str
     close_change_pct: float | None = None
+    index_change_pct: float | None = None
     volume: float | None = None
     average_volume_20d: float | None = None
     volume_ratio: float | None = None

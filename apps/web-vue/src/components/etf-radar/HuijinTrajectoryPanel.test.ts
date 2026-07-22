@@ -11,6 +11,7 @@ import type {
   EtfRadarHistoryPoint,
   EtfRadarHistoryResponse,
   EtfRadarOverviewResponse,
+  EtfThreeFactorHistoryResponse,
   HuijinEtfActivityItem
 } from '@/service/types';
 import HuijinTrajectoryPanel from './HuijinTrajectoryPanel.vue';
@@ -161,9 +162,26 @@ function historyFixture(points?: EtfRadarHistoryPoint[]): EtfRadarHistoryRespons
   };
 }
 
+function indexHistoryFixture(): EtfThreeFactorHistoryResponse {
+  return {
+    generated_at: '2026-07-18T15:05:00+08:00',
+    trade_date: '2026-07-18',
+    as_of: '2026-07-18T15:00:00+08:00',
+    signal_stage: 'post_close',
+    model_version: 'three-factor-v1',
+    source_status: [],
+    symbol: '510050.SH',
+    points: [
+      { trade_date: '2026-07-17', symbol: '510050.SH', close_change_pct: 0.5, index_change_pct: 0.25, volume: null, average_volume_20d: null, volume_ratio: null, total_shares: null, share_change_pct: null, signal_score: null, level: 'incomplete' },
+      { trade_date: '2026-07-18', symbol: '510050.SH', close_change_pct: 1.25, index_change_pct: 0.75, volume: null, average_volume_20d: null, volume_ratio: null, total_shares: null, share_change_pct: null, signal_score: null, level: 'incomplete' }
+    ]
+  };
+}
+
 type MountOverrides = Partial<{
   overview: EtfRadarOverviewResponse;
   history: EtfRadarHistoryResponse | null;
+  indexHistory: EtfThreeFactorHistoryResponse | null;
   selectedSymbol: string;
   historyLoading: boolean;
   historyError: string | null;
@@ -251,6 +269,18 @@ describe('HuijinTrajectoryPanel', () => {
     expect(source).toMatch(/\.huijin-trajectory__table-head,[^{]*\{[^}]*min-width: 760px;/s);
     expect(source).not.toMatch(/\.huijin-trajectory__table-head\s*\{\s*display: none;/s);
     expect(source).toMatch(/\.huijin-ranking__zero\s*\{[^}]*z-index: 1;/s);
+  });
+
+  it('plots the holdings trend and index trend together', () => {
+    const wrapper = mountPanel({ indexHistory: indexHistoryFixture() });
+
+    const chart = wrapper.getComponent(ChartStub);
+    const option = chart.props('option') as EChartsOption;
+    const series = option.series as Array<{ name?: string; type?: string }>;
+
+    expect(series).toHaveLength(2);
+    expect(series.map(item => item.name)).toEqual(['持仓趋势', '指数走势']);
+    expect(series.every(item => item.type === 'line')).toBe(true);
   });
 
   it('renders daily change, validation status, and data date in the detail table', () => {

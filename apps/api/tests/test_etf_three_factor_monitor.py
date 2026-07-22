@@ -675,6 +675,19 @@ def test_history_returns_persisted_symbol_points(tmp_path: Path) -> None:
     assert [point.trade_date for point in history.points] == ["2026-07-22"]
 
 
+def test_history_includes_index_close_change_for_selected_symbol(tmp_path: Path) -> None:
+    monitor, _, daily, _ = monitor_with(tmp_path)
+    daily.bars_by_symbol[INDEX_SYMBOL_BY_ETF["510050.SH"]] = [
+        KlineBar(date="2026-07-21", open=100, high=100, low=100, close=100, volume=1),
+        KlineBar(date="2026-07-22", open=103, high=103, low=103, close=103, volume=1),
+    ]
+    monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+
+    history = monitor.history("510050.SH")
+
+    assert history.points[-1].index_change_pct == pytest.approx(3)
+
+
 def test_enrich_overview_uses_close_changes_without_mutating_capital_snapshot(tmp_path: Path) -> None:
     monitor, _, _, shares = monitor_with(tmp_path)
     overview = shares.response
@@ -686,6 +699,30 @@ def test_enrich_overview_uses_close_changes_without_mutating_capital_snapshot(tm
     updated = next(item for item in enriched.core_items if item.symbol == "510050.SH")
     assert original.close_change_pct is None
     assert updated.close_change_pct == pytest.approx(10)
+    assert updated.close_change_trade_date == "2026-07-21"
+
+
+def test_enrich_overview_adds_close_changes_to_validation_etfs(tmp_path: Path) -> None:
+    monitor, _, daily, shares = monitor_with(tmp_path)
+    daily.bars_by_symbol["159919.SZ"] = [
+        KlineBar(date="2026-07-20", open=100, high=100, low=100, close=100, volume=1),
+        KlineBar(date="2026-07-21", open=102, high=102, low=102, close=102, volume=1),
+    ]
+    monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+
+    validation_item = HuijinEtfActivityItem(
+        symbol="159919.SZ",
+        name="沪深300ETF嘉实",
+        index_name="沪深300",
+        role="validator",
+        paired_symbol="510300.SH",
+        trade_date="2026-07-22",
+    )
+    overview = shares.response.model_copy(update={"validation_items": [validation_item]})
+    enriched = monitor.enrich_overview(overview)
+
+    updated = next(item for item in enriched.validation_items if item.symbol == "159919.SZ")
+    assert updated.close_change_pct == pytest.approx(2)
     assert updated.close_change_trade_date == "2026-07-21"
 
 

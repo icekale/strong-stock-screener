@@ -65,6 +65,9 @@ const history = ref<EtfRadarHistoryResponse | null>(null);
 const holders = ref<EtfRadarHoldersResponse | null>(null);
 const methodology = ref<EtfRadarMethodologyResponse | null>(null);
 const selectedTrajectorySymbol = ref('');
+const trajectoryIndexHistory = ref<EtfThreeFactorHistoryResponse | null>(null);
+const trajectoryIndexHistoryLoading = ref(false);
+const trajectoryIndexHistoryError = ref<string | null>(null);
 const threeFactor = ref<EtfThreeFactorResponse | null>(null);
 const threeFactorHistory = ref<EtfThreeFactorHistoryResponse | null>(null);
 const selectedThreeFactorSymbol = ref('');
@@ -233,6 +236,10 @@ function validationBaseline(symbol: string) {
   return formatPercent(validationItem(symbol)?.baseline_change_pct);
 }
 
+function validationCloseChange(symbol: string) {
+  return formatPercent(validationItem(symbol)?.close_change_pct);
+}
+
 function conservativeResult(group: HuijinEtfValidationGroup) {
   if (group.state === 'divergent' || group.state === 'incomplete') return '--';
   return formatPercent(group.conservative_baseline_change_pct);
@@ -344,7 +351,41 @@ async function loadTrajectory(force = false) {
   if (!selectedTrajectorySymbol.value && overview.value) {
     selectedTrajectorySymbol.value = pickDefaultHuijinSymbol(overview.value.core_items);
   }
+  if (selectedTrajectorySymbol.value) {
+    await loadTrajectoryIndexHistory(selectedTrajectorySymbol.value, force);
+  }
   loading.trajectory = false;
+}
+
+async function loadTrajectoryIndexHistory(symbol: string, force = false) {
+  if (!symbol) return;
+  trajectoryIndexHistoryLoading.value = true;
+  trajectoryIndexHistoryError.value = null;
+  try {
+    const response = await requestCache.get(
+      `etf-three-factor-history:${symbol}`,
+      () => getEtfThreeFactorHistory(symbol, 40),
+      { force }
+    );
+    if (symbol === selectedTrajectorySymbol.value) {
+      trajectoryIndexHistory.value = response;
+    }
+  } catch (error) {
+    if (symbol === selectedTrajectorySymbol.value) {
+      trajectoryIndexHistoryError.value = errorMessage(error, '读取指数走势历史失败');
+    }
+  } finally {
+    if (symbol === selectedTrajectorySymbol.value) {
+      trajectoryIndexHistoryLoading.value = false;
+    }
+  }
+}
+
+function selectTrajectorySymbol(symbol: string) {
+  if (!overview.value?.core_items.some(item => item.symbol === symbol) || symbol === selectedTrajectorySymbol.value) return;
+  selectedTrajectorySymbol.value = symbol;
+  trajectoryIndexHistory.value = null;
+  void loadTrajectoryIndexHistory(symbol);
 }
 
 async function loadLazyTab(tab: 'holders' | 'methodology', force = false) {
@@ -383,6 +424,7 @@ function updateThreeFactorSelection() {
 }
 
 async function loadThreeFactor(force = false) {
+  if (!force && threeFactorLoading.value) return;
   threeFactorLoading.value = true;
   threeFactorError.value = null;
   try {
@@ -506,6 +548,38 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
         :message="dataErrorMessage('overview', overview)"
         show-icon
       />
+      <section v-if="overview" data-testid="daily-activity-home" class="etf-home-activity" aria-label="日度活动摘要">
+        <div class="etf-home-activity__header">
+          <div>
+            <h2>日度活动摘要</h2>
+            <p>份额活动与 ETF 最近收盘涨跌，作为持仓轨迹的当日背景。</p>
+          </div>
+          <span>{{ overview.trade_date }}</span>
+        </div>
+        <div class="etf-metrics">
+          <div v-for="metric in overviewMetrics" :key="metric.label" class="etf-metric">
+            <span class="etf-metric__label">{{ metric.label }}</span>
+            <strong :class="metric.className">{{ metric.value }}</strong>
+            <small>{{ metric.helper }}</small>
+          </div>
+        </div>
+        <div class="etf-home-activity__items">
+          <div v-for="item in overview.core_items" :key="item.symbol" class="etf-home-activity__item">
+            <div class="etf-home-activity__identity">
+              <strong :title="item.name">{{ item.name }}</strong>
+              <small>{{ item.symbol }} · {{ item.index_name }}</small>
+            </div>
+            <span>
+              <small>份额日变化</small>
+              <b :class="directionClass(item.direction)">{{ formatPercent(item.daily_change_pct) }}</b>
+            </span>
+            <span>
+              <small>收盘涨跌</small>
+              <b :class="valueTone(item.close_change_pct)">{{ formatPercent(item.close_change_pct) }}</b>
+            </span>
+          </div>
+        </div>
+      </section>
       <div v-if="loading.trajectory && !overview" class="etf-loading" aria-label="正在读取持仓轨迹">
         <a-skeleton active :paragraph="{ rows: 8 }" />
       </div>
@@ -513,10 +587,13 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
         v-else-if="overview"
         :overview="overview"
         :history="history"
+        :index-history="trajectoryIndexHistory"
         :selected-symbol="selectedTrajectorySymbol"
         :history-loading="historyLoading"
+        :index-history-loading="trajectoryIndexHistoryLoading"
         :history-error="dataErrorMessage('history', history) || null"
-        @select="selectedTrajectorySymbol = $event"
+        :index-history-error="trajectoryIndexHistoryError"
+        @select="selectTrajectorySymbol"
       />
       <div v-else-if="!errors.overview" class="etf-state">暂无持仓轨迹数据</div>
     </section>
@@ -622,8 +699,16 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
           <div v-for="group in overview.validation_groups" :key="group.index_name" data-testid="validation-row" class="etf-validation-row">
             <strong>{{ group.index_name }}</strong>
             <div class="etf-validation-pair">
-              <span>{{ group.core_symbol }} <b :class="valueTone(validationItem(group.core_symbol)?.baseline_change_pct)">{{ validationBaseline(group.core_symbol) }}</b></span>
-              <span>{{ group.validator_symbol }} <b :class="valueTone(validationItem(group.validator_symbol)?.baseline_change_pct)">{{ validationBaseline(group.validator_symbol) }}</b></span>
+              <span>
+                {{ group.core_symbol }}
+                <b :class="valueTone(validationItem(group.core_symbol)?.baseline_change_pct)">基线 {{ validationBaseline(group.core_symbol) }}</b>
+                <small>收盘涨跌 <b :class="valueTone(validationItem(group.core_symbol)?.close_change_pct)">{{ validationCloseChange(group.core_symbol) }}</b></small>
+              </span>
+              <span>
+                {{ group.validator_symbol }}
+                <b :class="valueTone(validationItem(group.validator_symbol)?.baseline_change_pct)">基线 {{ validationBaseline(group.validator_symbol) }}</b>
+                <small>收盘涨跌 <b :class="valueTone(validationItem(group.validator_symbol)?.close_change_pct)">{{ validationCloseChange(group.validator_symbol) }}</b></small>
+              </span>
             </div>
             <span>保守结果 <b data-testid="validation-conservative" :class="validationTone(group.state)">{{ conservativeResult(group) }}</b></span>
             <span>保守倍数 <b>{{ conservativeMultiple(group) }}</b></span>
@@ -835,6 +920,89 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
 
 .etf-loading {
   padding: 8px 16px 20px;
+}
+
+.etf-home-activity {
+  margin: 0 16px 16px;
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius);
+  background: var(--wb-surface-muted);
+}
+
+.etf-home-activity__header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 14px 16px 8px;
+}
+
+.etf-home-activity__header h2 {
+  margin: 0;
+  color: var(--wb-ink);
+  font-size: 15px;
+  line-height: 22px;
+}
+
+.etf-home-activity__header p {
+  margin: 2px 0 0;
+  color: var(--wb-muted);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.etf-home-activity__header > span {
+  flex: none;
+  color: var(--wb-muted);
+  font-size: 12px;
+  line-height: 22px;
+}
+
+.etf-home-activity .etf-metrics {
+  margin: 0 16px 8px;
+  border-top: 1px solid var(--wb-border);
+}
+
+.etf-home-activity__items {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 16px;
+  padding: 0 16px 10px;
+}
+
+.etf-home-activity__item {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(88px, 0.8fr) minmax(88px, 0.8fr);
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--wb-border);
+  font-size: 12px;
+}
+
+.etf-home-activity__identity,
+.etf-home-activity__item > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.etf-home-activity__identity strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.etf-home-activity__identity small,
+.etf-home-activity__item small {
+  color: var(--wb-muted);
+  font-size: 11px;
+}
+
+.etf-home-activity__item b {
+  font-weight: 600;
 }
 
 .etf-metrics {
@@ -1094,6 +1262,15 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
 }
 
 @media (max-width: 760px) {
+  .etf-home-activity__items {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .etf-home-activity__item {
+    grid-template-columns: minmax(0, 1.3fr) minmax(82px, 0.8fr) minmax(82px, 0.8fr);
+    gap: 8px;
+  }
+
   .etf-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

@@ -136,3 +136,31 @@ The focused tests cover canonical allowlisted input and stable SHA-256 hashing, 
 - Allowed movement subjects cover the requested broad market/index names, aggregate metric labels, and supplied sector names. Digits inside recognized index names are not treated as factual statistics.
 - Semantic category detection now covers the reviewed allocation, subscribe/redeem/order, strategy permission, level-zone, contribution/coefficient/weight, and unknown-security valuation/attention wording without adding a stock-name dictionary.
 - The strict input allowlist, hash/cache identity, three-attempt retry flow, sanitized failure persistence, and shared model-maintenance parsers were not changed. The pre-existing dirty Task 4 report was not modified.
+
+## Fix 4
+
+### RED Evidence
+
+- Added focused probes for exported hash validation, sector security identifiers, response lifecycle invariants, security attention/recommendation wording, Chinese-number claims, cross-field metric fallback, conditional source checks, and allowed aggregate/index/sector attention prose.
+- Initial focused RED: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py -q` -> `13 failed, 71 passed`.
+- After isolating the conditional-source probe, restoring the old threshold early return produced `1 failed, 83 deselected`; the failure was the exact missing-decision/source bypass.
+
+### GREEN Evidence
+
+- Focused analysis suite: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py -q` -> `84 passed`.
+- Required regression: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py tests/test_model_maintenance.py -q` -> `96 passed`.
+- Ruff: `cd apps/api && uv run ruff check app tests` -> `All checks passed!`.
+- `git diff --check` completed without errors.
+
+### Fix Scope And Self-Review
+
+- `hash_sentiment_analysis_input` now validates and normalizes the complete recursive strict allowlist before hashing; the builder uses the same normalized payload. Sector names containing A-share or exchange security identifiers are rejected.
+- Security attention wording such as `贵州茅台的表现受到关注` and generic recommendations such as `建议增持` are prohibited, while supplied sector and aggregate/index attention prose remains accepted.
+- Quantitative Chinese-number claims are rejected when ungrounded, and numeric clauses containing market metrics must match a recognized metric-specific canonical field rather than borrowing a global score.
+- Conditional watch thresholds remain valid without a market snapshot, but unavailable decision, sector, and validation facts in the condition are checked before threshold numbers are allowed.
+- `SentimentPercentileAnalysisResponse` now forbids extra fields, bounds attempts to 0-3, requires results for ready states, forbids results for failed states, and requires input hashes for generated states.
+- Self-review covered `中证全指` and supplied-sector attention prose, existing aggregate/index/sector movement prose, `前一日` temporal wording, and source-free future watch thresholds. The dirty Task 4 report was not staged or modified.
+
+### Concerns
+
+- Persisted pending, ready, or failed records without an input hash now fail response validation and are treated as cache misses by the existing store loader, as required by the stricter lifecycle contract.

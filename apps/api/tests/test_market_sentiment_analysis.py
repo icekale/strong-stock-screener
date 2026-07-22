@@ -12,6 +12,7 @@ from app.models import (
     SentimentAnalysisResult,
     SentimentDecisionResponse,
     SentimentMainSectorSignal,
+    SentimentPercentileAnalysisResponse,
     SentimentPercentileFactor,
     SentimentPercentileFactors,
     SentimentPercentilePoint,
@@ -252,6 +253,22 @@ def test_input_is_allowlisted_canonical_and_hashes_sorted_json() -> None:
     assert hash_sentiment_analysis_input({key: payload[key] for key in reversed(payload)}) == hash_sentiment_analysis_input(payload)
 
 
+def test_exported_hash_rejects_noncanonical_input() -> None:
+    payload = _input_payload()
+    payload["secret"] = "must-not-leak"
+
+    with pytest.raises(ValidationError):
+        hash_sentiment_analysis_input(payload)
+
+
+def test_build_rejects_sector_security_identifiers() -> None:
+    sector = _decision().main_sectors[0].model_copy(update={"name": "存储芯片 300001.SZ"})
+    decision = _decision().model_copy(update={"main_sectors": [sector]})
+
+    with pytest.raises(ValidationError):
+        build_sentiment_analysis_input(_point(), [_point()], _summary(), decision, _validation())
+
+
 def test_input_marks_missing_auxiliary_context_explicitly() -> None:
     payload = build_sentiment_analysis_input(_point(), [_point()], None, None, None)
 
@@ -338,6 +355,57 @@ def test_result_requires_numeric_driver_and_watch_evidence() -> None:
 
     with pytest.raises(ValidationError):
         SentimentAnalysisResult.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    "status,result,extra",
+    [
+        ("ready", None, {}),
+        ("failed", _result_payload(), {}),
+        ("pending", None, {"input_hash": None}),
+        ("ready", _result_payload(), {"extra": True}),
+    ],
+)
+def test_analysis_response_enforces_lifecycle_contract(
+    status: str,
+    result: object,
+    extra: dict[str, object],
+) -> None:
+    payload: dict[str, object] = {
+        "trade_date": "2026-07-22",
+        "status": status,
+        "input_hash": "a" * 64,
+        "attempts": 1,
+        "result": result,
+        **extra,
+    }
+
+    with pytest.raises(ValidationError):
+        SentimentPercentileAnalysisResponse.model_validate(payload)
+
+
+@pytest.mark.parametrize("attempts", [-1, 4])
+def test_analysis_response_bounds_attempts(attempts: int) -> None:
+    with pytest.raises(ValidationError):
+        SentimentPercentileAnalysisResponse.model_validate(
+            {
+                "trade_date": "2026-07-22",
+                "status": "pending",
+                "input_hash": "a" * 64,
+                "attempts": attempts,
+            }
+        )
+
+
+def test_analysis_response_forbids_unknown_fields() -> None:
+    with pytest.raises(ValidationError):
+        SentimentPercentileAnalysisResponse.model_validate(
+            {
+                "trade_date": "2026-07-22",
+                "status": "not_generated",
+                "unknown": True,
+            }
+        )
 
 
 def test_service_reuses_matching_ready_provider_model_and_hash(tmp_path: Path) -> None:
@@ -662,6 +730,91 @@ def test_semantic_contract_allows_grounded_aggregate_index_sector_and_threshold_
     assert response.status == "ready"
     assert response.result is not None
     assert client.post.call_count == 1
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("market_conclusion", "贵州茅台的表现受到关注，市场结构分化。"),
+        ("risk_note", "建议增持。"),
+    ],
+)
+def test_semantic_contract_rejects_security_attention_and_recommendation(
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    result = _result_payload()
+    result[field] = value
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content), _Response(content), _Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "failed"
+    assert response.attempts == 3
+    assert client.post.call_count == 3
+
+
+def test_semantic_contract_allows_attention_prose_for_aggregate_and_sector(
+    tmp_path: Path,
+) -> None:
+    result = _result_payload()
+    result["market_conclusion"] = "中证全指的表现受到关注，市场结构分化。"
+    result["historical_context"] = "存储芯片的表现受到关注。"
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+    assert response.result is not None
+    assert client.post.call_count == 1
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("market_conclusion", "市场上涨两个百分点，结构仍有分化。"),
+        ("market_conclusion", "成交额增长 62.0%，市场结构分化。"),
+    ],
+)
+def test_semantic_contract_rejects_ungrounded_chinese_or_cross_field_metric_numbers(
+    tmp_path: Path,
+    field: str,
+    value: str,
+) -> None:
+    result = _result_payload()
+    result[field] = value
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content), _Response(content), _Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "failed"
+    assert response.attempts == 3
+    assert client.post.call_count == 3
+
+
+def test_semantic_contract_checks_sources_in_conditional_clauses(tmp_path: Path) -> None:
+    payload = build_sentiment_analysis_input(_point(), [_point()], None, None, None)
+    result = _result_payload()
+    result["key_drivers"] = ["综合分 62.0，处于偏热", "量能趋势为 1.2%"]
+    result["factor_divergence"] = "量能趋势为 1.2%。"
+    result["historical_context"] = "历史背景暂无可用样本。"
+    result["next_session_watch"] = ["若市场状态为主升且涨停家数高于 70 家", "若封板率低于 60%"]
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content), _Response(content), _Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(payload, _config())
+
+    assert response.status == "failed"
+    assert response.attempts == 3
+    assert client.post.call_count == 3
 
 
 def test_semantic_contract_allows_conditional_watch_thresholds_without_market_snapshot(

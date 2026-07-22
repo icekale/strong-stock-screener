@@ -470,18 +470,30 @@ class SentimentAnalysisResult(BaseModel):
 
 
 class SentimentPercentileAnalysisResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     trade_date: str
     status: SentimentAnalysisStatus
     model_version: str = "market-sentiment-percentile-v1"
     provider: str | None = None
     llm_model: str | None = None
     input_hash: str | None = None
-    attempts: int = 0
+    attempts: int = Field(default=0, ge=0, le=3)
     requested_at: str | None = None
     completed_at: str | None = None
     retry_after: str | None = None
     error: str | None = None
     result: SentimentAnalysisResult | None = None
+
+    @model_validator(mode="after")
+    def _validate_lifecycle(self) -> SentimentPercentileAnalysisResponse:
+        if self.status in {"pending", "ready", "failed"} and not self.input_hash:
+            raise ValueError("generated analysis states require input_hash")
+        if self.status == "ready" and self.result is None:
+            raise ValueError("ready analysis requires a result")
+        if self.status == "failed" and self.result is not None:
+            raise ValueError("failed analysis cannot contain a result")
+        return self
 
 
 class CzscResearchSnapshot(BaseModel):

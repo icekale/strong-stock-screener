@@ -9,7 +9,7 @@ from threading import RLock
 from typing import Any, Literal, Mapping, Sequence
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 from app.models import (
     SentimentAnalysisResult,
@@ -118,6 +118,13 @@ class _MainSectorInput(_StrictAnalysisInput):
     break_board_count: int
     max_consecutive_boards: int
 
+    @field_validator("name")
+    @classmethod
+    def _reject_security_identifiers(cls, value: str) -> str:
+        if _A_SHARE_CODE_PATTERN.search(value) or _SECURITY_IDENTIFIER_PATTERN.search(value):
+            raise ValueError("sector names cannot contain security identifiers")
+        return value
+
 
 class _MainSectorsInput(_StrictAnalysisInput):
     source_date: str | None
@@ -148,11 +155,14 @@ class _SentimentAnalysisInput(_StrictAnalysisInput):
 _A_SHARE_CODE_PATTERN = re.compile(
     r"(?<!\d)(?:[034689]\d{5})(?:\.(?:SH|SZ|BJ))?(?!\d)", re.IGNORECASE
 )
+_SECURITY_IDENTIFIER_PATTERN = re.compile(
+    r"(?<![A-Za-z0-9])(?:SH|SZ|BJ)[.:]?\d{6}(?![A-Za-z0-9])", re.IGNORECASE
+)
 _NUMBER_TEXT = r"[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
 _PROHIBITED_RESULT_TEXT_PATTERN = re.compile(
     r"(?:个股|股票(?:代码)?|证券代码|标的|"
     r"\b(?:individual\s+stock|stock\s+code|security\s+recommendation|ticker)\b|"
-    r"仓位|轻仓|重仓|满仓|半仓|加仓|减仓|建仓|持仓|空仓|"
+    r"仓位|轻仓|重仓|满仓|半仓|加仓|减仓|增持|减持|建仓|持仓|空仓|"
     r"控制资金比例|资金(?:使用|投入|配置|分配|安排)?(?:比例|占比)|"
     rf"(?:建议|计划|可以|可)?\s*(?:投入|配置|分配|安排)\s*{_NUMBER_TEXT}\s*(?:%|％)?\s*资金|"
     r"\b(?:position\s+sizing|position\s+size|portfolio\s+allocation|"
@@ -171,6 +181,12 @@ _TRADE_PERMISSION_CLAIM_PATTERN = re.compile(
 )
 _NUMERIC_CLAIM_PATTERN = re.compile(
     rf"(?<![\d.])(?P<number>{_NUMBER_TEXT})(?P<unit>\s*(?:%|％|万亿|亿|万))?(?![\d.])"
+)
+_CHINESE_NUMERIC_CLAIM_PATTERN = re.compile(
+    r"(?<![零〇一二两三四五六七八九十百千万亿点])"
+    r"(?P<number>[零〇一二两三四五六七八九十百千万亿点]+)"
+    r"(?P<unit>个?百分点|%|％|万亿|亿|万|家|个|项|次|分|倍|成)"
+    r"(?![零〇一二两三四五六七八九十百千万亿点])"
 )
 _DATE_VALUE_PATTERN = re.compile(r"\d{4}-\d{2}-\d{2}")
 _NUMBERED_INDEX_ENTITY_PATTERN = re.compile(
@@ -290,6 +306,9 @@ _RECOMMENDATION_AFTER_PATTERN = re.compile(r"(?:推荐|看好|关注|首选)\s*(
 _RECOMMENDATION_BEFORE_PATTERN = re.compile(
     r"(?P<target>[^，,。；;！？!?\n]+?)(?:值得关注|可重点关注)"
 )
+_ATTENTION_CLAIM_PATTERN = re.compile(
+    r"(?P<target>[^，,。；;！？!?\n]+?)(?:的)?表现受到关注"
+)
 _VALUATION_CLAIM_PATTERN = re.compile(
     r"(?P<target>[^，,。；;！？!?\n]+?)(?:估值|价值)\s*(?:偏高|偏低|高估|低估|合理|昂贵|便宜)"
 )
@@ -397,7 +416,7 @@ def build_sentiment_analysis_input(
     market_available = summary is not None and summary.snapshot_status != "missing"
     metrics = summary.metrics if market_available else None
 
-    return {
+    payload = {
         "trade_date": percentile.trade_date,
         "percentile": {
             "score": percentile.score,
@@ -454,11 +473,22 @@ def build_sentiment_analysis_input(
         },
         "validation": _validation_payload(validation),
     }
+    return _normalize_analysis_input(payload)
 
 
 def hash_sentiment_analysis_input(payload: Mapping[str, object]) -> str:
-    canonical = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    canonical_input = _normalize_analysis_input(payload)
+    canonical = json.dumps(
+        canonical_input,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _normalize_analysis_input(payload: Mapping[str, object]) -> dict[str, object]:
+    return _SentimentAnalysisInput.model_validate(payload).model_dump(mode="json", by_alias=True)
 
 
 class MarketSentimentAnalysisService:
@@ -769,6 +799,9 @@ def _validate_prohibited_semantics(text: str, sector_names: Sequence[str]) -> No
         for match in pattern.finditer(text):
             if not _is_allowed_entity_reference(match.group("target"), sector_names):
                 raise ValueError("AI response recommends a non-aggregate security")
+    for match in _ATTENTION_CLAIM_PATTERN.finditer(text):
+        if not _is_allowed_entity_reference(match.group("target"), sector_names):
+            raise ValueError("AI response gives attention to a non-aggregate security")
     for match in _VALUATION_CLAIM_PATTERN.finditer(text):
         if not _is_allowed_entity_reference(match.group("target"), sector_names):
             raise ValueError("AI response evaluates a non-aggregate security")
@@ -962,12 +995,9 @@ def _validate_source_availability(
     *,
     allow_threshold: bool,
 ) -> None:
-    if allow_threshold:
-        return
-
     has_named_sector = any(name in clause for name in sector_names)
     has_sector_metric = has_named_sector and bool(_SECTOR_LIMIT_METRIC_PATTERN.search(clause))
-    if _MARKET_METRIC_CLAIM_PATTERN.search(clause) and not has_sector_metric:
+    if _MARKET_METRIC_CLAIM_PATTERN.search(clause) and not has_sector_metric and not allow_threshold:
         if analysis_input.market.status == "unavailable":
             raise ValueError("AI response claims unavailable market metrics")
     if _MAIN_SECTOR_CLAIM_PATTERN.search(clause) and analysis_input.main_sectors.status == "unavailable":
@@ -989,7 +1019,17 @@ def _validate_numeric_evidence(
     for date in canonical_dates:
         factual_text = factual_text.replace(date, "")
 
-    for match in _NUMERIC_CLAIM_PATTERN.finditer(factual_text):
+    numeric_matches = list(_NUMERIC_CLAIM_PATTERN.finditer(factual_text))
+    if numeric_matches and _MARKET_METRIC_CLAIM_PATTERN.search(factual_text):
+        if not any(pattern.search(clause) for _, pattern in _MARKET_FIELD_CLAIM_PATTERNS):
+            raise ValueError("AI response contains an ungrounded market metric")
+
+    for match in _CHINESE_NUMERIC_CLAIM_PATTERN.finditer(factual_text):
+        if allow_thresholds and _number_is_threshold(factual_text, match):
+            continue
+        raise ValueError("AI response contains an ungrounded Chinese-number claim")
+
+    for match in numeric_matches:
         if _normalized_claim_number(match) in canonical_numbers:
             continue
         if allow_thresholds and _number_is_threshold(factual_text, match):

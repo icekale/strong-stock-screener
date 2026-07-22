@@ -11,6 +11,12 @@ function historyFixture(): SentimentPercentilePoint[] {
       volumeRawValue: 1_230_000_000
     }),
     createPoint({
+      trade_date: '2026-07-19',
+      score: 88,
+      level: '过热',
+      volumeRawValue: 1.75
+    }),
+    createPoint({
       trade_date: '2026-07-21',
       score: 52,
       level: '中性',
@@ -18,9 +24,9 @@ function historyFixture(): SentimentPercentilePoint[] {
     }),
     createPoint({
       trade_date: '2026-07-22',
-      score: 88,
-      level: '过热',
-      volumeRawValue: 1.75
+      score: 42,
+      level: '偏冷',
+      volumeRawValue: 1.2
     })
   ];
 }
@@ -61,7 +67,7 @@ describe('buildSentimentPercentileChartOption', () => {
 
     expect(option.xAxis).toMatchObject({
       type: 'category',
-      data: ['2026-07-18', '2026-07-21', '2026-07-22']
+      data: ['2026-07-18', '2026-07-19', '2026-07-21', '2026-07-22']
     });
     expect(option.yAxis).toMatchObject({ type: 'value', min: 0, max: 100 });
     expect(series[0]?.markArea.data).toContainEqual([
@@ -79,13 +85,34 @@ describe('buildSentimentPercentileChartOption', () => {
     expect(JSON.stringify(option)).toContain('过热区');
   });
 
-  it('only marks extreme and latest percentile points', () => {
+  it('marks extreme points independently of the latest point', () => {
     const option = buildSentimentPercentileChartOption(historyFixture(), '2026-07-22', false);
     const series = option.series as Array<{
-      data: Array<{ symbolSize: number }>;
+      data: Array<{ symbolSize: number; itemStyle: { color: string } }>;
     }>;
 
-    expect(series[0]?.data.map(item => item.symbolSize)).toEqual([6, 0, 6]);
+    expect(series[0]?.data[0]).toMatchObject({ symbolSize: 6, itemStyle: { color: '#16805c' } });
+    expect(series[0]?.data[1]).toMatchObject({ symbolSize: 6, itemStyle: { color: '#c9363e' } });
+    expect(series[0]?.data[2]).toMatchObject({ symbolSize: 0 });
+  });
+
+  it('marks a non-extreme latest point with its actual level color', () => {
+    const option = buildSentimentPercentileChartOption(historyFixture(), '2026-07-22', false);
+    const series = option.series as Array<{
+      data: Array<{ symbolSize: number; itemStyle: { color: string } }>;
+    }>;
+
+    expect(series[0]?.data[3]).toEqual({
+      value: 42,
+      symbolSize: 6,
+      itemStyle: { color: '#245b8a' }
+    });
+  });
+
+  it('uses only resolved concrete colors in the canvas option', () => {
+    const option = buildSentimentPercentileChartOption(historyFixture(), '2026-07-22', false);
+
+    expect(JSON.stringify(option)).not.toContain('var(');
   });
 
   it('includes composite and all factor score and raw values in the tooltip', () => {

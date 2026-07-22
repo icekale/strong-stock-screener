@@ -1,13 +1,13 @@
 import type { SentimentPercentileFactor, SentimentPercentileLevel, SentimentPercentilePoint } from '@/service/types';
 
 const COLORS = {
-  primary: 'var(--wb-primary, #245b8a)',
-  positive: 'var(--wb-positive, #c9363e)',
-  negative: 'var(--wb-negative, #16805c)',
-  warning: 'var(--wb-warning, #a66a00)',
-  muted: 'var(--wb-muted, #617184)',
-  border: 'var(--wb-border, #d9e2ea)',
-  surface: 'var(--wb-surface, #ffffff)'
+  primary: '#245b8a',
+  positive: '#c9363e',
+  negative: '#16805c',
+  warning: '#a66a00',
+  muted: '#617184',
+  border: '#d9e2ea',
+  surface: '#ffffff'
 };
 
 const FACTOR_LABELS: Array<[keyof SentimentPercentilePoint['factors'], string]> = [

@@ -12,10 +12,10 @@ import {
   getEtfThreeFactorHistory,
   getMarketSentimentAnalysis,
   getMarketSentimentPercentile,
-  markAllEtfAlertsRead,
-  markEtfAlertRead,
   getSectorReplicaRadar,
-  getStockKline
+  getStockKline,
+  markAllEtfAlertsRead,
+  markEtfAlertRead
 } from './product-api';
 import type { ApiRequestError } from './product-request';
 import { apiRequest } from './product-request';
@@ -46,6 +46,7 @@ import type {
   HuijinEtfBaseline,
   HuijinEtfRole,
   HuijinEtfValidationGroup,
+  SentimentAnalysisStatus,
   SentimentPercentileAnalysisResponse,
   SentimentPercentilePoint,
   SentimentPercentileResponse
@@ -201,6 +202,10 @@ describe('apiRequest', () => {
   });
 
   it('keeps sentiment percentile contracts aligned with backend payloads', () => {
+    expectTypeOf<SentimentAnalysisStatus>().toEqualTypeOf<
+      'not_generated' | 'unconfigured' | 'pending' | 'ready' | 'failed'
+    >();
+
     const factor = {
       score: 72.5,
       raw_value: 1.25,

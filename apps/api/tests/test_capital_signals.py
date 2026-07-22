@@ -308,7 +308,11 @@ def test_close_change_enrichment_copies_activity_items_without_mutating_overview
     assert updated.close_change_pct == pytest.approx(1.25)
     assert updated.close_change_trade_date == "2026-07-17"
     assert enriched.validation_items == overview.validation_items
-    assert enriched.items == overview.items
+    updated_legacy = next(item for item in enriched.items if item.symbol == "510050.SH")
+    assert updated_legacy.close_change_pct == pytest.approx(1.25)
+    assert updated_legacy.close_change_trade_date == "2026-07-17"
+    original_legacy = next(item for item in overview.items if item.symbol == "510050.SH")
+    assert original_legacy.close_change_pct is None
 
 
 def test_service_builds_complete_huijin_activity_and_legacy_mapping(tmp_path: Path) -> None:

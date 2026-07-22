@@ -2035,6 +2035,8 @@ export type EtfRadarItem = {
   symbol: string;
   name: string;
   index_name: string;
+  close_change_pct: number | null;
+  close_change_trade_date: string | null;
   total_shares: number | null;
   share_change: number | null;
   estimated_subscription_cny: number | null;

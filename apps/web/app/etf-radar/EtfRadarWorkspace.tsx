@@ -2,6 +2,7 @@
 
 import { ReloadOutlined } from "@ant-design/icons";
 import { Button, Table, Tabs, Tag } from "antd";
+import type { TableColumnsType } from "antd";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { OverviewTrendChart } from "../../components/overview/OverviewTrendChart";
 import { DataState } from "../../components/workbench/DataState";
@@ -187,15 +188,16 @@ function MethodologyView({ data, error, loading, onRetry }: ViewProps<EtfRadarMe
   );
 }
 
-const overviewColumns = [
-  { title: "ETF", key: "etf", fixed: "left" as const, width: 150, render: (_: unknown, row: EtfRadarItem) => <div className="etf-symbol-cell"><strong>{row.name}</strong><span>{row.symbol}</span></div> },
-  { title: "跟踪指数", dataIndex: "index_name", width: 110 },
-  { title: "证据强度", dataIndex: "evidence_strength", width: 100, render: (value: number | null) => formatEvidenceStrength(value) },
-  { title: "份额变化", dataIndex: "share_change", align: "right" as const, width: 120, render: (value: number | null) => <DirectionValue value={value} formatter={formatDirectionalShares} /> },
-  { title: "估算净申购", dataIndex: "estimated_subscription_cny", align: "right" as const, width: 130, render: (value: number | null) => <DirectionValue value={value} formatter={formatDirectionalCny} /> },
-  { title: "稳健标准分", dataIndex: "robust_score", align: "right" as const, width: 110, render: (value: number | null) => value === null ? "--" : value.toFixed(2) },
-  { title: "同刻成交", dataIndex: "same_time_turnover_ratio", align: "right" as const, width: 100, render: (value: number | null) => value === null ? "--" : `${value.toFixed(2)}x` },
-  { title: "相对指数", dataIndex: "relative_index_return_pct", align: "right" as const, width: 110, render: (value: number | null) => <DirectionValue value={value} formatter={formatDirectionalPercent} /> },
+const overviewColumns: TableColumnsType<EtfRadarItem> = [
+  { title: "ETF", key: "etf", fixed: "left", width: 150, sorter: (a, b) => compareText(a.name, b.name), render: (_: unknown, row: EtfRadarItem) => <div className="etf-symbol-cell"><strong>{row.name}</strong><span>{row.symbol}</span></div> },
+  { title: "日涨跌", dataIndex: "close_change_pct", align: "right", width: 100, sorter: (a, b, sortOrder) => compareNullableNumber(a.close_change_pct, b.close_change_pct, sortOrder), render: (value: number | null) => <DirectionValue value={value} formatter={formatDirectionalPercent} /> },
+  { title: "跟踪指数", dataIndex: "index_name", width: 110, sorter: (a, b) => compareText(a.index_name, b.index_name) },
+  { title: "证据强度", dataIndex: "evidence_strength", width: 100, sorter: (a, b, sortOrder) => compareNullableNumber(a.evidence_strength, b.evidence_strength, sortOrder), render: (value: number | null) => formatEvidenceStrength(value) },
+  { title: "份额变化", dataIndex: "share_change", align: "right", width: 120, sorter: (a, b, sortOrder) => compareNullableNumber(a.share_change, b.share_change, sortOrder), render: (value: number | null) => <DirectionValue value={value} formatter={formatDirectionalShares} /> },
+  { title: "估算净申购", dataIndex: "estimated_subscription_cny", align: "right", width: 130, sorter: (a, b, sortOrder) => compareNullableNumber(a.estimated_subscription_cny, b.estimated_subscription_cny, sortOrder), render: (value: number | null) => <DirectionValue value={value} formatter={formatDirectionalCny} /> },
+  { title: "稳健标准分", dataIndex: "robust_score", align: "right", width: 110, sorter: (a, b, sortOrder) => compareNullableNumber(a.robust_score, b.robust_score, sortOrder), render: (value: number | null) => value === null ? "--" : value.toFixed(2) },
+  { title: "同刻成交", dataIndex: "same_time_turnover_ratio", align: "right", width: 100, sorter: (a, b, sortOrder) => compareNullableNumber(a.same_time_turnover_ratio, b.same_time_turnover_ratio, sortOrder), render: (value: number | null) => value === null ? "--" : `${value.toFixed(2)}x` },
+  { title: "相对指数", dataIndex: "relative_index_return_pct", align: "right", width: 110, sorter: (a, b, sortOrder) => compareNullableNumber(a.relative_index_return_pct, b.relative_index_return_pct, sortOrder), render: (value: number | null) => <DirectionValue value={value} formatter={formatDirectionalPercent} /> },
 ];
 
 const historyColumns = [
@@ -259,6 +261,13 @@ function metadataFor(view: RadarView, data: { overview: EtfRadarOverviewResponse
 }
 
 function without<T>(values: Set<T>, value: T): Set<T> { const next = new Set(values); next.delete(value); return next; }
+function compareText(a: string, b: string): number { return a.localeCompare(b, "zh-Hans-CN"); }
+function compareNullableNumber(a: number | null, b: number | null, sortOrder?: "ascend" | "descend" | null): number {
+  if (a === null && b === null) return 0;
+  if (a === null) return sortOrder === "descend" ? -1 : 1;
+  if (b === null) return sortOrder === "descend" ? 1 : -1;
+  return a - b;
+}
 function stageLabel(stage: CapitalSignalMetadata["signal_stage"]): string { return stage === "intraday" ? "盘中代理" : stage === "disclosure" ? "定期披露" : "盘后确认"; }
 function metadataTone(metadata: CapitalSignalMetadata): string { return metadata.source_status.some((item) => item.status !== "success") ? "gold" : "blue"; }
 function formatTime(value: string): string { return value.replace("T", " ").slice(0, 16); }

@@ -1137,8 +1137,21 @@ def enrich_etf_overview_close_changes(
             for item in items
         ]
 
+    legacy_items = [
+        item.model_copy(
+            update={
+                "close_change_pct": close_changes[item.symbol][0],
+                "close_change_trade_date": close_changes[item.symbol][1],
+            }
+        )
+        if item.symbol in close_changes
+        else item.model_copy()
+        for item in overview.items
+    ]
+
     return overview.model_copy(
         update={
+            "items": legacy_items,
             "core_items": enrich(overview.core_items),
             "validation_items": enrich(overview.validation_items),
         }
@@ -1193,6 +1206,8 @@ def _legacy_radar_item(item: HuijinEtfActivityItem) -> EtfRadarItem:
         symbol=item.symbol,
         name=item.name,
         index_name=item.index_name,
+        close_change_pct=item.close_change_pct,
+        close_change_trade_date=item.close_change_trade_date,
         total_shares=item.total_shares,
         share_change=item.share_delta,
     )

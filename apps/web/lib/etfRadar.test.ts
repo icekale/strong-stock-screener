@@ -24,6 +24,9 @@ test("ETF radar workspace exposes four independently loaded evidence views", () 
   assert.match(source, /createMemoryRequestCache/);
   assert.match(source, /etfRadarRequestCache\.get/);
   assert.match(source, /证据强度/);
+  assert.match(source, /日涨跌/);
+  assert.match(source, /close_change_pct/);
+  assert.ok((source.match(/sorter:/g) ?? []).length >= 9);
   assert.doesNotMatch(source, /概率/);
 });
 

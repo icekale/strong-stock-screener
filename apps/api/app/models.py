@@ -2243,6 +2243,8 @@ class EtfRadarItem(BaseModel):
     symbol: str
     name: str
     index_name: str
+    close_change_pct: float | None = None
+    close_change_trade_date: str | None = None
     total_shares: float | None = None
     share_change: float | None = None
     estimated_subscription_cny: float | None = None

@@ -11,4 +11,4 @@ Plan: `docs/superpowers/plans/2026-07-22-market-sentiment-percentile.md`
 - Task 6: complete (commits a5fc6b2..539016e; review approved after local-only GET, trade-date scheduling, and catch-up retry fixes; 154 selected tests passed)
 - Task 7: complete (commits 2e93bc6..531e58d; review approved after Canvas-color and latest-point test fixes; 18 focused tests and typecheck passed)
 - Task 8: complete (commits 43512b1..5715676; review approved after retry-race, error-sanitization, and mobile-overflow fixes; 207 Vue tests, typecheck, and build passed)
-- Task 9: in progress
+- Task 9: complete (commit 3569cba; 1234 backend tests, Ruff, 207 Vue tests, typecheck, build, desktop/mobile QA passed; real TickFlow/LLM checks unavailable without keys; post-fix Docker rebuild blocked by Docker Desktop containerd I/O)

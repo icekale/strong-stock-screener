@@ -1,21 +1,16 @@
 <script setup lang="ts">
-import { Skeleton as ASkeleton } from 'ant-design-vue';
-import dayjs from 'dayjs';
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
-import IconIcRoundRefresh from '~icons/ic/round-refresh';
-import PageHeader from '@/components/common/workbench/page-header.vue';
-import SectionHeader from '@/components/common/workbench/section-header.vue';
-import StatusTag from '@/components/common/workbench/status-tag.vue';
-import HuijinTrajectoryPanel from '@/components/etf-radar/HuijinTrajectoryPanel.vue';
-import EtfThreeFactorPanel from '@/components/etf-radar/EtfThreeFactorPanel.vue';
+import { breakpointsTailwind, useBreakpoints } from '@vueuse/core';
+import { Skeleton as ASkeleton } from 'ant-design-vue';
+import dayjs from 'dayjs';
 import {
-  getEtfThreeFactor,
-  getEtfThreeFactorHistory,
   getEtfRadarHistory,
   getEtfRadarHolders,
   getEtfRadarMethodology,
-  getEtfRadarOverview
+  getEtfRadarOverview,
+  getEtfThreeFactor,
+  getEtfThreeFactorHistory
 } from '@/service/product-api';
 import type {
   CapitalSignalMetadata,
@@ -28,14 +23,12 @@ import type {
   EtfThreeFactorHistoryResponse,
   EtfThreeFactorResponse,
   EtfValidationState,
-  HuijinEtfActivityItem,
   HuijinEtfBaseline,
   HuijinEtfValidationGroup,
   SourceStatusValue
 } from '@/service/types';
 import { createMemoryRequestCache } from '@/utils/requestCache';
 import {
-  activityDirectionLabel,
   directionTone,
   formatActivityMultiple,
   formatDirectionalPercent,
@@ -45,8 +38,15 @@ import {
   validationStateLabel,
   validationStateTone
 } from '@/utils/domain/capitalSignals';
-import { huijinActivityDataState, pickDefaultHuijinSymbol } from '@/utils/domain/huijinTrajectory';
-import { closeChangeTone } from '@/utils/domain/etfThreeFactor';
+import { pickDefaultHuijinSymbol } from '@/utils/domain/huijinTrajectory';
+import { buildUnifiedEtfActivityRows, pickDefaultEtfActivitySymbol } from '@/utils/domain/etfThreeFactor';
+import EtfThreeFactorPanel from '@/components/etf-radar/EtfThreeFactorPanel.vue';
+import EtfActivityTable from '@/components/etf-radar/EtfActivityTable.vue';
+import HuijinTrajectoryPanel from '@/components/etf-radar/HuijinTrajectoryPanel.vue';
+import SectionHeader from '@/components/common/workbench/section-header.vue';
+import StatusTag from '@/components/common/workbench/status-tag.vue';
+import PageHeader from '@/components/common/workbench/page-header.vue';
+import IconIcRoundRefresh from '~icons/ic/round-refresh';
 
 defineOptions({ name: 'EtfRadarView' });
 
@@ -75,27 +75,20 @@ const threeFactorLoading = ref(false);
 const threeFactorHistoryLoading = ref(false);
 const threeFactorError = ref<string | null>(null);
 const threeFactorHistoryError = ref<string | null>(null);
+const activityDetailOpen = ref(false);
+const validationExpanded = ref(false);
+const isCompact = useBreakpoints(breakpointsTailwind).smaller('md');
 const selectedThreeFactorHistory = computed(() =>
   threeFactorHistory.value?.symbol === selectedThreeFactorSymbol.value ? threeFactorHistory.value : null
+);
+const activityRows = computed(() =>
+  buildUnifiedEtfActivityRows(overview.value?.core_items ?? [], threeFactor.value?.items ?? [])
 );
 const historyLoading = ref(false);
 const loading = reactive<Record<EtfTab, boolean>>({ trajectory: false, activity: false, holders: false, methodology: false });
 const errors = reactive<Record<EtfDataKey, string | null>>({ overview: null, history: null, holders: null, methodology: null });
 const loaded = reactive({ holders: false, methodology: false });
 const requestCache = createMemoryRequestCache({ ttlMs: 15_000 });
-
-const coreColumns = [
-  { title: 'ETF', dataIndex: 'symbol', key: 'etf', width: 188, fixed: 'left' as const },
-  { title: '收盘涨跌', dataIndex: 'close_change_pct', key: 'close_change_pct', width: 112 },
-  { title: '指数', dataIndex: 'index_name', key: 'index_name', width: 110 },
-  { title: '份额变化', dataIndex: 'share_delta', key: 'share_delta', width: 130 },
-  { title: '份额日变化', dataIndex: 'daily_change_pct', key: 'daily_change_pct', width: 112 },
-  { title: '报告基线变化', dataIndex: 'baseline_change_pct', key: 'baseline_change_pct', width: 132 },
-  { title: '倍数', dataIndex: 'multiple', key: 'multiple', width: 88 },
-  { title: '方向', dataIndex: 'direction', key: 'direction', width: 136 },
-  { title: '确认持仓', dataIndex: 'confirmed_huijin_holding_pct', key: 'holding', width: 178 },
-  { title: '数据状态', dataIndex: 'data_state', key: 'data_state', width: 100, fixed: 'right' as const }
-];
 
 const baselineColumns = [
   { title: 'ETF', dataIndex: 'symbol', key: 'etf', width: 188 },
@@ -167,8 +160,12 @@ function formatAsOf(value: string | undefined) {
 }
 
 function valueTone(value: number | null | undefined) {
-  const tone = closeChangeTone(value ?? null) === 'rise' ? 'rise' : closeChangeTone(value ?? null) === 'fall' ? 'fall' : directionTone(value ?? null);
+  const tone = directionTone(value ?? null);
   return tone === 'rise' ? 'etf-value--positive' : tone === 'fall' ? 'etf-value--negative' : '';
+}
+
+function directionClass(direction: EtfActivityDirection) {
+  return direction === 'increase' ? 'etf-value--positive' : direction === 'decrease' ? 'etf-value--negative' : '';
 }
 
 function validationTone(state: EtfValidationState) {
@@ -187,28 +184,6 @@ function formatHoldingPct(value: number | null | undefined) {
 function formatFingerprint(value: string | null | undefined) {
   if (!value) return '--';
   return value.length > 10 ? `${value.slice(0, 10)}...` : value;
-}
-
-function directionDisplay(direction: EtfActivityDirection) {
-  if (direction === 'increase') return `增加（${activityDirectionLabel(direction)}代理）`;
-  if (direction === 'decrease') return `减少（${activityDirectionLabel(direction)}代理）`;
-  return activityDirectionLabel(direction);
-}
-
-function directionClass(direction: EtfActivityDirection) {
-  return direction === 'increase' ? 'etf-value--positive' : direction === 'decrease' ? 'etf-value--negative' : '';
-}
-
-function coreCell(key: string, record: unknown) {
-  const item = record as HuijinEtfActivityItem;
-  if (key === 'close_change_pct') return formatPercent(item.close_change_pct);
-  if (key === 'share_delta') return formatDirectionalShares(item.share_delta);
-  if (key === 'daily_change_pct') return formatPercent(item.daily_change_pct);
-  if (key === 'baseline_change_pct') return formatPercent(item.baseline_change_pct);
-  if (key === 'multiple') return formatActivityMultiple(item.multiple);
-  if (key === 'direction') return directionDisplay(item.direction);
-  if (key === 'data_state') return huijinActivityDataState(item);
-  return String(item[key as keyof HuijinEtfActivityItem] ?? '--');
 }
 
 function baselineCell(key: string, record: unknown) {
@@ -260,12 +235,6 @@ function thresholdValue(key: string, value: number) {
 
 function columnKey(key: unknown) {
   return typeof key === 'string' ? key : '';
-}
-
-function recordNumber(record: unknown, key: unknown) {
-  if (record === null || typeof record !== 'object' || typeof key !== 'string') return null;
-  const value = (record as Record<string, unknown>)[key];
-  return typeof value === 'number' ? value : null;
 }
 
 function holderRowKey(position: EtfHolderPosition) {
@@ -326,6 +295,13 @@ async function loadOverview(force = false) {
   errors.overview = null;
   try {
     overview.value = await requestCache.get('etf-radar-overview', getEtfRadarOverview, { force });
+    if (activeTab.value === 'activity' && !threeFactorLoading.value) {
+      const previous = selectedThreeFactorSymbol.value;
+      updateThreeFactorSelection();
+      if (selectedThreeFactorSymbol.value && selectedThreeFactorSymbol.value !== previous) {
+        loadThreeFactorHistory(selectedThreeFactorSymbol.value);
+      }
+    }
   } catch (error) {
     errors.overview = errorMessage(error, '读取汇金持仓概览失败');
   } finally {
@@ -412,14 +388,15 @@ function requestedThreeFactorSymbol() {
 }
 
 function updateThreeFactorSelection() {
-  const items = threeFactor.value?.items ?? [];
+  const rows = activityRows.value;
   const requested = requestedThreeFactorSymbol();
-  if (requested && items.some(item => item.symbol === requested)) {
+  if (requested && rows.some(row => row.symbol === requested)) {
     selectedThreeFactorSymbol.value = requested;
+    activityDetailOpen.value = true;
     return;
   }
-  if (!items.some(item => item.symbol === selectedThreeFactorSymbol.value)) {
-    selectedThreeFactorSymbol.value = items[0]?.symbol ?? '';
+  if (!rows.some(row => row.symbol === selectedThreeFactorSymbol.value)) {
+    selectedThreeFactorSymbol.value = pickDefaultEtfActivitySymbol(rows);
   }
 }
 
@@ -463,14 +440,18 @@ async function loadThreeFactorHistory(symbol: string, force = false) {
 
 async function loadActivityWorkbench(force = false) {
   await loadThreeFactor(force);
+  updateThreeFactorSelection();
   if (selectedThreeFactorSymbol.value) {
     await loadThreeFactorHistory(selectedThreeFactorSymbol.value, force);
   }
 }
 
 function selectThreeFactorSymbol(symbol: string) {
-  if (!threeFactor.value?.items.some(item => item.symbol === symbol) || symbol === selectedThreeFactorSymbol.value) return;
+  if (!activityRows.value.some(row => row.symbol === symbol)) return;
+  activityDetailOpen.value = true;
+  if (symbol === selectedThreeFactorSymbol.value) return;
   selectedThreeFactorSymbol.value = symbol;
+  threeFactorHistory.value = null;
   void loadThreeFactorHistory(symbol);
 }
 
@@ -604,121 +585,110 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
       </SectionHeader>
       <a-alert v-if="errors.overview" data-testid="etf-panel-error" type="warning" :message="activeErrorMessage()" show-icon />
       <a-alert v-if="threeFactorError" data-testid="three-factor-error" type="warning" :message="threeFactorErrorMessage()" show-icon />
-      <div v-if="threeFactorLoading && !threeFactor" class="etf-loading" aria-label="正在读取ETF三因子活动">
+      <div v-if="loading.activity && !overview && !threeFactor" class="etf-loading" aria-label="正在读取今日活动">
         <a-skeleton active :paragraph="{ rows: 6 }" />
       </div>
-      <EtfThreeFactorPanel
-        v-else-if="threeFactor"
-        :snapshot="threeFactor"
-        :history="selectedThreeFactorHistory"
-        :selected-symbol="selectedThreeFactorSymbol"
-        :history-loading="threeFactorHistoryLoading"
-        :history-error="threeFactorHistoryError"
-        @select="selectThreeFactorSymbol"
-      />
-      <div v-if="loading.activity && !overview" class="etf-loading" aria-label="正在读取今日活动">
-        <a-skeleton active :paragraph="{ rows: 7 }" />
-      </div>
-      <div v-else-if="overview" class="etf-panel-content">
-        <div class="etf-metrics" aria-label="今日活动摘要">
-          <div v-for="metric in overviewMetrics" :key="metric.label" class="etf-metric">
-            <span class="etf-metric__label">{{ metric.label }}</span>
-            <strong :class="metric.className">{{ metric.value }}</strong>
-            <small>{{ metric.helper }}</small>
-          </div>
-        </div>
-
-        <div class="etf-compact-meta">
-          <span>核心池 {{ overview.pool_version || '--' }}</span>
-          <span>报告基线 {{ overview.baseline_version || '--' }}</span>
-          <span
-            data-testid="baseline-fingerprint"
-            class="etf-fingerprint"
-            :title="overview.baseline_fingerprint || undefined"
-          >基线指纹 {{ formatFingerprint(overview.baseline_fingerprint) }}</span>
-          <span>模型 {{ overview.model_version || '--' }}</span>
-        </div>
-
-        <div class="etf-source-statuses">
-          <div v-for="source in activeSources()" :key="source.source" class="etf-source-status">
-            <span class="etf-source-status__summary">
-              {{ source.source }} <StatusTag :status="sourceStatusTone(source.status)" />
-            </span>
-            <span class="etf-source-status__detail">{{ source.detail || '--' }}</span>
-          </div>
-        </div>
-
-        <div
-          v-if="overview.core_items.length"
-          class="etf-table-scroll"
-          tabindex="0"
-          role="region"
-          aria-label="核心 ETF 今日活动表"
-        >
-          <a-table
-            data-testid="core-table"
-            :columns="coreColumns"
-            :data-source="overview.core_items"
-            :pagination="false"
-            :scroll="{ x: 1296 }"
-            row-key="symbol"
-            size="small"
-          >
-            <template #bodyCell="{ column, record }">
-              <div v-if="columnKey(column.key) === 'etf'" data-testid="core-etf-row" class="etf-name-cell">
-                <strong :title="record.name">{{ record.name }}</strong>
-                <span>{{ record.symbol }}</span>
-              </div>
-              <div v-else-if="columnKey(column.key) === 'holding'" class="etf-holding-cell">
-                <span>{{ formatHoldingPct(record.confirmed_huijin_holding_pct) }}</span>
-                <small>{{ record.report_period ? `报告期 ${record.report_period}` : '--' }}</small>
-              </div>
-              <span
-                v-else
-                :class="[
-                  ['close_change_pct', 'share_delta', 'daily_change_pct', 'baseline_change_pct'].includes(columnKey(column.key)) ? valueTone(recordNumber(record, column.key)) : '',
-                  columnKey(column.key) === 'direction' ? directionClass(record.direction) : ''
-                ]"
-              >
-                {{ coreCell(columnKey(column.key), record) }}
-              </span>
-            </template>
-          </a-table>
-        </div>
-        <div v-else class="etf-state">暂无核心 ETF 活动数据</div>
-
-        <div class="etf-divider" />
-        <h3 class="etf-subheading">交叉验证</h3>
-        <div
-          v-if="overview.validation_groups.length"
-          class="etf-validation-list"
-          tabindex="0"
-          role="region"
-          aria-label="ETF 配对交叉验证"
-        >
-          <div v-for="group in overview.validation_groups" :key="group.index_name" data-testid="validation-row" class="etf-validation-row">
-            <strong>{{ group.index_name }}</strong>
-            <div class="etf-validation-pair">
-              <span>
-                {{ group.core_symbol }}
-                <b :class="valueTone(validationItem(group.core_symbol)?.baseline_change_pct)">基线 {{ validationBaseline(group.core_symbol) }}</b>
-                <small>收盘涨跌 <b :class="valueTone(validationItem(group.core_symbol)?.close_change_pct)">{{ validationCloseChange(group.core_symbol) }}</b></small>
-              </span>
-              <span>
-                {{ group.validator_symbol }}
-                <b :class="valueTone(validationItem(group.validator_symbol)?.baseline_change_pct)">基线 {{ validationBaseline(group.validator_symbol) }}</b>
-                <small>收盘涨跌 <b :class="valueTone(validationItem(group.validator_symbol)?.close_change_pct)">{{ validationCloseChange(group.validator_symbol) }}</b></small>
-              </span>
+      <div v-else class="etf-panel-content">
+        <template v-if="overview">
+          <div class="etf-metrics" aria-label="今日活动摘要">
+            <div v-for="metric in overviewMetrics" :key="metric.label" class="etf-metric">
+              <span class="etf-metric__label">{{ metric.label }}</span>
+              <strong :class="metric.className">{{ metric.value }}</strong>
+              <small>{{ metric.helper }}</small>
             </div>
-            <span>保守结果 <b data-testid="validation-conservative" :class="validationTone(group.state)">{{ conservativeResult(group) }}</b></span>
-            <span>保守倍数 <b>{{ conservativeMultiple(group) }}</b></span>
-            <span class="etf-validation-state" :class="validationTone(group.state)">{{ validationStateLabel(group.state) }}</span>
           </div>
-        </div>
-        <div v-else class="etf-state etf-state--compact">暂无配对验证数据</div>
+
+          <div class="etf-compact-meta">
+            <span>核心池 {{ overview.pool_version || '--' }}</span>
+            <span>报告基线 {{ overview.baseline_version || '--' }}</span>
+            <span
+              data-testid="baseline-fingerprint"
+              class="etf-fingerprint"
+              :title="overview.baseline_fingerprint || undefined"
+            >基线指纹 {{ formatFingerprint(overview.baseline_fingerprint) }}</span>
+            <span>模型 {{ overview.model_version || '--' }}</span>
+          </div>
+
+          <div class="etf-source-statuses">
+            <div v-for="source in activeSources()" :key="source.source" class="etf-source-status">
+              <span class="etf-source-status__summary">
+                {{ source.source }} <StatusTag :status="sourceStatusTone(source.status)" />
+              </span>
+              <span class="etf-source-status__detail">{{ source.detail || '--' }}</span>
+            </div>
+          </div>
+        </template>
+
+        <EtfActivityTable
+          v-if="activityRows.length"
+          :rows="activityRows"
+          :selected-symbol="selectedThreeFactorSymbol"
+          @select="selectThreeFactorSymbol"
+        />
+        <div v-else class="etf-state">暂无今日活动数据</div>
+
+        <template v-if="threeFactor && activityDetailOpen">
+          <EtfThreeFactorPanel
+            v-if="isCompact"
+            :snapshot="threeFactor"
+            :history="selectedThreeFactorHistory"
+            :selected-symbol="selectedThreeFactorSymbol"
+            :history-loading="threeFactorHistoryLoading"
+            :history-error="threeFactorHistoryError"
+          />
+          <ADrawer v-else v-model:open="activityDetailOpen" title="ETF 活动证据" placement="right" :width="560">
+            <EtfThreeFactorPanel
+              :snapshot="threeFactor"
+              :history="selectedThreeFactorHistory"
+              :selected-symbol="selectedThreeFactorSymbol"
+              :history-loading="threeFactorHistoryLoading"
+              :history-error="threeFactorHistoryError"
+            />
+          </ADrawer>
+        </template>
+
+        <template v-if="overview">
+          <div class="etf-divider" />
+          <button
+            id="etf-validation-toggle"
+            type="button"
+            class="etf-disclosure-toggle"
+            :aria-expanded="validationExpanded"
+            aria-controls="etf-validation-content"
+            @click="validationExpanded = !validationExpanded"
+          >
+            交叉验证
+          </button>
+          <div
+            v-if="validationExpanded && overview.validation_groups.length"
+            id="etf-validation-content"
+            class="etf-validation-list"
+            tabindex="0"
+            role="region"
+            aria-label="ETF 配对交叉验证"
+          >
+            <div v-for="group in overview.validation_groups" :key="group.index_name" data-testid="validation-row" class="etf-validation-row">
+              <strong>{{ group.index_name }}</strong>
+              <div class="etf-validation-pair">
+                <span>
+                  {{ group.core_symbol }}
+                  <b :class="valueTone(validationItem(group.core_symbol)?.baseline_change_pct)">基线 {{ validationBaseline(group.core_symbol) }}</b>
+                  <small>收盘涨跌 <b :class="valueTone(validationItem(group.core_symbol)?.close_change_pct)">{{ validationCloseChange(group.core_symbol) }}</b></small>
+                </span>
+                <span>
+                  {{ group.validator_symbol }}
+                  <b :class="valueTone(validationItem(group.validator_symbol)?.baseline_change_pct)">基线 {{ validationBaseline(group.validator_symbol) }}</b>
+                  <small>收盘涨跌 <b :class="valueTone(validationItem(group.validator_symbol)?.close_change_pct)">{{ validationCloseChange(group.validator_symbol) }}</b></small>
+                </span>
+              </div>
+              <span>保守结果 <b data-testid="validation-conservative" :class="validationTone(group.state)">{{ conservativeResult(group) }}</b></span>
+              <span>保守倍数 <b>{{ conservativeMultiple(group) }}</b></span>
+              <span class="etf-validation-state" :class="validationTone(group.state)">{{ validationStateLabel(group.state) }}</span>
+            </div>
+          </div>
+          <div v-else-if="validationExpanded" id="etf-validation-content" class="etf-state etf-state--compact">暂无配对验证数据</div>
+        </template>
       </div>
-      <div v-else-if="errors.overview" class="etf-state">今日份额活动概览暂不可用，旧版概览表与交叉验证已降级。</div>
-      <div v-else class="etf-state">暂无今日活动数据</div>
     </section>
 
     <section v-else-if="activeTab === 'holders'" class="etf-panel">
@@ -1024,8 +994,7 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
 
 .etf-metric__label,
 .etf-metric small,
-.etf-name-cell span,
-.etf-holding-cell small {
+.etf-name-cell span {
   display: block;
   color: var(--wb-muted);
   font-size: 12px;
@@ -1072,8 +1041,7 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
   overflow-x: auto;
 }
 
-.etf-name-cell,
-.etf-holding-cell {
+.etf-name-cell {
   min-width: 0;
   line-height: 1.35;
 }
@@ -1121,6 +1089,18 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
   margin: 0 0 10px;
   color: var(--wb-ink);
   font-size: 14px;
+  line-height: 20px;
+}
+
+.etf-disclosure-toggle {
+  margin: 0 0 10px;
+  padding: 0;
+  border: 0;
+  color: var(--wb-ink);
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
   line-height: 20px;
 }
 

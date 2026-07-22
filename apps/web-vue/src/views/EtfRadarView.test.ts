@@ -103,6 +103,13 @@ const ButtonStub = defineComponent({
   template: '<button data-testid="etf-refresh" @click="$emit(\'click\')"><slot /></button>'
 });
 
+const DrawerStub = defineComponent({
+  name: 'ADrawer',
+  props: { open: { type: Boolean, default: false } },
+  emits: ['update:open'],
+  template: '<aside v-if="open" data-testid="etf-detail-drawer"><slot /></aside>'
+});
+
 const source = readFileSync(resolvePath(process.cwd(), 'src/views/EtfRadarView.vue'), 'utf8');
 const BASELINE_FINGERPRINT = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
@@ -319,6 +326,7 @@ function mountViewImmediately() {
         ATable: TableStub,
         AAlert: AlertStub,
         AButton: ButtonStub,
+        ADrawer: DrawerStub,
         ASkeleton: { template: '<div data-testid="etf-skeleton" />' },
         EChart: ChartStub
       }
@@ -364,16 +372,28 @@ describe('EtfRadarView', () => {
     expect(wrapper.text()).toContain('十倍量增加');
     expect(wrapper.text()).toContain('十倍量减少');
     expect(wrapper.text()).toContain('交叉验证');
-    expect(wrapper.find('[data-testid="validation-row"]').text()).toContain('收盘涨跌');
     expect(wrapper.text()).toContain('方向分歧');
-    expect(wrapper.findAll('[data-testid="core-etf-row"]')).toHaveLength(7);
-    expect(wrapper.findAll('[data-testid="validation-row"]')).toHaveLength(3);
-    expect(wrapper.text()).toContain('▲ +2.00亿份');
-    expect(wrapper.text()).toContain('▼ -1.20亿份');
-    expect(wrapper.text()).toContain('交易所尚未披露');
-    expect(wrapper.text()).toContain('日度历史积累中');
-    expect(wrapper.text()).toContain('确认基线缺失');
-    expect(wrapper.text()).toContain('可计算');
+    expect(wrapper.findAll('[data-testid="etf-activity-table"]')).toHaveLength(1);
+    expect(wrapper.find('[data-testid="three-factor-table"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="dragon-status"]').exists()).toBe(false);
+    expect(wrapper.find('[data-testid="factor-detail"]').exists()).toBe(false);
+    expect(wrapper.findAll('[data-testid="activity-etf-row"]')).toHaveLength(7);
+    expect(wrapper.find('[aria-label="ETF 配对交叉验证"]').exists()).toBe(false);
+    await wrapper.findAll('[data-testid="activity-etf-row"]')[1]!.trigger('click');
+    expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('三因子ETF2');
+    expect(api.getEtfThreeFactorHistory).toHaveBeenCalledWith('510300.SH', 40);
+    const historyRequestCount = api.getEtfThreeFactorHistory.mock.calls.length;
+    await wrapper
+      .find('[data-testid="activity-etf-row"][data-symbol="510300.SH"]')
+      .get('[data-testid="activity-etf-select"]')
+      .trigger('click');
+    expect(api.getEtfThreeFactorHistory).toHaveBeenCalledTimes(historyRequestCount);
+    expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('三因子ETF2');
+    expect(wrapper.find('[aria-label="ETF 配对交叉验证"]').exists()).toBe(false);
+    await wrapper.get('button[aria-expanded="false"]').trigger('click');
+    expect(wrapper.get('[aria-label="ETF 配对交叉验证"]')).toBeTruthy();
+    expect(wrapper.get('[data-testid="etf-activity-table"]').text()).toContain('+14.50%');
+    expect(wrapper.get('[data-testid="etf-activity-table"]').text()).toContain('高确信');
     expect(wrapper.text()).toContain('配对一致增加');
     expect(wrapper.text()).toContain('配对一致减少');
     expect(wrapper.text()).not.toContain('确认增加');
@@ -385,11 +405,12 @@ describe('EtfRadarView', () => {
     expect(fingerprint.text()).toContain('基线指纹 0123456789...');
     expect(fingerprint.attributes('title')).toBe(BASELINE_FINGERPRINT);
     expect(wrapper.text()).not.toContain(BASELINE_FINGERPRINT);
-    const coreRegion = wrapper.get('[aria-label="核心 ETF 今日活动表"]');
-    expect(coreRegion.attributes()).toMatchObject({ role: 'region', tabindex: '0' });
+    const activityTable = wrapper.get('[data-testid="etf-activity-table"]');
+    expect(activityTable.get('[aria-label="ETF活动统一表"]').attributes()).toMatchObject({ role: 'region', tabindex: '0' });
+    expect(wrapper.get('button[aria-expanded="true"]').attributes('aria-controls')).toBe('etf-validation-content');
     const validationRegion = wrapper.get('[aria-label="ETF 配对交叉验证"]');
     expect(validationRegion.attributes()).toMatchObject({ role: 'region', tabindex: '0' });
-    expect(wrapper.get('[data-testid="core-etf-row"] strong').attributes('title')).toBe('华夏上证50ETF');
+    expect(wrapper.get('[data-testid="activity-etf-row"] strong').attributes('title')).toBe('华夏上证50ETF');
     expect(wrapper.text()).not.toContain('OLD_GENERIC_SENTINEL');
     expect(wrapper.text()).not.toMatch(/证据强度|稳健分|同时间成交|相对指数|估算申购/);
     wrapper.unmount();
@@ -408,11 +429,32 @@ describe('EtfRadarView', () => {
 
     expect(api.getEtfThreeFactor).toHaveBeenCalledTimes(1);
     expect(api.getEtfThreeFactorHistory).toHaveBeenCalledWith('510050.SH', 40);
-    const table = wrapper.get('[data-testid="core-table"]');
+    const table = wrapper.get('[data-testid="etf-activity-table"]');
     expect(table.text()).toContain('收盘涨跌');
-    expect(table.html()).toContain('etf-value--positive');
-    expect(table.html()).toContain('etf-value--negative');
+    expect(table.html()).toContain('etf-activity-table__value--rise');
+    expect(table.html()).toContain('etf-activity-table__value--fall');
     expect(table.text()).toContain('份额日变化');
+    wrapper.unmount();
+  });
+
+  it('defaults to the merged row with the highest non-null factor score', async () => {
+    routeState.route.query = { tab: 'activity' };
+    setDefaultApiResponses();
+    const factorResponse = threeFactorFixture();
+    factorResponse.items[0]!.signal_score = 10;
+    factorResponse.items[2]!.signal_score = 99;
+    api.getEtfThreeFactor.mockResolvedValueOnce(factorResponse);
+
+    const wrapper = await mountView();
+
+    expect(api.getEtfThreeFactorHistory).toHaveBeenCalledWith('510500.SH', 40);
+    expect(
+      wrapper
+        .find('[data-testid="activity-etf-row"][data-symbol="510500.SH"]')
+        .get('[data-testid="activity-etf-select"]')
+        .attributes('aria-pressed')
+    ).toBe('true');
+    expect(wrapper.find('[data-testid="factor-detail"]').exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -427,19 +469,49 @@ describe('EtfRadarView', () => {
     wrapper.unmount();
   });
 
-  it('keeps the workbench usable when the overview request fails and degrades its legacy tables', async () => {
+  it('keeps the workbench usable when the overview request fails and uses factor-only rows', async () => {
     routeState.route.query = { tab: 'activity' };
     setDefaultApiResponses();
     api.getEtfRadarOverview.mockRejectedValueOnce(new Error('概览服务暂不可用'));
+    const factorResponse = threeFactorFixture();
+    factorResponse.items.push(threeFactorItem({
+      symbol: '600000.SH',
+      name: '仅三因子ETF',
+      index_name: '上证指数',
+      close_change_pct: 2.5,
+      signal_score: 96
+    }));
+    api.getEtfThreeFactor.mockResolvedValueOnce(factorResponse);
 
     const wrapper = await mountView();
 
-    expect(wrapper.find('[data-testid="etf-three-factor-panel"]').exists()).toBe(true);
-    expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('三因子ETF1');
+    expect(wrapper.findAll('[data-testid="etf-activity-table"]')).toHaveLength(1);
+    expect(wrapper.findAll('[data-testid="activity-etf-row"]')).toHaveLength(8);
+    expect(wrapper.get('[data-testid="etf-activity-table"]').text()).toContain('仅三因子ETF');
     expect(wrapper.get('[data-testid="etf-panel-error"]').text()).toContain('概览服务暂不可用');
-    expect(wrapper.find('[data-testid="core-table"]').exists()).toBe(false);
-    expect(wrapper.text()).toContain('今日份额活动概览暂不可用');
+    await wrapper.find('[data-testid="activity-etf-row"][data-symbol="600000.SH"]').trigger('click');
+    expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('仅三因子ETF');
     expect(wrapper.get('.wb-section-header .wb-status-tag').text()).toBe('成功');
+    wrapper.unmount();
+  });
+
+  it('keeps overview rows selected and usable when the factor request fails', async () => {
+    routeState.route.query = { tab: 'activity' };
+    setDefaultApiResponses();
+    api.getEtfThreeFactor.mockRejectedValueOnce(new Error('三因子服务暂不可用'));
+
+    const wrapper = await mountView();
+
+    expect(wrapper.findAll('[data-testid="etf-activity-table"]')).toHaveLength(1);
+    expect(wrapper.findAll('[data-testid="activity-etf-row"]')).toHaveLength(7);
+    expect(
+      wrapper
+        .find('[data-testid="activity-etf-row"][data-symbol="510050.SH"]')
+        .get('[data-testid="activity-etf-select"]')
+        .attributes('aria-pressed')
+    ).toBe('true');
+    expect(wrapper.get('[data-testid="three-factor-error"]').text()).toContain('三因子服务暂不可用');
+    expect(wrapper.find('[data-testid="factor-detail"]').exists()).toBe(false);
     wrapper.unmount();
   });
 
@@ -457,7 +529,7 @@ describe('EtfRadarView', () => {
     await vi.waitFor(() => {
       expect(api.getEtfThreeFactorHistory).toHaveBeenCalledWith('510050.SH', 40);
     });
-    await wrapper.findAll('[data-testid="dragon-status"]')[1]!.trigger('click');
+    await wrapper.findAll('[data-testid="activity-etf-row"]')[1]!.trigger('click');
 
     await vi.waitFor(() => {
       expect(api.getEtfThreeFactorHistory).toHaveBeenCalledWith('510300.SH', 40);
@@ -490,7 +562,7 @@ describe('EtfRadarView', () => {
     setDefaultApiResponses();
     const wrapper = await mountView();
 
-    expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('三因子ETF1');
+    expect(wrapper.find('[data-testid="factor-detail"]').exists()).toBe(false);
     expect(api.getEtfThreeFactorHistory).toHaveBeenCalledWith('510050.SH', 40);
 
     routeState.route.query = { tab: 'activity', symbol: '159915.SZ' };
@@ -520,6 +592,7 @@ describe('EtfRadarView', () => {
 
     expect(api.getEtfThreeFactor).toHaveBeenCalledTimes(2);
     expect(api.getEtfThreeFactorHistory).toHaveBeenCalledTimes(2);
+    await wrapper.find('[data-testid="activity-etf-row"][data-symbol="510050.SH"]').trigger('click');
     expect(wrapper.find('[data-testid="etf-three-factor-panel"]').exists()).toBe(true);
     expect(wrapper.get('[data-testid="three-factor-error"]').text()).toContain('当前显示上次成功数据');
     wrapper.unmount();
@@ -564,6 +637,7 @@ describe('EtfRadarView', () => {
 
     const wrapper = await mountView();
     await openTab(wrapper, 1);
+    await wrapper.get('button[aria-expanded="false"]').trigger('click');
     const divergenceMetric = wrapper.findAll('.etf-metric').find(metric => metric.text().includes('方向分歧'))!;
     expect(divergenceMetric.get('strong').classes()).not.toContain('etf-value--warning');
 

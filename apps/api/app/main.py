@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 from threading import RLock, Thread
 from time import perf_counter
 from pathlib import Path
@@ -74,6 +74,7 @@ from app.models import (
     SectorReplicaRadarResponse,
     SectorReplicaStocksResponse,
     SentimentDetailResponse,
+    SentimentPercentileResponse,
     ShortTermIntradaySentimentResponse,
     ShortTermIntradaySignalDigest,
     ShortTermSentimentResponse,
@@ -206,6 +207,8 @@ from app.services.sector_replica_live import SectorReplicaLiveProvider
 from app.services.sector_workbench_intraday import build_sector_intraday_series
 from app.services.sector_workbench_store import SectorThemeRowsStore, SectorWorkbenchSampleStore
 from app.services.short_term_cache import TtlCache
+from app.services.market_sentiment_percentile_service import MarketSentimentPercentileService
+from app.services.market_sentiment_percentile_store import MarketSentimentPercentileStore
 from app.services.sentiment_snapshot_store import SentimentSnapshotStore
 from app.services.sentiment_monitor import (
     SentimentMonitor,
@@ -1970,6 +1973,23 @@ def get_short_term_sentiment(trade_date: str, limit: int = 50) -> dict[str, obje
     return result.model_dump(mode="json")
 
 
+@app.get(
+    "/api/short-term/sentiment/percentile",
+    response_model=SentimentPercentileResponse,
+)
+def get_market_sentiment_percentile(
+    as_of: date | None = None,
+    refresh: bool = False,
+) -> SentimentPercentileResponse:
+    try:
+        return _market_sentiment_percentile_service().get(
+            as_of=as_of.isoformat() if as_of else None,
+            refresh=refresh,
+        )
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 @app.get("/api/short-term/sentiment/summary")
 def get_short_term_sentiment_summary(
     trade_date: str,
@@ -3464,6 +3484,28 @@ def _kline_provider() -> object:
 
 def _daily_kline_provider() -> object:
     return _kline_provider()
+
+
+def _market_sentiment_percentile_store() -> MarketSentimentPercentileStore:
+    injected = getattr(app.state, "market_sentiment_percentile_store", None)
+    if injected is not None:
+        return injected
+    data_dir = Path(getattr(app.state, "runs_dir", get_settings().data_dir))
+    store = MarketSentimentPercentileStore(data_dir)
+    app.state.market_sentiment_percentile_store = store
+    return store
+
+
+def _market_sentiment_percentile_service() -> MarketSentimentPercentileService:
+    injected = getattr(app.state, "market_sentiment_percentile_service", None)
+    if injected is not None:
+        return injected
+    service = MarketSentimentPercentileService(
+        provider=_daily_kline_provider(),
+        store=_market_sentiment_percentile_store(),
+    )
+    app.state.market_sentiment_percentile_service = service
+    return service
 
 
 def _chanlun_daily_provider() -> object:

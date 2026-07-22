@@ -40,19 +40,38 @@ export function buildUnifiedEtfActivityRows(
   return symbols.map(symbol => {
     const activity = activityBySymbol.get(symbol) ?? null;
     const factor = factorBySymbol.get(symbol) ?? null;
-    return {
+    const row: UnifiedEtfActivityRow = {
       symbol,
-      name: activity?.name ?? factor?.name ?? symbol,
-      indexName: activity?.index_name ?? factor?.index_name ?? '--',
-      closeChangePct: activity?.close_change_pct ?? factor?.close_change_pct ?? null,
-      dailyChangePct: activity?.daily_change_pct ?? null,
-      baselineChangePct: activity?.cumulative_baseline_change_pct ?? activity?.baseline_change_pct ?? null,
-      volumeRatio: factor?.volume_ratio ?? null,
-      signalScore: factor?.signal_score ?? null,
-      signalLevel: factor?.level ?? 'incomplete',
+      name: symbol,
+      indexName: '--',
+      closeChangePct: null,
+      dailyChangePct: null,
+      baselineChangePct: null,
+      volumeRatio: null,
+      signalScore: null,
+      signalLevel: 'incomplete',
       activity,
       factor
     };
+
+    if (factor) {
+      row.name = factor.name;
+      row.indexName = factor.index_name;
+      row.closeChangePct = factor.close_change_pct;
+      row.volumeRatio = factor.volume_ratio;
+      row.signalScore = factor.signal_score;
+      row.signalLevel = factor.level;
+    }
+
+    if (activity) {
+      row.name = activity.name;
+      row.indexName = activity.index_name;
+      row.closeChangePct = activity.close_change_pct ?? row.closeChangePct;
+      row.dailyChangePct = activity.daily_change_pct;
+      row.baselineChangePct = activity.cumulative_baseline_change_pct ?? activity.baseline_change_pct;
+    }
+
+    return row;
   });
 }
 

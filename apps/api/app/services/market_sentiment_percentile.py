@@ -155,12 +155,12 @@ def calculate_sentiment_percentile(bars: list[KlineBar]) -> list[SentimentPercen
 def _normalize_bars(bars: list[KlineBar]) -> list[KlineBar]:
     by_date: dict[str, KlineBar] = {}
     for bar in bars:
-        _validate_bar(bar)
+        validate_sentiment_bar(bar)
         by_date[bar.date] = bar
     return [by_date[key] for key in sorted(by_date)]
 
 
-def _validate_bar(bar: KlineBar) -> None:
+def validate_sentiment_bar(bar: KlineBar) -> None:
     values = (bar.open, bar.high, bar.low, bar.close, bar.amount)
     if (
         bar.amount is None

@@ -162,7 +162,7 @@ _NUMBER_TEXT = r"[+-]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
 _PROHIBITED_RESULT_TEXT_PATTERN = re.compile(
     r"(?:个股|股票(?:代码)?|证券代码|标的|"
     r"\b(?:individual\s+stock|stock\s+code|security\s+recommendation|ticker)\b|"
-    r"仓位|轻仓|重仓|满仓|半仓|加仓|减仓|增持|减持|建仓|持仓|空仓|"
+    r"仓位|轻仓|重仓|满仓|半仓|加仓|减仓|增持|减持|建仓|持仓|持有|空仓|"
     rf"\b(?:maintain|hold|keep)\s+(?:a\s+)?{_NUMBER_TEXT}\s*(?:%|％)?\s+position\b|"
     r"控制资金比例|资金(?:使用|投入|配置|分配|安排)?(?:比例|占比)|"
     rf"(?:建议|计划|可以|可)?\s*(?:投入|配置|分配|安排)\s*{_NUMBER_TEXT}\s*(?:%|％)?\s*资金|"
@@ -196,6 +196,7 @@ _NUMBERED_INDEX_ENTITY_PATTERN = re.compile(
 )
 _CLAUSE_SPLIT_PATTERN = re.compile(r"[，,。；;！？!?\n]+")
 _CONSEQUENCE_SPLIT_PATTERN = re.compile(r"\s*(?:(?<!否)则|那么|届时|\bthen\b)\s*", re.IGNORECASE)
+_MOVEMENT_CONNECTOR_PREFIX_PATTERN = re.compile(r"^\s*(?:且|并且|以及|同时|和|与)\s*")
 _THRESHOLD_PREFIX_PATTERN = re.compile(
     r"(?:如果|若|一旦|当|只要|高于|低于|超过|不超过|少于|不少于|至少|至多|"
     r"突破|跌破|达到|维持在|>=|<=|>|<|\bif\b|\bwhen\b|\babove\b|\bbelow\b|"
@@ -299,13 +300,17 @@ _VALIDATION_CLAIM_PATTERN = re.compile(r"历史样本|验证样本|样本(?:数|
 _HISTORICAL_LEVEL_CUE_PATTERN = re.compile(r"历史|过去|此前|曾经|曾|前一日|前日|昨日|上日|\d+日前")
 _CURRENT_CUE_PATTERN = re.compile(r"当前|目前|现时|now|current", re.IGNORECASE)
 _MOVEMENT_PATTERN = re.compile(
-    r"上涨|下跌|上升|下降|走高|走低|走强|走弱|反弹|回落|攀升|跳水|领涨|领跌|涨幅|跌幅|"
+    r"上涨(?:了)?|下跌(?:了)?|上升|下降|走高|走低|走强|走弱|反弹|回落|攀升|跳水|"
+    r"领涨|领跌|涨幅|跌幅|涨了|跌了|"
     r"\b(?:rise|rises|rose|fall|falls|fell|rally|rallies|drop|drops|dropped)\b",
     re.IGNORECASE,
 )
-_RECOMMENDATION_AFTER_PATTERN = re.compile(r"(?:推荐|看好|关注|首选)\s*(?P<target>[^，,。；;！？!?\n]+)")
+_RECOMMENDATION_AFTER_PATTERN = re.compile(
+    r"(?:推荐|看好|关注|首选|建议(?:配置|持有|买入?|卖出?))\s*"
+    r"(?P<target>[^，,。；;！？!?\n]+)"
+)
 _RECOMMENDATION_BEFORE_PATTERN = re.compile(
-    r"(?P<target>[^，,。；;！？!?\n]+?)(?:值得关注|可重点关注)"
+    r"(?P<target>[^，,。；;！？!?\n]+?)(?:值得关注|可重点关注|值得买|值得卖|是首选)"
 )
 _ATTENTION_CLAIM_PATTERN = re.compile(
     r"(?P<target>[^，,。；;！？!?\n]+?)(?:的)?表现受到关注"
@@ -385,15 +390,22 @@ _FACTOR_RAW_CLAIM_PATTERNS = (
         re.compile(r"(?:成交量|量能)趋势(?:原始值|数值|值)?" + _VALUE_LINK + _CLAIM_NUMBER),
     ),
 )
+_MOVEMENT_VALUE_CLAIM_PATTERN = re.compile(
+    r"(?P<movement>上涨|下跌|上升|下降|走高|走低|走强|走弱|反弹|回落|攀升|跳水|"
+    r"领涨|领跌|涨幅|跌幅|涨|跌)(?:了)?" + _VALUE_LINK + _CLAIM_NUMBER,
+    re.IGNORECASE,
+)
+_FIVE_DAY_SUFFIX_PATTERN = re.compile(r"(?:近|过去)?\s*(?:5|五)\s*日(?:内)?$")
+_NEGATIVE_MOVEMENT_PATTERN = re.compile(r"下跌|下降|走低|走弱|回落|跳水|领跌|跌幅|跌")
 _SCORE_CHANGE_1D_CLAIM_PATTERN = re.compile(
-    r"(?:(?:市场|情绪|综合)?(?:得分|评分|分数)\s*(?:较|比)\s*"
-    r"(?:前一日|前日|昨日|上日)|(?:单日|一日|1日)\s*(?:市场|情绪|综合)?"
+    r"(?:(?:市场情绪|市场|情绪|综合)?(?:得分|评分|分数)\s*(?:较|比)\s*"
+    r"(?:前一日|前日|昨日|上日)|(?:单日|一日|1日)\s*(?:市场情绪|市场|情绪|综合)?"
     r"(?:得分|评分|分数))\s*(?P<direction>变化|变动|上升|下降|增加|减少)"
     r"\s*(?:为|至|了)?\s*" + _CLAIM_NUMBER
 )
 _SCORE_CHANGE_5D_CLAIM_PATTERN = re.compile(
-    r"(?:(?:市场|情绪|综合)?(?:得分|评分|分数)\s*(?:较|比)\s*5日前|"
-    r"(?:5日|五日)\s*(?:市场|情绪|综合)?(?:得分|评分|分数))\s*"
+    r"(?:(?:市场情绪|市场|情绪|综合)?(?:得分|评分|分数)\s*(?:较|比)\s*5日前|"
+    r"(?:5日|五日)\s*(?:市场情绪|市场|情绪|综合)?(?:得分|评分|分数))\s*"
     r"(?P<direction>变化|变动|上升|下降|增加|减少)\s*(?:为|至|了)?\s*"
     + _CLAIM_NUMBER
 )
@@ -487,6 +499,38 @@ def hash_sentiment_analysis_input(payload: Mapping[str, object]) -> str:
         separators=(",", ":"),
     )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def sentiment_analysis_record_matches(
+    record: SentimentPercentileAnalysisResponse | None,
+    input_payload: Mapping[str, object],
+    config: EffectiveAiAnalysisSettings,
+) -> bool:
+    if record is None:
+        return False
+    canonical_input = _normalize_analysis_input(input_payload)
+    trade_date = _trade_date(canonical_input)
+    input_hash = hash_sentiment_analysis_input(canonical_input)
+    return _same_identity(record, trade_date, input_hash, config)
+
+
+def sentiment_analysis_record_is_reusable(
+    record: SentimentPercentileAnalysisResponse | None,
+    input_payload: Mapping[str, object],
+    config: EffectiveAiAnalysisSettings,
+) -> bool:
+    if not sentiment_analysis_record_matches(record, input_payload, config):
+        return False
+    if record is None:
+        return False
+    if record.status == "ready":
+        return True
+    return _is_matching_cooling_failure(
+        record,
+        record.trade_date,
+        record.input_hash or "",
+        config,
+    )
 
 
 def _normalize_analysis_input(payload: Mapping[str, object]) -> dict[str, object]:
@@ -615,6 +659,12 @@ class MarketSentimentAnalysisService:
         return self.store.save(failed)
 
 
+_RESULT_SCHEMA_JSON = json.dumps(
+    SentimentAnalysisResult.model_json_schema(),
+    ensure_ascii=False,
+    sort_keys=True,
+    separators=(",", ":"),
+)
 _SYSTEM_PROMPT = (
     "You are a post-close market-statistics interpreter. Return only one JSON object matching the "
     "requested schema. Do not modify or override any statistic, score, level, factor weights, or "
@@ -623,7 +673,8 @@ _SYSTEM_PROMPT = (
     "state unavailable data as unavailable. Every factual number must equal a provided input value. "
     "Only next-session watch conditions may introduce a new number, and only as an explicit "
     "conditional threshold. Describe movements only for market aggregates, indexes, or supplied "
-    "sectors. Every key driver and next session watch condition must cite an ASCII digit."
+    "sectors. Every key driver and next session watch condition must cite an ASCII digit. "
+    f"The required output JSON Schema is: {_RESULT_SCHEMA_JSON}"
 )
 
 
@@ -844,6 +895,7 @@ def _validate_field_specific_claims(
     allow_thresholds: bool,
 ) -> None:
     _validate_sector_strength_claims(clause, analysis_input, allow_thresholds=allow_thresholds)
+    _validate_movement_value_claims(clause, analysis_input, allow_thresholds=allow_thresholds)
 
     for field_name, pattern in _MARKET_FIELD_CLAIM_PATTERNS:
         value = _market_field_value(field_name, clause, analysis_input)
@@ -902,6 +954,47 @@ def _validate_field_specific_claims(
         allow_thresholds=allow_thresholds,
         error="AI response claims an unavailable decision score change",
     )
+
+
+def _validate_movement_value_claims(
+    clause: str,
+    analysis_input: _SentimentAnalysisInput,
+    *,
+    allow_thresholds: bool,
+) -> None:
+    score_change_spans = _score_change_spans(clause)
+    index_factor_spans = tuple(
+        factor_match.span()
+        for factor_name, pattern in _FACTOR_RAW_CLAIM_PATTERNS
+        if factor_name == "index_move_5d"
+        for factor_match in pattern.finditer(clause)
+    )
+    for match in _MOVEMENT_VALUE_CLAIM_PATTERN.finditer(clause):
+        if _match_within_spans(match, score_change_spans):
+            continue
+        if allow_thresholds and _number_is_threshold(clause, match):
+            continue
+        if _match_within_spans(match, index_factor_spans):
+            continue
+        movement_prefix = _movement_local_prefix(clause, match.start(), score_change_spans)
+        subject = _movement_subject(movement_prefix)
+        if _GENERIC_METRIC_ENTITY_PATTERN.fullmatch(subject):
+            continue
+        has_five_day_horizon = bool(
+            _FIVE_DAY_SUFFIX_PATTERN.search(movement_prefix.rstrip("的 ").strip())
+        )
+        names_sector = any(item.name in subject for item in analysis_input.main_sectors.items)
+        if not has_five_day_horizon or names_sector:
+            raise ValueError("AI response uses an unavailable movement horizon")
+
+        claimed_value = _normalized_claim_number(match)
+        if _NEGATIVE_MOVEMENT_PATTERN.search(match.group("movement")):
+            claimed_value = -abs(claimed_value)
+        else:
+            claimed_value = abs(claimed_value)
+        expected_value = Decimal(str(analysis_input.percentile.factors.index_move_5d.raw_value))
+        if claimed_value != expected_value:
+            raise ValueError("AI response changes the five-day index movement")
 
 
 def _validate_sector_strength_claims(
@@ -979,15 +1072,52 @@ def _validate_claim_matches(
 
 def _validate_movement_subjects(text: str, sector_names: Sequence[str]) -> None:
     for clause in _CLAUSE_SPLIT_PATTERN.split(text):
+        score_change_spans = _score_change_spans(clause)
         for match in _MOVEMENT_PATTERN.finditer(clause):
-            subject = _movement_subject(clause[: match.start()])
+            if _match_within_spans(match, score_change_spans):
+                continue
+            subject = _movement_subject(
+                _movement_local_prefix(clause, match.start(), score_change_spans)
+            )
             if subject and not _is_allowed_entity_reference(subject, sector_names):
                 raise ValueError("AI response names a non-aggregate movement subject")
+
+
+def _score_change_spans(clause: str) -> tuple[tuple[int, int], ...]:
+    return tuple(
+        match.span()
+        for pattern in (
+            _SCORE_CHANGE_1D_CLAIM_PATTERN,
+            _SCORE_CHANGE_5D_CLAIM_PATTERN,
+            _DECISION_SCORE_CHANGE_CLAIM_PATTERN,
+        )
+        for match in pattern.finditer(clause)
+    )
+
+
+def _match_within_spans(
+    match: re.Match[str],
+    spans: Sequence[tuple[int, int]],
+) -> bool:
+    return any(start <= match.start() and match.end() <= end for start, end in spans)
+
+
+def _movement_local_prefix(
+    clause: str,
+    movement_start: int,
+    score_change_spans: Sequence[tuple[int, int]],
+) -> str:
+    prior_end = max(
+        (end for _start, end in score_change_spans if end <= movement_start),
+        default=0,
+    )
+    return _MOVEMENT_CONNECTOR_PREFIX_PATTERN.sub("", clause[prior_end:movement_start])
 
 
 def _movement_subject(prefix: str) -> str:
     subject = _SUBJECT_QUALIFIER_PATTERN.sub("", prefix).strip()
     subject = re.sub(r"^(?:近|过去)?\s*\d+(?:\.\d+)?\s*(?:日|周|月|年)(?:内)?\s*", "", subject)
+    subject = _FIVE_DAY_SUFFIX_PATTERN.sub("", subject).strip()
     return subject.rstrip("的 ").strip()
 
 

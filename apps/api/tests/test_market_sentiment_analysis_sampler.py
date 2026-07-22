@@ -57,11 +57,16 @@ def test_sampler_waits_until_1515_then_completes_current_date() -> None:
     )
 
     assert sampler.sample_once() is False
-    assert resolved == []
+    assert resolved == [clock.current]
     clock.current = datetime.fromisoformat("2026-07-22T15:15:00+08:00")
     assert sampler.sample_once() is True
-    assert sampler.sample_once() is False
-    assert calls == [clock.current]
+    assert sampler.sample_once() is True
+    assert resolved == [
+        datetime.fromisoformat("2026-07-22T15:14:00+08:00"),
+        clock.current,
+        clock.current,
+    ]
+    assert calls == [clock.current, clock.current]
 
 
 def test_sampler_catches_up_latest_completed_friday_after_weekend_restart() -> None:
@@ -74,11 +79,79 @@ def test_sampler_catches_up_latest_completed_friday_after_weekend_restart() -> N
     )
 
     assert sampler.sample_once() is True
-    assert sampler.sample_once() is False
-    assert calls == [clock.current]
+    assert sampler.sample_once() is True
+    assert calls == [clock.current, clock.current]
 
 
-def test_sampler_dedupes_consecutive_exchange_holidays_by_completed_trade_date() -> None:
+def test_sampler_catches_up_prior_trade_date_on_weekday_morning() -> None:
+    clock = Clock("2026-07-27T10:00:00+08:00")
+    calls: list[datetime] = []
+    sampler = MarketSentimentAnalysisSampler(
+        latest_completed_trade_date=lambda _now: "2026-07-24",
+        generate_latest=lambda now: calls.append(now) or analysis("2026-07-24", "ready"),
+        clock=clock,
+    )
+
+    assert sampler.sample_once() is True
+    assert sampler.sample_once() is True
+    assert calls == [clock.current, clock.current]
+
+
+def test_sampler_rechecks_ready_date_so_changed_generation_identity_can_run() -> None:
+    clock = Clock("2026-07-22T15:15:00+08:00")
+    responses = [
+        analysis("2026-07-22", "ready").model_copy(update={"input_hash": "a" * 64}),
+        analysis("2026-07-22", "ready").model_copy(update={"input_hash": "b" * 64}),
+    ]
+    calls: list[datetime] = []
+
+    def generate_latest(now: datetime) -> SentimentPercentileAnalysisResponse:
+        calls.append(now)
+        return responses.pop(0)
+
+    sampler = MarketSentimentAnalysisSampler(
+        latest_completed_trade_date=lambda _now: "2026-07-22",
+        generate_latest=generate_latest,
+        clock=clock,
+    )
+
+    assert sampler.sample_once() is True
+    assert sampler.sample_once() is True
+    assert calls == [clock.current, clock.current]
+
+
+def test_sampler_rechecks_failed_date_so_changed_generation_identity_can_run() -> None:
+    clock = Clock("2026-07-22T15:15:00+08:00")
+    responses = [
+        analysis(
+            "2026-07-22",
+            "failed",
+            retry_after="2026-07-22T15:45:00+08:00",
+        ).model_copy(update={"input_hash": "a" * 64}),
+        analysis("2026-07-22", "ready").model_copy(update={"input_hash": "b" * 64}),
+    ]
+    calls: list[datetime] = []
+
+    def generate_latest(now: datetime) -> SentimentPercentileAnalysisResponse:
+        calls.append(now)
+        return responses.pop(0)
+
+    sampler = MarketSentimentAnalysisSampler(
+        latest_completed_trade_date=lambda _now: "2026-07-22",
+        generate_latest=generate_latest,
+        clock=clock,
+    )
+
+    assert sampler.sample_once() is True
+    clock.current += timedelta(minutes=1)
+    assert sampler.sample_once() is True
+    assert calls == [
+        datetime.fromisoformat("2026-07-22T15:15:00+08:00"),
+        datetime.fromisoformat("2026-07-22T15:16:00+08:00"),
+    ]
+
+
+def test_sampler_rechecks_consecutive_exchange_holidays_for_identity_changes() -> None:
     clock = Clock("2026-10-01T15:15:00+08:00")
     calls: list[datetime] = []
     sampler = MarketSentimentAnalysisSampler(
@@ -89,14 +162,18 @@ def test_sampler_dedupes_consecutive_exchange_holidays_by_completed_trade_date()
 
     assert sampler.sample_once() is True
     clock.current = datetime.fromisoformat("2026-10-02T15:15:00+08:00")
-    assert sampler.sample_once() is False
-    assert calls == [datetime.fromisoformat("2026-10-01T15:15:00+08:00")]
+    assert sampler.sample_once() is True
+    assert calls == [
+        datetime.fromisoformat("2026-10-01T15:15:00+08:00"),
+        datetime.fromisoformat("2026-10-02T15:15:00+08:00"),
+    ]
 
 
-def test_sampler_defers_failed_retry_until_persisted_retry_after() -> None:
+def test_sampler_delegates_failed_retry_cooldown_to_generation_service() -> None:
     clock = Clock("2026-07-22T15:15:00+08:00")
     retry_after = "2026-07-22T15:45:00+08:00"
     responses = [
+        analysis("2026-07-22", "failed", retry_after=retry_after),
         analysis("2026-07-22", "failed", retry_after=retry_after),
         analysis("2026-07-22", "ready"),
     ]
@@ -114,11 +191,12 @@ def test_sampler_defers_failed_retry_until_persisted_retry_after() -> None:
 
     assert sampler.sample_once() is True
     clock.current += timedelta(minutes=29)
-    assert sampler.sample_once() is False
+    assert sampler.sample_once() is True
     clock.current += timedelta(minutes=1)
     assert sampler.sample_once() is True
     assert calls == [
         datetime.fromisoformat("2026-07-22T15:15:00+08:00"),
+        datetime.fromisoformat("2026-07-22T15:44:00+08:00"),
         datetime.fromisoformat("2026-07-22T15:45:00+08:00"),
     ]
 

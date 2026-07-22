@@ -74,8 +74,9 @@ def snapshot(
 
 def test_before_1510_excludes_current_local_date(tmp_path: Path) -> None:
     bars = make_test_bars(1020)
-    bars[-1] = bars[-1].model_copy(update={"date": "2026-07-22"})
-    bars[-2] = bars[-2].model_copy(update={"date": "2026-07-21"})
+    bars = [bar.model_copy(update={"date": bar.date.replace("-", "")}) for bar in bars]
+    bars[-1] = bars[-1].model_copy(update={"date": "20260722"})
+    bars[-2] = bars[-2].model_copy(update={"date": "20260721"})
     provider = FakeProvider(bars)
     service = service_for(tmp_path, provider)
 
@@ -86,7 +87,7 @@ def test_before_1510_excludes_current_local_date(tmp_path: Path) -> None:
 
 def test_completed_bar_filter_retains_latest_prior_bar_on_weekend() -> None:
     bars = make_test_bars(2)
-    bars[-1] = bars[-1].model_copy(update={"date": "2026-07-24"})
+    bars[-1] = bars[-1].model_copy(update={"date": "20260724"})
 
     result = filter_completed_daily_bars(
         bars,
@@ -94,6 +95,35 @@ def test_completed_bar_filter_retains_latest_prior_bar_on_weekend() -> None:
     )
 
     assert result[-1].date == "2026-07-24"
+
+
+def test_compact_provider_dates_support_iso_as_of_selection(tmp_path: Path) -> None:
+    bars = [
+        bar.model_copy(update={"date": bar.date.replace("-", "")})
+        for bar in make_test_bars(1020)
+    ]
+
+    result = service_for(tmp_path, FakeProvider(bars)).get(as_of="2024-09-01")
+
+    assert result.history
+    assert all("-" in point.trade_date for point in result.history)
+    assert all(point.trade_date <= "2024-09-01" for point in result.history)
+
+
+def test_post_cutoff_excludes_invalid_current_date_bar(tmp_path: Path) -> None:
+    bars = [
+        bar.model_copy(update={"date": bar.date.replace("-", "")})
+        for bar in make_test_bars(1020)
+    ]
+    bars[-2] = bars[-2].model_copy(update={"date": "20260721"})
+    bars[-1] = bars[-1].model_copy(update={"date": "20260722", "amount": None})
+
+    result = service_for(tmp_path, FakeProvider(bars)).get(
+        refresh=True,
+        now=datetime.fromisoformat("2026-07-22T16:00:00+08:00"),
+    )
+
+    assert result.latest_complete_trade_date == "2026-07-21"
 
 
 def test_failed_refresh_returns_stale_successful_snapshot(tmp_path: Path) -> None:

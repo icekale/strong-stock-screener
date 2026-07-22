@@ -178,8 +178,13 @@ from app.services.market_emotion_history import MarketEmotionHistoryStore
 from app.services.market_sentiment_analysis import (
     MarketSentimentAnalysisService,
     build_sentiment_analysis_input,
+    sentiment_analysis_record_is_reusable,
+    sentiment_analysis_record_matches,
 )
-from app.services.market_sentiment_analysis_sampler import MarketSentimentAnalysisSampler
+from app.services.market_sentiment_analysis_sampler import (
+    MarketSentimentAnalysisSampler,
+    is_generation_due,
+)
 from app.services.market_sentiment_analysis_store import MarketSentimentAnalysisStore
 from app.services.model_maintenance_packet import build_model_maintenance_packet
 from app.services.model_maintenance_store import ModelMaintenanceStore
@@ -2030,12 +2035,18 @@ def get_market_sentiment_percentile_analysis(
     trade_date: date,
 ) -> SentimentPercentileAnalysisResponse:
     trade_date_text = trade_date.isoformat()
-    _persisted_percentile_point_for_trade_date(trade_date_text)
+    percentile, point = _persisted_percentile_point_for_trade_date(trade_date_text)
+    config = _effective_settings().ai_analysis
+    input_payload = _build_market_sentiment_analysis_input(
+        trade_date_text,
+        percentile,
+        point,
+        refresh_missing=False,
+    )
     existing = _market_sentiment_analysis_store().load(trade_date_text)
-    if existing is not None:
+    if sentiment_analysis_record_matches(existing, input_payload, config):
         return existing
 
-    config = _effective_settings().ai_analysis
     return SentimentPercentileAnalysisResponse(
         trade_date=trade_date_text,
         status=("not_generated" if config.enabled and config.api_key else "unconfigured"),
@@ -3655,24 +3666,42 @@ def _generate_market_sentiment_analysis(
         trade_date,
         response=percentile_response,
     )
-    summary, market_emotion = _optional_sentiment_analysis_context(trade_date)
+    input_payload = _build_market_sentiment_analysis_input(
+        trade_date,
+        percentile,
+        point,
+        refresh_missing=True,
+    )
+    return _market_sentiment_analysis_service().generate(
+        input_payload,
+        _effective_settings().ai_analysis,
+        force=force,
+    )
+
+
+def _build_market_sentiment_analysis_input(
+    trade_date: str,
+    percentile: SentimentPercentileResponse,
+    point: SentimentPercentilePoint,
+    *,
+    refresh_missing: bool,
+) -> dict[str, object]:
+    summary, market_emotion = _optional_sentiment_analysis_context(
+        trade_date,
+        refresh_missing=refresh_missing,
+    )
     decision = None
     if summary is not None:
         try:
             decision = build_sentiment_decision(summary, market_emotion)
         except Exception:
             decision = None
-    input_payload = build_sentiment_analysis_input(
+    return build_sentiment_analysis_input(
         point,
         percentile.history,
         summary,
         decision,
         _load_sentiment_validation(),
-    )
-    return _market_sentiment_analysis_service().generate(
-        input_payload,
-        _effective_settings().ai_analysis,
-        force=force,
     )
 
 
@@ -3693,6 +3722,8 @@ def _latest_completed_market_sentiment_trade_date(now: datetime) -> str:
 
 def _optional_sentiment_analysis_context(
     trade_date: str,
+    *,
+    refresh_missing: bool = True,
 ) -> tuple[SentimentSummaryResponse | None, MarketEmotionSnapshotResponse | None]:
     snapshot_store = _sentiment_snapshot_store()
     try:
@@ -3704,7 +3735,7 @@ def _optional_sentiment_analysis_context(
     except Exception:
         market_emotion = None
 
-    if summary is not None and market_emotion is not None:
+    if (summary is not None and market_emotion is not None) or not refresh_missing:
         return summary, market_emotion
     try:
         sentiment, refreshed_emotion = _build_and_persist_sentiment_snapshots(
@@ -3743,10 +3774,17 @@ def _schedule_market_sentiment_analysis_catchup(
     if not config.enabled or not config.api_key:
         return
     now = _market_sentiment_analysis_now()
-    if now.timetz().replace(tzinfo=None) < time(15, 15):
+    if not is_generation_due(now, selected.trade_date):
         return
+    input_payload = _build_market_sentiment_analysis_input(
+        selected.trade_date,
+        percentile,
+        selected,
+        refresh_missing=False,
+    )
     try:
-        if _market_sentiment_analysis_store().load(selected.trade_date) is not None:
+        existing = _market_sentiment_analysis_store().load(selected.trade_date)
+        if sentiment_analysis_record_is_reusable(existing, input_payload, config):
             return
     except Exception:
         return
@@ -3758,7 +3796,10 @@ def _schedule_market_sentiment_analysis_catchup(
 
     def run() -> None:
         try:
-            _generate_latest_market_sentiment_analysis(now)
+            _generate_market_sentiment_analysis(
+                selected.trade_date,
+                percentile_response=percentile,
+            )
         except Exception:
             logger.exception("market sentiment analysis catch-up failed")
         finally:

@@ -24,6 +24,7 @@ from app.services.market_sentiment_analysis import (
     MarketSentimentAnalysisService,
     build_sentiment_analysis_input,
     hash_sentiment_analysis_input,
+    sentiment_analysis_record_is_reusable,
 )
 from app.services.market_sentiment_analysis_store import MarketSentimentAnalysisStore
 from app.services.runtime_settings import EffectiveAiAnalysisSettings
@@ -429,6 +430,30 @@ def test_service_reuses_matching_ready_provider_model_and_hash(tmp_path: Path) -
         assert prohibited in system_prompt
 
 
+def test_llm_request_includes_the_complete_result_schema(tmp_path: Path) -> None:
+    client = _Client([_Response(json.dumps(_result_payload(), ensure_ascii=False))])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+    system_prompt = client.post.call_args.kwargs["json"]["messages"][0]["content"]
+    for field in (
+        "market_conclusion",
+        "key_drivers",
+        "factor_divergence",
+        "historical_context",
+        "risk_posture",
+        "next_session_watch",
+        "risk_note",
+    ):
+        assert f'"{field}"' in system_prompt
+    for posture in ("attack", "balanced", "defensive", "wait"):
+        assert f'"{posture}"' in system_prompt
+    assert '"minItems":2' in system_prompt
+    assert '"maxItems":4' in system_prompt
+
+
 def test_changed_input_or_model_generates_again(tmp_path: Path) -> None:
     client = _Client(
         [
@@ -445,6 +470,19 @@ def test_changed_input_or_model_generates_again(tmp_path: Path) -> None:
     service.generate(input_payload, _config(model="next-model"))
 
     assert client.post.call_count == 3
+
+
+def test_pending_record_does_not_permanently_block_catchup_generation() -> None:
+    payload = _input_payload()
+    record = SentimentPercentileAnalysisResponse(
+        trade_date="2026-07-22",
+        status="pending",
+        provider="openai_compatible",
+        llm_model="test-model",
+        input_hash=hash_sentiment_analysis_input(payload),
+    )
+
+    assert sentiment_analysis_record_is_reusable(record, payload, _config()) is False
 
 
 def test_service_persists_pending_before_request_and_limits_main_sectors(tmp_path: Path) -> None:
@@ -612,6 +650,32 @@ def test_semantic_contract_rejects_prior_claims_without_history(
     assert client.post.call_count == 3
 
 
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "市场情绪得分较昨日上升 4.0。",
+        "5日市场情绪得分上升 13.0。",
+        "市场情绪得分较昨日上升 4.0 且中证全指近5日上涨 2.5%。",
+        "5日市场情绪得分上升 13.0 且中证全指近5日上涨 2.5%。",
+        "决策得分变化为 8.5 且中证全指近5日上涨 2.5%。",
+    ],
+)
+def test_semantic_contract_allows_grounded_score_change_movement(
+    tmp_path: Path,
+    claim: str,
+) -> None:
+    result = _result_payload()
+    result["historical_context"] = claim
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+    assert client.post.call_count == 1
+
+
 def test_semantic_contract_rejects_invented_key_driver_threshold(tmp_path: Path) -> None:
     result = _result_payload()
     result["key_drivers"] = ["综合分 62.0，处于偏热", "若涨停家数高于 69 家"]
@@ -665,7 +729,7 @@ def test_semantic_contract_does_not_apply_watch_threshold_to_an_unrelated_number
 @pytest.mark.parametrize(
     "field,value",
     [
-        ("market_conclusion", "沪深300上涨 2.5%"),
+        ("market_conclusion", "沪深300近5日上涨 2.5%"),
         ("key_drivers", ["涨停数上升至 68 家", "量能趋势 1.2%"]),
         (
             "next_session_watch",
@@ -720,7 +784,7 @@ def test_semantic_contract_allows_grounded_aggregate_index_sector_and_threshold_
     result = _result_payload()
     result["market_conclusion"] = "当前综合得分为 62.0，前一日市场处于中性，当前市场位于热区。"
     result["factor_divergence"] = "量能系数为 20%，量能趋势为 1.2%。"
-    result["historical_context"] = "中证全指上涨 2.5%，存储芯片上涨 2%。"
+    result["historical_context"] = "中证全指近5日上涨 2.5%，存储芯片的表现受到关注。"
     content = json.dumps(result, ensure_ascii=False)
     client = _Client([_Response(content)])
     service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
@@ -748,6 +812,42 @@ def test_semantic_contract_rejects_security_attention_and_recommendation(
     result[field] = value
     content = json.dumps(result, ensure_ascii=False)
     client = _Client([_Response(content), _Response(content), _Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "failed"
+    assert response.attempts == 3
+    assert client.post.call_count == 3
+
+
+@pytest.mark.parametrize(
+    "claim",
+    [
+        "今日中证全指上涨 2.5%，市场结构分化。",
+        "今日中证全指上涨了 2.5%，市场结构分化。",
+        "今日中证全指涨了 2.5%，市场结构分化。",
+        "今日中证全指跌了 2.5%，市场结构分化。",
+        "5日涨幅为 2.5% 且今日中证全指上涨 2.5%。",
+        "市场情绪得分较昨日上升 4.0 且今日中证全指上涨 2.5%。",
+        "5日市场情绪得分上升 13.0 且今日中证全指跌了 2.5%。",
+        "决策得分变化为 8.5 且今日中证全指上涨 2.5%。",
+        "今日中证全指上涨 2.5% 且指数5日表现为 2.5%。",
+        "今日中证全指跌了 2.5% 且指数5日表现为 2.5%。",
+        "建议持有贵州茅台，市场结构分化。",
+        "贵州茅台值得买，市场结构分化。",
+        "贵州茅台是首选，市场结构分化。",
+        "建议配置贵州茅台，市场结构分化。",
+    ],
+)
+def test_semantic_contract_rejects_cross_field_movement_and_named_holding_advice(
+    tmp_path: Path,
+    claim: str,
+) -> None:
+    result = _result_payload()
+    result["market_conclusion"] = claim
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content)] * 3)
     service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
 
     response = service.generate(_input_payload(), _config())
@@ -974,6 +1074,24 @@ def test_store_load_treats_malformed_record_as_cache_miss(tmp_path: Path) -> Non
     path = store.record_path("2026-07-22")
     path.parent.mkdir(parents=True)
     path.write_text("not-json", encoding="utf-8")
+
+    assert store.load("2026-07-22") is None
+
+
+def test_store_load_treats_wrong_version_or_trade_date_as_cache_miss(tmp_path: Path) -> None:
+    store = MarketSentimentAnalysisStore(tmp_path)
+    path = store.record_path("2026-07-22")
+    path.parent.mkdir(parents=True)
+    record = SentimentPercentileAnalysisResponse(
+        trade_date="2026-07-21",
+        status="ready",
+        model_version="market-sentiment-percentile-v0",
+        provider="openai_compatible",
+        llm_model="test-model",
+        input_hash="a" * 64,
+        result=SentimentAnalysisResult.model_validate(_result_payload()),
+    )
+    path.write_text(record.model_dump_json(), encoding="utf-8")
 
     assert store.load("2026-07-22") is None
 

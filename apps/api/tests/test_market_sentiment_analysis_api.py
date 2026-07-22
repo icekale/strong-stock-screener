@@ -18,6 +18,10 @@ from app.models import (
     SentimentPercentileResponse,
     StrongStockDataUnavailable,
 )
+from app.services.market_sentiment_analysis import (
+    build_sentiment_analysis_input,
+    hash_sentiment_analysis_input,
+)
 
 
 ORIGINAL_EFFECTIVE_SETTINGS = main._effective_settings
@@ -67,7 +71,13 @@ def percentile_response_fixture() -> SentimentPercentileResponse:
     )
 
 
-def analysis(trade_date: str, status: str, *, retry_after: str | None = None):
+def analysis(
+    trade_date: str,
+    status: str,
+    *,
+    retry_after: str | None = None,
+    input_hash: str | None = None,
+):
     result = (
         SentimentAnalysisResult(
             market_conclusion="市场情绪读数为 62。",
@@ -84,7 +94,9 @@ def analysis(trade_date: str, status: str, *, retry_after: str | None = None):
     return SentimentPercentileAnalysisResponse(
         trade_date=trade_date,
         status=status,  # type: ignore[arg-type]
-        input_hash="a" * 64 if status in {"pending", "ready", "failed"} else None,
+        provider="openai_compatible" if status in {"pending", "ready", "failed"} else None,
+        llm_model="test-model" if status in {"pending", "ready", "failed"} else None,
+        input_hash=(input_hash or "a" * 64) if status in {"pending", "ready", "failed"} else None,
         retry_after=retry_after,
         result=result,
     )
@@ -167,6 +179,19 @@ class FakeLifecycleService:
         return None
 
 
+def current_analysis_hash(response: SentimentPercentileResponse) -> str:
+    point = response.history[-1]
+    return hash_sentiment_analysis_input(
+        build_sentiment_analysis_input(
+            point,
+            response.history,
+            None,
+            None,
+            {"status": "unavailable", "sample_count": 0},
+        )
+    )
+
+
 @pytest.fixture(autouse=True)
 def isolate_analysis_sampler(monkeypatch: pytest.MonkeyPatch) -> FakeSampler:
     sampler = FakeSampler()
@@ -202,14 +227,20 @@ def configured_settings(*, enabled: bool = True, api_key: str = "test-key") -> o
 @pytest.mark.parametrize("status", ["pending", "ready", "failed"])
 def test_analysis_get_returns_persisted_lifecycle_states(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     status: str,
 ) -> None:
-    service = FakePercentileService(percentile_response_fixture())
-    percentile_store = FakePercentileStore(percentile_response_fixture())
-    store = FakeAnalysisStore({"2026-07-22": analysis("2026-07-22", status)})
+    fixture = percentile_response_fixture()
+    service = FakePercentileService(fixture)
+    percentile_store = FakePercentileStore(fixture)
+    store = FakeAnalysisStore(
+        {"2026-07-22": analysis("2026-07-22", status, input_hash=current_analysis_hash(fixture))}
+    )
     monkeypatch.setattr(app.state, "market_sentiment_percentile_service", service, raising=False)
     monkeypatch.setattr(app.state, "market_sentiment_percentile_store", percentile_store, raising=False)
     monkeypatch.setattr(app.state, "market_sentiment_analysis_store", store, raising=False)
+    monkeypatch.setattr(app.state, "runs_dir", tmp_path, raising=False)
+    monkeypatch.setattr(main, "_optional_sentiment_analysis_context", lambda *_args, **_kwargs: (None, None))
     monkeypatch.setattr(main, "_effective_settings", configured_settings)
 
     with TestClient(app) as client:
@@ -219,6 +250,49 @@ def test_analysis_get_returns_persisted_lifecycle_states(
     assert response.json()["status"] == status
     assert service.calls == []
     assert percentile_store.calls == 1
+
+
+@pytest.mark.parametrize(
+    "record_update",
+    [
+        {"model_version": "market-sentiment-percentile-v0"},
+        {"provider": "legacy-provider"},
+        {"llm_model": "legacy-model"},
+        {"input_hash": "b" * 64},
+    ],
+)
+def test_analysis_get_ignores_records_with_stale_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    record_update: dict[str, str],
+) -> None:
+    fixture = percentile_response_fixture()
+    record = analysis(
+        "2026-07-22",
+        "ready",
+        input_hash=current_analysis_hash(fixture),
+    ).model_copy(update=record_update)
+    monkeypatch.setattr(
+        app.state,
+        "market_sentiment_percentile_store",
+        FakePercentileStore(fixture),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        app.state,
+        "market_sentiment_analysis_store",
+        FakeAnalysisStore({"2026-07-22": record}),
+        raising=False,
+    )
+    monkeypatch.setattr(app.state, "runs_dir", tmp_path, raising=False)
+    monkeypatch.setattr(main, "_optional_sentiment_analysis_context", lambda *_args, **_kwargs: (None, None))
+    monkeypatch.setattr(main, "_effective_settings", configured_settings)
+
+    with TestClient(app) as client:
+        response = client.get("/api/short-term/sentiment/percentile/analysis?trade_date=2026-07-22")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "not_generated"
 
 
 def test_analysis_get_reports_not_generated_and_unconfigured(
@@ -337,8 +411,9 @@ def test_percentile_get_schedules_analysis_without_waiting_for_llm(
     sampler = FakeSampler()
     calls = 0
 
-    def generate_latest(_now: datetime):
+    def generate_target(trade_date: str, **_kwargs: object):
         nonlocal calls
+        assert trade_date == "2026-07-22"
         calls += 1
         started.set()
         assert release.wait(timeout=1)
@@ -348,7 +423,7 @@ def test_percentile_get_schedules_analysis_without_waiting_for_llm(
     monkeypatch.setattr(app.state, "market_sentiment_analysis_store", FakeAnalysisStore(), raising=False)
     monkeypatch.setattr(app.state, "market_sentiment_analysis_sampler", sampler, raising=False)
     monkeypatch.setattr(main, "_market_sentiment_analysis_now", lambda: datetime.fromisoformat("2026-07-22T15:16:00+08:00"))
-    monkeypatch.setattr(main, "_generate_latest_market_sentiment_analysis", generate_latest)
+    monkeypatch.setattr(main, "_generate_market_sentiment_analysis", generate_target)
     monkeypatch.setattr(main, "_effective_settings", configured_settings)
     main._MARKET_SENTIMENT_ANALYSIS_CATCHUP_DATES.discard("2026-07-22")
 
@@ -377,8 +452,9 @@ def test_percentile_get_retries_catchup_after_transient_thread_failure(
         def start(self) -> None:
             self.target()
 
-    def generate_latest(_now: datetime):
+    def generate_target(trade_date: str, **_kwargs: object):
         nonlocal attempts
+        assert trade_date == "2026-07-22"
         attempts += 1
         if attempts == 1:
             raise RuntimeError("temporary provider failure")
@@ -396,7 +472,7 @@ def test_percentile_get_retries_catchup_after_transient_thread_failure(
         "_market_sentiment_analysis_now",
         lambda: datetime.fromisoformat("2026-07-22T15:16:00+08:00"),
     )
-    monkeypatch.setattr(main, "_generate_latest_market_sentiment_analysis", generate_latest)
+    monkeypatch.setattr(main, "_generate_market_sentiment_analysis", generate_target)
     monkeypatch.setattr(main, "_effective_settings", configured_settings)
     monkeypatch.setattr(main, "Thread", InlineThread)
     main._MARKET_SENTIMENT_ANALYSIS_CATCHUP_DATES.discard("2026-07-22")

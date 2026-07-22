@@ -136,5 +136,20 @@ describe('buildSentimentPercentileChartOption', () => {
 
     expect(option.animationDuration).toBeLessThanOrEqual(160);
     expect(reducedMotionOption.animationDuration).toBe(0);
+    expect(reducedMotionOption.animationDurationUpdate).toBe(0);
+    expect(reducedMotionOption.animation).toBe(false);
+  });
+
+  it('keeps the latest point marked while a historical point is selected', () => {
+    const option = buildSentimentPercentileChartOption(
+      historyFixture(),
+      '2026-07-22',
+      false,
+      '2026-07-21'
+    );
+    const series = option.series as Array<{ data: Array<{ symbolSize: number }> }>;
+
+    expect(series[0]?.data[2]?.symbolSize).toBeGreaterThan(0);
+    expect(series[0]?.data[3]?.symbolSize).toBeGreaterThan(0);
   });
 });

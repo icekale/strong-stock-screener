@@ -230,6 +230,11 @@ describe('SentimentPercentilePanel', () => {
     await flushPromises();
     const firstDate = percentileFixture().history[0]!.trade_date;
     expect(api.getMarketSentimentAnalysis).toHaveBeenLastCalledWith(firstDate);
+    const historicalOption = wrapper.getComponent(EChartStub).props('option') as {
+      series: Array<{ data: Array<{ symbolSize: number }> }>;
+    };
+    expect(historicalOption.series[0]?.data[0]?.symbolSize).toBeGreaterThan(0);
+    expect(historicalOption.series[0]?.data.at(-1)?.symbolSize).toBeGreaterThan(0);
 
     await wrapper.get('[aria-label="查看日期"]').setValue('2026-07-22');
     await flushPromises();

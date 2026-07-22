@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, time
+from datetime import date, datetime, time
 from threading import Event, Lock, Thread
 from typing import Callable
 from zoneinfo import ZoneInfo
@@ -27,8 +27,6 @@ class MarketSentimentAnalysisSampler:
         self._generate_latest = generate_latest
         self._clock = clock or (lambda: datetime.now(SHANGHAI))
         self._poll_seconds = poll_seconds
-        self._completed_trade_dates: set[str] = set()
-        self._retry_after_by_trade_date: dict[str, datetime] = {}
         self._stop_event = Event()
         self._thread: Thread | None = None
         self._lifecycle_lock = Lock()
@@ -82,30 +80,14 @@ class MarketSentimentAnalysisSampler:
 
     def sample_once(self) -> bool:
         current = _local_now(self._clock())
-        if not _is_generation_time(current):
-            return False
         trade_date = self._latest_completed_trade_date(current)
-        if trade_date is None:
+        if trade_date is None or not is_generation_due(current, trade_date):
             return False
 
         with self._sample_lock:
-            if trade_date in self._completed_trade_dates:
-                return False
-            retry_after = self._retry_after_by_trade_date.get(trade_date)
-            if retry_after is not None and current < retry_after:
-                return False
-
             response = self._generate_latest(current)
             if response is None:
                 return True
-            response_trade_date = response.trade_date
-            if response.status == "ready":
-                self._completed_trade_dates.add(response_trade_date)
-                self._retry_after_by_trade_date.pop(response_trade_date, None)
-            elif response.status == "failed" and response.retry_after:
-                parsed_retry_after = _parse_local_datetime(response.retry_after)
-                if parsed_retry_after is not None:
-                    self._retry_after_by_trade_date[response_trade_date] = parsed_retry_after
             return True
 
     def _run(self, stop_event: Event | None = None) -> None:
@@ -123,15 +105,13 @@ def _local_now(value: datetime) -> datetime:
     return value.astimezone(SHANGHAI)
 
 
-def _is_generation_time(current: datetime) -> bool:
-    if current.weekday() < 5:
-        return current.timetz().replace(tzinfo=None) >= GENERATION_CUTOFF
-    return True
-
-
-def _parse_local_datetime(value: str) -> datetime | None:
+def is_generation_due(current: datetime, trade_date: str) -> bool:
     try:
-        parsed = datetime.fromisoformat(value)
+        target_date = date.fromisoformat(trade_date)
     except ValueError:
-        return None
-    return _local_now(parsed)
+        return False
+    if target_date < current.date():
+        return True
+    if target_date > current.date() or current.weekday() >= 5:
+        return False
+    return current.timetz().replace(tzinfo=None) >= GENERATION_CUTOFF

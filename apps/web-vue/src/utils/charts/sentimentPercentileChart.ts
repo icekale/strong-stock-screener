@@ -21,10 +21,13 @@ const FACTOR_LABELS: Array<[keyof SentimentPercentilePoint['factors'], string]> 
 export function buildSentimentPercentileChartOption(
   history: SentimentPercentilePoint[],
   latestTradeDate: string,
-  reducedMotion: boolean
+  reducedMotion: boolean,
+  selectedTradeDate: string = latestTradeDate
 ) {
   return {
+    animation: !reducedMotion,
     animationDuration: reducedMotion ? 0 : 160,
+    animationDurationUpdate: reducedMotion ? 0 : 160,
     backgroundColor: COLORS.surface,
     grid: { left: 46, right: 18, top: 22, bottom: 34 },
     tooltip: {
@@ -68,7 +71,10 @@ export function buildSentimentPercentileChartOption(
         lineStyle: { color: COLORS.primary, width: 2 },
         data: history.map(point => ({
           value: point.score,
-          symbolSize: point.trade_date === latestTradeDate || isExtreme(point.level) ? 6 : 0,
+          symbolSize:
+            point.trade_date === latestTradeDate || point.trade_date === selectedTradeDate || isExtreme(point.level)
+              ? 6
+              : 0,
           itemStyle: { color: levelColor(point.level) }
         })),
         markArea: {

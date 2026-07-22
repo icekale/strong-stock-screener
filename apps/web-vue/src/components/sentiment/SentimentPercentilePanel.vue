@@ -66,8 +66,9 @@ const chartOption = computed<EChartsOption>(
   () =>
     buildSentimentPercentileChartOption(
       percentile.value?.history ?? [],
-      selectedTradeDate.value,
-      reducedMotion
+      percentile.value?.latest_complete_trade_date ?? '',
+      reducedMotion,
+      selectedTradeDate.value
     ) as EChartsOption
 );
 

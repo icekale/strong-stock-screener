@@ -7,6 +7,7 @@ from threading import RLock
 from pydantic import ValidationError
 
 from app.models import SentimentPercentileAnalysisResponse
+from app.services.market_sentiment_percentile import MODEL_VERSION
 
 
 class MarketSentimentAnalysisStore:
@@ -29,11 +30,14 @@ class MarketSentimentAnalysisStore:
             if not path.exists():
                 return None
             try:
-                return SentimentPercentileAnalysisResponse.model_validate_json(
+                record = SentimentPercentileAnalysisResponse.model_validate_json(
                     path.read_text(encoding="utf-8")
                 )
             except (UnicodeError, ValidationError):
                 return None
+            if record.trade_date != trade_date or record.model_version != MODEL_VERSION:
+                return None
+            return record
 
     def save(
         self,

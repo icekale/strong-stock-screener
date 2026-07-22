@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, time
+from datetime import date, datetime, time
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -15,6 +15,7 @@ from app.services.market_sentiment_percentile import (
     MODEL_VERSION,
     WEIGHTS,
     calculate_sentiment_percentile,
+    validate_sentiment_bar,
 )
 from app.services.market_sentiment_percentile_store import MarketSentimentPercentileStore
 
@@ -114,10 +115,29 @@ def filter_completed_daily_bars(
     bars: list[KlineBar], *, now: datetime | None = None
 ) -> list[KlineBar]:
     local_now = _shanghai_now(now)
-    if _is_after_completion_cutoff(local_now):
-        return list(bars)
-    current_date = local_now.date().isoformat()
-    return [bar for bar in bars if bar.date != current_date]
+    current_date = local_now.date()
+    completed: list[KlineBar] = []
+    for bar in bars:
+        trade_date = _parse_trade_date(bar.date)
+        if trade_date > current_date:
+            continue
+        normalized = bar.model_copy(update={"date": trade_date.isoformat()})
+        if trade_date == current_date:
+            if not _is_after_completion_cutoff(local_now):
+                continue
+            try:
+                validate_sentiment_bar(normalized)
+            except ValueError:
+                continue
+        completed.append(normalized)
+    return completed
+
+
+def _parse_trade_date(value: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError("market bar date must use YYYY-MM-DD or YYYYMMDD") from exc
 
 
 def _shanghai_now(now: datetime | None) -> datetime:

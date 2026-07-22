@@ -198,6 +198,7 @@ function sortLabel(key: SortKey) {
         :key="item.symbol"
         data-testid="dragon-status"
         type="button"
+        class="etf-three-factor__dragon"
         :class="[{ 'etf-three-factor__dragon--selected': item.symbol === selectedItem?.symbol }, levelClass(item.level)]"
         :aria-pressed="item.symbol === selectedItem?.symbol"
         @click="emit('select', item.symbol)"

@@ -108,6 +108,7 @@ describe('EtfThreeFactorPanel', () => {
 
     expect(wrapper.get('[data-testid="three-factor-summary"]').text()).toContain('综合信号强度');
     expect(wrapper.findAll('[data-testid="dragon-status"]')).toHaveLength(7);
+    expect(wrapper.findAll('[data-testid="dragon-status"]').every(status => status.classes().includes('etf-three-factor__dragon'))).toBe(true);
     expect(wrapper.get('[data-testid="three-factor-table"]').text()).toContain('收盘涨跌');
     expect(wrapper.get('[data-testid="three-factor-table"]').text()).toContain('20日均量');
     expect(wrapper.get('[data-testid="factor-detail"]').text()).toContain('量能因子');

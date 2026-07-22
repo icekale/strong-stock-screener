@@ -22,6 +22,7 @@ from app.services.market_sentiment_percentile_store import MarketSentimentPercen
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 BENCHMARK_SYMBOL = "000985.SH"
 KLINE_COUNT = 1020
+COMPLETION_CUTOFF = time(15, 10)
 
 
 class DailyKlineProvider(Protocol):
@@ -113,7 +114,7 @@ def filter_completed_daily_bars(
     bars: list[KlineBar], *, now: datetime | None = None
 ) -> list[KlineBar]:
     local_now = _shanghai_now(now)
-    if local_now.timetz().replace(tzinfo=None) >= time(15, 10):
+    if _is_after_completion_cutoff(local_now):
         return list(bars)
     current_date = local_now.date().isoformat()
     return [bar for bar in bars if bar.date != current_date]
@@ -132,7 +133,14 @@ def _is_current_local_day(response: SentimentPercentileResponse, now: datetime) 
         generated_at = datetime.fromisoformat(response.generated_at)
     except ValueError:
         return False
-    return _shanghai_now(generated_at).date() == now.date()
+    generated_local = _shanghai_now(generated_at)
+    return generated_local.date() == now.date() and (
+        _is_after_completion_cutoff(generated_local) == _is_after_completion_cutoff(now)
+    )
+
+
+def _is_after_completion_cutoff(value: datetime) -> bool:
+    return value.timetz().replace(tzinfo=None) >= COMPLETION_CUTOFF
 
 
 def _select_as_of(

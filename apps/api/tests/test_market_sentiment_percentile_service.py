@@ -135,6 +135,21 @@ def test_same_day_cache_hit_does_not_call_provider_twice(tmp_path: Path) -> None
     assert provider.calls == 1
 
 
+def test_post_cutoff_call_refreshes_pre_cutoff_same_day_snapshot(tmp_path: Path) -> None:
+    bars = make_test_bars(1020)
+    bars[-1] = bars[-1].model_copy(update={"date": "2026-07-22"})
+    bars[-2] = bars[-2].model_copy(update={"date": "2026-07-21"})
+    provider = FakeProvider(bars)
+    service = service_for(tmp_path, provider)
+
+    before_cutoff = service.get(now=datetime.fromisoformat("2026-07-22T15:09:00+08:00"))
+    after_cutoff = service.get(now=datetime.fromisoformat("2026-07-22T16:00:00+08:00"))
+
+    assert before_cutoff.latest_complete_trade_date == "2026-07-21"
+    assert provider.calls == 2
+    assert after_cutoff.latest_complete_trade_date == "2026-07-22"
+
+
 def test_corrupt_or_wrong_version_snapshot_is_ignored(tmp_path: Path) -> None:
     store = MarketSentimentPercentileStore(tmp_path)
     store.root_dir.mkdir(parents=True)

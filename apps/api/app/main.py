@@ -2052,7 +2052,10 @@ def generate_market_sentiment_percentile_analysis(
     trade_date: date,
     force: bool = False,
 ) -> SentimentPercentileAnalysisResponse:
-    return _generate_market_sentiment_analysis(trade_date.isoformat(), force=force)
+    try:
+        return _generate_market_sentiment_analysis(trade_date.isoformat(), force=force)
+    except StrongStockDataUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @app.get("/api/short-term/sentiment/summary")

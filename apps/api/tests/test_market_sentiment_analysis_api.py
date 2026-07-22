@@ -16,6 +16,7 @@ from app.models import (
     SentimentPercentileFactors,
     SentimentPercentilePoint,
     SentimentPercentileResponse,
+    StrongStockDataUnavailable,
 )
 
 
@@ -301,6 +302,30 @@ def test_generate_analysis_builds_context_and_forwards_force(
         "sample_counts": {},
         "conclusion": None,
     }
+
+
+def test_generate_analysis_reports_percentile_provider_failure_as_503(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class UnavailablePercentileService:
+        def get(self, **_kwargs: object) -> SentimentPercentileResponse:
+            raise StrongStockDataUnavailable("市场情绪分位数据不可用")
+
+    monkeypatch.setattr(
+        app.state,
+        "market_sentiment_percentile_service",
+        UnavailablePercentileService(),
+        raising=False,
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/short-term/sentiment/percentile/analysis/generate"
+            "?trade_date=2026-07-22&force=false"
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "市场情绪分位数据不可用"}
 
 
 def test_percentile_get_schedules_analysis_without_waiting_for_llm(

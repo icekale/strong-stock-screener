@@ -83,6 +83,8 @@ const notGeneratedCopy = computed(() =>
   selectedTradeDate.value === percentile.value?.latest_complete_trade_date ? '今日 AI 分析待生成' : '该日未生成 AI 解读'
 );
 
+const analysisErrorCopy = computed(() => safeAnalysisError(analysis.value?.error));
+
 async function loadPercentile(asOf: string, refresh: boolean) {
   percentileRequestId += 1;
   const requestId = percentileRequestId;
@@ -107,6 +109,7 @@ async function loadAnalysis(tradeDate: string) {
   analysisRequestId += 1;
   const requestId = analysisRequestId;
   analysisLoading.value = true;
+  analysisRetrying.value = false;
   analysisReadError.value = null;
   try {
     const response = await getMarketSentimentAnalysis(tradeDate);
@@ -139,19 +142,58 @@ function handleChartSelect(params: unknown) {
 }
 
 async function retryAnalysis() {
-  if (!selectedTradeDate.value || analysisRetrying.value) return;
+  const retryTradeDate = selectedTradeDate.value;
+  if (!retryTradeDate || analysisRetrying.value) return;
+  analysisRequestId += 1;
+  const requestId = analysisRequestId;
   analysisRetrying.value = true;
   analysisReadError.value = null;
   try {
-    analysis.value = await generateMarketSentimentAnalysis(selectedTradeDate.value, true);
+    const response = await generateMarketSentimentAnalysis(retryTradeDate, true);
+    if (requestId === analysisRequestId && selectedTradeDate.value === retryTradeDate) analysis.value = response;
   } catch {
-    analysis.value = analysis.value
-      ? { ...analysis.value, status: 'failed', error: 'AI 分析重试失败，请稍后再试' }
-      : null;
-    analysisReadError.value = analysis.value ? null : 'AI 分析重试失败，请稍后再试';
+    if (requestId === analysisRequestId && selectedTradeDate.value === retryTradeDate) {
+      analysis.value = analysis.value ? { ...analysis.value, status: 'failed', error: 'retry_failed' } : null;
+      analysisReadError.value = analysis.value ? null : 'AI 分析重试失败，请稍后再试';
+    }
   } finally {
-    analysisRetrying.value = false;
+    if (requestId === analysisRequestId && selectedTradeDate.value === retryTradeDate) {
+      analysisRetrying.value = false;
+    }
   }
+}
+
+function safeAnalysisError(value: string | null | undefined) {
+  const category = (value ?? '').toLowerCase();
+  if (category.includes('retry_failed')) return 'AI 分析重试失败，请稍后再试';
+  if (category.includes('timeout') || category.includes('timed out') || category.includes('超时')) {
+    return 'AI 解读请求超时，请稍后重试';
+  }
+  if (
+    category.includes('rate limit') ||
+    category.includes('too many requests') ||
+    category.includes('429') ||
+    category.includes('限流')
+  ) {
+    return 'AI 服务请求频繁，请稍后重试';
+  }
+  if (
+    category.includes('unavailable') ||
+    category.includes('服务不可用') ||
+    category.includes('上游模型暂时不可用') ||
+    category.includes('503')
+  ) {
+    return 'AI 解读服务暂时不可用，请稍后重试';
+  }
+  if (
+    category.includes('invalid json') ||
+    category.includes('schema') ||
+    category.includes('格式') ||
+    category.includes('校验')
+  ) {
+    return 'AI 返回内容格式异常，请稍后重试';
+  }
+  return 'AI 解读暂时不可用，请稍后重试';
 }
 
 function factorFor(key: FactorKey): SentimentPercentileFactor | null {
@@ -313,8 +355,8 @@ watch(
         data-testid="ai-failed"
       >
         <div>
-          <strong>今日 AI 分析失败</strong>
-          <p>{{ analysis.error || '上游模型暂时不可用' }}</p>
+          <strong>所选日期 AI 分析失败</strong>
+          <p>{{ analysisErrorCopy }}</p>
         </div>
         <AButton data-testid="analysis-retry" size="small" :loading="analysisRetrying" @click="retryAnalysis">
           重试
@@ -381,6 +423,19 @@ watch(
 .sentiment-percentile__current,
 .sentiment-percentile__analysis,
 .sentiment-percentile__analysis-ready {
+  min-width: 0;
+}
+
+.sentiment-percentile__header > *,
+.sentiment-percentile__body > *,
+.sentiment-percentile__selector > *,
+.sentiment-percentile__score-block > *,
+.sentiment-percentile__factor-copy > *,
+.sentiment-percentile__analysis-heading > *,
+.sentiment-percentile__analysis-lead > *,
+.sentiment-percentile__analysis-grid > *,
+.sentiment-percentile__analysis-state > *,
+.sentiment-percentile__analysis-meta > * {
   min-width: 0;
 }
 
@@ -599,6 +654,14 @@ watch(
 
 .sentiment-percentile__analysis-state > div strong {
   color: var(--wb-ink);
+}
+
+.sentiment-percentile__analysis-state,
+.sentiment-percentile__analysis-ready p,
+.sentiment-percentile__analysis-ready li,
+.sentiment-percentile__analysis-meta {
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .sentiment-percentile__analysis-state[aria-busy='true'] {

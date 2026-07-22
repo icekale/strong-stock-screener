@@ -1,5 +1,8 @@
 // @vitest-environment jsdom
 
+import process from 'node:process';
+import { readFileSync } from 'node:fs';
+import { resolve as resolvePath } from 'node:path';
 import { defineComponent } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -19,8 +22,14 @@ const api = vi.hoisted(() => ({
 
 type Deferred<T> = {
   promise: Promise<T>;
+  reject: (reason?: unknown) => void;
   resolve: (value: T) => void;
 };
+
+const source = readFileSync(
+  resolvePath(process.cwd(), 'src/components/sentiment/SentimentPercentilePanel.vue'),
+  'utf8'
+);
 
 vi.mock('@/service/product-api', () => api);
 
@@ -147,10 +156,21 @@ function mountPanel() {
 
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>(resolvePromise => {
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
+    reject = rejectPromise;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
+}
+
+function readyAnalysis(tradeDate: string, conclusion: string) {
+  const response = analysisFixture('ready');
+  return {
+    ...response,
+    trade_date: tradeDate,
+    result: { ...response.result!, market_conclusion: conclusion }
+  };
 }
 
 beforeEach(() => {
@@ -231,18 +251,78 @@ describe('SentimentPercentilePanel', () => {
     if (status === 'pending') expect(wrapper.get('[data-testid="ai-pending"]').attributes('aria-busy')).toBe('true');
   });
 
-  it('shows a sanitized failure and force-retries only the selected analysis', async () => {
+  it('maps failed analysis to safe date-neutral copy and force-retries the selected analysis', async () => {
     api.getMarketSentimentAnalysis.mockResolvedValueOnce(analysisFixture('failed'));
     const wrapper = mountPanel();
     await flushPromises();
 
-    expect(wrapper.get('[data-testid="ai-failed"]').text()).toContain('今日 AI 分析失败');
-    expect(wrapper.get('[data-testid="ai-failed"]').text()).toContain('上游模型暂时不可用');
+    expect(wrapper.get('[data-testid="ai-failed"]').text()).toContain('所选日期 AI 分析失败');
+    expect(wrapper.get('[data-testid="ai-failed"]').text()).toContain('AI 解读服务暂时不可用，请稍后重试');
     await wrapper.get('[data-testid="analysis-retry"]').trigger('click');
     await flushPromises();
 
     expect(api.generateMarketSentimentAnalysis).toHaveBeenCalledWith('2026-07-22', true);
     expect(wrapper.get('[data-testid="ai-ready"]').text()).toContain('综合分 62.4');
+  });
+
+  it('does not expose provider URLs, secrets, or stack details from failed analysis', async () => {
+    const unsafeError =
+      'POST https://llm.internal.example/v1 failed: Bearer sk-live-secret\n    at request (/srv/app/client.ts:42:7)';
+    api.getMarketSentimentAnalysis.mockResolvedValueOnce(analysisFixture('failed', { error: unsafeError }));
+    const wrapper = mountPanel();
+    await flushPromises();
+
+    const failure = wrapper.get('[data-testid="ai-failed"]').text();
+    expect(failure).toContain('AI 解读暂时不可用，请稍后重试');
+    expect(failure).not.toContain('https://');
+    expect(failure).not.toContain('sk-live-secret');
+    expect(failure).not.toContain('/srv/app');
+  });
+
+  it('ignores a late retry success after selection moves to another date', async () => {
+    const retry = deferred<SentimentPercentileAnalysisResponse>();
+    const firstDate = percentileFixture().history[0]!.trade_date;
+    api.getMarketSentimentAnalysis.mockResolvedValueOnce(analysisFixture('failed'));
+    api.generateMarketSentimentAnalysis.mockReturnValueOnce(retry.promise);
+    const wrapper = mountPanel();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="analysis-retry"]').trigger('click');
+    api.getMarketSentimentAnalysis.mockResolvedValueOnce(readyAnalysis(firstDate, 'B 日期分析保持可见。'));
+    await wrapper.get('[data-testid="percentile-chart"]').trigger('click');
+    await flushPromises();
+    retry.resolve(readyAnalysis('2026-07-22', '迟到的 A 日期分析。'));
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="ai-ready"]').text()).toContain('B 日期分析保持可见。');
+    expect(wrapper.text()).not.toContain('迟到的 A 日期分析。');
+  });
+
+  it('ignores a late retry failure after selection moves to another date', async () => {
+    const retry = deferred<SentimentPercentileAnalysisResponse>();
+    const firstDate = percentileFixture().history[0]!.trade_date;
+    api.getMarketSentimentAnalysis.mockResolvedValueOnce(analysisFixture('failed'));
+    api.generateMarketSentimentAnalysis.mockReturnValueOnce(retry.promise);
+    const wrapper = mountPanel();
+    await flushPromises();
+
+    await wrapper.get('[data-testid="analysis-retry"]').trigger('click');
+    api.getMarketSentimentAnalysis.mockResolvedValueOnce(readyAnalysis(firstDate, 'B 日期分析保持可见。'));
+    await wrapper.get('[data-testid="percentile-chart"]').trigger('click');
+    await flushPromises();
+    retry.reject(new Error('late A failure'));
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="ai-ready"]').text()).toContain('B 日期分析保持可见。');
+    expect(wrapper.find('[data-testid="ai-failed"]').exists()).toBe(false);
+    expect(wrapper.text()).not.toContain('AI 分析重试失败');
+  });
+
+  it('constrains direct layout children and wraps generated analysis text on narrow screens', () => {
+    expect(source).toContain('.sentiment-percentile__body > *');
+    expect(source).toContain('.sentiment-percentile__analysis-grid > *');
+    expect(source).toContain('overflow-wrap: anywhere;');
+    expect(source).toContain('word-break: break-word;');
   });
 
   it('keeps the last successful statistic visible while an explicit refresh fails', async () => {

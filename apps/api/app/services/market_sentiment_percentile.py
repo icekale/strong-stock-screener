@@ -149,7 +149,7 @@ def calculate_sentiment_percentile(bars: list[KlineBar]) -> list[SentimentPercen
                 factors=factors,
             )
         )
-    return points
+    return points[-WINDOW:]
 
 
 def _normalize_bars(bars: list[KlineBar]) -> list[KlineBar]:

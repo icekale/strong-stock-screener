@@ -71,3 +71,54 @@ The single full-suite failure was `tests/test_chanlun_research_report.py::test_r
 ## Concerns
 
 - The full API suite has one pre-existing failure in `scripts/czsc-research.py`; it is unrelated to this task and remains unresolved by design.
+
+## Fix: Retain Latest 500 Complete Points
+
+### Status
+
+FIXED_WITH_CONCERNS
+
+### Changed Files
+
+- `apps/api/app/services/market_sentiment_percentile.py`
+- `apps/api/tests/test_market_sentiment_percentile.py`
+- `.superpowers/sdd/task-1-report.md`
+
+The calculator now returns only the latest `WINDOW` complete composite points. The normal 1020-bar fixture asserts 500 points, beginning at `bars[520].date` and ending at the final trade date. The factor formula test, no-lookahead test, and zero-range test expectations were updated for the bounded history. Amount remains the raw value for the first volume factor.
+
+### RED Evidence
+
+Command:
+
+```text
+cd apps/api && uv run pytest tests/test_market_sentiment_percentile.py -q
+```
+
+Observed failure:
+
+```text
+1 failed, 24 passed in 0.67s
+AssertionError: assert 502 == 500
+```
+
+### GREEN And Regression Evidence
+
+```text
+cd apps/api && uv run pytest tests/test_market_sentiment_percentile.py -q
+25 passed in 0.63s
+```
+
+```text
+cd apps/api && uv run ruff check app/models.py app/services/market_sentiment_percentile.py tests/market_sentiment_fixtures.py tests/test_market_sentiment_percentile.py
+All checks passed!
+```
+
+```text
+cd apps/api && uv run pytest tests/test_api.py tests/test_short_term_sentiment.py tests/test_chanlun_models.py -q
+186 passed in 9.44s
+```
+
+### Concerns
+
+- The full API suite still has the pre-existing `tests/test_chanlun_research_report.py::test_research_cli_preserves_rc8_virtualenv_interpreter_path` failure documented above; no related files were changed.
+- Fix commit SHA: recorded in repository history.

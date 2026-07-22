@@ -50,15 +50,15 @@ def test_midrank_counts_ties_in_the_middle() -> None:
 def test_calculator_requires_full_factor_warmup() -> None:
     bars = make_test_bars(1020)
     points = calculate_sentiment_percentile(bars)
-    assert len(points) == 502
-    assert points[0].trade_date == bars[518].date
-    assert len(points[-500:]) == 500
+    assert len(points) == 500
+    assert points[0].trade_date == bars[520].date
+    assert points[-1].trade_date == bars[-1].date
 
 
 def test_factor_formulas_are_exposed_in_the_first_complete_point() -> None:
     bars = make_test_bars(1020)
     point = calculate_sentiment_percentile(bars)[0]
-    index = 518
+    index = 520
     five_day_return = bars[index].close / bars[index - 5].close - 1
     five_day_amplitude = directional_amplitude(
         bars[index - 5].close,
@@ -85,7 +85,7 @@ def test_future_bar_changes_do_not_change_prior_points() -> None:
     baseline = calculate_sentiment_percentile(bars)
     mutated = [*bars, make_test_bar(1021, close=9999, amount=9_999_999_999)]
     by_date = {point.trade_date: point for point in calculate_sentiment_percentile(mutated)}
-    assert all(by_date[point.trade_date] == point for point in baseline)
+    assert all(by_date[point.trade_date] == point for point in baseline[1:])
 
 
 def test_zero_price_range_skips_only_the_affected_composite_date() -> None:
@@ -98,9 +98,10 @@ def test_zero_price_range_skips_only_the_affected_composite_date() -> None:
     points = calculate_sentiment_percentile(bars)
     dates = {point.trade_date for point in points}
 
-    assert len(points) == 501
+    assert len(points) == 500
     assert bars[518].date not in dates
-    assert bars[519].date in dates
+    assert bars[519].date not in dates
+    assert bars[520].date in dates
     assert bars[-1].date in dates
 
 

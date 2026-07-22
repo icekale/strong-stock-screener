@@ -4,6 +4,8 @@ from datetime import date
 from pathlib import Path
 from threading import RLock
 
+from pydantic import ValidationError
+
 from app.models import SentimentPercentileAnalysisResponse
 
 
@@ -30,7 +32,7 @@ class MarketSentimentAnalysisStore:
                 return SentimentPercentileAnalysisResponse.model_validate_json(
                     path.read_text(encoding="utf-8")
                 )
-            except Exception:
+            except (UnicodeError, ValidationError):
                 return None
 
     def save(

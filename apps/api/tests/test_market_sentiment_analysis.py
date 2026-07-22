@@ -275,6 +275,52 @@ def test_input_marks_missing_auxiliary_context_explicitly() -> None:
     }
 
 
+def test_input_marks_missing_snapshot_context_unavailable() -> None:
+    missing_summary = _summary().model_copy(update={"snapshot_status": "missing"})
+
+    payload = build_sentiment_analysis_input(_point(), [_point()], missing_summary, _decision(), None)
+
+    assert payload["market"] == {
+        "source_date": None,
+        "status": "unavailable",
+        "breadth": {"advance_count": None, "decline_count": None},
+        "limits": {"limit_up_count": None, "limit_down_count": None, "break_board_count": None},
+        "boards": {"max_consecutive_boards": None},
+        "seal_rate_pct": None,
+        "turnover_cny": None,
+    }
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda payload: payload.__setitem__("secret", "must-not-leak"),
+        lambda payload: payload["market"].__setitem__("secret", "must-not-leak"),
+        lambda payload: payload["main_sectors"]["items"][0].__setitem__("symbols", ["300001.SZ"]),
+        lambda payload: payload["validation"].__setitem__("samples", []),
+        lambda payload: payload["validation"]["sample_counts"].__setitem__("secret", 1),
+        lambda payload: payload["main_sectors"].__setitem__(
+            "items", payload["main_sectors"]["items"] * 6
+        ),
+    ],
+)
+def test_service_rejects_noncanonical_input_before_hash_or_provider_request(
+    tmp_path: Path,
+    mutate: object,
+) -> None:
+    payload = _input_payload()
+    mutate(payload)  # type: ignore[operator]
+    store = MarketSentimentAnalysisStore(tmp_path)
+    client = _Client([])
+    service = MarketSentimentAnalysisService(store, http_client=client)
+
+    with pytest.raises(ValidationError):
+        service.generate(payload, _config())
+
+    assert client.post.call_count == 0
+    assert not store.record_path("2026-07-22").exists()
+
+
 @pytest.mark.parametrize("protected_field", ["score", "level", "weights", "trade_permission"])
 def test_result_forbids_fields_that_could_override_deterministic_statistics(
     protected_field: str,
@@ -388,6 +434,41 @@ def test_malformed_or_invalid_llm_output_retries_exactly_three_times(
     assert client.post.call_count == 3
 
 
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("market_conclusion", "关注 300001.SZ 个股，市场结构分化。"),
+        ("key_drivers", ["建议轻仓参与 1", "涨停 68 家"]),
+        ("factor_divergence", "可对存储芯片下单，封板率 71.5%。"),
+        ("historical_context", "建议买入，历史样本 37 个。"),
+        ("next_session_watch", ["考虑卖出 1", "跌停低于 10 家"]),
+        ("risk_note", "对个股设置止损，参考 5%。"),
+        ("market_conclusion", "当前综合分为 61.0，市场结构分化。"),
+        ("market_conclusion", "市场情绪处于中性区间。"),
+        ("market_conclusion", "Current level is neutral."),
+        ("market_conclusion", "当前权重为 30%，市场结构分化。"),
+        ("market_conclusion", "当前交易许可为空仓等待，市场结构分化。"),
+    ],
+)
+def test_semantically_invalid_llm_output_retries_exactly_three_times(
+    tmp_path: Path,
+    field: str,
+    value: object,
+) -> None:
+    result = _result_payload()
+    result[field] = value
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content), _Response(content), _Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "failed"
+    assert response.attempts == 3
+    assert response.result is None
+    assert client.post.call_count == 3
+
+
 def test_matching_failed_request_waits_for_retry_cooldown(tmp_path: Path) -> None:
     client = _Client([RuntimeError("network unavailable")] * 3)
     service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
@@ -440,3 +521,27 @@ def test_failure_is_persisted_atomically_without_secret_leakage(
     assert secret not in response.error
     assert secret not in store.record_path("2026-07-22").read_text(encoding="utf-8")
     assert [path.name for path in replaced_from] == ["2026-07-22.json.tmp", "2026-07-22.json.tmp"]
+
+
+def test_store_load_treats_malformed_record_as_cache_miss(tmp_path: Path) -> None:
+    store = MarketSentimentAnalysisStore(tmp_path)
+    path = store.record_path("2026-07-22")
+    path.parent.mkdir(parents=True)
+    path.write_text("not-json", encoding="utf-8")
+
+    assert store.load("2026-07-22") is None
+
+
+def test_store_load_propagates_filesystem_errors(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = MarketSentimentAnalysisStore(tmp_path)
+    path = store.record_path("2026-07-22")
+    path.parent.mkdir(parents=True)
+    path.write_text("{}", encoding="utf-8")
+
+    def fail_read_text(*_args: object, **_kwargs: object) -> str:
+        raise PermissionError("read denied")
+
+    monkeypatch.setattr(Path, "read_text", fail_read_text)
+
+    with pytest.raises(PermissionError, match="read denied"):
+        store.load("2026-07-22")

@@ -72,6 +72,7 @@ RUN corepack enable \
     && corepack prepare pnpm@9.15.0 --activate
 
 COPY --from=web-deps /build/web/node_modules ./node_modules
+COPY --from=web-deps /build/web/packages ./packages
 COPY apps/web-vue ./
 ARG VITE_API_BASE_URL=
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL

@@ -1,47 +1,73 @@
-# Task 1 Report: Parse the Actual SZSE ETF Share Date
+# Task 1 Report: Deterministic Five-Factor Calculator
 
-## Implementation Summary
+## Status
 
-- Replaced SZSE ETF fixture metadata with the real response shape: page date `2026-07-20` and scale-column share date `2026-07-17`.
-- Added strict `_szse_share_date` extraction from `metadata.cols.dqgm` using one valid ISO date only.
-- The parser compares the extracted share date with the requested trade date and does not fall back to `metadata.subname`.
-- Added the collected actual share date to successful and partial SZSE provider status details.
+DONE_WITH_CONCERNS
+
+## Files Changed
+
+- `apps/api/app/models.py`
+- `apps/api/app/services/market_sentiment_percentile.py`
+- `apps/api/tests/market_sentiment_fixtures.py`
+- `apps/api/tests/test_market_sentiment_percentile.py`
+- `.superpowers/sdd/task-1-report.md`
+
+## Commit SHA(s)
+
+- Implementation commit: pending commit
 
 ## RED Evidence
 
 Command:
 
-    .venv/bin/pytest tests/test_capital_signal_providers.py -k 'szse_share_parser' -vv
+```text
+cd apps/api && uv run pytest tests/test_market_sentiment_percentile.py -q
+```
 
-Initial output: `zsh:1: no such file or directory: .venv/bin/pytest` because this worktree had no API virtual environment.
+Observed failure:
 
-Command used with the available locked environment:
+```text
+ERROR collecting tests/test_market_sentiment_percentile.py
+ImportError: cannot import name 'SentimentPercentileFactor' from 'app.models'
+1 error during collection
+```
 
-    uv run --offline pytest tests/test_capital_signal_providers.py -k 'szse_share_parser' -vv
+This was the expected failure before the Task 1 models and calculator existed.
 
-Output: `1 failed, 4 passed, 20 deselected`. The mismatch test failed with `assert 0 == 1`, proving the old parser incorrectly rejected the real response shape while reading `metadata.subname`.
+## GREEN And Regression Evidence
 
-## GREEN Evidence
+```text
+cd apps/api && uv run pytest tests/test_market_sentiment_percentile.py -q
+25 passed in 0.66s
+```
 
-    .venv/bin/pytest tests/test_capital_signal_providers.py -k 'szse_share_parser' -vv
-    5 passed, 20 deselected in 0.27s
+```text
+cd apps/api && uv run ruff check app/models.py app/services/market_sentiment_percentile.py tests/market_sentiment_fixtures.py tests/test_market_sentiment_percentile.py
+All checks passed!
+```
 
-    .venv/bin/pytest tests/test_capital_signal_providers.py -q
-    25 passed in 0.32s
+```text
+cd apps/api && uv run pytest tests/test_api.py tests/test_short_term_sentiment.py tests/test_chanlun_models.py -q
+186 passed in 15.72s
+```
 
-    .venv/bin/ruff check app/providers/capital_signals.py tests/test_capital_signal_providers.py
-    All checks passed!
+Full API suite:
 
-## Files Changed
+```text
+cd apps/api && uv run pytest -q
+1105 passed, 1 failed in 46.79s
+```
 
-- `apps/api/app/providers/capital_signals.py`
-- `apps/api/tests/test_capital_signal_providers.py`
-- `.superpowers/sdd/task-1-report.md`
+The single full-suite failure was `tests/test_chanlun_research_report.py::test_research_cli_preserves_rc8_virtualenv_interpreter_path`, asserting an existing unrelated `scripts/czsc-research.py` behavior. That script and test are outside the Task 1 scope and were not changed.
 
-## Self-Review Findings
+## Self-Review Notes
 
-No findings. The diff is limited to the requested provider, test, and report files. The parser preserves the distinction between page generation date and actual share date, rejects missing, ambiguous, and invalid scale-column dates, and reports actual dates for both successful and partial SZSE coverage.
+- The calculator normalizes unsorted bars by date and keeps the last duplicate record.
+- It validates finite, positive OHLC and amount values plus OHLC ordering before calculation.
+- It uses the required index-518 warmup, exact 500-observation midrank windows, equal 20% weights, fixed level boundaries, and signed directional amplitude.
+- A zero 500-day high/low range skips only that date's composite point.
+- `git diff --check` passed, and no unrelated files were modified.
 
 ## Concerns
 
-No known functional concerns. The required `.venv` was created locally by `uv run --offline` because it was absent initially; it is ignored and is not part of the commit.
+- The full API suite has one pre-existing failure in `scripts/czsc-research.py`; it is unrelated to this task and remains unresolved by design.

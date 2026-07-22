@@ -407,6 +407,47 @@ class StrongStockSourceStatus(BaseModel):
     detail: str
 
 
+SentimentPercentileLevel = Literal["冰点", "偏冷", "中性", "偏热", "过热"]
+SentimentPercentileCacheStatus = Literal["fresh", "cached", "stale"]
+
+
+class SentimentPercentileFactor(BaseModel):
+    score: float = Field(ge=0, le=100)
+    raw_value: float
+    raw_unit: str
+
+
+class SentimentPercentileFactors(BaseModel):
+    volume: SentimentPercentileFactor
+    index_move_5d: SentimentPercentileFactor
+    price_position: SentimentPercentileFactor
+    amplitude_5d: SentimentPercentileFactor
+    volume_trend: SentimentPercentileFactor
+
+
+class SentimentPercentilePoint(BaseModel):
+    trade_date: str
+    score: float = Field(ge=0, le=100)
+    level: SentimentPercentileLevel
+    factors: SentimentPercentileFactors
+
+
+class SentimentPercentileResponse(BaseModel):
+    model_version: str = "market-sentiment-percentile-v1"
+    benchmark_symbol: str = "000985.SH"
+    benchmark_name: str = "中证全指"
+    window_size: int = 500
+    weights: dict[str, float]
+    latest_complete_trade_date: str
+    selected_trade_date: str | None = None
+    selected: SentimentPercentilePoint | None = None
+    history: list[SentimentPercentilePoint] = Field(default_factory=list)
+    cache_status: SentimentPercentileCacheStatus = "fresh"
+    source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    generated_at: str
+    notes: list[str] = Field(default_factory=list)
+
+
 class CzscResearchSnapshot(BaseModel):
     status: CzscResearchStatus
     symbol: str

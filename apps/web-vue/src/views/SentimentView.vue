@@ -5,6 +5,7 @@ import { getSentimentDecision, getSentimentSummary, getShortTermIntradaySentimen
 import type { SentimentDecisionResponse, SentimentSummaryResponse, ShortTermIntradaySentimentItem, ShortTermIntradaySentimentResponse } from '@/service/types';
 import { formatWorkbenchNumber } from '@/components/common/workbench/workbench';
 import type { WorkbenchMetric } from '@/components/common/workbench/workbench';
+import SentimentPercentilePanel from '@/components/sentiment/SentimentPercentilePanel.vue';
 import { useTradeDate } from '@/composables/useTradeDate';
 
 defineOptions({ name: 'SentimentView' });
@@ -15,6 +16,7 @@ const decision = ref<SentimentDecisionResponse | null>(null);
 const intraday = ref<ShortTermIntradaySentimentResponse | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
+const percentileRefreshToken = ref(0);
 
 const sentimentMetrics = computed<WorkbenchMetric[]>(() => {
   const metrics = summary.value?.metrics;
@@ -39,6 +41,11 @@ async function load() {
 
 function handleDateChange(value: string) {
   setTradeDate(value);
+  void load();
+}
+
+function handleRefresh() {
+  percentileRefreshToken.value += 1;
   void load();
 }
 
@@ -100,11 +107,14 @@ onMounted(() => void load());
     <PageHeader title="情绪与复盘" description="短线情绪、交易许可和盘中提醒">
       <template #meta>{{ tradeDate }}</template>
       <a-date-picker :value="dayjs(tradeDate)" value-format="YYYY-MM-DD" @change="(_, value) => handleDateChange(String(value))" />
-      <a-button :loading="loading" type="primary" @click="load">刷新数据</a-button>
+      <a-button data-testid="sentiment-refresh" :loading="loading" type="primary" @click="handleRefresh">刷新数据</a-button>
     </PageHeader>
 
     <a-alert v-if="error" :title="error" show-icon type="warning" />
-    <MetricStrip :items="sentimentMetrics" />
+    <SentimentPercentilePanel :as-of="tradeDate" :refresh-token="percentileRefreshToken" />
+    <div data-testid="sentiment-metrics">
+      <MetricStrip :items="sentimentMetrics" />
+    </div>
 
     <section class="sentiment-panel sentiment-permission-panel">
       <SectionHeader title="交易许可" :source="decision ? '情绪决策模型' : '等待数据'" :updated-at="formatGeneratedAt(decision?.generated_at)">

@@ -1,4 +1,50 @@
-import type { EtfFactorStatus, EtfThreeFactorLevel } from "@/service/types";
+import type { EtfFactorStatus, EtfThreeFactorItem, EtfThreeFactorLevel, HuijinEtfActivityItem } from "@/service/types";
+
+export type UnifiedEtfActivityRow = {
+  symbol: string;
+  name: string;
+  indexName: string;
+  closeChangePct: number | null;
+  dailyChangePct: number | null;
+  baselineChangePct: number | null;
+  volumeRatio: number | null;
+  signalScore: number | null;
+  signalLevel: EtfThreeFactorLevel;
+  activity: HuijinEtfActivityItem | null;
+  factor: EtfThreeFactorItem | null;
+};
+
+export function buildUnifiedEtfActivityRows(
+  activityItems: HuijinEtfActivityItem[],
+  factorItems: EtfThreeFactorItem[]
+): UnifiedEtfActivityRow[] {
+  const activityBySymbol = new Map(activityItems.map(item => [item.symbol, item]));
+  const factorBySymbol = new Map(factorItems.map(item => [item.symbol, item]));
+  const symbols = [...activityItems.map(item => item.symbol)];
+  for (const item of factorItems) if (!activityBySymbol.has(item.symbol)) symbols.push(item.symbol);
+
+  return symbols.map(symbol => {
+    const activity = activityBySymbol.get(symbol) ?? null;
+    const factor = factorBySymbol.get(symbol) ?? null;
+    return {
+      symbol,
+      name: activity?.name ?? factor?.name ?? symbol,
+      indexName: activity?.index_name ?? factor?.index_name ?? '--',
+      closeChangePct: activity?.close_change_pct ?? factor?.close_change_pct ?? null,
+      dailyChangePct: activity?.daily_change_pct ?? null,
+      baselineChangePct: activity?.cumulative_baseline_change_pct ?? activity?.baseline_change_pct ?? null,
+      volumeRatio: factor?.volume_ratio ?? null,
+      signalScore: factor?.signal_score ?? null,
+      signalLevel: factor?.level ?? 'incomplete',
+      activity,
+      factor
+    };
+  });
+}
+
+export function pickDefaultEtfActivitySymbol(rows: UnifiedEtfActivityRow[]): string {
+  return [...rows].sort((left, right) => (right.signalScore ?? -1) - (left.signalScore ?? -1))[0]?.symbol ?? '';
+}
 
 export type EtfSignalTone = "danger" | "warning" | "info" | "neutral";
 export type CloseChangeTone = "rise" | "fall" | "flat";

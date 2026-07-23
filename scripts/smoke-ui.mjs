@@ -11,7 +11,7 @@ const viewports = [
 
 let chromium;
 try {
-  const require = createRequire(new URL("../apps/web/package.json", import.meta.url));
+  const require = createRequire(import.meta.url);
   ({ chromium } = require("playwright"));
 } catch {
   console.warn("smoke:ui skipped: Playwright is not installed in this workspace.");
@@ -55,7 +55,7 @@ for (const viewport of viewports) {
         const width = Math.max(document.body.scrollWidth, document.documentElement.scrollWidth);
         const clientWidth = document.documentElement.clientWidth;
         return {
-          hasNextError: Boolean(document.querySelector("nextjs-portal, .nextjs-toast-errors-parent")),
+          hasErrorOverlay: Boolean(document.querySelector("vite-error-overlay")),
           hasHorizontalOverflow: width > clientWidth + 4,
           width,
           clientWidth,
@@ -65,8 +65,8 @@ for (const viewport of viewports) {
       if (!response || response.status() >= 400) {
         failures.push(`${viewport.name} ${route}: navigation failed with ${response?.status() ?? "no response"}`);
       }
-      if (metrics.hasNextError) {
-        failures.push(`${viewport.name} ${route}: Next.js error overlay detected`);
+      if (metrics.hasErrorOverlay) {
+        failures.push(`${viewport.name} ${route}: Vite error overlay detected`);
       }
       if (metrics.hasHorizontalOverflow) {
         failures.push(`${viewport.name} ${route}: horizontal overflow ${metrics.width}/${metrics.clientWidth}`);

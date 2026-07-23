@@ -1,7 +1,0 @@
-.env
-.env.local
-node_modules
-.next
-.next-dev
-dist
-*.tsbuildinfo

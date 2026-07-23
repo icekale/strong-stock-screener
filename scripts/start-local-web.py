@@ -13,8 +13,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-WEB_DIR = ROOT / "apps" / "web"
-DEV_DIST_DIR = WEB_DIR / ".next-dev"
+WEB_DIR = ROOT / "apps" / "web-vue"
 DEFAULT_LOG = Path("/tmp/strong-stock-web-3110.log")
 DEFAULT_PID_FILE = Path("/tmp/strong-stock-web-3110.pid")
 
@@ -75,9 +74,9 @@ def wait_for_port(port: int, timeout: float = 30.0) -> bool:
 
 
 def daemonize_web(port: int, log_path: Path, pid_file: Path) -> None:
-    npm = shutil.which("npm")
-    if not npm:
-        raise RuntimeError("npm not found in PATH")
+    pnpm = shutil.which("pnpm")
+    if not pnpm:
+        raise RuntimeError("pnpm not found in PATH")
 
     first_pid = os.fork()
     if first_pid:
@@ -90,8 +89,6 @@ def daemonize_web(port: int, log_path: Path, pid_file: Path) -> None:
         os._exit(0)
 
     env = os.environ.copy()
-    env["NEXT_DIST_DIR"] = ".next-dev"
-    env.setdefault("NEXT_TELEMETRY_DISABLED", "1")
 
     log_path.parent.mkdir(parents=True, exist_ok=True)
     pid_file.parent.mkdir(parents=True, exist_ok=True)
@@ -110,13 +107,12 @@ def daemonize_web(port: int, log_path: Path, pid_file: Path) -> None:
         os.close(null_fd)
 
     os.chdir(WEB_DIR)
-    os.execve(npm, [npm, "run", "dev", "--", "-p", str(port)], env)
+    os.execve(pnpm, [pnpm, "dev", "--", "--host", "127.0.0.1", "--port", str(port)], env)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Start the local Next.js web dev server safely.")
+    parser = argparse.ArgumentParser(description="Start the local Vue web dev server safely.")
     parser.add_argument("--port", type=int, default=int(os.environ.get("STRONG_STOCK_WEB_PORT", "3110")))
-    parser.add_argument("--no-clean", action="store_true", help="Do not remove apps/web/.next-dev before start.")
     parser.add_argument("--no-kill", action="store_true", help="Do not stop an existing listener on the target port.")
     parser.add_argument("--log", type=Path, default=Path(os.environ.get("STRONG_STOCK_WEB_LOG", DEFAULT_LOG)))
     parser.add_argument(
@@ -135,9 +131,6 @@ def main() -> int:
         if pids:
             print(f"stopping existing listener on {args.port}: {', '.join(map(str, pids))}")
             stop_pids(pids)
-
-    if not args.no_clean:
-        shutil.rmtree(DEV_DIST_DIR, ignore_errors=True)
 
     daemonize_web(args.port, args.log, args.pid_file)
 

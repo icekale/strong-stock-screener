@@ -9,15 +9,20 @@ import {
   getDataSourceStatus,
   getLatestModelMaintenancePacket,
   getLatestModelMaintenanceReport,
+  getRuntimeSettings,
   getSystemCache,
-  getSystemStatus
+  getSystemStatus,
+  saveRuntimeSettings
 } from '@/service/product-api';
 import type {
+  AiAnalysisSettingsUpdate,
   AuctionTop3PerformanceResponse,
   AuctionTop3TrainingSummary,
   DataSourceStatusResponse,
   ModelMaintenancePacket,
   ModelMaintenanceReport,
+  RuntimeSettingsConfig,
+  RuntimeSettingsResponse,
   SourceStatusValue,
   SystemCacheItem,
   SystemCacheSummary,
@@ -37,6 +42,11 @@ const training = ref<AuctionTop3TrainingSummary | null>(null);
 const performance = ref<AuctionTop3PerformanceResponse | null>(null);
 const packet = ref<ModelMaintenancePacket | null>(null);
 const report = ref<ModelMaintenanceReport | null>(null);
+const runtimeSettings = ref<RuntimeSettingsResponse | null>(null);
+const aiSettingsSaving = ref(false);
+const aiSettingsError = ref<string | null>(null);
+const aiSettingsMessage = ref<string | null>(null);
+const aiDraft = ref<AiAnalysisDraft>(defaultAiDraft());
 const loading = ref(false);
 const clearing = ref<string | null>(null);
 const error = ref<string | null>(null);
@@ -59,7 +69,7 @@ const trainingMetrics = computed<WorkbenchMetric[]>(() => [
 async function load() {
   loading.value = true;
   error.value = null;
-  const results = await Promise.allSettled([getSystemStatus(), getSystemCache(), getDataSourceStatus(), getAuctionTop3TrainingSummary(), getAuctionTop3TrainingPerformance(), getLatestModelMaintenancePacket(), getLatestModelMaintenanceReport()]);
+  const results = await Promise.allSettled([getSystemStatus(), getSystemCache(), getDataSourceStatus(), getAuctionTop3TrainingSummary(), getAuctionTop3TrainingPerformance(), getLatestModelMaintenancePacket(), getLatestModelMaintenanceReport(), getRuntimeSettings()]);
   if (results[0].status === 'fulfilled') status.value = results[0].value;
   if (results[1].status === 'fulfilled') cache.value = results[1].value;
   if (results[2].status === 'fulfilled') sources.value = results[2].value;
@@ -67,8 +77,34 @@ async function load() {
   if (results[4].status === 'fulfilled') performance.value = results[4].value;
   if (results[5].status === 'fulfilled') packet.value = results[5].value;
   if (results[6].status === 'fulfilled') report.value = results[6].value;
+  if (results[7].status === 'fulfilled') {
+    runtimeSettings.value = results[7].value;
+    applyAiDraft(results[7].value.config);
+    aiSettingsError.value = null;
+  } else {
+    aiSettingsError.value = '读取 AI 配置失败，请检查后端服务';
+  }
   if (results.every(result => result.status === 'rejected')) error.value = '系统状态暂时不可用';
   loading.value = false;
+}
+
+async function saveAiSettings() {
+  const current = runtimeSettings.value;
+  if (!current) return;
+
+  aiSettingsSaving.value = true;
+  aiSettingsError.value = null;
+  aiSettingsMessage.value = null;
+  try {
+    const response = await saveRuntimeSettings(buildRuntimeSettingsPayload(current, aiDraft.value));
+    runtimeSettings.value = response;
+    applyAiDraft(response.config);
+    aiSettingsMessage.value = 'AI 配置已保存';
+  } catch (cause) {
+    aiSettingsError.value = cause instanceof Error ? cause.message : '保存 AI 配置失败';
+  } finally {
+    aiSettingsSaving.value = false;
+  }
 }
 
 async function clear(group: string) {
@@ -164,6 +200,60 @@ function asCacheItem(value: unknown) {
   return value as SystemCacheItem;
 }
 
+type AiAnalysisDraft = AiAnalysisSettingsUpdate & { api_key: string };
+
+function defaultAiDraft(): AiAnalysisDraft {
+  return {
+    enabled: false,
+    provider: 'openai_compatible',
+    base_url: 'https://api.openai.com/v1',
+    model: 'gpt-4.1-mini',
+    api_key: '',
+    run_after_daily_review: false,
+    run_after_weekly_calibration: false
+  };
+}
+
+function applyAiDraft(config: RuntimeSettingsConfig) {
+  const value = config.ai_analysis;
+  aiDraft.value = {
+    enabled: value.enabled,
+    provider: value.provider,
+    base_url: value.base_url,
+    model: value.model,
+    api_key: '',
+    run_after_daily_review: value.run_after_daily_review,
+    run_after_weekly_calibration: value.run_after_weekly_calibration
+  };
+}
+
+function buildRuntimeSettingsPayload(current: RuntimeSettingsResponse, draft: AiAnalysisDraft) {
+  const { config, saved } = current;
+  return {
+    candidate_provider: saved.candidate_provider ?? config.candidate_provider,
+    kline_provider: saved.kline_provider ?? config.kline_provider,
+    quote_provider: saved.quote_provider ?? config.quote_provider,
+    tickflow_base_url: saved.tickflow_base_url ?? config.tickflow_base_url,
+    ifind_base_url: saved.ifind_base_url ?? config.ifind_base_url,
+    ifind_service_id: saved.ifind_service_id ?? config.ifind_service_id,
+    tdx_base_url: saved.tdx_base_url ?? config.tdx_base_url,
+    provider_timeout_seconds: saved.provider_timeout_seconds ?? config.provider_timeout_seconds,
+    notification_channels: saved.notification_channels ?? [],
+    sentiment_monitor: saved.sentiment_monitor ?? config.sentiment_monitor,
+    gsgf_auto_review: saved.gsgf_auto_review ?? config.gsgf_auto_review,
+    auction_top3_training: saved.auction_top3_training ?? config.auction_top3_training,
+    ai_analysis: {
+      enabled: draft.enabled,
+      provider: draft.provider,
+      base_url: draft.base_url.trim(),
+      model: draft.model.trim(),
+      api_key: draft.api_key.trim() || undefined,
+      run_after_daily_review: draft.run_after_daily_review,
+      run_after_weekly_calibration: draft.run_after_weekly_calibration
+    }
+  };
+}
+
 onMounted(() => void load());
 </script>
 
@@ -176,6 +266,60 @@ onMounted(() => void load());
 
     <a-alert v-if="error" :title="error" show-icon type="warning" />
     <MetricStrip :items="systemMetrics" />
+
+    <section class="system-panel" data-testid="ai-analysis-settings">
+      <SectionHeader title="AI 分析服务" source="情绪盘后解读与模型维护">
+        <a-button data-testid="ai-analysis-save" :loading="aiSettingsSaving" type="primary" @click="saveAiSettings">保存 AI 配置</a-button>
+      </SectionHeader>
+      <a-alert v-if="aiSettingsError" :title="aiSettingsError" show-icon type="warning" />
+      <a-alert v-if="aiSettingsMessage" :title="aiSettingsMessage" show-icon type="success" />
+      <div v-if="runtimeSettings" class="ai-settings-grid">
+        <label class="ai-settings-field ai-settings-field--switch">
+          <span>启用 AI 分析</span>
+          <a-switch v-model:checked="aiDraft.enabled" />
+        </label>
+        <label class="ai-settings-field">
+          <span>Provider</span>
+          <a-select
+            v-model:value="aiDraft.provider"
+            data-testid="ai-analysis-provider"
+            :options="[
+              { label: 'OpenAI / Codex', value: 'openai' },
+              { label: 'DeepSeek', value: 'deepseek' },
+              { label: 'OpenAI Compatible', value: 'openai_compatible' }
+            ]"
+          />
+        </label>
+        <label class="ai-settings-field">
+          <span>Base URL</span>
+          <a-input v-model:value="aiDraft.base_url" data-testid="ai-analysis-base-url" />
+        </label>
+        <label class="ai-settings-field">
+          <span>模型名称</span>
+          <a-input v-model:value="aiDraft.model" data-testid="ai-analysis-model" placeholder="deepseek-reasoner / gpt-4.1-mini" />
+        </label>
+        <label class="ai-settings-field">
+          <span>API Key</span>
+          <a-input-password
+            v-model:value="aiDraft.api_key"
+            data-testid="ai-analysis-api-key"
+            :placeholder="runtimeSettings.config.ai_analysis.api_key_configured ? '留空表示沿用已保存 Key' : '请输入 AI API Key'"
+          />
+        </label>
+        <label class="ai-settings-field ai-settings-field--switch">
+          <span>每日复盘后自动生成建议</span>
+          <a-switch v-model:checked="aiDraft.run_after_daily_review" />
+        </label>
+        <label class="ai-settings-field ai-settings-field--switch">
+          <span>每周校准后自动生成建议</span>
+          <a-switch v-model:checked="aiDraft.run_after_weekly_calibration" />
+        </label>
+      </div>
+      <div v-else class="system-empty">正在读取 AI 配置</div>
+      <div v-if="runtimeSettings" class="system-detail ai-settings-hint">
+        当前状态：{{ runtimeSettings.config.ai_analysis.enabled && runtimeSettings.config.ai_analysis.api_key_configured ? '已启用' : '未配置' }} · API Key 只显示配置状态，不会回显完整内容。留空保存时会沿用已有 Key。
+      </div>
+    </section>
 
     <div class="grid grid-cols-1 gap-16px xl:grid-cols-2">
       <section class="system-panel">
@@ -304,6 +448,34 @@ onMounted(() => void load());
   color: var(--wb-positive);
 }
 
+.ai-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  padding-top: 14px;
+}
+
+.ai-settings-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--wb-muted);
+  font-size: 12px;
+}
+
+.ai-settings-field--switch {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 32px;
+  padding: 0 2px;
+}
+
+.ai-settings-hint {
+  margin-top: 12px;
+}
+
 .system-status-column,
 .system-cache-actions {
   display: flex;
@@ -388,6 +560,10 @@ onMounted(() => void load());
 
   .system-packet-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ai-settings-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 

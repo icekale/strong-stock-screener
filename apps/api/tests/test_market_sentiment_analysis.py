@@ -561,6 +561,8 @@ def test_llm_request_uses_the_compact_result_contract(tmp_path: Path) -> None:
         assert compact_key in user_prompt
     for posture in ("attack", "balanced", "defensive", "wait"):
         assert posture in user_prompt
+    assert "上涨家数和下跌家数" in user_prompt
+    assert "禁止写任何指数或板块的涨幅" in user_prompt
 
 
 def test_changed_input_or_model_generates_again(tmp_path: Path) -> None:

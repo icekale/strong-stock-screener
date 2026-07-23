@@ -33,7 +33,7 @@ _FACTOR_NAMES = (
 )
 _RETRY_DELAY = timedelta(minutes=30)
 _PENDING_TIMEOUT = timedelta(minutes=3)
-_AI_PROVIDER_TIMEOUT_SECONDS = 60
+_AI_PROVIDER_TIMEOUT_SECONDS = 180
 
 
 class _StrictAnalysisInput(BaseModel):

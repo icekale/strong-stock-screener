@@ -630,7 +630,7 @@ class MarketSentimentAnalysisService:
                             "content": json.dumps(
                                 {
                                     "instruction": _COMPACT_OUTPUT_PROMPT,
-                                    "data": input_payload,
+                                    "data": _prompt_input_payload(input_payload),
                                 },
                                 ensure_ascii=False,
                                 sort_keys=True,
@@ -704,8 +704,21 @@ _COMPACT_OUTPUT_PROMPT = (
     "c 是市场结论，d 是 2 到 4 条带数字的主要驱动，v 是因子背离，h 是历史位置，"
     "p 只能是 attack、balanced、defensive、wait，w 是 2 到 4 条带数字的次日观察，"
     "n 只能写数据缺失、样本限制或模型局限。只使用输入数字，保持简洁；不要输出数据表、"
-    "个股、买卖建议、仓位或持有建议。"
+    "个股、买卖建议、仓位或持有建议。不要复述 decision 中的交易权限或风险等级，"
+    "输出不得出现低吸、轻仓、重仓、买入、卖出、加仓、减仓等交易措辞。"
 )
+
+
+def _prompt_input_payload(input_payload: Mapping[str, object]) -> dict[str, object]:
+    prompt_payload = dict(input_payload)
+    decision = input_payload.get("decision")
+    if isinstance(decision, Mapping):
+        prompt_payload["decision"] = {
+            "source_date": decision.get("source_date"),
+            "status": decision.get("status"),
+            "market_state": decision.get("market_state"),
+        }
+    return prompt_payload
 
 
 def _normalize_sentiment_result_payload(payload: dict[str, Any]) -> dict[str, Any]:

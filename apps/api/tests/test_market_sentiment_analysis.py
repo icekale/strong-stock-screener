@@ -23,6 +23,7 @@ from app.models import (
 )
 from app.services.market_sentiment_analysis import (
     MarketSentimentAnalysisService,
+    _prompt_input_payload,
     build_sentiment_analysis_input,
     hash_sentiment_analysis_input,
     sentiment_analysis_record_is_reusable,
@@ -355,6 +356,20 @@ def test_input_marks_missing_snapshot_context_unavailable() -> None:
     }
 
 
+def test_prompt_input_hides_trade_permission_and_risk_level_without_mutating_input() -> None:
+    payload = _input_payload()
+
+    prompt_payload = _prompt_input_payload(payload)
+
+    assert prompt_payload["decision"] == {
+        "source_date": "2026-07-22",
+        "status": "available",
+        "market_state": "修复",
+    }
+    assert payload["decision"]["trade_permission"] == "轻仓试错"
+    assert payload["decision"]["risk_level"] == "中"
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
@@ -517,6 +532,21 @@ def test_service_reuses_matching_ready_provider_model_and_hash(tmp_path: Path) -
     user_prompt = request["messages"][1]["content"]
     assert "短键" in user_prompt
     assert '"data"' in user_prompt
+
+
+def test_llm_prompt_redacts_decision_permission_and_risk_level(tmp_path: Path) -> None:
+    client = _Client([_Response(json.dumps(_result_payload(), ensure_ascii=False))])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+    user_prompt = json.loads(client.post.call_args.kwargs["json"]["messages"][1]["content"])
+    assert user_prompt["data"]["decision"] == {
+        "source_date": "2026-07-22",
+        "status": "available",
+        "market_state": "修复",
+    }
 
 
 def test_llm_request_uses_the_compact_result_contract(tmp_path: Path) -> None:

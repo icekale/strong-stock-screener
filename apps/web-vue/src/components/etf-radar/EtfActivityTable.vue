@@ -93,8 +93,8 @@ function statusText(row: UnifiedEtfActivityRow) {
         </colgroup>
         <thead>
           <tr>
-            <th scope="col">ETF / 指数</th>
-            <th scope="col">
+            <th scope="col" class="etf-activity-table__cell--identity">ETF / 指数</th>
+            <th scope="col" class="etf-activity-table__cell--numeric">
               <button
                 type="button"
                 :aria-label="`收盘涨跌 ${sortLabel('closeChangePct')}`"
@@ -103,7 +103,7 @@ function statusText(row: UnifiedEtfActivityRow) {
                 收盘涨跌
               </button>
             </th>
-            <th scope="col">
+            <th scope="col" class="etf-activity-table__cell--numeric">
               <button
                 type="button"
                 :aria-label="`份额日变化 ${sortLabel('dailyChangePct')}`"
@@ -112,7 +112,7 @@ function statusText(row: UnifiedEtfActivityRow) {
                 份额日变化
               </button>
             </th>
-            <th scope="col">
+            <th scope="col" class="etf-activity-table__cell--numeric">
               <button
                 type="button"
                 :aria-label="`报告基线偏离 ${sortLabel('baselineChangePct')}`"
@@ -121,12 +121,12 @@ function statusText(row: UnifiedEtfActivityRow) {
                 报告基线偏离
               </button>
             </th>
-            <th scope="col">
+            <th scope="col" class="etf-activity-table__cell--numeric">
               <button type="button" :aria-label="`20日量比 ${sortLabel('volumeRatio')}`" @click="sortBy('volumeRatio')">
                 20日量比
               </button>
             </th>
-            <th scope="col">
+            <th scope="col" class="etf-activity-table__cell--numeric">
               <button
                 type="button"
                 :aria-label="`三因子评分 ${sortLabel('signalScore')}`"
@@ -135,7 +135,7 @@ function statusText(row: UnifiedEtfActivityRow) {
                 三因子评分
               </button>
             </th>
-            <th scope="col">状态</th>
+            <th scope="col" class="etf-activity-table__cell--status">状态</th>
           </tr>
         </thead>
         <tbody>
@@ -147,7 +147,7 @@ function statusText(row: UnifiedEtfActivityRow) {
             :class="{ 'etf-activity-table__row--selected': row.symbol === selectedSymbol }"
             @click="selectRow(row.symbol)"
           >
-            <th scope="row">
+            <th scope="row" class="etf-activity-table__cell--identity">
               <button
                 data-testid="activity-etf-select"
                 type="button"
@@ -159,27 +159,40 @@ function statusText(row: UnifiedEtfActivityRow) {
                 <span :title="`${row.symbol} · ${row.indexName}`">{{ row.symbol }} · {{ row.indexName }}</span>
               </button>
             </th>
-            <td :class="valueClass(row.closeChangePct)">{{ formatPercent(row.closeChangePct) }}</td>
-            <td :class="valueClass(row.dailyChangePct)">
+            <td class="etf-activity-table__cell--numeric" :class="valueClass(row.closeChangePct)">
+              {{ formatPercent(row.closeChangePct) }}
+            </td>
+            <td class="etf-activity-table__cell--numeric" :class="valueClass(row.dailyChangePct)">
               <div class="etf-activity-table__share-change">
                 <span>{{ formatPercent(row.dailyChangePct) }}</span>
                 <span
                   v-if="row.activity && shareChangeEventLabel(row.activity)"
                   data-testid="tenfold-share-change"
                   class="etf-activity-table__event"
-                  :class="row.activity.direction === 'increase' ? 'etf-activity-table__event--increase' : 'etf-activity-table__event--decrease'"
+                  :class="
+                    row.activity.direction === 'increase'
+                      ? 'etf-activity-table__event--increase'
+                      : 'etf-activity-table__event--decrease'
+                  "
                 >
                   {{ shareChangeEventLabel(row.activity) }}
                 </span>
-                <small v-if="row.activity?.share_change_20d_multiple !== null && row.activity?.share_change_20d_multiple !== undefined">
+                <small
+                  v-if="
+                    row.activity?.share_change_20d_multiple !== null &&
+                    row.activity?.share_change_20d_multiple !== undefined
+                  "
+                >
                   {{ row.activity.share_change_20d_multiple.toFixed(1) }}倍
                 </small>
               </div>
             </td>
-            <td :class="valueClass(row.baselineChangePct)">{{ formatPercent(row.baselineChangePct) }}</td>
-            <td>{{ formatVolumeRatio(row.volumeRatio) }}</td>
-            <td>{{ formatScore(row.signalScore) }}</td>
-            <td class="etf-activity-table__status">{{ statusText(row) }}</td>
+            <td class="etf-activity-table__cell--numeric" :class="valueClass(row.baselineChangePct)">
+              {{ formatPercent(row.baselineChangePct) }}
+            </td>
+            <td class="etf-activity-table__cell--numeric">{{ formatVolumeRatio(row.volumeRatio) }}</td>
+            <td class="etf-activity-table__cell--numeric">{{ formatScore(row.signalScore) }}</td>
+            <td class="etf-activity-table__cell--status etf-activity-table__status">{{ statusText(row) }}</td>
           </tr>
         </tbody>
       </table>
@@ -226,8 +239,15 @@ td {
   white-space: nowrap;
 }
 
-thead th,
-tbody th {
+.etf-activity-table__cell--identity {
+  text-align: left;
+}
+
+.etf-activity-table__cell--numeric {
+  text-align: right;
+}
+
+.etf-activity-table__cell--status {
   text-align: left;
 }
 
@@ -238,12 +258,15 @@ thead th {
 }
 
 thead button {
+  display: block;
+  width: 100%;
   padding: 0;
   border: 0;
   color: inherit;
   background: transparent;
   cursor: pointer;
   font: inherit;
+  text-align: inherit;
 }
 
 tbody tr {

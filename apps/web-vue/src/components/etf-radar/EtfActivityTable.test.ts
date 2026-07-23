@@ -67,6 +67,31 @@ describe('EtfActivityTable', () => {
     expect(rowSymbols(wrapper)).toEqual(['510300.SH', '510050.SH', '159915.SZ']);
   });
 
+  it('uses matching alignment classes for each header and data column', () => {
+    const wrapper = mountTable();
+    const headerCells = wrapper.findAll('thead th');
+    const firstRowCells = wrapper.findAll('tbody tr')[0].findAll('th, td');
+
+    expect(headerCells.map(cell => cell.classes())).toEqual([
+      expect.arrayContaining(['etf-activity-table__cell--identity']),
+      expect.arrayContaining(['etf-activity-table__cell--numeric']),
+      expect.arrayContaining(['etf-activity-table__cell--numeric']),
+      expect.arrayContaining(['etf-activity-table__cell--numeric']),
+      expect.arrayContaining(['etf-activity-table__cell--numeric']),
+      expect.arrayContaining(['etf-activity-table__cell--numeric']),
+      expect.arrayContaining(['etf-activity-table__cell--status'])
+    ]);
+    expect(firstRowCells.map(cell => cell.classes())).toEqual([
+      expect.arrayContaining(['etf-activity-table__cell--identity']),
+      expect.arrayContaining(['etf-activity-table__cell--numeric']),
+      expect.arrayContaining(['etf-activity-table__cell--numeric']),
+      expect.arrayContaining(['etf-activity-table__cell--numeric']),
+      expect.arrayContaining(['etf-activity-table__cell--numeric']),
+      expect.arrayContaining(['etf-activity-table__cell--numeric']),
+      expect.arrayContaining(['etf-activity-table__cell--status'])
+    ]);
+  });
+
   it('keeps activity directions explicit as non-confirmatory proxies', () => {
     const activity = (direction: HuijinEtfActivityItem['direction']) => ({ direction }) as HuijinEtfActivityItem;
     const wrapper = mount(EtfActivityTable, {

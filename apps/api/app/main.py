@@ -4,7 +4,7 @@ import json
 import logging
 from collections import defaultdict
 from contextlib import asynccontextmanager
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from threading import RLock, Thread
 from time import perf_counter
 from pathlib import Path
@@ -180,6 +180,7 @@ from app.services.market_emotion_history import MarketEmotionHistoryStore
 from app.services.market_sentiment_analysis import (
     MarketSentimentAnalysisService,
     build_sentiment_analysis_input,
+    pending_analysis_is_stale,
     sentiment_analysis_record_is_reusable,
     sentiment_analysis_record_matches,
 )
@@ -2054,6 +2055,20 @@ def get_market_sentiment_percentile_analysis(
     )
     existing = _market_sentiment_analysis_store().load(trade_date_text)
     if sentiment_analysis_record_matches(existing, input_payload, config):
+        if pending_analysis_is_stale(existing):
+            existing = _market_sentiment_analysis_store().save(
+                existing.model_copy(
+                    update={
+                        "status": "failed",
+                        "attempts": max(1, existing.attempts),
+                        "completed_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                        "retry_after": (
+                            datetime.now(timezone.utc) + timedelta(minutes=30)
+                        ).isoformat(timespec="seconds"),
+                        "error": "TimeoutError: previous AI generation did not complete",
+                    }
+                )
+            )
         return existing
 
     return SentimentPercentileAnalysisResponse(

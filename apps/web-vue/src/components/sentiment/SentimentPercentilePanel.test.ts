@@ -270,6 +270,25 @@ describe('SentimentPercentilePanel', () => {
     expect(wrapper.get('[data-testid="ai-ready"]').text()).toContain('综合分 62.4');
   });
 
+  it('polls a pending analysis until the LLM result is available', async () => {
+    vi.useFakeTimers();
+    api.getMarketSentimentAnalysis
+      .mockResolvedValueOnce(analysisFixture('pending'))
+      .mockResolvedValueOnce(readyAnalysis('2026-07-22', '轮询后已完成。'));
+    const wrapper = mountPanel();
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="ai-pending"]').text()).toContain('AI 解读生成中');
+
+    await vi.advanceTimersByTimeAsync(5000);
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="ai-ready"]').text()).toContain('轮询后已完成。');
+    expect(api.getMarketSentimentAnalysis).toHaveBeenCalledTimes(2);
+    wrapper.unmount();
+    vi.useRealTimers();
+  });
+
   it('does not expose provider URLs, secrets, or stack details from failed analysis', async () => {
     const unsafeError =
       'POST https://llm.internal.example/v1 failed: Bearer sk-live-secret\n    at request (/srv/app/client.ts:42:7)';

@@ -148,6 +148,10 @@ class FakeAnalysisStore:
     def load(self, trade_date: str) -> SentimentPercentileAnalysisResponse | None:
         return self.values.get(trade_date)
 
+    def save(self, value: SentimentPercentileAnalysisResponse) -> SentimentPercentileAnalysisResponse:
+        self.values[value.trade_date] = value
+        return value
+
 
 class FakeAnalysisService:
     def __init__(self, response: SentimentPercentileAnalysisResponse) -> None:
@@ -250,6 +254,34 @@ def test_analysis_get_returns_persisted_lifecycle_states(
     assert response.json()["status"] == status
     assert service.calls == []
     assert percentile_store.calls == 1
+
+
+def test_analysis_get_reclaims_stale_pending_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixture = percentile_response_fixture()
+    store = FakeAnalysisStore(
+        {
+            "2026-07-22": analysis(
+                "2026-07-22",
+                "pending",
+                input_hash=current_analysis_hash(fixture),
+            ).model_copy(update={"requested_at": "2020-01-01T00:00:00+00:00"})
+        }
+    )
+    monkeypatch.setattr(app.state, "market_sentiment_percentile_service", FakePercentileService(fixture), raising=False)
+    monkeypatch.setattr(app.state, "market_sentiment_percentile_store", FakePercentileStore(fixture), raising=False)
+    monkeypatch.setattr(app.state, "market_sentiment_analysis_store", store, raising=False)
+    monkeypatch.setattr(main, "_optional_sentiment_analysis_context", lambda *_args, **_kwargs: (None, None))
+    monkeypatch.setattr(main, "_effective_settings", configured_settings)
+
+    with TestClient(app) as client:
+        response = client.get("/api/short-term/sentiment/percentile/analysis?trade_date=2026-07-22")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "failed"
+    assert response.json()["error"] == "TimeoutError: previous AI generation did not complete"
+    assert store.values["2026-07-22"].status == "failed"
 
 
 @pytest.mark.parametrize(

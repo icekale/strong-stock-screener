@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { Skeleton as ASkeleton } from 'ant-design-vue';
 import dayjs from 'dayjs';
 import type { EChartsOption } from 'echarts';
@@ -46,6 +46,12 @@ const percentileError = ref<string | null>(null);
 const analysisReadError = ref<string | null>(null);
 let percentileRequestId = 0;
 let analysisRequestId = 0;
+let analysisPollTimer: ReturnType<typeof setTimeout> | null = null;
+let analysisPollTradeDate = '';
+let analysisPollAttempts = 0;
+
+const ANALYSIS_POLL_INTERVAL_MS = 5000;
+const MAX_ANALYSIS_POLL_ATTEMPTS = 36;
 
 const reducedMotion =
   typeof window !== 'undefined' &&
@@ -107,6 +113,14 @@ async function loadPercentile(asOf: string, refresh: boolean) {
 }
 
 async function loadAnalysis(tradeDate: string) {
+  if (tradeDate !== analysisPollTradeDate) {
+    analysisPollTradeDate = tradeDate;
+    analysisPollAttempts = 0;
+  }
+  if (analysisPollTimer !== null) {
+    clearTimeout(analysisPollTimer);
+    analysisPollTimer = null;
+  }
   analysisRequestId += 1;
   const requestId = analysisRequestId;
   analysisLoading.value = true;
@@ -114,7 +128,11 @@ async function loadAnalysis(tradeDate: string) {
   analysisReadError.value = null;
   try {
     const response = await getMarketSentimentAnalysis(tradeDate);
-    if (requestId === analysisRequestId && selectedTradeDate.value === tradeDate) analysis.value = response;
+    if (requestId === analysisRequestId && selectedTradeDate.value === tradeDate) {
+      analysis.value = response;
+      if (response.status === 'pending') scheduleAnalysisPoll(tradeDate);
+      else analysisPollAttempts = 0;
+    }
   } catch {
     if (requestId === analysisRequestId) {
       analysis.value = null;
@@ -123,6 +141,20 @@ async function loadAnalysis(tradeDate: string) {
   } finally {
     if (requestId === analysisRequestId) analysisLoading.value = false;
   }
+}
+
+function scheduleAnalysisPoll(tradeDate: string) {
+  if (analysisPollAttempts >= MAX_ANALYSIS_POLL_ATTEMPTS) {
+    analysis.value = analysis.value
+      ? { ...analysis.value, status: 'failed', error: 'TimeoutError: AI analysis polling timed out' }
+      : null;
+    return;
+  }
+  analysisPollAttempts += 1;
+  analysisPollTimer = setTimeout(() => {
+    analysisPollTimer = null;
+    if (selectedTradeDate.value === tradeDate) void loadAnalysis(tradeDate);
+  }, ANALYSIS_POLL_INTERVAL_MS);
 }
 
 function selectTradeDate(value: unknown) {
@@ -151,7 +183,10 @@ async function retryAnalysis() {
   analysisReadError.value = null;
   try {
     const response = await generateMarketSentimentAnalysis(retryTradeDate, true);
-    if (requestId === analysisRequestId && selectedTradeDate.value === retryTradeDate) analysis.value = response;
+    if (requestId === analysisRequestId && selectedTradeDate.value === retryTradeDate) {
+      analysis.value = response;
+      if (response.status === 'pending') scheduleAnalysisPoll(retryTradeDate);
+    }
   } catch {
     if (requestId === analysisRequestId && selectedTradeDate.value === retryTradeDate) {
       analysis.value = analysis.value ? { ...analysis.value, status: 'failed', error: 'retry_failed' } : null;
@@ -163,6 +198,10 @@ async function retryAnalysis() {
     }
   }
 }
+
+onBeforeUnmount(() => {
+  if (analysisPollTimer !== null) clearTimeout(analysisPollTimer);
+});
 
 function safeAnalysisError(value: string | null | undefined) {
   const category = (value ?? '').toLowerCase();

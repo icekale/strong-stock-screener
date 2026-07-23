@@ -32,7 +32,8 @@ _FACTOR_NAMES = (
     "volume_trend",
 )
 _RETRY_DELAY = timedelta(minutes=30)
-_AI_PROVIDER_TIMEOUT_SECONDS = 120
+_PENDING_TIMEOUT = timedelta(minutes=3)
+_AI_PROVIDER_TIMEOUT_SECONDS = 30
 
 
 class _StrictAnalysisInput(BaseModel):
@@ -535,6 +536,23 @@ def sentiment_analysis_record_is_reusable(
     )
 
 
+def pending_analysis_is_stale(
+    record: SentimentPercentileAnalysisResponse | None,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    if record is None or record.status != "pending" or not record.requested_at:
+        return False
+    try:
+        requested_at = datetime.fromisoformat(record.requested_at)
+    except ValueError:
+        return True
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+    return current - requested_at.astimezone(timezone.utc) > _PENDING_TIMEOUT
+
+
 def _normalize_analysis_input(payload: Mapping[str, object]) -> dict[str, object]:
     return _SentimentAnalysisInput.model_validate(payload).model_dump(mode="json", by_alias=True)
 
@@ -600,6 +618,7 @@ class MarketSentimentAnalysisService:
         should_close = self.http_client is None
         last_error: Exception | None = None
         validation_feedback = ""
+        attempts = 0
         try:
             sector_names = tuple(item.name for item in analysis_input.main_sectors.items)
             sector_instruction = (
@@ -613,6 +632,7 @@ class MarketSentimentAnalysisService:
                 "not present in the input, say unavailable."
             )
             for attempt in range(1, 4):
+                attempts = attempt
                 try:
                     messages: list[dict[str, str]] = [
                         {"role": "system", "content": _SYSTEM_PROMPT + sector_instruction},
@@ -638,7 +658,7 @@ class MarketSentimentAnalysisService:
                         json={
                             "model": config.model,
                             "temperature": 0.0,
-                            "max_tokens": 8000,
+                            "max_tokens": 2000,
                             "thinking": {"type": "disabled"},
                             "response_format": {"type": "json_object"},
                             "messages": messages,
@@ -652,6 +672,8 @@ class MarketSentimentAnalysisService:
                     _validate_result_semantics(result, analysis_input)
                 except Exception as exc:
                     last_error = exc
+                    if isinstance(exc, httpx.TimeoutException):
+                        break
                     validation_feedback = (
                         "The previous draft failed deterministic validation: "
                         f"{type(exc).__name__}: {exc}. Return a new JSON object only. Re-read "
@@ -676,7 +698,7 @@ class MarketSentimentAnalysisService:
         failed = pending.model_copy(
             update={
                 "status": "failed",
-                "attempts": 3,
+                "attempts": attempts,
                 "completed_at": _now(),
                 "retry_after": _retry_after(),
                 "error": _safe_error(last_error),
@@ -1391,6 +1413,8 @@ def _retry_after() -> str:
 
 
 def _safe_error(error: Exception | None) -> str:
+    if isinstance(error, httpx.TimeoutException):
+        return "TimeoutError: AI provider request timed out"
     if isinstance(error, ValidationError):
         return "ValidationError: AI response does not match the required schema"
     if isinstance(error, ValueError):

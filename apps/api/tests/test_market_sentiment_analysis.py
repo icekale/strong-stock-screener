@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 from unittest.mock import Mock
 
+import httpx
 import pytest
 from pydantic import ValidationError
 
@@ -207,6 +208,11 @@ class _PendingInspectingClient:
         pending = self.store.load("2026-07-22")
         self.pending_status = pending.status if pending else None
         return _Response(json.dumps(_result_payload(), ensure_ascii=False))
+
+
+class _TimeoutClient:
+    def __init__(self) -> None:
+        self.post = Mock(side_effect=httpx.ReadTimeout("provider timed out"))
 
 
 def test_input_is_allowlisted_canonical_and_hashes_sorted_json() -> None:
@@ -481,7 +487,7 @@ def test_service_reuses_matching_ready_provider_model_and_hash(tmp_path: Path) -
     assert client.post.call_count == 1
     request = client.post.call_args.kwargs["json"]
     assert request["temperature"] == 0.0
-    assert request["max_tokens"] == 8000
+    assert request["max_tokens"] == 2000
     assert request["thinking"] == {"type": "disabled"}
     system_prompt = request["messages"][0]["content"]
     for prohibited in ("statistic", "stocks", "position sizing", "orders", "missing values"):
@@ -574,6 +580,18 @@ def test_service_persists_pending_before_request_and_limits_main_sectors(tmp_pat
         }
         for item in payload["main_sectors"]["items"]
     )
+
+
+def test_provider_timeout_is_persisted_without_repeating_the_request(tmp_path: Path) -> None:
+    client = _TimeoutClient()
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "failed"
+    assert response.attempts == 1
+    assert response.error == "TimeoutError: AI provider request timed out"
+    assert client.post.call_count == 1
 
 
 @pytest.mark.parametrize(

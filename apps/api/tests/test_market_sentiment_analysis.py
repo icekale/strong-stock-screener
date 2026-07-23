@@ -155,6 +155,19 @@ def _result_payload() -> dict[str, object]:
     }
 
 
+def _compact_result_payload() -> dict[str, object]:
+    result = _result_payload()
+    return {
+        "c": result["market_conclusion"],
+        "d": result["key_drivers"],
+        "v": result["factor_divergence"],
+        "h": result["historical_context"],
+        "p": result["risk_posture"],
+        "w": result["next_session_watch"],
+        "n": result["risk_note"],
+    }
+
+
 class _Response:
     def __init__(self, content: str) -> None:
         self.content = content
@@ -401,6 +414,17 @@ def test_provider_request_accepts_text_content_blocks(tmp_path: Path) -> None:
     assert client.post.call_count == 1
 
 
+def test_provider_request_maps_compact_result_keys(tmp_path: Path) -> None:
+    client = _Client([_Response(json.dumps(_compact_result_payload(), ensure_ascii=False))])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+    assert response.result is not None
+    assert response.result.market_conclusion == _result_payload()["market_conclusion"]
+
+
 @pytest.mark.parametrize("protected_field", ["score", "level", "weights", "trade_permission"])
 def test_result_forbids_fields_that_could_override_deterministic_statistics(
     protected_field: str,
@@ -487,37 +511,26 @@ def test_service_reuses_matching_ready_provider_model_and_hash(tmp_path: Path) -
     assert client.post.call_count == 1
     request = client.post.call_args.kwargs["json"]
     assert request["temperature"] == 0.0
-    assert request["max_tokens"] == 2000
-    assert request["thinking"] == {"type": "disabled"}
+    assert request["max_tokens"] == 1200
     system_prompt = request["messages"][0]["content"]
-    for prohibited in ("statistic", "stocks", "position sizing", "orders", "missing values"):
-        assert prohibited in system_prompt
-    assert '"存储芯片"' in system_prompt
-    assert "Use those names verbatim" in system_prompt
+    assert "JSON" in system_prompt
+    user_prompt = request["messages"][1]["content"]
+    assert "短键" in user_prompt
+    assert '"data"' in user_prompt
 
 
-def test_llm_request_includes_the_complete_result_schema(tmp_path: Path) -> None:
+def test_llm_request_uses_the_compact_result_contract(tmp_path: Path) -> None:
     client = _Client([_Response(json.dumps(_result_payload(), ensure_ascii=False))])
     service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
 
     response = service.generate(_input_payload(), _config())
 
     assert response.status == "ready"
-    system_prompt = client.post.call_args.kwargs["json"]["messages"][0]["content"]
-    for field in (
-        "market_conclusion",
-        "key_drivers",
-        "factor_divergence",
-        "historical_context",
-        "risk_posture",
-        "next_session_watch",
-        "risk_note",
-    ):
-        assert f'"{field}"' in system_prompt
+    user_prompt = client.post.call_args.kwargs["json"]["messages"][1]["content"]
+    for compact_key in ("c、d、v、h、p、w、n", "短键"):
+        assert compact_key in user_prompt
     for posture in ("attack", "balanced", "defensive", "wait"):
-        assert f'"{posture}"' in system_prompt
-    assert '"minItems":2' in system_prompt
-    assert '"maxItems":4' in system_prompt
+        assert posture in user_prompt
 
 
 def test_changed_input_or_model_generates_again(tmp_path: Path) -> None:

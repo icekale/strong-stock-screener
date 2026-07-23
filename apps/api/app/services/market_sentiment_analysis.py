@@ -33,7 +33,7 @@ _FACTOR_NAMES = (
 )
 _RETRY_DELAY = timedelta(minutes=30)
 _PENDING_TIMEOUT = timedelta(minutes=3)
-_AI_PROVIDER_TIMEOUT_SECONDS = 30
+_AI_PROVIDER_TIMEOUT_SECONDS = 60
 
 
 class _StrictAnalysisInput(BaseModel):
@@ -620,26 +620,18 @@ class MarketSentimentAnalysisService:
         validation_feedback = ""
         attempts = 0
         try:
-            sector_names = tuple(item.name for item in analysis_input.main_sectors.items)
-            sector_instruction = (
-                " The only allowed sector names are the exact names in main_sectors.items: "
-                f"{json.dumps(sector_names, ensure_ascii=False)}. Use those names verbatim; "
-                "never substitute an alias, parent industry, related sector, or a sector learned "
-                "from outside the input. Use complete source numbers exactly as provided; do not "
-                "round, rescale, abbreviate, or convert units. Use '上涨家数' and '下跌家数' "
-                "for market breadth. Repeat the exact sector name in every clause containing "
-                "that sector's metrics; do not replace it with '当日' or '该板块'. If a fact is "
-                "not present in the input, say unavailable."
-            )
             for attempt in range(1, 4):
                 attempts = attempt
                 try:
                     messages: list[dict[str, str]] = [
-                        {"role": "system", "content": _SYSTEM_PROMPT + sector_instruction},
+                        {"role": "system", "content": _SYSTEM_PROMPT},
                         {
                             "role": "user",
                             "content": json.dumps(
-                                input_payload,
+                                {
+                                    "instruction": _COMPACT_OUTPUT_PROMPT,
+                                    "data": input_payload,
+                                },
                                 ensure_ascii=False,
                                 sort_keys=True,
                                 separators=(",", ":"),
@@ -658,8 +650,7 @@ class MarketSentimentAnalysisService:
                         json={
                             "model": config.model,
                             "temperature": 0.0,
-                            "max_tokens": 2000,
-                            "thinking": {"type": "disabled"},
+                            "max_tokens": 1200,
                             "response_format": {"type": "json_object"},
                             "messages": messages,
                         },
@@ -667,7 +658,9 @@ class MarketSentimentAnalysisService:
                     response.raise_for_status()
                     payload = response.json()
                     result = SentimentAnalysisResult.model_validate(
-                        extract_json_object(extract_chat_content(payload))
+                        _normalize_sentiment_result_payload(
+                            extract_json_object(extract_chat_content(payload))
+                        )
                     )
                     _validate_result_semantics(result, analysis_input)
                 except Exception as exc:
@@ -675,10 +668,8 @@ class MarketSentimentAnalysisService:
                     if isinstance(exc, httpx.TimeoutException):
                         break
                     validation_feedback = (
-                        "The previous draft failed deterministic validation: "
-                        f"{type(exc).__name__}: {exc}. Return a new JSON object only. Re-read "
-                        "the input and copy every current score, level, weight, raw value, and "
-                        "market or sector statistic exactly; if uncertain, write unavailable."
+                        "上一次短键 JSON 未通过本地校验。只返回 c,d,v,h,p,w,n 这 7 个短键，"
+                        "修正格式或数字后重试；只使用输入数据，不要输出其他内容。"
                     )
                     continue
 
@@ -707,23 +698,32 @@ class MarketSentimentAnalysisService:
         return self.store.save(failed)
 
 
-_RESULT_SCHEMA_JSON = json.dumps(
-    SentimentAnalysisResult.model_json_schema(),
-    ensure_ascii=False,
-    sort_keys=True,
-    separators=(",", ":"),
+_SYSTEM_PROMPT = "只返回 JSON。"
+_COMPACT_OUTPUT_PROMPT = (
+    "请做收盘市场统计摘要，只返回 JSON，且只能使用短键 c、d、v、h、p、w、n。"
+    "c 是市场结论，d 是 2 到 4 条带数字的主要驱动，v 是因子背离，h 是历史位置，"
+    "p 只能是 attack、balanced、defensive、wait，w 是 2 到 4 条带数字的次日观察，"
+    "n 只能写数据缺失、样本限制或模型局限。只使用输入数字，保持简洁；不要输出数据表、"
+    "个股、买卖建议、仓位或持有建议。"
 )
-_SYSTEM_PROMPT = (
-    "You are a post-close market-statistics interpreter. Return only one JSON object matching the "
-    "requested schema. Do not modify or override any statistic, score, level, factor weights, or "
-    "trade permission. Do not state any trade or operation permission. Do not name or recommend "
-    "individual stocks, position sizing, fund allocation, or orders. Do not invent missing values; "
-    "state unavailable data as unavailable. Every factual number must equal a provided input value. "
-    "Only next-session watch conditions may introduce a new number, and only as an explicit "
-    "conditional threshold. Describe movements only for market aggregates, indexes, or supplied "
-    "sectors. Every key driver and next session watch condition must cite an ASCII digit. "
-    f"The required output JSON Schema is: {_RESULT_SCHEMA_JSON}"
-)
+
+
+def _normalize_sentiment_result_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    aliases = {
+        "market_conclusion": "c",
+        "key_drivers": "d",
+        "factor_divergence": "v",
+        "historical_context": "h",
+        "risk_posture": "p",
+        "next_session_watch": "w",
+        "risk_note": "n",
+    }
+    if any(key in payload for key in aliases):
+        return payload
+    return {
+        field_name: payload.get(compact_key)
+        for field_name, compact_key in aliases.items()
+    }
 
 
 def _factor_payload(factor: Any) -> dict[str, object]:

@@ -868,6 +868,26 @@ def test_semantic_contract_accepts_rounded_display_values(tmp_path: Path) -> Non
     assert client.post.call_count == 1
 
 
+def test_semantic_contract_accepts_decimal_chinese_unit_display_value(tmp_path: Path) -> None:
+    payload = _input_payload()
+    payload["market"]["turnover_cny"] = 1_205_000_100_000
+
+    result = _result_payload()
+    result["key_drivers"] = [
+        "成交额1.205万亿元，涨停68家",
+        "价格位置得分60.0，结构仍有分化",
+    ]
+    result["next_session_watch"][-1] = "成交额能否维持1.205万亿量级"
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(payload, _config())
+
+    assert response.status == "ready"
+    assert client.post.call_count == 1
+
+
 def test_semantic_contract_rejects_invented_key_driver_threshold(tmp_path: Path) -> None:
     result = _result_payload()
     result["key_drivers"] = ["综合分 62.0，处于偏热", "若涨停家数高于 69 家"]

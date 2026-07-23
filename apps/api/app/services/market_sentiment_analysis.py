@@ -344,7 +344,7 @@ _CLAIM_NUMBER = rf"(?P<number>{_NUMBER_TEXT})(?P<unit>\s*(?:%|％|万亿|亿|万
 _VALUE_LINK = (
     r"\s*(?:能否|是否|仅|约)?\s*"
     r"(?:为|是|达(?:到)?|录得|升至|上升至|增至|降至|下降至|回落至|"
-    r"维持在|高于|低于|超过|不超过|少于|不少于|至少|至多|突破|跌破|=|:|：)?"
+    r"维持在|维持|高于|低于|超过|不超过|少于|不少于|至少|至多|突破|跌破|=|:|：)?"
     r"\s*(?:仅|约)?\s*"
 )
 _SECTOR_STRENGTH_CLAIM_PATTERN = re.compile(r"板块强度" + _VALUE_LINK + _CLAIM_NUMBER)
@@ -1375,7 +1375,10 @@ def _validate_numeric_evidence(
         if not any(pattern.search(clause) for _, pattern in _MARKET_FIELD_CLAIM_PATTERNS):
             raise ValueError("AI response contains an ungrounded market metric")
 
+    numeric_spans = tuple(match.span() for match in numeric_matches)
     for match in _CHINESE_NUMERIC_CLAIM_PATTERN.finditer(factual_text):
+        if _match_within_spans(match, numeric_spans):
+            continue
         if allow_thresholds and _number_is_threshold(factual_text, match):
             continue
         raise ValueError("AI response contains an ungrounded Chinese-number claim")

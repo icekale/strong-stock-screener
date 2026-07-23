@@ -71,6 +71,8 @@ import type {
   SectorWorkbenchStatusResponse,
   SentimentDetailResponse,
   SentimentDecisionResponse,
+  SentimentPercentileAnalysisResponse,
+  SentimentPercentileResponse,
   SentimentWatchlistAlertsResponse,
   SentimentSummaryResponse,
   SentimentMonitorConfig,
@@ -568,6 +570,48 @@ export async function getShortTermSentiment(tradeDate: string, limit = 50): Prom
     throw new Error(`读取短线情绪失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<ShortTermSentimentResponse>;
+}
+
+export async function getMarketSentimentPercentile(
+  asOf?: string,
+  refresh = false,
+): Promise<SentimentPercentileResponse> {
+  const params = new URLSearchParams({ refresh: String(refresh) });
+  if (asOf) params.set("as_of", asOf);
+  const response = await apiFetch(`${API_BASE_URL}/api/short-term/sentiment/percentile?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取市场情绪百分位失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SentimentPercentileResponse>;
+}
+
+export async function getMarketSentimentAnalysis(
+  tradeDate: string,
+): Promise<SentimentPercentileAnalysisResponse> {
+  const params = new URLSearchParams({ trade_date: tradeDate });
+  const response = await apiFetch(`${API_BASE_URL}/api/short-term/sentiment/percentile/analysis?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取市场情绪解读失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SentimentPercentileAnalysisResponse>;
+}
+
+export async function generateMarketSentimentAnalysis(
+  tradeDate: string,
+  force = false,
+): Promise<SentimentPercentileAnalysisResponse> {
+  const params = new URLSearchParams({
+    trade_date: tradeDate,
+    force: String(force),
+  });
+  const response = await apiFetch(
+    `${API_BASE_URL}/api/short-term/sentiment/percentile/analysis/generate?${params.toString()}`,
+    { method: "POST" },
+  );
+  if (!response.ok) {
+    throw new Error(`生成市场情绪解读失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<SentimentPercentileAnalysisResponse>;
 }
 
 export async function getSentimentDecision(

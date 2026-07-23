@@ -75,6 +75,73 @@ export type StrongStockSourceStatus = {
   detail: string;
 };
 
+export type SentimentPercentileLevel = "冰点" | "偏冷" | "中性" | "偏热" | "过热";
+export type SentimentPercentileCacheStatus = "fresh" | "cached" | "stale";
+export type SentimentAnalysisStatus = "not_generated" | "unconfigured" | "pending" | "ready" | "failed";
+export type SentimentRiskPosture = "attack" | "balanced" | "defensive" | "wait";
+
+export type SentimentPercentileFactor = {
+  score: number;
+  raw_value: number;
+  raw_unit: string;
+};
+
+export type SentimentPercentileFactors = {
+  volume: SentimentPercentileFactor;
+  index_move_5d: SentimentPercentileFactor;
+  price_position: SentimentPercentileFactor;
+  amplitude_5d: SentimentPercentileFactor;
+  volume_trend: SentimentPercentileFactor;
+};
+
+export type SentimentPercentilePoint = {
+  trade_date: string;
+  score: number;
+  level: SentimentPercentileLevel;
+  factors: SentimentPercentileFactors;
+};
+
+export type SentimentPercentileResponse = {
+  model_version: string;
+  benchmark_symbol: string;
+  benchmark_name: string;
+  window_size: number;
+  weights: Record<string, number>;
+  latest_complete_trade_date: string;
+  selected_trade_date: string | null;
+  selected: SentimentPercentilePoint | null;
+  history: SentimentPercentilePoint[];
+  cache_status: SentimentPercentileCacheStatus;
+  source_status: StrongStockSourceStatus[];
+  generated_at: string;
+  notes: string[];
+};
+
+export type SentimentAnalysisResult = {
+  market_conclusion: string;
+  key_drivers: string[];
+  factor_divergence: string;
+  historical_context: string;
+  risk_posture: SentimentRiskPosture;
+  next_session_watch: string[];
+  risk_note: string;
+};
+
+export type SentimentPercentileAnalysisResponse = {
+  trade_date: string;
+  status: SentimentAnalysisStatus;
+  model_version: string;
+  provider: string | null;
+  llm_model: string | null;
+  input_hash: string | null;
+  attempts: number;
+  requested_at: string | null;
+  completed_at: string | null;
+  retry_after: string | null;
+  error: string | null;
+  result: SentimentAnalysisResult | null;
+};
+
 export type HeatmapPeriodKey = "day" | "week" | "month" | "year";
 export type HeatmapMarketKey = "all" | "sse" | "szse" | "hs300" | "zza500" | "cyb" | "kcb";
 export type HeatmapSizeMode = "market_cap" | "turnover";

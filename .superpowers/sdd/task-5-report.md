@@ -1,91 +1,189 @@
-# Task 5 Report: Approved Huijin Trajectory Panel
+# Task 5 Report: Market Sentiment LLM Analysis Core
 
-## Status and Implementation
+## Status
 
-- Implemented the reusable `HuijinTrajectoryPanel` with the approved typed prop/event boundary and Task 4 transforms.
-- The panel renders seven-core ranking and selection, report/latest/coverage/direction metrics, source status, one-ETF null-gap trajectory, confirmed-holding details, the fixed Huijin inference warning, and compact detail rows.
-- Positive ETF share deviation is red and labeled `扩张`; negative deviation is green and labeled `收缩`. Values also retain arrows and explicit signs, so color is never the only signal.
-- ECharts uses `animation: false` and `connectNulls: false`. The desktop main area uses `minmax(0, 1.15fr) minmax(320px, 0.85fr)` and becomes one column at `900px`.
+Completed and committed. This task adds only the strict analysis contracts, canonical input/hash, OpenAI-compatible generator, per-date atomic store, and focused tests. Routes, samplers, and frontend remain unchanged for Task 6 and later.
 
-## RED Evidence
+## Changed Files
 
-- Required literal command: `cd apps/web-vue && corepack pnpm@9.15.0 test:unit --run src/components/etf-radar/HuijinTrajectoryPanel.test.ts` -> exit 1 before collection with the existing Vite `setupUnocss` error, `Cannot read properties of undefined (reading 'replace')`, because `.env.test` omits icon prefixes.
-- Valid component-resolution RED: `VITE_ICON_PREFIX=icon VITE_ICON_LOCAL_PREFIX=local-icon corepack pnpm@9.15.0 test:unit --run src/components/etf-radar/HuijinTrajectoryPanel.test.ts` -> `Test Files 1 failed (1)`, `Tests no tests`; Vite reported `Failed to resolve import "./HuijinTrajectoryPanel.vue"`.
+- `apps/api/app/models.py`
+- `apps/api/app/services/ai_model_analysis.py`
+- `apps/api/app/services/market_sentiment_analysis.py`
+- `apps/api/app/services/market_sentiment_analysis_store.py`
+- `apps/api/tests/test_market_sentiment_analysis.py`
 
-## GREEN Evidence
+## Commit
 
-- Focused component GREEN: the same environment-adjusted component command -> `Test Files 1 passed (1)`, `Tests 1 passed (1)`.
-- Final component/domain verification: `VITE_ICON_PREFIX=icon VITE_ICON_LOCAL_PREFIX=local-icon corepack pnpm@9.15.0 test:unit --run src/components/etf-radar/HuijinTrajectoryPanel.test.ts src/utils/domain/huijinTrajectory.test.ts` -> `Test Files 2 passed (2)`, `Tests 6 passed (6)`.
-- Typecheck: `corepack pnpm@9.15.0 typecheck` -> `vue-tsc --noEmit --skipLibCheck`, exit 0.
-- Lint: `corepack pnpm@9.15.0 exec eslint src/components/etf-radar/HuijinTrajectoryPanel.vue src/components/etf-radar/HuijinTrajectoryPanel.test.ts` -> exit 0 with no output.
+- `3e02a6f feat: generate daily LLM sentiment analysis`
 
-## Files
+## RED
 
-- `apps/web-vue/src/components/etf-radar/HuijinTrajectoryPanel.vue`
-- `apps/web-vue/src/components/etf-radar/HuijinTrajectoryPanel.test.ts`
-- `.superpowers/sdd/task-5-report.md`
+Before production implementation, ran:
 
-## Self-Review and Concerns
+```text
+cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py -q
+```
 
-- No functional findings. The contract, labels, chart settings, fallback states, source statuses, responsive breakpoint, and selection event match the approved brief.
-- CSS uses only existing `--wb-*` color/radius/gap tokens; there are no hex/rgb colors, gradients, custom SVGs, nested cards, or local horizontal scrollers. `git diff --check` passed.
-- Verification regenerated the auto-component entry in `src/typings/components.d.ts`; it was removed after verification to preserve the requested three-file scope.
-- Known repository concern: focused Vitest requires process-only `VITE_ICON_PREFIX` and `VITE_ICON_LOCAL_PREFIX` overrides. Page fetching and tab integration remain intentionally deferred to Task 6.
+Observed the expected collection failure:
 
-## Review Fix
+```text
+ImportError: cannot import name 'SentimentAnalysisResult' from 'app.models'
+```
+
+## GREEN And Regression
+
+Focused analysis suite:
+
+```text
+17 passed in 0.23s
+```
+
+Required combined analysis and model-maintenance regression:
+
+```text
+29 passed in 0.52s
+```
+
+Ruff:
+
+```text
+cd apps/api && uv run ruff check app tests
+All checks passed!
+```
+
+The focused tests cover canonical allowlisted input and stable SHA-256 hashing, explicit missing auxiliary context, strict result validation including ASCII-digit evidence, no deterministic-field overrides, ready-cache identity, changed model/input regeneration, pending persistence, five-sector/symbol-free truncation, malformed/unknown/missing-field retries, matching failed cooldown, unconfigured no-I/O behavior, atomic writes, and secret-safe failure persistence.
+
+## Self-Review
+
+- The result contract uses `extra="forbid"`; score, level, weights, and trade permission cannot enter LLM output.
+- Input includes only declared percentile, market aggregate, sector aggregate, decision, and validation fields. Leaders, symbols, raw validation samples, notes, and source secrets are excluded.
+- Every LLM request uses the existing OpenAI-compatible configuration, JSON response format, temperature `0.1`, and exported existing parsers.
+- The system instruction prohibits changing statistics, individual stock names, position sizing, orders, and invented missing values.
+- Pending is atomically stored before network I/O. Success and failure replace the same per-date record atomically.
+- Failures retry exactly three times, then persist a 30-minute retry deadline and a generic class/category message. API keys and provider exception text are never stored or returned.
+- Existing model-maintenance parsing is preserved by exporting, rather than altering, the generic response parsers.
+
+## Concerns
+
+- Analysis APIs, lifecycle sampling, and frontend presentation are deliberately deferred to Task 6 and later.
+- The pre-existing modification to `.superpowers/sdd/task-4-report.md` was not staged, altered, or included in the Task 5 commit.
+
+## Fix
 
 ### RED Evidence
 
-- Command: `cd apps/web-vue && VITE_ICON_PREFIX=icon VITE_ICON_LOCAL_PREFIX=local-icon corepack pnpm@9.15.0 test:unit --run src/components/etf-radar/HuijinTrajectoryPanel.test.ts`
-- Output before the review fix: `Test Files 1 failed (1)` and `Tests 7 failed (7)`. Failures covered missing native list items and zero-centered bars, static EChart loading, baseline-only charts for empty/all-null selected history, missing loading live state, and missing independent error status with and without stale history.
-- Zero-axis stacking RED with the focused source assertion: the same command -> `Test Files 1 failed (1)`, `Tests 1 failed | 6 passed (7)`; `.huijin-ranking__zero` lacked `z-index: 1`, allowing a positive bar to cover the center axis.
-- The first full typecheck exposed an invalid test assertion: `corepack pnpm@9.15.0 typecheck` -> exit 2 with `TS2339: Property 'exists' does not exist on type 'Omit<DOMWrapper<Element>, "exists">'`. The test now uses `find().exists()`.
-
-### Implementation
-
-- Added a zero-centered track to every ranked core ETF. The maximum absolute deviation maps to half the track; negative bars extend left in `--wb-negative`, positive bars extend right in `--wb-positive`, and the zero axis remains visibly stacked above both.
-- Ranking rows retain ETF identity, signed percentage, and explicit `扩张`/`收缩` text. Track/bar/axis selectors and a track `role="img"` label expose the visual meaning without relying on color.
-- Chart eligibility now checks selected-symbol real history points directly and ignores the synthetic report baseline. Empty and all-null selected history render `暂无可用历史轨迹`; loading without history renders `历史加载中`.
-- EChart now uses `defineAsyncComponent`. Stale real history remains charted while loading or after an error, and `historyError` is always rendered independently in an `aria-live="polite"` status.
-- Ranking uses native `ul`/`li` semantics. Misleading explicit list/table roles were removed, detail rows are a labelled native section, and all ranking/detail selection buttons expose `aria-pressed`.
-- The public props/emits remain unchanged, and the component still performs no fetching.
+- `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py -q` after adding the boundary, missing-snapshot, semantic-retry, and filesystem-error tests: `17 failed, 18 passed`. The failures showed arbitrary input was requested, missing snapshots retained metrics, semantic output became ready, and read `PermissionError` was swallowed.
+- The recursive `sample_counts` allowlist test then failed independently: `1 failed, 35 passed`.
+- The English current-level claim test failed independently: `1 failed, 36 passed`.
 
 ### GREEN Evidence
 
-- Focused command: `VITE_ICON_PREFIX=icon VITE_ICON_LOCAL_PREFIX=local-icon corepack pnpm@9.15.0 test:unit --run src/components/etf-radar/HuijinTrajectoryPanel.test.ts` -> `Test Files 1 passed (1)`, `Tests 7 passed (7)`.
-- Final tests: `VITE_ICON_PREFIX=icon VITE_ICON_LOCAL_PREFIX=local-icon corepack pnpm@9.15.0 test:unit --run src/components/etf-radar/HuijinTrajectoryPanel.test.ts src/utils/domain/huijinTrajectory.test.ts` -> `Test Files 2 passed (2)`, `Tests 12 passed (12)`.
-- Final typecheck: `corepack pnpm@9.15.0 typecheck` -> `vue-tsc --noEmit --skipLibCheck`, exit 0.
-- Final lint: `corepack pnpm@9.15.0 exec eslint src/components/etf-radar/HuijinTrajectoryPanel.vue src/components/etf-radar/HuijinTrajectoryPanel.test.ts` -> exit 0 with no output.
+- Focused analysis suite: `37 passed in 0.33s`.
+- Required regression: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py tests/test_model_maintenance.py -q` -> `49 passed in 0.63s`.
+- Ruff: `cd apps/api && uv run ruff check app/services/market_sentiment_analysis.py app/services/market_sentiment_analysis_store.py tests/test_market_sentiment_analysis.py` -> `All checks passed!`.
 
-### Self-Review and Concerns
+### Fix Scope
 
-- The diff remains limited to the two Task 5 component files and this report. Generated `components.d.ts` changes were removed after verification, and `git diff --check` passes.
-- CSS keeps the approved desktop columns, switches to one column at `900px`, preserves `max-width: 100%`, `min-width: 0`, and component-local `overflow-x: hidden`, and uses only existing `--wb-*` color tokens.
-- No functional concerns remain. The existing Vitest icon-prefix environment requirement is unchanged.
+- `generate` validates the complete recursive allowlist before hashing, caching, persistence, or provider I/O; the validated JSON payload is the only payload hashed and sent.
+- Missing summary snapshots are explicit unavailable market context. Semantic violations in any result text retry through the existing three-attempt path and persist `failed` rather than `ready`.
+- Malformed analysis records remain cache misses, while filesystem read failures propagate.
+- Reviewed cache identity and failure persistence: identity remains trade date, model version, provider, model, and validated-input hash; provider errors and API keys are not persisted. The pre-existing dirty Task 4 report was not modified.
 
-## Review Fix 2
+## Fix 2
 
 ### RED Evidence
 
-- Command: `cd apps/web-vue && VITE_ICON_PREFIX=icon VITE_ICON_LOCAL_PREFIX=local-icon corepack pnpm@9.15.0 test:unit --run src/components/etf-radar/HuijinTrajectoryPanel.test.ts`
-- Initial output after adding the decorative-track and single-error-region assertions: `Test Files 1 failed (1)`, `Tests 2 failed | 5 passed (7)`. The track lacked `aria-hidden="true"`, and the no-history error path still rendered the independent banner plus the empty live region.
-- After isolating the detail-button requirement in its own test, the same command produced the final RED: `Test Files 1 failed (1)`, `Tests 3 failed | 5 passed (8)`. The additional failure received an undefined detail-button `aria-label`.
-
-### Implementation
-
-- Removed `role="img"` and the duplicate label from each ranking track and set the complete track subtree to `aria-hidden="true"`. The parent button keeps one accessible name from its visible ETF identity, signed percent, and `扩张`/`收缩` text.
-- The independent history error status now renders only when `hasRealHistory` is true. Without real history, the single empty live region displays `historyError` exactly; loading without an error remains `历史加载中`.
-- Every detail selection button now has an explicit label containing ETF name/symbol, `确认持仓比例`, signed and directional `累计偏离`, and `数据状态`. Visible content and selection behavior are unchanged.
-- The public prop/event contract, async chart loading, real-history eligibility, stale-chart behavior, responsive layout, and no-fetch boundary remain unchanged.
+- `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py -q` after adding the second semantic-hardening cases: `14 failed, 39 passed`.
+- The failures included the reviewer's exact bypasses: `贵州茅台上涨 2%`, `控制资金比例为 30%`, `当前综合得分为 61.0`, `市场位于冷区`, `量能系数为 30%`, and `当前操作权限为强势进攻`.
+- Separate failures proved that invented `69` facts passed in every free-text result field, a conditional-looking key driver could invent `69`, and `涨停 68 家` passed while the canonical market section was unavailable.
+- A focused self-review RED run then found `3 failed, 53 passed`: a threshold cue could mask an unrelated number in the same watch clause, factor `占比` could reuse a different grounded value, and historical zone prose was treated as a current-level override.
 
 ### GREEN Evidence
 
-- Focused command: `VITE_ICON_PREFIX=icon VITE_ICON_LOCAL_PREFIX=local-icon corepack pnpm@9.15.0 test:unit --run src/components/etf-radar/HuijinTrajectoryPanel.test.ts` -> `Test Files 1 passed (1)`, `Tests 8 passed (8)`.
-- Final tests: `VITE_ICON_PREFIX=icon VITE_ICON_LOCAL_PREFIX=local-icon corepack pnpm@9.15.0 test:unit --run src/components/etf-radar/HuijinTrajectoryPanel.test.ts src/utils/domain/huijinTrajectory.test.ts` -> `Test Files 2 passed (2)`, `Tests 13 passed (13)`.
-- Final typecheck: `corepack pnpm@9.15.0 typecheck` -> `vue-tsc --noEmit --skipLibCheck`, exit 0.
-- Final lint: `corepack pnpm@9.15.0 exec eslint src/components/etf-radar/HuijinTrajectoryPanel.vue src/components/etf-radar/HuijinTrajectoryPanel.test.ts` -> exit 0 with no output.
+- Focused analysis suite: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py -q` -> `56 passed in 0.40s`.
+- Required regression: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py tests/test_model_maintenance.py -q` -> `68 passed in 0.76s`.
+- Ruff: `cd apps/api && uv run ruff check app tests` -> `All checks passed!`.
 
-### Self-Review and Concerns
+### Fix Scope And Self-Review
 
-- The diff is limited to the Task 5 component, test, and report. Generated `components.d.ts` changes were removed after verification, and `git diff --check` passes.
-- No functional concerns remain. The existing Vitest icon-prefix environment requirement is unchanged.
+- Semantic validation now operates per result item and clause. It normalizes canonical numeric evidence, percentage-form weights, and `万`/`亿`/`万亿` claims; factual numbers must match canonical input values.
+- Only an explicitly conditional or threshold clause in `next_session_watch` may introduce a new number. Key drivers and all other fields remain grounded-only.
+- Unavailable market, decision, sector, and validation metric claims are rejected, while conditional next-session thresholds remain allowed.
+- Overall score, current level/zone, named factor coefficients, and trade/operation permission claims use context-aware checks. Permission claims are rejected even when they repeat canonical decision text.
+- A-share codes, individual-security recommendations, position/fund sizing, and order actions are rejected. Movement subjects must be a market aggregate, index, generic aggregate metric, or a sector name present in canonical input.
+- False-positive review covered grounded market prose, `中证全指上涨 2.5%`, `存储芯片上涨 2%`, correct `62.0`/`热区`/`20%` protected claims, and unavailable-market watch thresholds; all remain accepted.
+- Retry, failed persistence, cache identity, and sanitized errors are unchanged. The pre-existing dirty Task 4 report was not modified.
+
+## Fix 3
+
+### RED Evidence
+
+- Added the reviewer's exact forbidden, cross-field, conditional-consequence, and valid-prose probes to `tests/test_market_sentiment_analysis.py` before changing production code.
+- Initial focused RED: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py -q` -> `12 failed, 57 passed`. The failures reproduced all newly accepted forbidden claims, `跌停 68 家`, the missing prior-level claim, the `若 ... 则 ...` consequence bypass, and the three valid-prose false positives.
+- The first one-day-change wording was rejected by unrelated movement-subject validation, so the probe was isolated as `单日得分变化为 4.0 分`; its targeted RED run, together with the prior-level probe, produced `2 failed`.
+
+### GREEN Evidence
+
+- Focused analysis suite: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py -q` -> `69 passed in 0.36s`.
+- Required combined regression: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py tests/test_model_maintenance.py -q` -> `81 passed in 0.82s`.
+- Ruff: `cd apps/api && uv run ruff check app tests` -> `All checks passed!`.
+- `git diff --check` completed without errors.
+
+### Fix Scope And Self-Review
+
+- Recognizable market metrics, score changes, factor scores/raw values, and factor weights now validate against their own canonical fields. A grounded number from another field can no longer satisfy the claim, and unavailable prior/source values reject factual claims.
+- Explicit watch thresholds remain allowed, but clauses are split at `则`, `那么`, `届时`, and `then`; only the condition-side threshold number is exempt, while consequence numbers are validated normally.
+- Allowed movement subjects cover the requested broad market/index names, aggregate metric labels, and supplied sector names. Digits inside recognized index names are not treated as factual statistics.
+- Semantic category detection now covers the reviewed allocation, subscribe/redeem/order, strategy permission, level-zone, contribution/coefficient/weight, and unknown-security valuation/attention wording without adding a stock-name dictionary.
+- The strict input allowlist, hash/cache identity, three-attempt retry flow, sanitized failure persistence, and shared model-maintenance parsers were not changed. The pre-existing dirty Task 4 report was not modified.
+
+## Fix 4
+
+### RED Evidence
+
+- Added focused probes for exported hash validation, sector security identifiers, response lifecycle invariants, security attention/recommendation wording, Chinese-number claims, cross-field metric fallback, conditional source checks, and allowed aggregate/index/sector attention prose.
+- Initial focused RED: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py -q` -> `13 failed, 71 passed`.
+- After isolating the conditional-source probe, restoring the old threshold early return produced `1 failed, 83 deselected`; the failure was the exact missing-decision/source bypass.
+
+### GREEN Evidence
+
+- Focused analysis suite: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py -q` -> `84 passed`.
+- Required regression: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py tests/test_model_maintenance.py -q` -> `96 passed`.
+- Ruff: `cd apps/api && uv run ruff check app tests` -> `All checks passed!`.
+- `git diff --check` completed without errors.
+
+### Fix Scope And Self-Review
+
+- `hash_sentiment_analysis_input` now validates and normalizes the complete recursive strict allowlist before hashing; the builder uses the same normalized payload. Sector names containing A-share or exchange security identifiers are rejected.
+- Security attention wording such as `贵州茅台的表现受到关注` and generic recommendations such as `建议增持` are prohibited, while supplied sector and aggregate/index attention prose remains accepted.
+- Quantitative Chinese-number claims are rejected when ungrounded, and numeric clauses containing market metrics must match a recognized metric-specific canonical field rather than borrowing a global score.
+- Conditional watch thresholds remain valid without a market snapshot, but unavailable decision, sector, and validation facts in the condition are checked before threshold numbers are allowed.
+- `SentimentPercentileAnalysisResponse` now forbids extra fields, bounds attempts to 0-3, requires results for ready states, forbids results for failed states, and requires input hashes for generated states.
+- Self-review covered `中证全指` and supplied-sector attention prose, existing aggregate/index/sector movement prose, `前一日` temporal wording, and source-free future watch thresholds. The dirty Task 4 report was not staged or modified.
+
+### Concerns
+
+- Persisted pending, ready, or failed records without an input hash now fail response validation and are treated as cache misses by the existing store loader, as required by the stricter lifecycle contract.
+
+## Fix 5
+
+### RED Evidence
+
+- Added exactly four focused regressions for English position sizing, ungrounded Chinese 点 quantities, unavailable decision-state transitions, and canonical sector strength binding.
+- Targeted RED run: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py -q -k 'english_position_sizing or ungrounded_chinese_point or unavailable_decision_state_transitions or binds_sector_strength'` -> `4 failed, 84 deselected`.
+- The failures reproduced `Maintain a 20% position.`, `市场上涨两点`, all three `转入`/`转为`/`进入` decision-state forms, and an incorrect `板块强度为 62.0` claim when the supplied sector strength was `92`.
+
+### GREEN Evidence
+
+- Targeted regressions: `4 passed`.
+- Required regression: `cd apps/api && uv run pytest tests/test_market_sentiment_analysis.py tests/test_model_maintenance.py -q` -> `100 passed in 0.90s`.
+- Ruff: `cd apps/api && uv run ruff check app tests` -> `All checks passed!`.
+- `git diff --check` completed without errors.
+
+### Fix Scope And Self-Review
+
+- English sizing sentences that maintain, hold, or keep a numeric percentage position are rejected without affecting factor wording.
+- Chinese quantitative parsing now recognizes 点 and 个点 with a non-greedy numeric span; temporal `前一点` wording remains accepted.
+- Decision source checks recognize state transitions with 转入, 转为, and 进入 before conditional thresholds are exempted.
+- Sector strength claims resolve the named sector, or the sole supplied sector for an unqualified claim, and compare against its canonical `strength_score`; the correct sector-name/value claim remains accepted.
+- The dirty `.superpowers/sdd/task-4-report.md` was not modified, staged, or included in the Task 5 commit.

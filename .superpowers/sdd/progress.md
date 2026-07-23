@@ -1,0 +1,15 @@
+# Market Sentiment Percentile SDD Progress
+
+Plan: `docs/superpowers/plans/2026-07-22-market-sentiment-percentile.md`
+
+- Preflight: complete. User confirmed zero 500-day price range skips the affected date instead of failing the full calculation.
+- Task 1: complete (commits 87f5444..e25e87f, review clean; amount-based volume factor retained per design)
+- Task 2: complete (commits 0f42ae9..c8acef6, review clean; fixed 15:10 cache phase transition)
+- Task 3: complete (commit 5c52d0c, review clean)
+- Task 4: complete (commit f38eb8a, review clean; local --as-of limitation documented)
+- Task 5: complete (commits 3e02a6f..de4ac4f, focused review clean; 100 combined tests passed)
+- Task 6: complete (commits a5fc6b2..539016e; review approved after local-only GET, trade-date scheduling, and catch-up retry fixes; 154 selected tests passed)
+- Task 7: complete (commits 2e93bc6..531e58d; review approved after Canvas-color and latest-point test fixes; 18 focused tests and typecheck passed)
+- Task 8: complete (commits 43512b1..5715676; review approved after retry-race, error-sanitization, and mobile-overflow fixes; 207 Vue tests, typecheck, and build passed)
+- Task 9: complete (commit 3569cba; 1234 backend tests, Ruff, 207 Vue tests, typecheck, build, desktop/mobile QA passed; real TickFlow/LLM checks unavailable without keys; post-fix Docker rebuild blocked by Docker Desktop containerd I/O)
+- Final branch review: complete (review approved after TickFlow date normalization, explicit LLM output Schema, identity-aware analysis caching, catch-up scheduling, semantic guard hardening, and chart accessibility fixes; final 1265 backend tests, Ruff, 208 Vue tests, typecheck, and production build passed)

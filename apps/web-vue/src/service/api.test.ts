@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
+  generateMarketSentimentAnalysis,
   getAuctionModelTop3,
   getCapitalSummary,
   getEtfActivityAlerts,
@@ -9,10 +10,12 @@ import {
   getEtfRadarOverview,
   getEtfThreeFactor,
   getEtfThreeFactorHistory,
-  markAllEtfAlertsRead,
-  markEtfAlertRead,
+  getMarketSentimentAnalysis,
+  getMarketSentimentPercentile,
   getSectorReplicaRadar,
-  getStockKline
+  getStockKline,
+  markAllEtfAlertsRead,
+  markEtfAlertRead
 } from './product-api';
 import type { ApiRequestError } from './product-request';
 import { apiRequest } from './product-request';
@@ -42,7 +45,11 @@ import type {
   HuijinEtfActivitySummary,
   HuijinEtfBaseline,
   HuijinEtfRole,
-  HuijinEtfValidationGroup
+  HuijinEtfValidationGroup,
+  SentimentAnalysisStatus,
+  SentimentPercentileAnalysisResponse,
+  SentimentPercentilePoint,
+  SentimentPercentileResponse
 } from './types';
 
 describe('apiRequest', () => {
@@ -163,6 +170,105 @@ describe('apiRequest', () => {
         expect.objectContaining({ method: 'POST' })
       ]
     ]);
+  });
+
+  it('requests sentiment percentile data and analysis with encoded query parameters', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockImplementation(() => Promise.resolve(new Response(JSON.stringify({}), { status: 200 })));
+
+    await getMarketSentimentPercentile('2026-07-22T15:10:00+08:00', true);
+    await getMarketSentimentAnalysis('2026-07-22 / close');
+    await generateMarketSentimentAnalysis('2026-07-22 / close', true);
+
+    expect(fetchMock.mock.calls.map(call => [String(call[0]), call[1]])).toEqual([
+      [
+        expect.stringContaining(
+          '/api/short-term/sentiment/percentile?refresh=true&as_of=2026-07-22T15%3A10%3A00%2B08%3A00'
+        ),
+        undefined
+      ],
+      [
+        expect.stringContaining('/api/short-term/sentiment/percentile/analysis?trade_date=2026-07-22+%2F+close'),
+        undefined
+      ],
+      [
+        expect.stringContaining(
+          '/api/short-term/sentiment/percentile/analysis/generate?trade_date=2026-07-22+%2F+close&force=true'
+        ),
+        expect.objectContaining({ method: 'POST' })
+      ]
+    ]);
+  });
+
+  it('keeps sentiment percentile contracts aligned with backend payloads', () => {
+    expectTypeOf<SentimentAnalysisStatus>().toEqualTypeOf<
+      'not_generated' | 'unconfigured' | 'pending' | 'ready' | 'failed'
+    >();
+
+    const factor = {
+      score: 72.5,
+      raw_value: 1.25,
+      raw_unit: '%'
+    };
+    const percentile = {
+      trade_date: '2026-07-22',
+      score: 68.2,
+      level: '偏热',
+      factors: {
+        volume: factor,
+        index_move_5d: factor,
+        price_position: factor,
+        amplitude_5d: factor,
+        volume_trend: factor
+      }
+    } satisfies SentimentPercentilePoint;
+    const response = {
+      model_version: 'market-sentiment-percentile-v1',
+      benchmark_symbol: '000985.SH',
+      benchmark_name: '中证全指',
+      window_size: 500,
+      weights: {
+        volume: 0.2,
+        index_move_5d: 0.2,
+        price_position: 0.2,
+        amplitude_5d: 0.2,
+        volume_trend: 0.2
+      },
+      latest_complete_trade_date: '2026-07-22',
+      selected_trade_date: '2026-07-22',
+      selected: percentile,
+      history: [percentile],
+      cache_status: 'fresh',
+      source_status: [],
+      generated_at: '2026-07-22T15:10:00+08:00',
+      notes: []
+    } satisfies SentimentPercentileResponse;
+    const analysis = {
+      trade_date: '2026-07-22',
+      status: 'ready',
+      model_version: 'market-sentiment-percentile-v1',
+      provider: 'openai',
+      llm_model: 'gpt-5',
+      input_hash: 'abc123',
+      attempts: 1,
+      requested_at: '2026-07-22T15:10:00+08:00',
+      completed_at: '2026-07-22T15:10:03+08:00',
+      retry_after: null,
+      error: null,
+      result: {
+        market_conclusion: '情绪偏热。',
+        key_drivers: ['量能72.5分', '位置72.5分'],
+        factor_divergence: '量能与波动同步抬升。',
+        historical_context: '处于近500日偏高区间。',
+        risk_posture: 'balanced',
+        next_session_watch: ['留意68.2分是否回落', '观察量能72.5分延续'],
+        risk_note: '高位波动可能放大。'
+      }
+    } satisfies SentimentPercentileAnalysisResponse;
+
+    expect(response.selected?.factors.volume.raw_unit).toBe('%');
+    expect(analysis.status).toBe('ready');
   });
 
   it('keeps ETF three-factor contracts aligned with backend payloads', () => {

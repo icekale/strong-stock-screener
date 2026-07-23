@@ -844,6 +844,30 @@ def test_semantic_contract_allows_grounded_score_change_movement(
     assert client.post.call_count == 1
 
 
+def test_semantic_contract_accepts_rounded_display_values(tmp_path: Path) -> None:
+    payload = _input_payload()
+    payload["market"]["turnover_cny"] = 1_250_000_100_000
+    payload["percentile"]["factors"]["price_position"]["raw_value"] = 64.004
+    payload["percentile"]["factors"]["amplitude_5d"]["raw_value"] = 3.604
+    payload["percentile"]["factors"]["volume_trend"]["raw_value"] = 1.204
+
+    result = _result_payload()
+    result["key_drivers"] = [
+        "成交额12500亿元，涨停68家",
+        "价格位置原始值64.00%，价格位置得分60.0",
+        "5日振幅原始值3.60%，得分60.0",
+    ]
+    result["factor_divergence"] = "量能趋势原始值1.20%，但5日涨幅为2.5%。"
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(payload, _config())
+
+    assert response.status == "ready"
+    assert client.post.call_count == 1
+
+
 def test_semantic_contract_rejects_invented_key_driver_threshold(tmp_path: Path) -> None:
     result = _result_payload()
     result["key_drivers"] = ["综合分 62.0，处于偏热", "若涨停家数高于 69 家"]

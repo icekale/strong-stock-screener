@@ -4,7 +4,7 @@ import hashlib
 import json
 import re
 from datetime import datetime, timedelta, timezone
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from threading import RLock
 from typing import Any, Literal, Mapping, Sequence
 
@@ -1216,11 +1216,37 @@ def _validate_claim_matches(
     for match in pattern.finditer(clause):
         if allow_thresholds and _number_is_threshold(clause, match):
             continue
-        claimed_value = _normalized_claim_number(match)
-        if signed_change:
-            claimed_value = _signed_claim_value(match, claimed_value)
-        if expected_value is None or claimed_value != expected_value:
+        if not _claim_matches_expected(match, expected_value, signed_change=signed_change):
             raise ValueError(error)
+
+
+def _claim_matches_expected(
+    match: re.Match[str],
+    expected_value: Decimal | None,
+    *,
+    signed_change: bool,
+) -> bool:
+    if expected_value is None:
+        return False
+
+    claimed_value = _normalized_claim_number(match)
+    if signed_change:
+        claimed_value = _signed_claim_value(match, claimed_value)
+    if claimed_value == expected_value:
+        return True
+
+    unit = (match.groupdict().get("unit") or "").strip()
+    number_text = match.group("number").replace(",", "")
+    decimal_places = len(number_text.partition(".")[2])
+    if unit in {"%", "％"}:
+        quantum = Decimal(1).scaleb(-decimal_places)
+    elif unit in {"万", "亿", "万亿"}:
+        scale_exponent = {"万": 4, "亿": 8, "万亿": 12}[unit]
+        quantum = Decimal(1).scaleb(scale_exponent - decimal_places)
+    else:
+        return False
+
+    return expected_value.quantize(quantum, rounding=ROUND_HALF_UP) == claimed_value
 
 
 def _validate_movement_subjects(text: str, sector_names: Sequence[str]) -> None:
@@ -1355,7 +1381,10 @@ def _validate_numeric_evidence(
         raise ValueError("AI response contains an ungrounded Chinese-number claim")
 
     for match in numeric_matches:
-        if _normalized_claim_number(match) in canonical_numbers:
+        if any(
+            _claim_matches_expected(match, expected, signed_change=False)
+            for expected in canonical_numbers
+        ):
             continue
         if allow_thresholds and _number_is_threshold(factual_text, match):
             continue

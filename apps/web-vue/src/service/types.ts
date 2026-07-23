@@ -2128,6 +2128,9 @@ export type HuijinEtfActivityItem = {
   multiple: number | null;
   direction: EtfActivityDirection;
   is_tenfold: boolean;
+  share_change_20d_avg_abs?: number | null;
+  share_change_20d_multiple?: number | null;
+  is_tenfold_share_change?: boolean;
   report_period: string | null;
   baseline_total_shares: number | null;
   confirmed_huijin_shares: number | null;
@@ -2221,6 +2224,24 @@ export type EtfRadarHistoryPoint = {
 
 export type EtfRadarHistoryResponse = CapitalSignalMetadata & {
   points: EtfRadarHistoryPoint[];
+};
+
+export type EtfExcessFlowPoint = {
+  trade_date: string;
+  net_excess_flow_cny: number | null;
+  excess_inflow_cny: number | null;
+  excess_outflow_cny: number | null;
+  coverage_count: number;
+  expected_count: number;
+  tenfold_increase_count: number;
+  tenfold_decrease_count: number;
+  trigger_symbols: string[];
+};
+
+export type EtfExcessFlowResponse = CapitalSignalMetadata & {
+  formula: string;
+  expected_count: number;
+  points: EtfExcessFlowPoint[];
 };
 
 export type EtfHolderPosition = {

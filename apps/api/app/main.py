@@ -3877,10 +3877,10 @@ def _etf_excess_flow_service() -> EtfExcessFlowService:
     injected = getattr(app.state, "etf_excess_flow_service", None)
     if injected is not None:
         return injected
+    capital_service = _capital_signal_service()
     cached = getattr(app.state, "default_etf_excess_flow_service", None)
-    if cached is None:
-        settings = get_settings()
-        cached = EtfExcessFlowService(CapitalSignalStore(settings.data_dir))
+    if cached is None or cached.store.root_dir != capital_service.store.root_dir:
+        cached = EtfExcessFlowService(capital_service.store)
         app.state.default_etf_excess_flow_service = cached
     return cached
 

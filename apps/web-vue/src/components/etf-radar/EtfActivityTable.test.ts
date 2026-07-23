@@ -157,4 +157,36 @@ describe('EtfActivityTable', () => {
     expect(wrapper.find('.etf-activity-table__value--rise').exists()).toBe(true);
     expect(wrapper.find('.etf-activity-table__value--fall').exists()).toBe(true);
   });
+
+  it('shows tenfold direction tags and the 20-day multiple without shifting the columns', () => {
+    const wrapper = mount(EtfActivityTable, {
+      props: {
+        rows: [
+          row({
+            symbol: 'BUY',
+            activity: {
+              direction: 'increase',
+              is_tenfold_share_change: true,
+              share_change_20d_multiple: 10
+            } as HuijinEtfActivityItem
+          }),
+          row({
+            symbol: 'SELL',
+            activity: {
+              direction: 'decrease',
+              is_tenfold_share_change: true,
+              share_change_20d_multiple: 11.25
+            } as HuijinEtfActivityItem
+          })
+        ],
+        selectedSymbol: 'BUY'
+      }
+    });
+
+    expect(wrapper.get('[data-testid="activity-etf-row"][data-symbol="BUY"]').text()).toContain('10×申购');
+    expect(wrapper.get('[data-testid="activity-etf-row"][data-symbol="BUY"]').text()).toContain('10.0倍');
+    expect(wrapper.get('[data-testid="activity-etf-row"][data-symbol="SELL"]').text()).toContain('10×赎回');
+    expect(wrapper.get('[data-testid="activity-etf-row"][data-symbol="SELL"]').text()).toContain('11.3倍');
+    expect(wrapper.findAll('thead th')).toHaveLength(6 + 1);
+  });
 });

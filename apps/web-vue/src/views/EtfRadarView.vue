@@ -9,12 +9,14 @@ import {
   getEtfRadarHolders,
   getEtfRadarMethodology,
   getEtfRadarOverview,
+  getEtfExcessFlow,
   getEtfThreeFactor,
   getEtfThreeFactorHistory
 } from '@/service/product-api';
 import type {
   CapitalSignalMetadata,
   EtfActivityDirection,
+  EtfExcessFlowResponse,
   EtfHolderPosition,
   EtfRadarHistoryResponse,
   EtfRadarHoldersResponse,
@@ -42,6 +44,7 @@ import { pickDefaultHuijinSymbol } from '@/utils/domain/huijinTrajectory';
 import { buildUnifiedEtfActivityRows, pickDefaultEtfActivitySymbol } from '@/utils/domain/etfThreeFactor';
 import EtfThreeFactorPanel from '@/components/etf-radar/EtfThreeFactorPanel.vue';
 import EtfActivityTable from '@/components/etf-radar/EtfActivityTable.vue';
+import EtfExcessFlowPanel from '@/components/etf-radar/EtfExcessFlowPanel.vue';
 import HuijinTrajectoryPanel from '@/components/etf-radar/HuijinTrajectoryPanel.vue';
 import SectionHeader from '@/components/common/workbench/section-header.vue';
 import StatusTag from '@/components/common/workbench/status-tag.vue';
@@ -75,6 +78,9 @@ const threeFactorLoading = ref(false);
 const threeFactorHistoryLoading = ref(false);
 const threeFactorError = ref<string | null>(null);
 const threeFactorHistoryError = ref<string | null>(null);
+const excessFlow = ref<EtfExcessFlowResponse | null>(null);
+const excessFlowLoading = ref(false);
+const excessFlowError = ref<string | null>(null);
 const activityDetailOpen = ref(false);
 const validationExpanded = ref(false);
 const isCompact = useBreakpoints(breakpointsTailwind).smaller('md');
@@ -447,8 +453,21 @@ async function loadThreeFactorHistory(symbol: string, force = false) {
   }
 }
 
+async function loadExcessFlow(force = false) {
+  if (!force && excessFlowLoading.value) return;
+  excessFlowLoading.value = true;
+  excessFlowError.value = null;
+  try {
+    excessFlow.value = await requestCache.get('etf-excess-flow', () => getEtfExcessFlow(60), { force });
+  } catch (error) {
+    excessFlowError.value = errorMessage(error, '读取ETF超量资金趋势失败');
+  } finally {
+    excessFlowLoading.value = false;
+  }
+}
+
 async function loadActivityWorkbench(force = false) {
-  await loadThreeFactor(force);
+  await Promise.all([loadThreeFactor(force), loadExcessFlow(force)]);
   updateThreeFactorSelection();
   if (selectedThreeFactorSymbol.value) {
     await loadThreeFactorHistory(selectedThreeFactorSymbol.value, force);
@@ -627,6 +646,8 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
             </div>
           </div>
         </template>
+
+        <EtfExcessFlowPanel :response="excessFlow" :loading="excessFlowLoading" :error="excessFlowError" />
 
         <EtfActivityTable
           v-if="activityRows.length"

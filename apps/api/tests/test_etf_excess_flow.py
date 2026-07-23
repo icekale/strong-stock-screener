@@ -24,11 +24,17 @@ def _history_with_deltas(
             close=close,
         )
     ]
-    for index, delta in enumerate(deltas, start=1):
+    current_date = start
+    for delta in deltas:
+        current_date += timedelta(days=1)
+        next_date = current_date
+        while next_date.weekday() >= 5:
+            next_date += timedelta(days=1)
+        current_date = next_date
         total_shares += delta
         rows.append(
             EtfSharePoint(
-                trade_date=(start + timedelta(days=index)).isoformat(),
+                trade_date=next_date.isoformat(),
                 symbol=symbol,
                 total_shares=total_shares,
                 close=close,
@@ -86,6 +92,19 @@ def test_zero_baseline_does_not_create_infinite_multiple() -> None:
     assert current.is_tenfold_share_change is False
 
 
+def test_missing_observed_trade_date_does_not_turn_cumulative_change_into_daily_change() -> None:
+    primary = _history_with_deltas("510050.SH", [100] * 20 + [1000])
+    companion = _history_with_deltas("510300.SH", [100] * 20 + [1000])
+    missing = primary.pop(5).trade_date
+
+    items = build_activity_metrics([*primary, *companion], symbols=("510050.SH", "510300.SH")).items
+
+    assert all(item.trade_date != missing for item in items if item.symbol == "510050.SH")
+    after_gap = next(item for item in items if item.symbol == "510050.SH" and item.trade_date > missing)
+    assert after_gap.share_delta is None
+    assert after_gap.share_change_20d_multiple is None
+
+
 def test_flow_trend_aggregates_events_and_keeps_symbol_order_stable() -> None:
     history = [
         *_history_with_deltas("510300.SH", [100] * 20 + [1000], close=4.0),
@@ -132,3 +151,13 @@ def test_flow_trend_returns_null_money_when_no_price_is_available() -> None:
     assert point.net_excess_flow_cny is None
     assert point.excess_inflow_cny is None
     assert point.excess_outflow_cny is None
+
+
+@pytest.mark.parametrize("close", [0.0, -1.0])
+def test_non_positive_close_is_excluded_from_money_coverage(close: float) -> None:
+    history = _history_with_deltas("510050.SH", [100] * 20 + [1000], close=close)
+
+    point = build_flow_trend(history, symbols=("510050.SH",)).points[-1]
+
+    assert point.coverage_count == 0
+    assert point.net_excess_flow_cny is None

@@ -41,18 +41,21 @@ class EtfExcessFlowService:
         history = self.store.load_share_history()
         symbols = tuple(ALL_ETFS)
         now = self.clock()
+        selected_history = [row for row in history if row.symbol in symbols]
         latest_date = max(
-            (row.trade_date for row in history if row.symbol in symbols),
+            (row.trade_date for row in selected_history),
             default=_latest_weekday(now),
         )
+        latest_expected_date = _latest_weekday(now)
+        has_current_history = latest_date == latest_expected_date
         source_status = [
             StrongStockSourceStatus(
                 source="ETF份额历史缓存",
-                status="success" if history else "stale",
+                status="success" if selected_history and has_current_history else "stale",
                 detail=(
                     f"监控池 {len(symbols)} 只，最新归档 {latest_date}"
-                    if history
-                    else "无可用 ETF 份额历史缓存"
+                    if selected_history
+                    else "无可用监控池 ETF 份额历史缓存"
                 ),
             )
         ]
@@ -70,6 +73,8 @@ def build_activity_metrics(
     symbols: Iterable[str],
 ) -> EtfExcessFlowActivityResult:
     selected_symbols = tuple(dict.fromkeys(symbols))
+    observed_dates = sorted({row.trade_date for row in history})
+    date_positions = {trade_date: index for index, trade_date in enumerate(observed_dates)}
     rows_by_symbol: dict[str, list[EtfSharePoint]] = {
         symbol: sorted(
             (row for row in history if row.symbol == symbol),
@@ -83,6 +88,7 @@ def build_activity_metrics(
         if definition is None:
             continue
         previous_total: float | None = None
+        previous_trade_date: str | None = None
         prior_deltas: list[float] = []
         for row in rows_by_symbol[symbol]:
             delta = None
@@ -90,6 +96,11 @@ def build_activity_metrics(
                 previous_total is not None
                 and isfinite(previous_total)
                 and isfinite(row.total_shares)
+                and _is_adjacent_observed_date(
+                    previous_trade_date,
+                    row.trade_date,
+                    date_positions,
+                )
             ):
                 delta = row.total_shares - previous_total
             baseline = (
@@ -123,6 +134,7 @@ def build_activity_metrics(
             if delta is not None and isfinite(delta):
                 prior_deltas.append(delta)
             previous_total = row.total_shares
+            previous_trade_date = row.trade_date
     return EtfExcessFlowActivityResult(
         items=sorted(items, key=lambda item: (item.trade_date, item.symbol))
     )
@@ -169,6 +181,7 @@ def build_flow_trend(
                 or row is None
                 or row.close is None
                 or not isfinite(row.close)
+                or row.close <= 0
             ):
                 continue
             coverage_count += 1
@@ -230,3 +243,17 @@ def _latest_weekday(now: datetime) -> str:
     while current.weekday() >= 5:
         current -= timedelta(days=1)
     return current.isoformat()
+
+
+def _is_adjacent_observed_date(
+    previous_trade_date: str | None,
+    trade_date: str,
+    date_positions: dict[str, int],
+) -> bool:
+    if previous_trade_date is None:
+        return False
+    previous_position = date_positions.get(previous_trade_date)
+    current_position = date_positions.get(trade_date)
+    if previous_position is None or current_position != previous_position + 1:
+        return False
+    return True

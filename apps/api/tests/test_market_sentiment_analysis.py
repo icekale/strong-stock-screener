@@ -526,7 +526,7 @@ def test_service_reuses_matching_ready_provider_model_and_hash(tmp_path: Path) -
     assert client.post.call_count == 1
     request = client.post.call_args.kwargs["json"]
     assert request["temperature"] == 0.0
-    assert request["max_tokens"] == 1200
+    assert request["max_tokens"] == 300
     system_prompt = request["messages"][0]["content"]
     assert "JSON" in system_prompt
     user_prompt = request["messages"][1]["content"]

@@ -650,7 +650,7 @@ class MarketSentimentAnalysisService:
                         json={
                             "model": config.model,
                             "temperature": 0.0,
-                            "max_tokens": 1200,
+                            "max_tokens": 300,
                             "response_format": {"type": "json_object"},
                             "messages": messages,
                         },

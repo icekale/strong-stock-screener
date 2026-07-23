@@ -1,18 +1,27 @@
 ---
 name: a-stock-data
-description: 当任务需要写代码实际获取A股数据时使用——拉取行情/K线(mootdx+腾讯+百度)、研报(东财+同花顺+iwencai)、信号(热点/北向/龙虎榜/解禁/行业)、资金面(融资融券/大宗/股东户数/分红/资金流)、新闻、财务三表/F10、公告(巨潮)、打板(涨停池/连板/炸板率)、ETF期权(T型报价/希腊字母/IV)、舆情互动(互动易/热榜/人气榜)等真实数据。十层数据源·43端点(含3官方备胎)·内嵌全部可运行代码，自包含零依赖外部文件；优先用通达信(mootdx)/腾讯(不封IP)，东财接口已内置限流防封，主源被封可查「备用源速查」降级。仅在需要调用数据接口取数时使用：A股概念解释、投资观点讨论、策略问答等无需取数的话题不要加载本skill。
+description: 当任务需要写代码实际获取A股数据时使用——拉取行情/K线(mootdx+腾讯+百度)、研报(东财+同花顺+iwencai)、信号(热点/北向/龙虎榜/解禁/行业)、资金面(融资融券/大宗/股东户数/分红/资金流)、新闻、财务三表/F10、公告(巨潮)、打板(涨停池/连板/炸板率)、ETF期权(T型报价/希腊字母/IV)、舆情互动(互动易/热榜/人气榜)等真实数据。十层数据源·44端点(含3官方备胎)·内嵌全部可运行代码，自包含零依赖外部文件；优先用通达信(mootdx)/腾讯(不封IP)，东财接口已内置限流防封，主源被封可查「备用源速查」降级。仅在需要调用数据接口取数时使用：A股概念解释、投资观点讨论、策略问答等无需取数的话题不要加载本skill。
 origin: custom
-version: 3.4.0
+version: 3.5.0
 ---
 
 > 📦 项目主页：https://github.com/simonlin1212/a-stock-data — 更新、反馈、支持作者
 > 
 > 作者：Simon 林 · 抖音「Simon林」· 公众号「硅基世纪」
 
-# A股全栈数据工具包 V3.4.0
+# A股全栈数据工具包 V3.5.0
 
-十层数据架构，43 个端点实测可用（40 主端点 + 3 官方备胎，2026-07 验证），覆盖主板/中小板/科创板/ST。每类数据在「备用源速查」列有独立备胎，主源被封时可降级。
+十层数据架构，44 个端点实测可用（41 主端点 + 3 官方备胎，2026-07 验证），覆盖主板/中小板/科创板/ST。每类数据在「备用源速查」列有独立备胎，主源被封时可降级。
 
+> **V3.5.0（板块资金流向，2026-07-23 · #37）：**
+> - **§3.8 `board_fund_flow()` 板块资金流向新增**：补上此前缺失的**板块级资金流**——行业/概念/地域三类板块 × 今日/5日/10日三周期，主力净流入额/净占比 + 超大/大/中/小单四档明细 + 领涨股。与 §3.7 板块排名**同源同接口**（东财 push2 `clist`），此前只请求了价格/涨跌家数字段，本版补请求 `f62/f184/f66...` 资金流字段即覆盖。走 `em_get` 限流防封。端点 43 → 44。
+> - 实测（2026-07-23）：行业今日 100 个板块主力净额降序（电力设备 64.66亿 = 超大 43.55亿 + 大 21.11亿）、概念 5 日、地域 10 日均真实返回；参数校验拒绝非法 board_type/period。
+>
+> **V3.4.1（前缀路由 + mootdx 验活修复，2026-07-23）：**
+> - **§1.2/§市场前缀规则 前缀路由修复（#40 #41）**：`5` 开头沪市 ETF（`510300`/`588200` 等）、沪深指数（`000300`/`000016` 等）此前落到 `else → sz`，腾讯接口返回空**或错票**（`000016` 被误判为 `sz000016` *ST康佳A，静默返回不相干标的的数据，比返空更危险）。`get_prefix()` 与 `tencent_quote()` 两处同步修复：`5x→sh`、沪指数白名单、支持显式前缀（`sh000001`/`sz000001`）透传解决 `000001`（上证指数 vs 平安银行）歧义。
+> - **§1.1 `tdx_client()` 真实取数验活（#43）**：`_probe()` 仅做 TCP 握手，握手成功 ≠ 能取数——坏服务器可握手通过却回 2 字节空 body，导致**静默返回空 DataFrame 或连接崩溃**且走不到 fallback。新增 `_validate()`：每个候选 server 必须真实拉一根 K 线成功才采用，并对 `factory()` 连接异常做 try/except 跳过，全部失败才抛明确错误。
+> - **备用源速查 K线行新增腾讯 m5 分钟 K 线（#43）**：同花顺 K 线备胎只有 30/60 分，mootdx 一挂就无 5 分钟源。补腾讯 `ifzq.gtimg.cn` 分钟 K（m1/m5/m15/m30/m60，零鉴权不封 IP）。⚠️ 第 7 字段是**换手率基点**不是成交额（差 3 个数量级），成交额需自算。
+>
 > **V3.4.0（接口质量 + 备用源韧性，2026-07-11）：**
 > - **§5.2 财联社快讯复活**：旧 nodeapi 2026-05 下线后，改走官方 `v1/roll/get_roll_list` + 本地签名（`sign=md5(sha1(排序query))`，零 key），V3.2 移除的全市场电报能力恢复，与东财 7×24 互为独立备份。实测 errno=0。
 > - **新增「备用源速查 & 降级策略」章节**：十层主源→独立备胎速查表（不同域名/不同风控面）+ 3 个实测备胎函数——`dragon_tiger_backup()`（沪深交易所官方龙虎榜，含营业部席位）、`fund_flow_backup()`（新浪日度资金流）、`announcements_backup()`（深市深交所官方/沪市东财公告+PDF）。端点 40 → 43，数据源 13 → 15（新增沪深交易所官方）。
@@ -66,7 +75,8 @@ version: 3.4.0
 ├── 龙虎榜席位     → 上榜记录 + 买卖席位 TOP5 + 机构动向 (datacenter-web)
 ├── 全市场龙虎榜   → 每日全市场上榜股票 + 净买额排名 (datacenter-web)
 ├── 限售解禁日历   → 历史解禁 + 未来90天待解禁 (datacenter-web)
-└── 行业板块排名   → 东财行业涨跌/上涨下跌家数 (V3.0 替换同花顺)
+├── 行业板块排名   → 东财行业涨跌/上涨下跌家数 (V3.0 替换同花顺)
+└── 板块资金流向   → 行业/概念/地域 × 今日/5日/10日 主力+超大/大/中/小四档 (push2, V3.5)
 
 资金面 / 筹码层
 ├── 融资融券明细   → 日级融资余额/买入/偿还 + 融券 (datacenter-web)
@@ -129,7 +139,8 @@ ETF期权层 (V3.3 新增)
 | 3.5 | `dragon_tiger_board(code, date)` | 个股龙虎榜+买卖席位 TOP5 | 东财 |
 | 3.6 | `lockup_expiry(code, date)` | 解禁历史+未来90天待解禁 | 东财 |
 | 3.7 | `industry_comparison()` | 行业板块涨跌排名 | 东财 |
-| 3.8 | `daily_dragon_tiger(date)` | 全市场龙虎榜+净买额排名 | 东财 |
+| 3.8 | `board_fund_flow(board_type, period)` | 板块资金流向（行业/概念/地域 × 今日/5日/10日，主力+四档） | 东财 |
+| 3.9 | `daily_dragon_tiger(date)` | 全市场龙虎榜+净买额排名 | 东财 |
 | 4.1 | `margin_trading(code)` | 融资融券明细 | 东财 |
 | 4.2 | `block_trade(code)` | 大宗交易+营业部 | 东财 |
 | 4.3 | `holder_num_change(code)` | 股东户数变化 | 东财 |
@@ -278,36 +289,50 @@ _TDX_SERVERS = [
 ]
 
 def _probe(ip, port, timeout=2.0):
-    """TCP 握手探测，判断服务器是否可达"""
+    """TCP 握手探测（快速粗筛）。注意：握手成功 ≠ 能取数，必须再经 _validate 验活。"""
     try:
         with socket.create_connection((ip, port), timeout=timeout):
             return True
     except Exception:
         return False
 
+def _validate(client) -> bool:
+    """真实取数验活：坏服务器可 TCP 握手通过却回 2 字节空 body → 静默空表。用一次真实 K 线请求兜底。"""
+    try:
+        df = client.bars(symbol='000001', frequency=9, offset=1)
+        return df is not None and not df.empty
+    except Exception:
+        return False
+
 def tdx_client(market='std'):
     """
-    创建 mootdx 客户端，规避 0.11.x BESTIP.HQ 空串 bug。
-    顺序兜底，保证 IP 列表老化/换网时仍能工作：
-      1) 顺序探测 _TDX_SERVERS，用第一个 TCP 可达的显式 server；
-      2) 全部不可达 → 回退 mootdx 自带 bestip 测速选优；
-      3) 再不行 → 回退裸 factory（老用户 config 已有可用 BESTIP 时成立）；
-      4) 仍失败 → 抛 RuntimeError，明确报错而非死等。
+    创建 mootdx 客户端，规避 0.11.x BESTIP.HQ 空串 bug + 坏服务器静默空表（#43）。
+    每个候选都必须「真实取数验活」通过才采用（_probe TCP 握手是假阳性来源）：
+      1) 顺序探测 _TDX_SERVERS，对 probe 通过者再 _validate 真实取数，取第一个验活成功的；
+      2) 全部失败 → 回退 mootdx 自带 bestip 测速选优（同样验活）；
+      3) 再回退裸 factory（老用户 config 已有可用 BESTIP 时成立）；
+      4) 仍失败 → 抛 RuntimeError，明确报错而非静默返回空表 / 崩溃。
     """
     for ip, port in _TDX_SERVERS:
-        if _probe(ip, port):
-            return Quotes.factory(market=market, server=(ip, port))
-    try:
-        return Quotes.factory(market=market, bestip=True)   # fallback 1
-    except Exception:
-        pass
-    try:
-        return Quotes.factory(market=market)                # fallback 2
-    except Exception as e:
-        raise RuntimeError(
-            "所有 mootdx 服务器均不可达。海外网络通常全部超时（TCP 7709），"
-            "请走国内代理或更新 _TDX_SERVERS 列表。原始错误：%s" % e
-        )
+        if not _probe(ip, port):
+            continue
+        try:
+            c = Quotes.factory(market=market, server=(ip, port))
+            if _validate(c):
+                return c
+        except Exception:
+            continue                                        # 握手过但取数崩 → 跳过下一台
+    for kwargs in ({'bestip': True}, {}):                   # fallback: bestip 测速 / 裸 factory
+        try:
+            c = Quotes.factory(market=market, **kwargs)
+            if _validate(c):
+                return c
+        except Exception:
+            continue
+    raise RuntimeError(
+        "所有 mootdx 服务器均无法取到数据（TCP 可达但返回空 / 被 reset）。"
+        "海外网络通常全部超时（TCP 7709），请走国内代理或更新 _TDX_SERVERS 列表。"
+    )
 
 # 用法：client = tdx_client()   # 替代所有 Quotes.factory(market='std')
 ```
@@ -317,15 +342,24 @@ def tdx_client(market='std'):
 ### 市场前缀规则（全局通用）
 
 ```python
+# 沪市指数白名单：与深市 000xxx 个股同段，需白名单区分（沪深300/上证50/中证500/科创50/中证1000/上证180）
+SH_INDEX = {"000300", "000905", "000016", "000688", "000852", "000010"}
+
 def get_prefix(code: str) -> str:
-    """6位代码 → 市场前缀"""
-    if code.startswith(("6", "9")):
+    """6位代码 → 市场前缀（sh/sz/bj）。支持显式前缀 sh/sz/bj 透传以解决歧义。"""
+    c = code.lower()
+    if c.startswith(("sh", "sz", "bj")):     # 显式前缀透传（如 sh000001=上证指数 vs sz000001=平安银行）
+        return c[:2]
+    if c.startswith(("5", "6", "9")):        # 5x=沪 ETF/LOF，6/9=沪个股
         return "sh"
-    elif code.startswith("8"):
+    if c.startswith(("4", "8")):             # 4x/8x=北交所
         return "bj"
-    else:
-        return "sz"
+    if c in SH_INDEX:                         # 沪深300/上证50 等沪指数（000xxx）
+        return "sh"
+    return "sz"                              # 深市个股/ETF（00/30/15x/16x/159 等），深指数 399xxx 亦走 sz
 ```
+
+> **歧义说明：** `000001` 默认按个股→`sz000001`（平安银行）；要上证指数请显式传 `sh000001`。`000016` 默认按沪指数→上证50；要深康佳A 请传 `sz000016`。
 
 ### Ticker 格式归一化
 
@@ -457,11 +491,16 @@ def tencent_quote(codes: list[str]) -> dict[str, dict]:
     也支持ETF: ["510050", "510300"]
     返回: {code: {name, price, pe_ttm, pb, mcap, ...}}
     """
+    # 前缀路由：与全局 get_prefix() 一致。5x 沪ETF / 000300 等沪指数不能落到 sz（会返回空或错票）。
+    SH_INDEX = {"000300", "000905", "000016", "000688", "000852", "000010"}   # 沪指数白名单
     prefixed = []
     for c in codes:
-        if c.startswith(("6", "9")):
+        low = c.lower()
+        if low.startswith(("sh", "sz", "bj")):        # 显式前缀透传，解决 000001 等歧义
+            prefixed.append(low)
+        elif c in SH_INDEX or c.startswith(("5", "6", "9")):
             prefixed.append(f"sh{c}")
-        elif c.startswith("8"):
+        elif c.startswith(("4", "8")):
             prefixed.append(f"bj{c}")
         else:
             prefixed.append(f"sz{c}")
@@ -1355,7 +1394,92 @@ for r in data["bottom"][-5:]:
     print(f"  {r['rank']}. {r['name']}: {r['change_pct']}%")
 ```
 
-### 3.8 全市场龙虎榜
+### 3.8 板块资金流向（行业/概念/地域 × 今日/5日/10日）
+
+东财板块资金流向——主力净流入额/净占比 + 超大/大/中/小单四档，覆盖行业、概念、地域三类板块，今日/5日/10日三个周期。与 §3.7 板块排名**同源同接口**（push2 `clist`），只是补请求了资金流字段（`f62/f184/f66...`）。走 `em_get` 限流防封。
+
+```python
+import requests
+
+# 板块类型 → 东财 fs 参数
+_BOARD_FS = {"industry": "m:90+t:2", "concept": "m:90+t:3", "region": "m:90+t:1"}
+# 周期 → (排序fid, 主力净额, 主力净占比, 涨跌幅, 领涨股name)；四档明细仅今日
+_BOARD_PERIOD = {
+    "today": ("f62",  "f62",  "f184", "f3",   "f204"),
+    "5d":    ("f164", "f164", "f165", "f109", "f257"),
+    "10d":   ("f174", "f174", "f175", "f160", None),   # 10日领涨股名称字段不稳定，省略
+}
+
+def board_fund_flow(board_type: str = "industry", period: str = "today",
+                    top_n: int = 20) -> dict:
+    """
+    板块资金流向排名（按主力净流入降序）。
+    board_type: industry(行业) / concept(概念) / region(地域)
+    period:     today(今日) / 5d(5日) / 10d(10日)
+    返回: {board_type, period, total, rows:[{rank, name, code, change_pct,
+           main_net(主力净额,元), main_pct(主力净占比,%), leader(领涨股),
+           # 仅 today：super_large_net/large_net/medium_net/small_net(超大/大/中/小单净额,元)}]}
+    注：板块级只有 今日/5日/10日（无 3日，个股级才有）。主力净额 = 超大单 + 大单。
+    """
+    if board_type not in _BOARD_FS:
+        raise ValueError(f"board_type 须为 {list(_BOARD_FS)}")
+    if period not in _BOARD_PERIOD:
+        raise ValueError(f"period 须为 {list(_BOARD_PERIOD)}")
+    fid, f_main, f_pct, f_chg, f_leader = _BOARD_PERIOD[period]
+
+    fields = ["f12", "f14", f_chg, f_main, f_pct]
+    if f_leader:
+        fields.append(f_leader)
+    if period == "today":
+        fields += ["f66", "f72", "f78", "f84"]   # 超大/大/中/小单净额
+
+    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    params = {
+        "pn": "1", "pz": "200", "po": "1", "np": "1",
+        "fltt": "2", "invt": "2", "fid": fid,       # fid + po=1：按该周期主力净额降序
+        "fs": _BOARD_FS[board_type],
+        "fields": ",".join(dict.fromkeys(fields)),  # 去重保序
+    }
+    r = em_get(url, params=params, headers={"User-Agent": UA}, timeout=15)
+    items = r.json().get("data", {}).get("diff", []) or []   # 注：API 的 total 字段不可信，用 len(items)
+
+    rows = []
+    for i, it in enumerate(items):
+        row = {
+            "rank": i + 1,
+            "name": it.get("f14", ""),
+            "code": it.get("f12", ""),
+            "change_pct": it.get(f_chg, 0),
+            "main_net": it.get(f_main, 0),          # 主力净流入净额（元）
+            "main_pct": it.get(f_pct, 0),           # 主力净流入净占比（%）
+            "leader": it.get(f_leader, "") if f_leader else "",
+        }
+        if period == "today":
+            row.update({
+                "super_large_net": it.get("f66", 0),
+                "large_net":       it.get("f72", 0),
+                "medium_net":      it.get("f78", 0),
+                "small_net":       it.get("f84", 0),
+            })
+        rows.append(row)
+
+    return {"board_type": board_type, "period": period,
+            "total": len(rows), "rows": rows[:top_n]}
+
+# 用法
+d = board_fund_flow("industry", "today", 10)
+print(f"行业板块今日主力净流入 TOP{len(d['rows'])}（共 {d['total']} 个）:")
+for r in d["rows"]:
+    print(f"  {r['rank']}. {r['name']}: 主力 {r['main_net']/1e8:.2f}亿 ({r['main_pct']}%) "
+          f"涨跌{r['change_pct']}% 超大{r['super_large_net']/1e8:.2f}亿 领涨{r['leader']}")
+
+# 概念板块 5 日资金流
+concept_5d = board_fund_flow("concept", "5d", 10)
+# 地域板块 10 日资金流
+region_10d = board_fund_flow("region", "10d", 10)
+```
+
+### 3.9 全市场龙虎榜
 
 每日全市场龙虎榜汇总——当日所有触发龙虎榜的股票 + 上榜原因 + 买卖净额 + 换手率。
 
@@ -1413,7 +1537,7 @@ data = daily_dragon_tiger("2026-05-16", min_net_buy=5000)
 print(f"\n净买入 > 5000万: {data['total_records']} 条")
 ```
 
-### 3.9 信号层组合用法：题材热度 + 资金验证
+### 3.10 信号层组合用法：题材热度 + 资金验证
 
 ```python
 # 拉当日强势股 reason
@@ -2656,6 +2780,7 @@ if holders:
 |---|---|---|---|
 | 实时行情+五档 | mootdx/腾讯 | 交易所官方 | 沪 `yunhq.sse.com.cn:32041/v1/sh1/snap/{code}`、深 `szse.cn/api/market/ssjjhq/getTimeData?marketId=1&code={code}`（一手五档） |
 | K线(全历史) | mootdx/百度/腾讯 | 同花顺 | `d.10jqka.com.cn/v6/line/hs_{code}/01/last.js`（01日/11周/21月/30/60分；2001至今；JSONP剥壳） |
+| K线(分钟) | mootdx | 腾讯 | `ifzq.gtimg.cn/appstock/app/kline/mkline?param={pre}{code},m5,,320`（m1/m5/m15/m30/m60，≤320根，需头 `Referer: https://gu.qq.com/`；mootdx 一挂时唯一的 5 分钟源）|
 | 龙虎榜 | 东财 datacenter | 沪深交易所官方 | `dragon_tiger_backup()`（见下，含营业部席位） |
 | 个股资金流 | 东财 push2 | 新浪 | `fund_flow_backup()`（见下，日度四档单净额） |
 | 公告 | 巨潮 | 深交所官方/东财 | `announcements_backup()`（见下，深市深交所+PDF，沪市东财+PDF） |
@@ -2666,6 +2791,8 @@ if holders:
 | 北向(权威) | 同花顺 hexin | HKEX 官方 | `hkex.com.hk/chi/csm/DailyStat/data_tab_daily_{YYYYMMDD}c.js`（成交额/额度/十大活跃股） |
 
 > ⛔ **已死透别用**（2026-07 实测）：网易财经(126.net 整站下线)、和讯、凤凰行情、腾讯资金流(ff_ 已死)、雪球免登录深度数据(需 token)。mootdx **库**已烂尾(2024 停更)但**通达信 TCP 协议本身照常**——继续用，装不上就用 `tdx_client()`。
+>
+> ⚠️ **腾讯分钟 K 线字段坑**：返回数组 `[时间, 开, 收, 高, 低, 量(手), {}, 换手率基点]`——第 7 个字段**不是成交额，是换手率基点**（当日各根累加 ÷100 = 当日换手率%）。当成交额读会小三个数量级；成交额需自算 `量(手) × 100 × 均价`。
 
 ```python
 import json, urllib.request, ssl

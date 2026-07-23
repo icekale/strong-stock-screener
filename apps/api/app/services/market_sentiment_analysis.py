@@ -32,6 +32,7 @@ _FACTOR_NAMES = (
     "volume_trend",
 )
 _RETRY_DELAY = timedelta(minutes=30)
+_AI_PROVIDER_TIMEOUT_SECONDS = 120
 
 
 class _StrictAnalysisInput(BaseModel):
@@ -194,7 +195,7 @@ _NUMBERED_INDEX_ENTITY_PATTERN = re.compile(
     r"(?:沪深|中证|上证|深证|国证|科创|北证|创业板)\d+(?:指数|指)?",
     re.IGNORECASE,
 )
-_CLAUSE_SPLIT_PATTERN = re.compile(r"[，,。；;！？!?\n]+")
+_CLAUSE_SPLIT_PATTERN = re.compile(r"[，,。；;！？!?、\n]+")
 _CONSEQUENCE_SPLIT_PATTERN = re.compile(r"\s*(?:(?<!否)则|那么|届时|\bthen\b)\s*", re.IGNORECASE)
 _MOVEMENT_CONNECTOR_PREFIX_PATTERN = re.compile(r"^\s*(?:且|并且|以及|同时|和|与)\s*")
 _THRESHOLD_PREFIX_PATTERN = re.compile(
@@ -206,7 +207,8 @@ _THRESHOLD_PREFIX_PATTERN = re.compile(
 _THRESHOLD_SUFFIX_PATTERN = re.compile(r"^\s*(?:以上|以下|or\s+(?:more|less)\b)", re.IGNORECASE)
 _OVERALL_SCORE_CLAIM_PATTERN = re.compile(
     rf"(?:\b(?:current\s+)?(?:(?:overall|sentiment)\s+)?score\b|"
-    rf"(?:当前|目前)?(?:市场|情绪)?(?:综合分|(?:综合|整体|总)?(?:得分|评分|分数)))"
+    rf"(?:当前|目前)?(?:(?:市场|情绪)(?:综合)?(?:分|得分|评分|分数)|"
+    rf"(?:综合|整体|总)(?:分|得分|评分|分数)))"
     rf"\s*(?:is|=|:|：|为|是|达(?:到)?|录得|stands?\s+at)?\s*"
     rf"(?P<number>{_NUMBER_TEXT})",
     re.IGNORECASE,
@@ -320,7 +322,7 @@ _VALUATION_CLAIM_PATTERN = re.compile(
 )
 _SUBJECT_QUALIFIER_PATTERN = re.compile(
     r"^(?:(?:若|如果|一旦|当|则|但|而|且|今日|当前|目前|明日|次日|"
-    r"下一交易日|较前日|环比|近\s*\d+\s*日|过去\s*\d+\s*日|"
+    r"当日|下一交易日|较前日|环比|近\s*\d+\s*日|过去\s*\d+\s*日|"
     r"小幅|大幅|明显|继续|整体)\s*)+"
 )
 _AGGREGATE_ENTITY_PATTERN = re.compile(
@@ -362,10 +364,10 @@ _MARKET_FIELD_CLAIM_PATTERNS = (
     ),
 )
 _FACTOR_SCORE_CLAIM_PATTERNS = tuple(
-    (name, re.compile(label + r"(?:因子)?(?:得分|评分|分数)" + _VALUE_LINK + _CLAIM_NUMBER))
+    (name, re.compile(label + r"(?:因子)?(?:得分|评分|分数|分位)" + _VALUE_LINK + _CLAIM_NUMBER))
     for name, label in (
         ("volume", r"(?:成交量|量能)(?!趋势)"),
-        ("index_move_5d", r"(?:指数)?5日(?:涨跌|涨幅)"),
+        ("index_move_5d", r"(?:(?:指数)?5日|5日指数)(?:涨跌|涨幅)"),
         ("price_position", r"(?:价格位置|价格位阶)"),
         ("amplitude_5d", r"(?:5日)?振幅"),
         ("volume_trend", r"(?:成交量|量能)趋势"),
@@ -375,7 +377,7 @@ _FACTOR_RAW_CLAIM_PATTERNS = (
     ("volume", re.compile(r"(?:成交量|量能)(?!趋势)(?:原始值|数值|值)?" + _VALUE_LINK + _CLAIM_NUMBER)),
     (
         "index_move_5d",
-        re.compile(r"(?:指数)?5日(?:涨跌幅?|涨幅|表现)" + _VALUE_LINK + _CLAIM_NUMBER),
+        re.compile(r"(?:(?:指数)?5日|5日指数)(?:涨跌幅?|涨幅|表现)" + _VALUE_LINK + _CLAIM_NUMBER),
     ),
     (
         "price_position",
@@ -594,34 +596,52 @@ class MarketSentimentAnalysisService:
         analysis_input: _SentimentAnalysisInput,
         config: EffectiveAiAnalysisSettings,
     ) -> SentimentPercentileAnalysisResponse:
-        client = self.http_client or httpx.Client(timeout=45)
+        client = self.http_client or httpx.Client(timeout=_AI_PROVIDER_TIMEOUT_SECONDS)
         should_close = self.http_client is None
         last_error: Exception | None = None
+        validation_feedback = ""
         try:
+            sector_names = tuple(item.name for item in analysis_input.main_sectors.items)
+            sector_instruction = (
+                " The only allowed sector names are the exact names in main_sectors.items: "
+                f"{json.dumps(sector_names, ensure_ascii=False)}. Use those names verbatim; "
+                "never substitute an alias, parent industry, related sector, or a sector learned "
+                "from outside the input. Use complete source numbers exactly as provided; do not "
+                "round, rescale, abbreviate, or convert units. Use '上涨家数' and '下跌家数' "
+                "for market breadth. Repeat the exact sector name in every clause containing "
+                "that sector's metrics; do not replace it with '当日' or '该板块'. If a fact is "
+                "not present in the input, say unavailable."
+            )
             for attempt in range(1, 4):
                 try:
+                    messages: list[dict[str, str]] = [
+                        {"role": "system", "content": _SYSTEM_PROMPT + sector_instruction},
+                        {
+                            "role": "user",
+                            "content": json.dumps(
+                                input_payload,
+                                ensure_ascii=False,
+                                sort_keys=True,
+                                separators=(",", ":"),
+                            ),
+                        },
+                    ]
+                    if validation_feedback:
+                        messages.append({"role": "user", "content": validation_feedback})
                     response = client.post(
                         f"{config.base_url.rstrip('/')}/chat/completions",
                         headers={
                             "Authorization": f"Bearer {config.api_key}",
                             "Content-Type": "application/json",
+                            "User-Agent": "StockMaster/1.0",
                         },
                         json={
                             "model": config.model,
-                            "temperature": 0.1,
+                            "temperature": 0.0,
+                            "max_tokens": 8000,
+                            "thinking": {"type": "disabled"},
                             "response_format": {"type": "json_object"},
-                            "messages": [
-                                {"role": "system", "content": _SYSTEM_PROMPT},
-                                {
-                                    "role": "user",
-                                    "content": json.dumps(
-                                        input_payload,
-                                        ensure_ascii=False,
-                                        sort_keys=True,
-                                        separators=(",", ":"),
-                                    ),
-                                },
-                            ],
+                            "messages": messages,
                         },
                     )
                     response.raise_for_status()
@@ -632,6 +652,12 @@ class MarketSentimentAnalysisService:
                     _validate_result_semantics(result, analysis_input)
                 except Exception as exc:
                     last_error = exc
+                    validation_feedback = (
+                        "The previous draft failed deterministic validation: "
+                        f"{type(exc).__name__}: {exc}. Return a new JSON object only. Re-read "
+                        "the input and copy every current score, level, weight, raw value, and "
+                        "market or sector statistic exactly; if uncertain, write unavailable."
+                    )
                     continue
 
                 ready = pending.model_copy(
@@ -753,14 +779,24 @@ def _validate_result_semantics(
         _validate_protected_claims(text, analysis_input)
         _validate_movement_subjects(text, sector_names)
 
+        previous_sector: str | None = None
         for clause, allows_watch_thresholds in _validation_segments(field_name, text):
+            current_sector = next((name for name in sector_names if name in clause), None)
+            is_market_clause = bool(re.search(r"全(?:市场|市)|市场", clause))
+            continues_sector = (
+                previous_sector is not None
+                and current_sector is None
+                and not is_market_clause
+                and bool(_SECTOR_LIMIT_METRIC_PATTERN.search(clause))
+            )
+            validation_clause = f"{previous_sector}{clause}" if continues_sector else clause
             _validate_field_specific_claims(
-                clause,
+                validation_clause,
                 analysis_input,
                 allow_thresholds=allows_watch_thresholds,
             )
             _validate_source_availability(
-                clause,
+                validation_clause,
                 analysis_input,
                 sector_names,
                 allow_threshold=allows_watch_thresholds and _is_threshold_clause(clause),
@@ -771,6 +807,7 @@ def _validate_result_semantics(
                 canonical_dates,
                 allow_thresholds=allows_watch_thresholds,
             )
+            previous_sector = current_sector or (previous_sector if continues_sector else None)
 
 
 def _result_text_items(result: SentimentAnalysisResult) -> tuple[tuple[str, str], ...]:
@@ -972,6 +1009,8 @@ def _validate_movement_value_claims(
     for match in _MOVEMENT_VALUE_CLAIM_PATTERN.finditer(clause):
         if _match_within_spans(match, score_change_spans):
             continue
+        if any(pattern.search(clause) for _, pattern in _MARKET_FIELD_CLAIM_PATTERNS):
+            continue
         if allow_thresholds and _number_is_threshold(clause, match):
             continue
         if _match_within_spans(match, index_factor_spans):
@@ -1071,10 +1110,22 @@ def _validate_claim_matches(
 
 
 def _validate_movement_subjects(text: str, sector_names: Sequence[str]) -> None:
+    factor_movement_patterns = (
+        *(pattern for _name, pattern in _FACTOR_SCORE_CLAIM_PATTERNS),
+        *(pattern for _name, pattern in _FACTOR_RAW_CLAIM_PATTERNS),
+    )
     for clause in _CLAUSE_SPLIT_PATTERN.split(text):
         score_change_spans = _score_change_spans(clause)
+        factor_movement_spans = tuple(
+            match.span()
+            for pattern in factor_movement_patterns
+            for match in pattern.finditer(clause)
+        )
         for match in _MOVEMENT_PATTERN.finditer(clause):
-            if _match_within_spans(match, score_change_spans):
+            if _match_within_spans(match, score_change_spans) or _match_within_spans(
+                match,
+                factor_movement_spans,
+            ):
                 continue
             subject = _movement_subject(
                 _movement_local_prefix(clause, match.start(), score_change_spans)

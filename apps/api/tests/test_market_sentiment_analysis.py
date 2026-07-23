@@ -165,6 +165,33 @@ class _Response:
         return {"choices": [{"message": {"content": self.content}}]}
 
 
+class _ReasoningOnlyResponse(_Response):
+    def json(self) -> dict[str, object]:
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": "",
+                        "reasoning_content": self.content,
+                    }
+                }
+            ]
+        }
+
+
+class _ContentBlocksResponse(_Response):
+    def json(self) -> dict[str, object]:
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": [{"type": "text", "text": self.content}],
+                    }
+                }
+            ]
+        }
+
+
 class _Client:
     def __init__(self, responses: list[object]) -> None:
         self.post = Mock(side_effect=responses)
@@ -339,6 +366,35 @@ def test_service_rejects_noncanonical_input_before_hash_or_provider_request(
     assert not store.record_path("2026-07-22").exists()
 
 
+def test_provider_request_sets_a_stable_user_agent(tmp_path: Path) -> None:
+    client = _Client([_Response(json.dumps(_result_payload(), ensure_ascii=False))])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+    assert client.post.call_args.kwargs["headers"]["User-Agent"] == "StockMaster/1.0"
+
+
+def test_provider_request_accepts_reasoning_content_when_content_is_empty(tmp_path: Path) -> None:
+    client = _Client([_ReasoningOnlyResponse(json.dumps(_result_payload(), ensure_ascii=False))])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+
+
+def test_provider_request_accepts_text_content_blocks(tmp_path: Path) -> None:
+    client = _Client([_ContentBlocksResponse(json.dumps(_result_payload(), ensure_ascii=False))])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+    assert client.post.call_count == 1
+
+
 @pytest.mark.parametrize("protected_field", ["score", "level", "weights", "trade_permission"])
 def test_result_forbids_fields_that_could_override_deterministic_statistics(
     protected_field: str,
@@ -424,10 +480,14 @@ def test_service_reuses_matching_ready_provider_model_and_hash(tmp_path: Path) -
     assert cached.input_hash == response.input_hash
     assert client.post.call_count == 1
     request = client.post.call_args.kwargs["json"]
-    assert request["temperature"] == 0.1
+    assert request["temperature"] == 0.0
+    assert request["max_tokens"] == 8000
+    assert request["thinking"] == {"type": "disabled"}
     system_prompt = request["messages"][0]["content"]
     for prohibited in ("statistic", "stocks", "position sizing", "orders", "missing values"):
         assert prohibited in system_prompt
+    assert '"存储芯片"' in system_prompt
+    assert "Use those names verbatim" in system_prompt
 
 
 def test_llm_request_includes_the_complete_result_schema(tmp_path: Path) -> None:
@@ -752,6 +812,74 @@ def test_semantic_contract_allows_reviewer_grounded_prose(
 
     assert response.status == "ready"
     assert response.result is not None
+    assert client.post.call_count == 1
+
+
+def test_semantic_contract_allows_market_breadth_movement_wording(
+    tmp_path: Path,
+) -> None:
+    result = _result_payload()
+    result["market_conclusion"] = "全市场上涨家数 3012、下跌家数 1845，市场结构分化。"
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+    assert client.post.call_count == 1
+
+
+def test_semantic_contract_keeps_sector_context_across_metric_clauses(
+    tmp_path: Path,
+) -> None:
+    result = _result_payload()
+    result["key_drivers"] = [
+        "存储芯片板块强度92，涨停11家，炸板2家，最高连板4",
+        "综合分62.0，处于偏热",
+    ]
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+    assert client.post.call_count == 1
+
+
+def test_semantic_contract_does_not_treat_sector_score_as_overall_score(
+    tmp_path: Path,
+) -> None:
+    result = _result_payload()
+    result["key_drivers"] = [
+        "存储芯片强度评分92.0，涨停11家，炸板2家，最高连板4板",
+        "综合评分62.0，处于偏热",
+    ]
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+    assert client.post.call_count == 1
+
+
+def test_semantic_contract_allows_factor_percentile_movement_subject(
+    tmp_path: Path,
+) -> None:
+    result = _result_payload()
+    result["factor_divergence"] = (
+        "价格位置分位60.0（原值64.0%）与5日指数涨幅分位60.0（原值2.5%）明显背离。"
+    )
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
     assert client.post.call_count == 1
 
 

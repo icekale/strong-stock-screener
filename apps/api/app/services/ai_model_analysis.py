@@ -154,10 +154,29 @@ def extract_chat_content(payload: dict[str, Any]) -> str:
     if not isinstance(choices, list) or not choices:
         raise ValueError("AI response missing choices")
     message = choices[0].get("message") if isinstance(choices[0], dict) else None
-    content = message.get("content") if isinstance(message, dict) else None
-    if not isinstance(content, str) or not content.strip():
+    if not isinstance(message, dict):
         raise ValueError("AI response missing content")
-    return content
+    for field_name in ("content", "reasoning_content"):
+        content = _extract_message_text(message.get(field_name))
+        if content:
+            return content
+    raise ValueError("AI response missing content")
+
+
+def _extract_message_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value.strip()
+    if isinstance(value, list):
+        chunks: list[str] = []
+        for item in value:
+            if isinstance(item, dict):
+                text = item.get("text")
+                if isinstance(text, str) and text.strip():
+                    chunks.append(text.strip())
+            elif isinstance(item, str) and item.strip():
+                chunks.append(item.strip())
+        return "\n".join(chunks)
+    return ""
 
 
 def extract_json_object(content: str) -> dict[str, Any]:

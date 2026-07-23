@@ -1,30 +1,30 @@
 {
   "artifacts": {
     "CHANGELOG.md": {
-      "raw_url": "https://raw.githubusercontent.com/simonlin1212/a-stock-data/9ed665cc9773457bc23fed6b770b2b5a8cede40f/CHANGELOG.md",
-      "sha256": "cdbe71b9a9e48e117a4b6b6d9af28236b76060db6651a53d2e02e6b48a9e8759",
-      "size": 23164
+      "raw_url": "https://raw.githubusercontent.com/simonlin1212/a-stock-data/06791b5a3159401524c10bd0e28aaebe415ce604/CHANGELOG.md",
+      "sha256": "bf42a7595d414cc4a02b1135be8e9590421a75eb04f56023496fdc9e09e28e8b",
+      "size": 28096
     },
     "LICENSE": {
-      "raw_url": "https://raw.githubusercontent.com/simonlin1212/a-stock-data/9ed665cc9773457bc23fed6b770b2b5a8cede40f/LICENSE",
+      "raw_url": "https://raw.githubusercontent.com/simonlin1212/a-stock-data/06791b5a3159401524c10bd0e28aaebe415ce604/LICENSE",
       "sha256": "199bab40163ad21135c2c4d5db43bffdadb14ed80762b048f04931cc48700bbf",
       "size": 10760
     },
     "SKILL.md": {
-      "raw_url": "https://raw.githubusercontent.com/simonlin1212/a-stock-data/9ed665cc9773457bc23fed6b770b2b5a8cede40f/SKILL.md",
-      "sha256": "a1cd1220f7ea1c57bb508dba78f1bfe9d9f92bed7a5e1f32f43afea41543c3de",
-      "size": 127733
+      "raw_url": "https://raw.githubusercontent.com/simonlin1212/a-stock-data/06791b5a3159401524c10bd0e28aaebe415ce604/SKILL.md",
+      "sha256": "34553ef3d349d7b55d7a2319f4487662e1a3b88437ccb876a1de4eca97cd970c",
+      "size": 136809
     }
   },
   "schema_version": 1,
   "upstream": {
     "branch": "main",
-    "commit": "9ed665cc9773457bc23fed6b770b2b5a8cede40f",
-    "commit_url": "https://github.com/simonlin1212/a-stock-data/commit/9ed665cc9773457bc23fed6b770b2b5a8cede40f",
-    "committed_at": "2026-07-11T04:09:29Z",
+    "commit": "06791b5a3159401524c10bd0e28aaebe415ce604",
+    "commit_url": "https://github.com/simonlin1212/a-stock-data/commit/06791b5a3159401524c10bd0e28aaebe415ce604",
+    "committed_at": "2026-07-23T04:17:26Z",
     "owner": "simonlin1212",
     "repository": "a-stock-data",
-    "synced_at": "2026-07-18T13:43:55.519925Z",
-    "version": "3.4.0"
+    "synced_at": "2026-07-23T23:29:07.695756Z",
+    "version": "3.5.0"
   }
 }

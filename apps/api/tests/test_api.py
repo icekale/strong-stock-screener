@@ -1,4 +1,5 @@
 import asyncio
+import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from datetime import date, datetime, timedelta
@@ -48,6 +49,7 @@ from app.models import (
     EtfRadarHoldersResponse,
     EtfRadarMethodologyResponse,
     EtfRadarOverviewResponse,
+    EtfExcessFlowResponse,
     EtfActivityAlert,
     EtfThreeFactorHistoryResponse,
     EtfThreeFactorResponse,
@@ -78,6 +80,7 @@ from app.services.plate_rotation_reference import (
     PlateRotationThemeItem,
 )
 from app.services.capital_signal_store import CapitalSignalStore
+from app.services.etf_excess_flow import EtfExcessFlowService
 from app.services.sector_workbench_store import SectorThemeRowsStore
 from app.services.etf_three_factor_store import EtfThreeFactorStore
 from app.providers.news_risk import NegativeNewsRisk
@@ -1602,6 +1605,7 @@ def _client(
     chanlun_rc8_client: object | None = None,
     chanlun_shadow_scheduler: object | None = None,
     capital_signal_service: object | None = None,
+    etf_excess_flow_service: object | None = None,
     etf_three_factor_monitor: object | None = None,
 ) -> TestClient:
     shutdown_research = getattr(main_module, "shutdown_chanlun_research", None)
@@ -1623,6 +1627,10 @@ def _client(
         app.state.capital_signal_service = capital_signal_service
     elif hasattr(app.state, "capital_signal_service"):
         delattr(app.state, "capital_signal_service")
+    if etf_excess_flow_service is not None:
+        app.state.etf_excess_flow_service = etf_excess_flow_service
+    elif hasattr(app.state, "etf_excess_flow_service"):
+        delattr(app.state, "etf_excess_flow_service")
     if etf_three_factor_monitor is not None:
         app.state.etf_three_factor_monitor = etf_three_factor_monitor
     elif hasattr(app.state, "etf_three_factor_monitor"):
@@ -2621,6 +2629,49 @@ def test_etf_radar_read_endpoints_return_shared_metadata(tmp_path: Path) -> None
     assert service.history_calls == 1
     assert service.holder_calls == 1
     assert service.methodology_calls == 1
+
+
+def test_etf_excess_flow_route_reads_legacy_share_cache(tmp_path: Path) -> None:
+    store = CapitalSignalStore(tmp_path)
+    rows = []
+    total_shares = 1_000_000
+    for index in range(22):
+        if index:
+            total_shares += 100 if index < 21 else 1000
+        rows.append(
+            {
+                "trade_date": (date(2026, 5, 4) + timedelta(days=index)).isoformat(),
+                "symbol": "510050.SH",
+                "total_shares": total_shares,
+                "close": 4.0,
+            }
+        )
+    store.root_dir.mkdir(parents=True, exist_ok=True)
+    store.share_history_path.write_text(
+        json.dumps(rows),
+        encoding="utf-8",
+    )
+    flow_service = EtfExcessFlowService(
+        store,
+        clock=lambda: datetime(2026, 7, 23, 15, 5, tzinfo=ZoneInfo("Asia/Shanghai")),
+    )
+    client = _client(
+        tmp_path,
+        capital_signal_service=FakeCapitalSignalService(tmp_path),
+        etf_excess_flow_service=flow_service,
+    )
+
+    response = client.get("/api/etf-radar/excess-flow?days=20")
+
+    assert response.status_code == 200
+    payload = EtfExcessFlowResponse.model_validate(response.json())
+    assert payload.expected_count == 10
+    assert payload.points[-1].net_excess_flow_cny == pytest.approx(3600)
+    assert payload.points[-1].coverage_count == 1
+    assert payload.points[-1].trigger_symbols == ["510050.SH"]
+    assert payload.source_status[0].source == "ETF份额历史缓存"
+    assert client.get("/api/etf-radar/excess-flow?days=19").status_code == 422
+    assert client.get("/api/etf-radar/excess-flow?days=121").status_code == 422
 
 
 def test_etf_three_factor_read_routes_use_snapshot_store_and_enrich_overview(

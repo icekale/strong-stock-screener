@@ -11,6 +11,7 @@ import type {
   EtfRadarHoldersResponse,
   EtfRadarMethodologyResponse,
   EtfRadarOverviewResponse,
+  EtfExcessFlowResponse,
   EtfThreeFactorHistoryResponse,
   EtfThreeFactorItem,
   EtfThreeFactorResponse,
@@ -26,7 +27,8 @@ const api = vi.hoisted(() => ({
   getEtfRadarHolders: vi.fn(),
   getEtfRadarMethodology: vi.fn(),
   getEtfThreeFactor: vi.fn(),
-  getEtfThreeFactorHistory: vi.fn()
+  getEtfThreeFactorHistory: vi.fn(),
+  getEtfExcessFlow: vi.fn()
 }));
 
 vi.mock('@/service/product-api', () => api);
@@ -323,6 +325,29 @@ function setDefaultApiResponses() {
   api.getEtfRadarMethodology.mockResolvedValue(methodologyFixture());
   api.getEtfThreeFactor.mockResolvedValue(threeFactorFixture());
   api.getEtfThreeFactorHistory.mockImplementation((symbol: string) => Promise.resolve(threeFactorHistoryFixture(symbol)));
+  api.getEtfExcessFlow.mockResolvedValue(excessFlowFixture());
+}
+
+function excessFlowFixture(): EtfExcessFlowResponse {
+  return {
+    ...metadata(),
+    model_version: 'etf-excess-flow-v1',
+    formula: 'test formula',
+    expected_count: 7,
+    points: [
+      {
+        trade_date: '2026-07-18',
+        net_excess_flow_cny: 120_000_000,
+        excess_inflow_cny: 180_000_000,
+        excess_outflow_cny: 60_000_000,
+        coverage_count: 6,
+        expected_count: 7,
+        tenfold_increase_count: 2,
+        tenfold_decrease_count: 1,
+        trigger_symbols: ['510050.SH', '510300.SH']
+      }
+    ]
+  };
 }
 
 function mountViewImmediately() {
@@ -378,6 +403,8 @@ describe('EtfRadarView', () => {
 
     await openTab(wrapper, 1);
 
+    expect(api.getEtfExcessFlow).toHaveBeenCalledWith(60);
+    expect(wrapper.find('[data-testid="etf-excess-flow-panel"]').exists()).toBe(true);
     expect(wrapper.text()).toContain('十倍量增加');
     expect(wrapper.text()).toContain('十倍量减少');
     expect(wrapper.text()).toContain('交叉验证');
@@ -422,6 +449,20 @@ describe('EtfRadarView', () => {
     expect(wrapper.get('[data-testid="activity-etf-row"] strong').attributes('title')).toBe('华夏上证50ETF');
     expect(wrapper.text()).not.toContain('OLD_GENERIC_SENTINEL');
     expect(wrapper.text()).not.toMatch(/证据强度|稳健分|同时间成交|相对指数|估算申购/);
+    wrapper.unmount();
+  });
+
+  it('keeps the activity table and three-factor workbench usable when excess flow fails', async () => {
+    routeState.route.query = { tab: 'activity' };
+    setDefaultApiResponses();
+    api.getEtfExcessFlow.mockRejectedValueOnce(new Error('超量趋势暂不可用'));
+
+    const wrapper = await mountView();
+
+    expect(wrapper.get('[data-testid="excess-flow-error"]').text()).toContain('超量趋势暂不可用');
+    expect(wrapper.findAll('[data-testid="activity-etf-row"]')).toHaveLength(7);
+    expect(wrapper.find('[data-testid="three-factor-table"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain('交叉验证');
     wrapper.unmount();
   });
 
@@ -578,12 +619,12 @@ describe('EtfRadarView', () => {
     setDefaultApiResponses();
     const wrapper = await mountView();
 
-    expect(wrapper.findAll('[data-testid="huijin-trajectory-chart"]')).toHaveLength(3);
+    expect(wrapper.get('[data-testid="etf-three-factor-panel"]').findAll('[data-testid="huijin-trajectory-chart"]')).toHaveLength(3);
     api.getEtfThreeFactorHistory.mockRejectedValueOnce(new Error('历史刷新失败：暂不可用'));
     await wrapper.get('[data-testid="etf-refresh"]').trigger('click');
     await flushPromises();
 
-    expect(wrapper.findAll('[data-testid="huijin-trajectory-chart"]')).toHaveLength(3);
+    expect(wrapper.get('[data-testid="etf-three-factor-panel"]').findAll('[data-testid="huijin-trajectory-chart"]')).toHaveLength(3);
     expect(wrapper.get('.etf-three-factor__history-error').text()).toContain('历史刷新失败：暂不可用');
     expect(wrapper.get('[data-testid="signal-timeline"]').text()).toContain('2026-07-18');
     wrapper.unmount();

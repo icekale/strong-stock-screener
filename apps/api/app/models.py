@@ -2284,11 +2284,18 @@ class HuijinEtfActivityItem(BaseModel):
     multiple: float | None = None
     direction: EtfActivityDirection = "unknown"
     is_tenfold: bool = False
+    share_change_20d_avg_abs: float | None = None
+    share_change_20d_multiple: float | None = None
+    is_tenfold_share_change: bool = False
     report_period: str | None = None
     baseline_total_shares: float | None = None
     confirmed_huijin_shares: float | None = None
     confirmed_huijin_holding_pct: float | None = None
     baseline_source_kind: HuijinBaselineSourceKind | None = None
+
+    @property
+    def share_change_direction(self) -> EtfActivityDirection:
+        return self.direction
 
 
 class HuijinEtfValidationGroup(BaseModel):
@@ -2379,6 +2386,24 @@ class EtfRadarHistoryPoint(BaseModel):
 
 class EtfRadarHistoryResponse(CapitalSignalMetadata):
     points: list[EtfRadarHistoryPoint] = Field(default_factory=list)
+
+
+class EtfExcessFlowPoint(BaseModel):
+    trade_date: str
+    net_excess_flow_cny: float | None = None
+    excess_inflow_cny: float | None = None
+    excess_outflow_cny: float | None = None
+    coverage_count: int = 0
+    expected_count: int = 0
+    tenfold_increase_count: int = 0
+    tenfold_decrease_count: int = 0
+    trigger_symbols: list[str] = Field(default_factory=list)
+
+
+class EtfExcessFlowResponse(CapitalSignalMetadata):
+    formula: str
+    expected_count: int
+    points: list[EtfExcessFlowPoint] = Field(default_factory=list)
 
 
 class EtfHolderPosition(BaseModel):

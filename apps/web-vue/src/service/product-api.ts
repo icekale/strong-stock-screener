@@ -27,6 +27,7 @@ import type {
   DataSourceStatusResponse,
   EtfActivityAlertResponse,
   EtfAlertReadResponse,
+  EtfExcessFlowResponse,
   EtfRadarHistoryResponse,
   EtfRadarHoldersResponse,
   EtfRadarMethodologyResponse,
@@ -189,6 +190,15 @@ export async function getEtfRadarHistory(days = 120): Promise<EtfRadarHistoryRes
     throw new Error(`读取ETF份额历史失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<EtfRadarHistoryResponse>;
+}
+
+export async function getEtfExcessFlow(days = 60): Promise<EtfExcessFlowResponse> {
+  const params = new URLSearchParams({ days: String(days) });
+  const response = await apiFetch(`${API_BASE_URL}/api/etf-radar/excess-flow?${params.toString()}`);
+  if (!response.ok) {
+    throw new Error(`读取ETF超量资金趋势失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<EtfExcessFlowResponse>;
 }
 
 export async function getEtfRadarHolders(): Promise<EtfRadarHoldersResponse> {

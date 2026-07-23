@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue';
 import type { UnifiedEtfActivityRow } from '@/utils/domain/etfThreeFactor';
 import { closeChangeTone, signalLevelLabel } from '@/utils/domain/etfThreeFactor';
+import { shareChangeEventLabel } from '@/utils/domain/etfExcessFlow';
 
 defineOptions({ name: 'EtfActivityTable' });
 
@@ -69,8 +70,9 @@ function valueClass(value: number | null) {
 function statusText(row: UnifiedEtfActivityRow) {
   const level = signalLevelLabel(row.signalLevel);
   if (!row.activity) return level;
-  if (row.activity.direction === 'increase') return `${level} · +增加（申购代理）`;
-  if (row.activity.direction === 'decrease') return `${level} · -减少（赎回代理）`;
+  const event = shareChangeEventLabel(row.activity);
+  if (row.activity.direction === 'increase') return `${level} · +增加（申购代理）${event ? ` · ${event}` : ''}`;
+  if (row.activity.direction === 'decrease') return `${level} · -减少（赎回代理）${event ? ` · ${event}` : ''}`;
   if (row.activity.direction === 'flat') return `${level} · 持平`;
   return `${level} · 待确认`;
 }
@@ -158,11 +160,26 @@ function statusText(row: UnifiedEtfActivityRow) {
               </button>
             </th>
             <td :class="valueClass(row.closeChangePct)">{{ formatPercent(row.closeChangePct) }}</td>
-            <td :class="valueClass(row.dailyChangePct)">{{ formatPercent(row.dailyChangePct) }}</td>
+            <td :class="valueClass(row.dailyChangePct)">
+              <div class="etf-activity-table__share-change">
+                <span>{{ formatPercent(row.dailyChangePct) }}</span>
+                <span
+                  v-if="row.activity && shareChangeEventLabel(row.activity)"
+                  data-testid="tenfold-share-change"
+                  class="etf-activity-table__event"
+                  :class="row.activity.direction === 'increase' ? 'etf-activity-table__event--increase' : 'etf-activity-table__event--decrease'"
+                >
+                  {{ shareChangeEventLabel(row.activity) }}
+                </span>
+                <small v-if="row.activity?.share_change_20d_multiple !== null && row.activity?.share_change_20d_multiple !== undefined">
+                  {{ row.activity.share_change_20d_multiple.toFixed(1) }}倍
+                </small>
+              </div>
+            </td>
             <td :class="valueClass(row.baselineChangePct)">{{ formatPercent(row.baselineChangePct) }}</td>
             <td>{{ formatVolumeRatio(row.volumeRatio) }}</td>
             <td>{{ formatScore(row.signalScore) }}</td>
-            <td>{{ statusText(row) }}</td>
+            <td class="etf-activity-table__status">{{ statusText(row) }}</td>
           </tr>
         </tbody>
       </table>
@@ -282,5 +299,47 @@ tbody th span {
 .etf-activity-table__value--fall {
   color: var(--wb-negative, #b91c1c);
   font-weight: 700;
+}
+
+.etf-activity-table__share-change {
+  display: inline-flex;
+  min-height: 42px;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.etf-activity-table__share-change small {
+  color: var(--wb-muted, #64748b);
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.etf-activity-table__event {
+  display: inline-flex;
+  min-height: 18px;
+  align-items: center;
+  padding: 0 5px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+.etf-activity-table__event--increase {
+  color: var(--wb-negative, #b91c1c);
+  background: color-mix(in srgb, var(--wb-negative, #b91c1c) 10%, transparent);
+}
+
+.etf-activity-table__event--decrease {
+  color: var(--wb-positive, #15803d);
+  background: color-mix(in srgb, var(--wb-positive, #15803d) 10%, transparent);
+}
+
+.etf-activity-table__status {
+  white-space: normal;
+  line-height: 18px;
+  overflow-wrap: anywhere;
 }
 </style>

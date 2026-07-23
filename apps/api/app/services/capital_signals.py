@@ -34,6 +34,7 @@ from app.models import (
 )
 from app.providers.capital_signals import CapitalProviderResult
 from app.services.capital_signal_store import CapitalSignalStore
+from app.services.etf_excess_flow import build_activity_metrics
 from app.services.huijin_etf_activity import (
     ALL_ETFS,
     CORE_ETFS,
@@ -352,13 +353,31 @@ class CapitalSignalService:
                 previous_by_symbol=previous_by_symbol,
                 baseline_by_symbol=baseline_by_symbol,
             )
+            history = _merge_share_history(history, current_rows)
+            excess_flow_items = build_activity_metrics(history, symbols=ALL_ETFS).items
+            excess_flow_by_symbol = {
+                item.symbol: item
+                for item in excess_flow_items
+                if item.trade_date == trade_date
+            }
+            activity_by_symbol = {
+                symbol: item.model_copy(
+                    update={
+                        "share_change_20d_avg_abs": excess_flow_by_symbol[symbol].share_change_20d_avg_abs,
+                        "share_change_20d_multiple": excess_flow_by_symbol[symbol].share_change_20d_multiple,
+                        "is_tenfold_share_change": excess_flow_by_symbol[symbol].is_tenfold_share_change,
+                    }
+                )
+                if symbol in excess_flow_by_symbol
+                else item
+                for symbol, item in activity_by_symbol.items()
+            }
             core_items = [activity_by_symbol[symbol] for symbol in CORE_ETFS]
             validation_items = [activity_by_symbol[symbol] for symbol in VALIDATION_ETFS]
             validation_groups = _validation_groups(activity_by_symbol)
             activity = _activity_summary(core_items, validation_groups)
             items = [_legacy_radar_item(item) for item in core_items]
 
-            history = _merge_share_history(history, current_rows)
             self.store.save_share_history(history)
             generated_at = now.isoformat(timespec="seconds")
             snapshot = EtfRadarOverviewResponse(

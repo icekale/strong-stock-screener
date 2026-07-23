@@ -640,23 +640,31 @@ class MarketSentimentAnalysisService:
                     ]
                     if validation_feedback:
                         messages.append({"role": "user", "content": validation_feedback})
-                    response = client.post(
-                        f"{config.base_url.rstrip('/')}/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {config.api_key}",
-                            "Content-Type": "application/json",
-                            "User-Agent": "StockMaster/1.0",
-                        },
-                        json={
-                            "model": config.model,
-                            "temperature": 0.0,
-                            "max_tokens": 300,
-                            "response_format": {"type": "json_object"},
-                            "messages": messages,
-                        },
+                    request_url = f"{config.base_url.rstrip('/')}/chat/completions"
+                    request_headers = {
+                        "Authorization": f"Bearer {config.api_key}",
+                        "Content-Type": "application/json",
+                        "User-Agent": "StockMaster/1.0",
+                    }
+                    request_json = {
+                        "model": config.model,
+                        "temperature": 0.0,
+                        "max_tokens": 300,
+                        "response_format": {"type": "json_object"},
+                        "messages": messages,
+                        "stream": should_close,
+                    }
+                    payload = _streaming_chat_payload(
+                        client,
+                        request_url,
+                        headers=request_headers,
+                        request_json=request_json,
+                    ) if should_close else _post_chat_payload(
+                        client,
+                        request_url,
+                        headers=request_headers,
+                        request_json=request_json,
                     )
-                    response.raise_for_status()
-                    payload = response.json()
                     result = SentimentAnalysisResult.model_validate(
                         _normalize_sentiment_result_payload(
                             extract_json_object(extract_chat_content(payload))
@@ -726,6 +734,70 @@ def _prompt_input_payload(input_payload: Mapping[str, object]) -> dict[str, obje
             "market_state": decision.get("market_state"),
         }
     return prompt_payload
+
+
+def _post_chat_payload(
+    client: Any,
+    url: str,
+    *,
+    headers: Mapping[str, str],
+    request_json: Mapping[str, object],
+) -> dict[str, Any]:
+    response = client.post(url, headers=dict(headers), json=dict(request_json))
+    response.raise_for_status()
+    payload = response.json()
+    if not isinstance(payload, dict):
+        raise ValueError("AI response JSON must be an object")
+    return payload
+
+
+def _streaming_chat_payload(
+    client: Any,
+    url: str,
+    *,
+    headers: Mapping[str, str],
+    request_json: Mapping[str, object],
+) -> dict[str, Any]:
+    content = ""
+    with client.stream("POST", url, headers=dict(headers), json=dict(request_json)) as response:
+        response.raise_for_status()
+        for line in response.iter_lines():
+            if not line:
+                continue
+            if line.startswith("data:"):
+                line = line[5:].strip()
+            if line == "[DONE]":
+                break
+            try:
+                chunk = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(chunk, dict):
+                continue
+            choices = chunk.get("choices")
+            if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+                continue
+            delta = choices[0].get("delta")
+            if not isinstance(delta, Mapping):
+                continue
+            piece = delta.get("content")
+            if isinstance(piece, str):
+                content += piece
+            elif isinstance(piece, list):
+                content += "".join(
+                    item.get("text", "")
+                    for item in piece
+                    if isinstance(item, Mapping) and isinstance(item.get("text"), str)
+                )
+            if content:
+                try:
+                    extract_json_object(content)
+                except (TypeError, ValueError):
+                    continue
+                return {"choices": [{"message": {"content": content}}]}
+    if content:
+        return {"choices": [{"message": {"content": content}}]}
+    raise ValueError("AI streaming response missing content")
 
 
 def _normalize_sentiment_result_payload(payload: dict[str, Any]) -> dict[str, Any]:

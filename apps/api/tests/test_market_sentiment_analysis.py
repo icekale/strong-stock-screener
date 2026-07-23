@@ -24,6 +24,7 @@ from app.models import (
 from app.services.market_sentiment_analysis import (
     MarketSentimentAnalysisService,
     _prompt_input_payload,
+    _streaming_chat_payload,
     build_sentiment_analysis_input,
     hash_sentiment_analysis_input,
     sentiment_analysis_record_is_reusable,
@@ -210,6 +211,29 @@ class _ContentBlocksResponse(_Response):
 class _Client:
     def __init__(self, responses: list[object]) -> None:
         self.post = Mock(side_effect=responses)
+
+
+class _StreamResponse:
+    def __init__(self, lines: list[str]) -> None:
+        self.lines = lines
+
+    def __enter__(self) -> "_StreamResponse":
+        return self
+
+    def __exit__(self, *_args: object) -> None:
+        return None
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def iter_lines(self) -> list[str]:
+        return self.lines
+
+
+class _StreamClient:
+    def __init__(self, lines: list[str]) -> None:
+        self.response = _StreamResponse(lines)
+        self.stream = Mock(return_value=self.response)
 
 
 class _PendingInspectingClient:
@@ -547,6 +571,27 @@ def test_llm_prompt_redacts_decision_permission_and_risk_level(tmp_path: Path) -
         "status": "available",
         "market_state": "修复",
     }
+
+
+def test_streaming_chat_payload_stops_after_complete_content_json() -> None:
+    content = json.dumps(_result_payload(), ensure_ascii=False)
+    lines = [
+        'data: {"choices":[{"delta":{"reasoning_content":"ignored"}}]}',
+        f'data: {{"choices":[{{"delta":{{"content":{json.dumps(content[:80])}}}}}]}}',
+        f'data: {{"choices":[{{"delta":{{"content":{json.dumps(content[80:])}}}}}]}}',
+        "data: [DONE]",
+    ]
+    client = _StreamClient(lines)
+
+    payload = _streaming_chat_payload(
+        client,
+        "https://ai.example/v1/chat/completions",
+        headers={},
+        request_json={"stream": True},
+    )
+
+    assert payload["choices"][0]["message"]["content"] == content
+    assert client.stream.call_count == 1
 
 
 def test_llm_request_uses_the_compact_result_contract(tmp_path: Path) -> None:

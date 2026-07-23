@@ -40,6 +40,7 @@ from app.models import (
     EtfRadarHoldersResponse,
     EtfRadarMethodologyResponse,
     EtfRadarOverviewResponse,
+    EtfExcessFlowResponse,
     EtfActivityAlertResponse,
     EtfThreeFactorHistoryResponse,
     EtfThreeFactorResponse,
@@ -119,6 +120,7 @@ from app.services.capital_signals import CapitalSignalService
 from app.services.etf_three_factor_monitor import EtfThreeFactorMonitor
 from app.services.etf_three_factor_sampler import EtfThreeFactorSampler
 from app.services.etf_three_factor_store import EtfThreeFactorStore
+from app.services.etf_excess_flow import EtfExcessFlowService
 from app.services.huijin_etf_activity import CORE_ETFS
 from app.services.background_jobs import BackgroundJobStore, CancelCheck, ProgressCallback
 from app.services.cache_registry import CacheRegistry
@@ -1239,6 +1241,13 @@ def get_market_capital_summary() -> CapitalSummaryResponse:
 @app.get("/api/etf-radar/overview", response_model=EtfRadarOverviewResponse)
 def get_etf_radar_overview() -> EtfRadarOverviewResponse:
     return _etf_three_factor_monitor().enrich_overview(_capital_signal_service().overview())
+
+
+@app.get("/api/etf-radar/excess-flow", response_model=EtfExcessFlowResponse)
+def get_etf_excess_flow(
+    days: int = Query(default=60, ge=20, le=120),
+) -> EtfExcessFlowResponse:
+    return _etf_excess_flow_service().trend(days=days)
 
 
 @app.get("/api/etf-radar/history", response_model=EtfRadarHistoryResponse)
@@ -3861,6 +3870,18 @@ def _capital_signal_service() -> CapitalSignalService:
             ),
         )
         app.state.default_capital_signal_service = cached
+    return cached
+
+
+def _etf_excess_flow_service() -> EtfExcessFlowService:
+    injected = getattr(app.state, "etf_excess_flow_service", None)
+    if injected is not None:
+        return injected
+    cached = getattr(app.state, "default_etf_excess_flow_service", None)
+    if cached is None:
+        settings = get_settings()
+        cached = EtfExcessFlowService(CapitalSignalStore(settings.data_dir))
+        app.state.default_etf_excess_flow_service = cached
     return cached
 
 

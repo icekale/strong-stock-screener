@@ -224,7 +224,7 @@ describe('apiRequest', () => {
       }
     } satisfies SentimentPercentilePoint;
     const response = {
-      model_version: 'market-sentiment-percentile-v1',
+      model_version: 'market-sentiment-percentile-v2',
       benchmark_symbol: '000985.SH',
       benchmark_name: '中证全指',
       window_size: 500,
@@ -247,7 +247,7 @@ describe('apiRequest', () => {
     const analysis = {
       trade_date: '2026-07-22',
       status: 'ready',
-      model_version: 'market-sentiment-percentile-v1',
+      model_version: 'market-sentiment-percentile-v2',
       provider: 'openai',
       llm_model: 'gpt-5',
       input_hash: 'abc123',

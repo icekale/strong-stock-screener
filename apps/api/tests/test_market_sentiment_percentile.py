@@ -65,6 +65,7 @@ def test_factor_formulas_are_exposed_in_the_first_complete_point() -> None:
         max(bar.high for bar in bars[index - 4 : index + 1]),
         min(bar.low for bar in bars[index - 4 : index + 1]),
         bars[index].close,
+        direction_close=bars[index - 1].close,
     )
     low = min(bar.low for bar in bars[index - 499 : index + 1])
     high = max(bar.high for bar in bars[index - 499 : index + 1])
@@ -78,6 +79,19 @@ def test_factor_formulas_are_exposed_in_the_first_complete_point() -> None:
     assert point.factors.price_position.raw_value == pytest.approx(price_position)
     assert point.factors.amplitude_5d.raw_value == pytest.approx(five_day_amplitude * 100)
     assert point.factors.volume_trend.raw_value == pytest.approx(volume_trend * 100)
+
+
+def test_five_day_amplitude_uses_current_day_direction() -> None:
+    bars = make_test_bars(1020)
+    bars[-6] = make_test_bar(1014, close=100)
+    bars[-2] = make_test_bar(1018, close=110)
+    bars[-1] = make_test_bar(1019, close=108)
+
+    point = calculate_sentiment_percentile(bars)[-1]
+
+    assert bars[-1].close > bars[-6].close
+    assert bars[-1].close < bars[-2].close
+    assert point.factors.amplitude_5d.raw_value < 0
 
 
 def test_future_bar_changes_do_not_change_prior_points() -> None:
@@ -151,7 +165,7 @@ def test_directional_amplitude_preserves_return_direction(direction: int) -> Non
 
 def test_response_contract_and_equal_weights() -> None:
     response = percentile_response_fixture()
-    assert response.model_version == "market-sentiment-percentile-v1"
+    assert response.model_version == "market-sentiment-percentile-v2"
     assert response.benchmark_symbol == "000985.SH"
     assert response.window_size == 500
     assert response.weights == {key: 0.2 for key in WEIGHTS}

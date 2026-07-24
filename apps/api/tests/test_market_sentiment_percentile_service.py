@@ -43,7 +43,7 @@ def service_for(tmp_path: Path, provider: FakeProvider) -> MarketSentimentPercen
 
 
 def snapshot(
-    *, model_version: str = "market-sentiment-percentile-v1"
+    *, model_version: str = "market-sentiment-percentile-v2"
 ) -> SentimentPercentileResponse:
     factor = SentimentPercentileFactor(score=50, raw_value=0, raw_unit="%")
     point = SentimentPercentilePoint(

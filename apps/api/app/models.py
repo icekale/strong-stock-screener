@@ -435,7 +435,7 @@ class SentimentPercentilePoint(BaseModel):
 
 
 class SentimentPercentileResponse(BaseModel):
-    model_version: str = "market-sentiment-percentile-v1"
+    model_version: str = "market-sentiment-percentile-v2"
     benchmark_symbol: str = "000985.SH"
     benchmark_name: str = "中证全指"
     window_size: int = 500
@@ -474,7 +474,7 @@ class SentimentPercentileAnalysisResponse(BaseModel):
 
     trade_date: str
     status: SentimentAnalysisStatus
-    model_version: str = "market-sentiment-percentile-v1"
+    model_version: str = "market-sentiment-percentile-v2"
     provider: str | None = None
     llm_model: str | None = None
     input_hash: str | None = None

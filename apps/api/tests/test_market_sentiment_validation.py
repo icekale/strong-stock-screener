@@ -46,7 +46,7 @@ def test_validation_reports_fixed_level_buckets_and_forward_metrics() -> None:
 
     report = validate_sentiment_percentile(bars)
 
-    assert report.model_version == "market-sentiment-percentile-v1"
+    assert report.model_version == "market-sentiment-percentile-v2"
     assert report.horizons == [5, 10, 20]
     assert sum(bucket.sample_count for bucket in report.buckets) == len(report.samples)
     assert report.buckets[0].windows[0].future_data_end <= report.data_end

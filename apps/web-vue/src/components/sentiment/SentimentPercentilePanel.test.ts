@@ -92,7 +92,7 @@ function percentileFixture(): SentimentPercentileResponse {
   const history = Array.from({ length: 499 }, (_, index) => point(index));
   const selected = { ...point(61, '2026-07-22'), score: 62.4, level: '偏热' as const };
   return {
-    model_version: 'market-sentiment-percentile-v1',
+    model_version: 'market-sentiment-percentile-v2',
     benchmark_symbol: '000985.SH',
     benchmark_name: '中证全指',
     window_size: 500,
@@ -115,7 +115,7 @@ function analysisFixture(
   return {
     trade_date: '2026-07-22',
     status,
-    model_version: 'market-sentiment-percentile-v1',
+    model_version: 'market-sentiment-percentile-v2',
     provider: status === 'ready' ? 'openai-compatible' : null,
     llm_model: status === 'ready' ? 'gpt-5-mini' : null,
     input_hash: status === 'ready' ? 'hash' : null,

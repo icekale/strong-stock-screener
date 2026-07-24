@@ -11,7 +11,7 @@ from app.models import (
 )
 
 
-MODEL_VERSION = "market-sentiment-percentile-v1"
+MODEL_VERSION = "market-sentiment-percentile-v2"
 WINDOW = 500
 WEIGHTS = {
     "volume": 0.2,
@@ -47,8 +47,11 @@ def directional_amplitude(
     high: float,
     low: float,
     close: float,
+    *,
+    direction_close: float | None = None,
 ) -> float:
-    direction = (close > previous_close) - (close < previous_close)
+    direction_reference = previous_close if direction_close is None else direction_close
+    direction = (close > direction_reference) - (close < direction_reference)
     return direction * (high - low) / previous_close
 
 
@@ -68,6 +71,7 @@ def calculate_sentiment_percentile(bars: list[KlineBar]) -> list[SentimentPercen
                 max(item.high for item in normalized[index - 4 : index + 1]),
                 min(item.low for item in normalized[index - 4 : index + 1]),
                 bar.close,
+                direction_close=normalized[index - 1].close,
             )
         if index >= 19:
             mean_5 = sum(amounts[index - 4 : index + 1]) / 5

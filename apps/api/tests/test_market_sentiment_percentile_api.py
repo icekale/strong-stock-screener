@@ -71,7 +71,7 @@ def test_percentile_api_returns_selected_history_and_metadata(monkeypatch) -> No
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["model_version"] == "market-sentiment-percentile-v1"
+    assert payload["model_version"] == "market-sentiment-percentile-v2"
     assert payload["benchmark_symbol"] == "000985.SH"
     assert payload["selected_trade_date"] == "2026-07-21"
     assert service.calls == [("2026-07-21", False)]

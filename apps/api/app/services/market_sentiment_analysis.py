@@ -711,7 +711,7 @@ class MarketSentimentAnalysisService:
         return self.store.save(failed)
 
 
-_SYSTEM_PROMPT = "只返回 JSON。"
+_SYSTEM_PROMPT = "只返回 JSON，不要输出分析过程、解释、Markdown 或代码围栏。"
 _SECURITY_RESTRICTION_PROMPT = (
     "任何字段不得提及个股、ETF、基金或具体证券，也不得使用推荐、看好、关注、首选、值得关注等词语指向对象；"
     "w 只能写市场、指数、因子或行业/板块聚合条件。"
@@ -719,13 +719,14 @@ _SECURITY_RESTRICTION_PROMPT = (
 _COMPACT_OUTPUT_PROMPT = (
     "请做收盘市场统计摘要，只返回 JSON，且只能使用短键 c、d、v、h、p、w、n。"
     "c 是市场结论，d 是 2 到 4 条带数字的主要驱动，v 是因子背离，h 是历史位置，"
-    "p 只能是 attack、balanced、defensive、wait，w 是 2 到 4 条带数字的次日观察，"
+    "p 只能是 attack、balanced、defensive、wait，w 是 2 到 4 条次日观察，w 中每一条都必须包含至少一个 ASCII 数字（0-9），"
     "n 只能写数据缺失、样本限制或模型局限。只使用输入数字，保持简洁；不要输出数据表、"
     "个股、买卖建议、仓位或持有建议。不要复述 decision 中的交易权限或风险等级，"
     "输出不得出现低吸、轻仓、重仓、买入、卖出、加仓、减仓等交易措辞。"
     "市场宽度必须使用上涨家数和下跌家数字段，不要写上涨3255家这类动词短语。"
     "禁止写任何指数或板块的涨幅、跌幅、上涨、下跌、回落、反弹等运动描述，"
-    f"{_SECURITY_RESTRICTION_PROMPT}"
+                        f"{_SECURITY_RESTRICTION_PROMPT}"
+                        "w 中每一条都必须包含至少一个 ASCII 数字（0-9），不得只写中文文字。"
     "指数和因子只能写因子得分或输入中的原始值；不要使用‘历史中位’、‘极值’、"
     "‘高于’、‘低于’等输入未提供的比较结论。市场字段的数字必须紧跟完整字段名，"
     "禁止出现孤立的‘原始值’；禁止自行计算新的数字，包括差距、变化、合计、平均、比例或约数，"

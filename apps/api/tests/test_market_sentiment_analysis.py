@@ -1253,6 +1253,7 @@ def test_prompt_forbids_security_recommendations_explicitly(tmp_path: Path) -> N
         "instruction"
     ]
     assert "个股、ETF、基金或具体证券" in instruction
+    assert "w 中每一条都必须包含至少一个 ASCII 数字" in instruction
 
 
 @pytest.mark.parametrize(

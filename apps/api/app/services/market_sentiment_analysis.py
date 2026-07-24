@@ -1279,7 +1279,9 @@ def _claim_matches_expected(
     else:
         return False
 
-    return expected_value.quantize(quantum, rounding=ROUND_HALF_UP) == claimed_value
+    if expected_value.quantize(quantum, rounding=ROUND_HALF_UP) == claimed_value:
+        return True
+    return abs(expected_value - claimed_value) <= quantum
 
 
 def _validate_movement_subjects(text: str, sector_names: Sequence[str]) -> None:

@@ -942,6 +942,21 @@ def test_semantic_contract_accepts_rounded_display_values(tmp_path: Path) -> Non
     assert client.post.call_count == 1
 
 
+def test_semantic_contract_accepts_truncated_percentage_display_value(tmp_path: Path) -> None:
+    payload = _input_payload()
+    payload["percentile"]["factors"]["amplitude_5d"]["raw_value"] = -6.372582294250943
+    result = _result_payload()
+    result["factor_divergence"] = "振幅5日原始值-6.372%，量能趋势原始值1.2%"
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(payload, _config())
+
+    assert response.status == "ready"
+    assert client.post.call_count == 1
+
+
 def test_semantic_contract_accepts_decimal_chinese_unit_display_value(tmp_path: Path) -> None:
     payload = _input_payload()
     payload["market"]["turnover_cny"] = 1_205_000_100_000

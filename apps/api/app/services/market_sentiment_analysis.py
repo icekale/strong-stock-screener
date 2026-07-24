@@ -679,6 +679,7 @@ class MarketSentimentAnalysisService:
                         "上一次短键 JSON 未通过本地校验（"
                         f"{type(exc).__name__}: {exc}）。只返回 c,d,v,h,p,w,n 这 7 个短键，"
                         "修正格式或数字后重试；只使用输入数据，不要输出其他内容；"
+                        "禁止自行计算新的数字（包括差距、变化、合计、平均、比例或约数），"
                         "不要复述 decision 的交易权限或风险等级，也不要写指数或板块的涨跌运动。"
                     )
                     continue
@@ -720,7 +721,9 @@ _COMPACT_OUTPUT_PROMPT = (
     "禁止写任何指数或板块的涨幅、跌幅、上涨、下跌、回落、反弹等运动描述，"
     "指数和因子只能写因子得分或输入中的原始值；不要使用‘历史中位’、‘极值’、"
     "‘高于’、‘低于’等输入未提供的比较结论。市场字段的数字必须紧跟完整字段名，"
-    "禁止出现孤立的‘原始值’；n 只写输入中明确存在的数据缺失、验证样本数或模型局限。"
+    "禁止出现孤立的‘原始值’；禁止自行计算新的数字，包括差距、变化、合计、平均、比例或约数，"
+    "不要写‘差距约’等计算结果；所有数字必须逐字来自输入字段；n 只写输入中明确存在的数据缺失、"
+    "验证样本数或模型局限。"
 )
 
 
@@ -1558,6 +1561,9 @@ def _safe_error(error: Exception | None) -> str:
     if isinstance(error, ValidationError):
         return "ValidationError: AI response does not match the required schema"
     if isinstance(error, ValueError):
+        message = str(error)
+        if message.startswith("AI response "):
+            return f"ValueError: {message}"
         return "ValueError: AI response could not be parsed"
     if isinstance(error, httpx.HTTPError):
         return f"{type(error).__name__}: AI provider request failed"

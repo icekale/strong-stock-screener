@@ -24,6 +24,7 @@ from app.models import (
 from app.services.market_sentiment_analysis import (
     MarketSentimentAnalysisService,
     _prompt_input_payload,
+    _safe_error,
     _streaming_chat_payload,
     build_sentiment_analysis_input,
     hash_sentiment_analysis_input,
@@ -644,6 +645,23 @@ def test_llm_request_uses_the_compact_result_contract(tmp_path: Path) -> None:
         assert posture in user_prompt
     assert "上涨家数和下跌家数" in user_prompt
     assert "禁止写任何指数或板块的涨幅" in user_prompt
+
+
+def test_llm_prompt_forbids_derived_numeric_claims(tmp_path: Path) -> None:
+    client = _Client([_Response(json.dumps(_result_payload(), ensure_ascii=False))])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+    user_prompt = client.post.call_args.kwargs["json"]["messages"][1]["content"]
+    assert "禁止自行计算" in user_prompt
+
+
+def test_safe_error_preserves_ai_validation_reason() -> None:
+    error = ValueError("AI response contains an ungrounded factual number")
+
+    assert _safe_error(error) == "ValueError: AI response contains an ungrounded factual number"
 
 
 def test_changed_input_or_model_generates_again(tmp_path: Path) -> None:

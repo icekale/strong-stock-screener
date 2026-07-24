@@ -937,6 +937,25 @@ def test_semantic_contract_does_not_treat_score_change_day_as_current_score(tmp_
     assert client.post.call_count == 1
 
 
+def test_semantic_contract_ignores_numbered_field_identifiers(tmp_path: Path) -> None:
+    payload = _input_payload()
+    payload["score_change_1d"] = -16.1
+    payload["score_change_5d"] = 5.6
+    result = _result_payload()
+    result["key_drivers"] = [
+        "score_change_1d为-16.1，score_change_5d为5.6",
+        "量能趋势1.2%",
+    ]
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content)])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(payload, _config())
+
+    assert response.status == "ready"
+    assert client.post.call_count == 1
+
+
 def test_semantic_contract_accepts_rounded_display_values(tmp_path: Path) -> None:
     payload = _input_payload()
     payload["market"]["turnover_cny"] = 1_250_000_100_000

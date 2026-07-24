@@ -196,6 +196,9 @@ _NUMBERED_INDEX_ENTITY_PATTERN = re.compile(
     r"(?:沪深|中证|上证|深证|国证|科创|北证|创业板)\d+(?:指数|指)?",
     re.IGNORECASE,
 )
+_NUMBERED_FIELD_IDENTIFIER_PATTERN = re.compile(
+    r"\b[a-zA-Z][a-zA-Z0-9]*(?:_[a-zA-Z0-9]+)*_\d+[a-zA-Z]*(?![a-zA-Z0-9_])"
+)
 _CLAUSE_SPLIT_PATTERN = re.compile(r"[，,。；;！？!?、\n]+")
 _CONSEQUENCE_SPLIT_PATTERN = re.compile(r"\s*(?:(?<!否)则|那么|届时|\bthen\b)\s*", re.IGNORECASE)
 _MOVEMENT_CONNECTOR_PREFIX_PATTERN = re.compile(r"^\s*(?:且|并且|以及|同时|和|与)\s*")
@@ -1403,6 +1406,7 @@ def _validate_numeric_evidence(
     factor_score_gaps: set[Decimal],
 ) -> None:
     factual_text = _NUMBERED_INDEX_ENTITY_PATTERN.sub("", clause)
+    factual_text = _NUMBERED_FIELD_IDENTIFIER_PATTERN.sub("", factual_text)
     for date in canonical_dates:
         factual_text = factual_text.replace(date, "")
     factual_text = re.sub(rf"(?<![\d.]){_NUMBER_TEXT}\s*日", "", factual_text)

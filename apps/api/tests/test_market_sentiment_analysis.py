@@ -468,6 +468,22 @@ def test_default_provider_uses_non_streaming_json_response(
     assert client.post.call_args.kwargs["json"]["stream"] is False
 
 
+def test_default_provider_falls_back_to_rule_summary_after_contract_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _Client([_Response("not-json")] * 3)
+    monkeypatch.setattr(httpx, "Client", lambda **_kwargs: client)
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path))
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+    assert response.result is not None
+    assert "规则化统计摘要" in response.result.risk_note
+    assert client.post.call_count == 3
+
+
 def test_provider_request_maps_compact_result_keys(tmp_path: Path) -> None:
     client = _Client([_Response(json.dumps(_compact_result_payload(), ensure_ascii=False))])
     service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)

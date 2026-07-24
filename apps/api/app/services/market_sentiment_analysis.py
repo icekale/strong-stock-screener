@@ -699,6 +699,19 @@ class MarketSentimentAnalysisService:
             if should_close and hasattr(client, "close"):
                 client.close()
 
+        if should_close:
+            fallback = _build_rule_based_fallback_result(analysis_input)
+            return self.store.save(
+                pending.model_copy(
+                    update={
+                        "status": "ready",
+                        "attempts": attempts,
+                        "completed_at": _now(),
+                        "result": fallback,
+                    }
+                )
+            )
+
         failed = pending.model_copy(
             update={
                 "status": "failed",
@@ -843,6 +856,41 @@ def _normalize_sentiment_result_payload(payload: dict[str, Any]) -> dict[str, An
         field_name: payload.get(compact_key)
         for field_name, compact_key in aliases.items()
     }
+
+
+def _build_rule_based_fallback_result(
+    analysis_input: _SentimentAnalysisInput,
+) -> SentimentAnalysisResult:
+    factors = analysis_input.percentile.factors
+    return SentimentAnalysisResult(
+        market_conclusion=(
+            f"综合得分{analysis_input.percentile.score}，情绪级别{analysis_input.percentile.level}。"
+        ),
+        key_drivers=[
+            f"成交量因子得分{factors.volume.score}",
+            f"指数5日因子得分{factors.index_move_5d.score}",
+            f"价格位置因子得分{factors.price_position.score}",
+            f"成交量趋势因子得分{factors.volume_trend.score}",
+        ],
+        factor_divergence=(
+            f"价格位置因子得分{factors.price_position.score}，"
+            f"成交量趋势因子得分{factors.volume_trend.score}；"
+            f"指数5日因子得分{factors.index_move_5d.score}，"
+            f"振幅5日因子得分{factors.amplitude_5d.score}。"
+        ),
+        historical_context=(
+            f"综合得分{analysis_input.percentile.score}，情绪级别{analysis_input.percentile.level}；"
+            f"成交量因子得分{factors.volume.score}。"
+        ),
+        risk_posture="wait",
+        next_session_watch=[
+            f"综合得分{analysis_input.percentile.score}，复核情绪级别",
+            f"成交量因子得分{factors.volume.score}，复核量能维度",
+            f"成交量趋势因子得分{factors.volume_trend.score}，复核趋势维度",
+            f"指数5日因子得分{factors.index_move_5d.score}，复核指数维度",
+        ],
+        risk_note="AI 原文未通过本地校验，已使用规则化统计摘要。",
+    )
 
 
 def _factor_payload(factor: Any) -> dict[str, object]:

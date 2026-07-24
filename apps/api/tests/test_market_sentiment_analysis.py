@@ -454,6 +454,20 @@ def test_provider_request_accepts_text_content_blocks(tmp_path: Path) -> None:
     assert client.post.call_count == 1
 
 
+def test_default_provider_uses_non_streaming_json_response(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _Client([_Response(json.dumps(_result_payload(), ensure_ascii=False))])
+    monkeypatch.setattr(httpx, "Client", lambda **_kwargs: client)
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path))
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+    assert client.post.call_args.kwargs["json"]["stream"] is False
+
+
 def test_provider_request_maps_compact_result_keys(tmp_path: Path) -> None:
     client = _Client([_Response(json.dumps(_compact_result_payload(), ensure_ascii=False))])
     service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)

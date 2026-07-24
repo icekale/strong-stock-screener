@@ -658,14 +658,9 @@ class MarketSentimentAnalysisService:
                         "max_tokens": 300,
                         "response_format": {"type": "json_object"},
                         "messages": messages,
-                        "stream": should_close,
+                        "stream": False,
                     }
-                    payload = _streaming_chat_payload(
-                        client,
-                        request_url,
-                        headers=request_headers,
-                        request_json=request_json,
-                    ) if should_close else _post_chat_payload(
+                    payload = _post_chat_payload(
                         client,
                         request_url,
                         headers=request_headers,

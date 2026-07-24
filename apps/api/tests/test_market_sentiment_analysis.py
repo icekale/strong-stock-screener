@@ -1228,6 +1228,19 @@ def test_semantic_contract_rejects_security_attention_and_recommendation(
     assert client.post.call_count == 3
 
 
+def test_prompt_forbids_security_recommendations_explicitly(tmp_path: Path) -> None:
+    client = _Client([_Response(json.dumps(_result_payload(), ensure_ascii=False))])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+    instruction = json.loads(client.post.call_args.kwargs["json"]["messages"][1]["content"])[
+        "instruction"
+    ]
+    assert "个股、ETF、基金或具体证券" in instruction
+
+
 @pytest.mark.parametrize(
     "claim",
     [

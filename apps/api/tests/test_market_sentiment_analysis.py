@@ -841,6 +841,26 @@ def test_semantic_contract_rejects_ungrounded_factual_numbers_in_every_result_te
     assert client.post.call_count == 3
 
 
+def test_semantic_contract_allows_rounded_factor_score_gap(tmp_path: Path) -> None:
+    payload = _input_payload()
+    payload["percentile"]["factors"]["volume"]["score"] = 56.1
+    payload["percentile"]["factors"]["volume_trend"]["score"] = 12.1
+    payload["percentile"]["factors"]["amplitude_5d"]["score"] = 4.1
+    payload["percentile"]["factors"]["price_position"]["score"] = 66.4
+    result = _result_payload()
+    result["factor_divergence"] = (
+        "成交量因子得分56.1与成交量趋势因子得分12.1差距约44分；"
+        "振幅5日因子得分4.1与价格位置因子得分66.4差距约62分"
+    )
+    client = _Client([_Response(json.dumps(result, ensure_ascii=False))])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(payload, _config())
+
+    assert response.status == "ready"
+    assert response.result is not None
+
+
 @pytest.mark.parametrize(
     "claim",
     [

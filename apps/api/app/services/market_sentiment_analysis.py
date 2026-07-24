@@ -370,7 +370,7 @@ _FACTOR_SCORE_CLAIM_PATTERNS = tuple(
         ("volume", r"(?:成交量|量能)(?!趋势)"),
         ("index_move_5d", r"(?:(?:指数)?5日|5日指数)(?:涨跌|涨幅)"),
         ("price_position", r"(?:价格位置|价格位阶)"),
-        ("amplitude_5d", r"(?:5日)?振幅"),
+        ("amplitude_5d", r"(?:5日振幅|振幅5日)"),
         ("volume_trend", r"(?:成交量|量能)趋势"),
     )
 )
@@ -386,7 +386,7 @@ _FACTOR_RAW_CLAIM_PATTERNS = (
     ),
     (
         "amplitude_5d",
-        re.compile(r"(?:5日)?振幅(?:原始值|数值|值)?" + _VALUE_LINK + _CLAIM_NUMBER),
+        re.compile(r"(?:5日振幅|振幅5日)(?:原始值|数值|值)?" + _VALUE_LINK + _CLAIM_NUMBER),
     ),
     (
         "volume_trend",
@@ -904,6 +904,7 @@ def _validate_result_semantics(
     analysis_input: _SentimentAnalysisInput,
 ) -> None:
     canonical_numbers = _canonical_numbers(analysis_input)
+    factor_score_gaps = _factor_score_gaps(analysis_input)
     canonical_dates = _canonical_dates(analysis_input)
     sector_names = tuple(item.name for item in analysis_input.main_sectors.items)
 
@@ -939,6 +940,7 @@ def _validate_result_semantics(
                 canonical_numbers,
                 canonical_dates,
                 allow_thresholds=allows_watch_thresholds,
+                factor_score_gaps=factor_score_gaps,
             )
             previous_sector = current_sector or (previous_sector if continues_sector else None)
 
@@ -1010,6 +1012,18 @@ def _canonical_dates(analysis_input: _SentimentAnalysisInput) -> set[str]:
 
     collect(analysis_input.model_dump(mode="python", by_alias=True))
     return dates
+
+
+def _factor_score_gaps(analysis_input: _SentimentAnalysisInput) -> set[Decimal]:
+    scores = [
+        Decimal(str(getattr(analysis_input.percentile.factors, factor_name).score))
+        for factor_name in _FACTOR_NAMES
+    ]
+    return {
+        abs(left - right)
+        for index, left in enumerate(scores)
+        for right in scores[index + 1 :]
+    }
 
 
 def _validate_prohibited_semantics(text: str, sector_names: Sequence[str]) -> None:
@@ -1384,6 +1398,7 @@ def _validate_numeric_evidence(
     canonical_dates: set[str],
     *,
     allow_thresholds: bool,
+    factor_score_gaps: set[Decimal],
 ) -> None:
     factual_text = _NUMBERED_INDEX_ENTITY_PATTERN.sub("", clause)
     for date in canonical_dates:
@@ -1408,9 +1423,25 @@ def _validate_numeric_evidence(
             for expected in canonical_numbers
         ):
             continue
+        if _is_factor_score_gap_claim(clause, match) and _matches_factor_score_gap(
+            match,
+            factor_score_gaps,
+        ):
+            continue
         if allow_thresholds and _number_is_threshold(factual_text, match):
             continue
         raise ValueError("AI response contains an ungrounded factual number")
+
+
+def _is_factor_score_gap_claim(clause: str, match: re.Match[str]) -> bool:
+    start = max(0, match.start() - 12)
+    end = min(len(clause), match.end() + 8)
+    return bool(re.search(r"差距|差异|相差", clause[start:end]))
+
+
+def _matches_factor_score_gap(match: re.Match[str], gaps: set[Decimal]) -> bool:
+    claimed = _normalized_claim_number(match)
+    return any(abs(claimed - gap) <= Decimal("0.5") for gap in gaps)
 
 
 def _is_threshold_clause(clause: str) -> bool:

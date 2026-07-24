@@ -211,7 +211,7 @@ _OVERALL_SCORE_CLAIM_PATTERN = re.compile(
     rf"(?:当前|目前)?(?:(?:市场|情绪)(?:综合)?(?:分|得分|评分|分数)|"
     rf"(?:综合|整体|总)(?:分|得分|评分|分数)))"
     rf"\s*(?:is|=|:|：|为|是|达(?:到)?|录得|stands?\s+at)?\s*"
-    rf"(?P<number>{_NUMBER_TEXT})",
+    rf"(?P<number>{_NUMBER_TEXT})(?!\s*日)",
     re.IGNORECASE,
 )
 _LEVEL_VALUE = (
@@ -1405,6 +1405,7 @@ def _validate_numeric_evidence(
     factual_text = _NUMBERED_INDEX_ENTITY_PATTERN.sub("", clause)
     for date in canonical_dates:
         factual_text = factual_text.replace(date, "")
+    factual_text = re.sub(rf"(?<![\d.]){_NUMBER_TEXT}\s*日", "", factual_text)
 
     numeric_matches = list(_NUMERIC_CLAIM_PATTERN.finditer(factual_text))
     if numeric_matches and _MARKET_METRIC_CLAIM_PATTERN.search(factual_text):

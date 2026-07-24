@@ -1324,6 +1324,32 @@ def test_semantic_contract_checks_sources_in_conditional_clauses(tmp_path: Path)
     assert client.post.call_count == 3
 
 
+def test_semantic_contract_allows_explicitly_unavailable_validation_note(
+    tmp_path: Path,
+) -> None:
+    payload = build_sentiment_analysis_input(
+        _point(),
+        [_point()],
+        _summary(),
+        _decision(),
+        None,
+    )
+    result = _result_payload()
+    result["historical_context"] = "历史样本数据暂不可用。"
+    content = json.dumps(result, ensure_ascii=False)
+    client = _Client([_Response(content)])
+    service = MarketSentimentAnalysisService(
+        MarketSentimentAnalysisStore(tmp_path),
+        http_client=client,
+    )
+
+    response = service.generate(payload, _config())
+
+    assert response.status == "ready"
+    assert response.result is not None
+    assert client.post.call_count == 1
+
+
 def test_semantic_contract_allows_conditional_watch_thresholds_without_market_snapshot(
     tmp_path: Path,
 ) -> None:

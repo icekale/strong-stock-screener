@@ -303,6 +303,9 @@ _DECISION_CLAIM_PATTERN = re.compile(
     r"(?:市场|情绪)(?:状态)?(?:为|是|处于|进入|转入|转为)?(?:修复|主升|高潮|分歧|退潮)"
 )
 _VALIDATION_CLAIM_PATTERN = re.compile(r"历史样本|验证样本|样本(?:数|数量)|回测(?:样本|结果)")
+_UNAVAILABLE_VALIDATION_NOTE_PATTERN = re.compile(
+    r"暂无|尚无|不可用|缺失|缺少|未(?:提供|形成|更新)|不足以|无法(?:提供|验证|获取)"
+)
 _HISTORICAL_LEVEL_CUE_PATTERN = re.compile(r"历史|过去|此前|曾经|曾|前一日|前日|昨日|上日|\d+日前")
 _CURRENT_CUE_PATTERN = re.compile(r"当前|目前|现时|now|current", re.IGNORECASE)
 _MOVEMENT_PATTERN = re.compile(
@@ -1393,7 +1396,11 @@ def _validate_source_availability(
         raise ValueError("AI response claims unavailable sector metrics")
     if _DECISION_CLAIM_PATTERN.search(clause) and analysis_input.decision.status == "unavailable":
         raise ValueError("AI response claims unavailable decision metrics")
-    if _VALIDATION_CLAIM_PATTERN.search(clause) and analysis_input.validation.status == "unavailable":
+    if (
+        _VALIDATION_CLAIM_PATTERN.search(clause)
+        and analysis_input.validation.status == "unavailable"
+        and not _UNAVAILABLE_VALIDATION_NOTE_PATTERN.search(clause)
+    ):
         raise ValueError("AI response claims unavailable validation metrics")
 
 

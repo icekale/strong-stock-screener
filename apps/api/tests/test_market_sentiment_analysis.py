@@ -594,6 +594,42 @@ def test_streaming_chat_payload_stops_after_complete_content_json() -> None:
     assert client.stream.call_count == 1
 
 
+def test_streaming_chat_payload_uses_reasoning_content_when_content_is_empty() -> None:
+    content = json.dumps(_compact_result_payload(), ensure_ascii=False)
+    lines = [
+        f'data: {{"choices":[{{"delta":{{"reasoning_content":{json.dumps(content)}}}}}]}}',
+        "data: [DONE]",
+    ]
+    client = _StreamClient(lines)
+
+    payload = _streaming_chat_payload(
+        client,
+        "https://ai.example/v1/chat/completions",
+        headers={},
+        request_json={"stream": True},
+    )
+
+    assert payload["choices"][0]["message"]["content"] == content
+
+
+def test_streaming_chat_payload_accepts_bytes_non_sse_message_text_blocks() -> None:
+    content = json.dumps(_compact_result_payload(), ensure_ascii=False)
+    line = json.dumps(
+        {"choices": [{"message": {"content": [{"type": "text", "text": content}]}}]},
+        ensure_ascii=False,
+    ).encode("utf-8")
+    client = _StreamClient([line])
+
+    payload = _streaming_chat_payload(
+        client,
+        "https://ai.example/v1/chat/completions",
+        headers={},
+        request_json={"stream": True},
+    )
+
+    assert payload["choices"][0]["message"]["content"] == content
+
+
 def test_llm_request_uses_the_compact_result_contract(tmp_path: Path) -> None:
     client = _Client([_Response(json.dumps(_result_payload(), ensure_ascii=False))])
     service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)

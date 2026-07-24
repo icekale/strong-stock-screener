@@ -759,10 +759,15 @@ def _streaming_chat_payload(
     request_json: Mapping[str, object],
 ) -> dict[str, Any]:
     content = ""
+    reasoning_content = ""
     with client.stream("POST", url, headers=dict(headers), json=dict(request_json)) as response:
         response.raise_for_status()
         for line in response.iter_lines():
             if not line:
+                continue
+            if isinstance(line, bytes):
+                line = line.decode("utf-8", errors="replace")
+            if not isinstance(line, str):
                 continue
             if line.startswith("data:"):
                 line = line[5:].strip()
@@ -777,27 +782,38 @@ def _streaming_chat_payload(
             choices = chunk.get("choices")
             if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
                 continue
-            delta = choices[0].get("delta")
-            if not isinstance(delta, Mapping):
+            choice = choices[0]
+            delta = choice.get("delta")
+            message = choice.get("message")
+            source = delta if isinstance(delta, Mapping) else message if isinstance(message, Mapping) else None
+            if source is None:
                 continue
-            piece = delta.get("content")
-            if isinstance(piece, str):
-                content += piece
-            elif isinstance(piece, list):
-                content += "".join(
-                    item.get("text", "")
-                    for item in piece
-                    if isinstance(item, Mapping) and isinstance(item.get("text"), str)
-                )
+            content_piece = _stream_text(source.get("content"))
+            reasoning_piece = _stream_text(source.get("reasoning_content"))
+            content += content_piece
+            reasoning_content += reasoning_piece
             if content:
                 try:
                     extract_json_object(content)
                 except (TypeError, ValueError):
                     continue
                 return {"choices": [{"message": {"content": content}}]}
-    if content:
-        return {"choices": [{"message": {"content": content}}]}
+    selected_content = content or reasoning_content
+    if selected_content:
+        return {"choices": [{"message": {"content": selected_content}}]}
     raise ValueError("AI streaming response missing content")
+
+
+def _stream_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return "".join(
+            item.get("text", "")
+            for item in value
+            if isinstance(item, Mapping) and isinstance(item.get("text"), str)
+        )
+    return ""
 
 
 def _normalize_sentiment_result_payload(payload: dict[str, Any]) -> dict[str, Any]:

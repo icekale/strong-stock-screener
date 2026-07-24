@@ -493,6 +493,41 @@ def test_next_trade_date_intraday_reuses_prior_post_close_completed_bars(tmp_pat
     assert len(daily.calls) == 2 * len(CORE_ETFS)
 
 
+def test_enrich_overview_uses_the_overview_trade_date_for_close_change(
+    tmp_path: Path,
+) -> None:
+    monitor, _, daily, _ = monitor_with(tmp_path)
+    snapshot = monitor.scan(now=shanghai("2026-07-22T10:30:00"))
+    monitor.store.save_snapshot(
+        snapshot.model_copy(
+            update={
+                "items": [
+                    item.model_copy(
+                        update={
+                            "close_change_pct": 99,
+                            "close_change_trade_date": "2026-07-23",
+                        }
+                    )
+                    for item in snapshot.items
+                ]
+            }
+        )
+    )
+    daily.bars_by_symbol["510050.SH"] = [
+        KlineBar(date="2026-07-21", open=100, high=100, low=100, close=100, volume=100),
+        KlineBar(date="2026-07-22", open=110, high=110, low=110, close=110, volume=100),
+        KlineBar(date="2026-07-23", open=120, high=120, low=120, close=120, volume=100),
+    ]
+
+    result = monitor.enrich_overview(
+        _official_overview(trade_date="2026-07-22", share_change_pct=5.0)
+    )
+
+    item = next(item for item in result.core_items if item.symbol == "510050.SH")
+    assert item.close_change_pct == pytest.approx(10)
+    assert item.close_change_trade_date == "2026-07-22"
+
+
 def test_next_trade_date_intraday_reuses_prior_post_close_kline_failure(tmp_path: Path) -> None:
     monitor, quotes, daily, _ = monitor_with(tmp_path)
     monitor.scan(now=shanghai("2026-07-22T10:30:00"))
@@ -698,8 +733,8 @@ def test_enrich_overview_uses_close_changes_without_mutating_capital_snapshot(tm
     original = next(item for item in overview.core_items if item.symbol == "510050.SH")
     updated = next(item for item in enriched.core_items if item.symbol == "510050.SH")
     assert original.close_change_pct is None
-    assert updated.close_change_pct == pytest.approx(10)
-    assert updated.close_change_trade_date == "2026-07-21"
+    assert updated.close_change_pct == pytest.approx(81.8181818)
+    assert updated.close_change_trade_date == "2026-07-22"
 
 
 def test_enrich_overview_adds_close_changes_to_validation_etfs(tmp_path: Path) -> None:

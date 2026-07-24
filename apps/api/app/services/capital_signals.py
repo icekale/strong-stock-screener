@@ -51,7 +51,6 @@ from app.services.huijin_etf_activity import (
 _SZSE_HISTORY_BACKFILL_DAYS = 150
 _SZSE_HISTORY_MIN_POINTS = 60
 _SZSE_HISTORY_OLDEST_TOLERANCE_DAYS = 30
-_SZSE_HISTORY_LATEST_TOLERANCE_DAYS = 7
 _SZSE_HISTORY_RETRY_SECONDS = 15 * 60
 
 
@@ -1068,10 +1067,6 @@ def _has_szse_history_coverage(
         datetime.fromisoformat(start_date).date()
         + timedelta(days=_SZSE_HISTORY_OLDEST_TOLERANCE_DAYS)
     ).isoformat()
-    latest_cutoff = (
-        datetime.fromisoformat(end_date).date()
-        - timedelta(days=_SZSE_HISTORY_LATEST_TOLERANCE_DAYS)
-    ).isoformat()
     for symbol in symbols:
         dates = {
             row.trade_date
@@ -1083,7 +1078,7 @@ def _has_szse_history_coverage(
         if (
             len(dates) < _SZSE_HISTORY_MIN_POINTS
             or min(dates, default=end_date) > oldest_cutoff
-            or max(dates, default=start_date) < latest_cutoff
+            or max(dates, default=start_date) != end_date
         ):
             return False
     return True

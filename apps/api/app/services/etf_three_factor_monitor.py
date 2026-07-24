@@ -166,21 +166,29 @@ class EtfThreeFactorMonitor:
             snapshot = self.store.load_snapshot()
             if snapshot is None:
                 return overview
-            close_changes = {
-                item.symbol: (item.close_change_pct, item.close_change_trade_date)
-                for item in snapshot.items
-            }
-            for symbol in VALIDATION_ETFS:
+            snapshot_by_symbol = {item.symbol: item for item in snapshot.items}
+            close_changes: dict[str, tuple[float | None, str | None]] = {}
+            for symbol in [*CORE_ETFS, *VALIDATION_ETFS]:
+                snapshot_item = snapshot_by_symbol.get(symbol)
+                if (
+                    snapshot_item is not None
+                    and snapshot_item.close_change_trade_date == overview.trade_date
+                ):
+                    close_changes[symbol] = (
+                        snapshot_item.close_change_pct,
+                        snapshot_item.close_change_trade_date,
+                    )
+                    continue
                 daily_bars = self._daily_bars(
                     overview.trade_date,
                     symbol,
-                    stage=snapshot.signal_stage,
+                    stage="post_close",
                 )
                 completed = [
                     bar
                     for bar in daily_bars.bars
                     if (bar_date := _bar_trade_date(bar.date)) is not None
-                    and (bar_date <= overview.trade_date if snapshot.signal_stage == "post_close" else bar_date < overview.trade_date)
+                    and bar_date <= overview.trade_date
                 ]
                 completed.sort(key=lambda bar: _bar_trade_date(bar.date) or "")
                 close_changes[symbol] = _close_change(completed)

@@ -4,7 +4,7 @@ import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -30,6 +30,7 @@ from app.services.capital_signals import (
     enrich_etf_overview_close_changes,
     robust_z_score,
     synchronization_ratio,
+    _has_szse_history_coverage,
 )
 from app.services.huijin_etf_activity import ALL_ETFS, CORE_ETFS, POOL_VERSION, build_baselines
 
@@ -89,6 +90,32 @@ def test_synchronization_is_missing_without_valid_etfs() -> None:
     assert result.positive_count == 0
     assert result.valid_count == 0
     assert result.ratio is None
+
+
+def test_szse_history_coverage_requires_the_requested_latest_trade_date() -> None:
+    end_date = "2026-07-22"
+    start = datetime.fromisoformat(end_date) - timedelta(days=150)
+    rows = [
+        EtfSharePoint(
+            trade_date=(
+                start
+                if offset == 0
+                else datetime.fromisoformat(end_date) - timedelta(days=offset + 1)
+            ).date().isoformat(),
+            symbol=symbol,
+            total_shares=1_000,
+            date_validation="szse_daily_v1",
+        )
+        for offset in range(60)
+        for symbol in ("159915.SZ", "159919.SZ", "159922.SZ", "159845.SZ")
+    ]
+
+    assert not _has_szse_history_coverage(
+        rows,
+        symbols=("159915.SZ", "159919.SZ", "159922.SZ", "159845.SZ"),
+        start_date="2026-02-22",
+        end_date=end_date,
+    )
 
 
 class FakeCapitalProvider:

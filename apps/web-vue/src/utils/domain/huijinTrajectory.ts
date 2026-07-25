@@ -58,6 +58,31 @@ export function buildHuijinTrajectory(
   };
 }
 
+export function buildShareTrajectory(
+  item: HuijinEtfActivityItem,
+  points: EtfRadarHistoryPoint[],
+  realDates: string[]
+) {
+  const values = new Map(
+    points
+      .filter(point => point.symbol === item.symbol)
+      .map(point => [point.trade_date, point.total_shares])
+  );
+  const dates = [
+    ...new Set([
+      ...(item.report_period ? [item.report_period] : []),
+      ...realDates.filter(date => !item.report_period || date > item.report_period)
+    ])
+  ].sort();
+  return {
+    dates,
+    values: dates.map(date => {
+      const shares = date === item.report_period ? item.baseline_total_shares : values.get(date);
+      return shares === null || shares === undefined ? null : Number((shares / 100_000_000).toFixed(8));
+    })
+  };
+}
+
 export function huijinActivityDataState(item: HuijinEtfActivityItem) {
   if (item.total_shares === null) return '交易所尚未披露';
   if (item.report_period === null || item.baseline_total_shares === null) return '确认基线缺失';

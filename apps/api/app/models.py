@@ -2396,6 +2396,17 @@ class EtfRadarHistoryResponse(CapitalSignalMetadata):
     points: list[EtfRadarHistoryPoint] = Field(default_factory=list)
 
 
+class EtfPriceHistoryPoint(BaseModel):
+    trade_date: str
+    close: float
+
+
+class EtfPriceHistoryResponse(CapitalSignalMetadata):
+    symbol: str
+    name: str
+    points: list[EtfPriceHistoryPoint] = Field(default_factory=list)
+
+
 class EtfExcessFlowPoint(BaseModel):
     trade_date: str
     net_excess_flow_cny: float | None = None

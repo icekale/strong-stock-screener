@@ -40,6 +40,7 @@ from app.models import (
     EtfRadarHoldersResponse,
     EtfRadarMethodologyResponse,
     EtfRadarOverviewResponse,
+    EtfPriceHistoryResponse,
     EtfExcessFlowResponse,
     EtfActivityAlertResponse,
     EtfThreeFactorHistoryResponse,
@@ -120,6 +121,7 @@ from app.services.capital_signals import CapitalSignalService
 from app.services.etf_three_factor_monitor import EtfThreeFactorMonitor
 from app.services.etf_three_factor_sampler import EtfThreeFactorSampler
 from app.services.etf_three_factor_store import EtfThreeFactorStore
+from app.services.etf_price_history import EtfPriceHistoryService, EtfPriceHistoryUnavailable
 from app.services.etf_excess_flow import EtfExcessFlowService
 from app.services.huijin_etf_activity import CORE_ETFS
 from app.services.background_jobs import BackgroundJobStore, CancelCheck, ProgressCallback
@@ -336,6 +338,11 @@ def _cors_allow_origins() -> list[str]:
     return [origin.strip() for origin in settings.cors_allow_origins.split(",") if origin.strip()]
 
 
+def _cors_allow_origin_regex() -> str:
+    # Local Vite preview/dev servers use an ephemeral port during development.
+    return r"^https?://(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$"
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     try:
@@ -369,6 +376,7 @@ logger = logging.getLogger(__name__)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_allow_origins(),
+    allow_origin_regex=_cors_allow_origin_regex(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -1258,6 +1266,22 @@ def get_etf_radar_history(
     days: int = Query(default=120, ge=1, le=365),
 ) -> EtfRadarHistoryResponse:
     return _capital_signal_service().history(days=days)
+
+
+@app.get("/api/etf-radar/price-history/{symbol}", response_model=EtfPriceHistoryResponse)
+def get_etf_price_history(
+    symbol: str,
+    days: int = Query(default=120, ge=1, le=365),
+) -> EtfPriceHistoryResponse:
+    try:
+        return _etf_price_history_service().history(symbol, days=days)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except EtfPriceHistoryUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"读取 ETF 收盘价失败：{exc}") from exc
+    except Exception as exc:
+        logger.exception("ETF price history failed for %s", symbol)
+        raise HTTPException(status_code=503, detail=f"读取 ETF 收盘价失败：{exc}") from exc
 
 
 @app.get("/api/etf-radar/holders", response_model=EtfRadarHoldersResponse)
@@ -3988,6 +4012,15 @@ def _etf_three_factor_monitor() -> EtfThreeFactorMonitor:
         )
         app.state.default_etf_three_factor_monitor = cached
     return cached
+
+
+def _etf_price_history_service() -> EtfPriceHistoryService:
+    injected = getattr(app.state, "etf_price_history_service", None)
+    if injected is not None:
+        return injected
+    service = EtfPriceHistoryService(provider=_daily_kline_provider())
+    app.state.etf_price_history_service = service
+    return service
 
 
 def _valuation_quote_provider() -> object:

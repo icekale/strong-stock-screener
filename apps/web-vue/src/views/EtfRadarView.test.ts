@@ -7,11 +7,12 @@ import { defineComponent, nextTick } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
+  EtfExcessFlowResponse,
+  EtfPriceHistoryResponse,
   EtfRadarHistoryResponse,
   EtfRadarHoldersResponse,
   EtfRadarMethodologyResponse,
   EtfRadarOverviewResponse,
-  EtfExcessFlowResponse,
   EtfThreeFactorHistoryResponse,
   EtfThreeFactorItem,
   EtfThreeFactorResponse,
@@ -24,6 +25,7 @@ const breakpointState = vi.hoisted(() => ({ compact: false }));
 const api = vi.hoisted(() => ({
   getEtfRadarOverview: vi.fn(),
   getEtfRadarHistory: vi.fn(),
+  getEtfPriceHistory: vi.fn(),
   getEtfRadarHolders: vi.fn(),
   getEtfRadarMethodology: vi.fn(),
   getEtfThreeFactor: vi.fn(),
@@ -227,6 +229,19 @@ function historyFixture(): EtfRadarHistoryResponse {
   };
 }
 
+function priceHistoryFixture(symbol = '510050.SH'): EtfPriceHistoryResponse {
+  return {
+    ...metadata(),
+    model_version: 'etf-price-history-v1',
+    symbol,
+    name: '华夏上证50ETF',
+    points: [
+      { trade_date: '2026-07-16', close: 2.1 },
+      { trade_date: '2026-07-18', close: 2.3 }
+    ]
+  };
+}
+
 function holdersFixture(): EtfRadarHoldersResponse {
   return {
     ...metadata(),
@@ -321,6 +336,7 @@ function deferred<T>() {
 function setDefaultApiResponses() {
   api.getEtfRadarOverview.mockResolvedValue(overviewFixture());
   api.getEtfRadarHistory.mockResolvedValue(historyFixture());
+  api.getEtfPriceHistory.mockImplementation((symbol: string) => Promise.resolve(priceHistoryFixture(symbol)));
   api.getEtfRadarHolders.mockResolvedValue(holdersFixture());
   api.getEtfRadarMethodology.mockResolvedValue(methodologyFixture());
   api.getEtfThreeFactor.mockResolvedValue(threeFactorFixture());
@@ -397,8 +413,13 @@ describe('EtfRadarView', () => {
     expect(wrapper.find('[data-testid="huijin-trajectory-panel"]').exists()).toBe(true);
     expect(api.getEtfRadarOverview).toHaveBeenCalledTimes(1);
     expect(api.getEtfRadarHistory).toHaveBeenCalledTimes(1);
+    expect(api.getEtfPriceHistory).toHaveBeenCalledWith('510050.SH', 120);
     expect(api.getEtfRadarHolders).not.toHaveBeenCalled();
     expect(api.getEtfRadarMethodology).not.toHaveBeenCalled();
+
+    await wrapper.get('[data-testid="huijin-ranking-row"][aria-pressed="false"]').trigger('click');
+    await flushPromises();
+    expect(api.getEtfPriceHistory).toHaveBeenCalledWith('512100.SH', 120);
 
     await openTab(wrapper, 1);
 

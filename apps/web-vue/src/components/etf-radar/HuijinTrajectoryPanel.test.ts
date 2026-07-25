@@ -8,10 +8,10 @@ import { mount } from '@vue/test-utils';
 import type { EChartsOption } from 'echarts';
 import { describe, expect, it } from 'vitest';
 import type {
+  EtfPriceHistoryResponse,
   EtfRadarHistoryPoint,
   EtfRadarHistoryResponse,
   EtfRadarOverviewResponse,
-  EtfThreeFactorHistoryResponse,
   HuijinEtfActivityItem
 } from '@/service/types';
 import HuijinTrajectoryPanel from './HuijinTrajectoryPanel.vue';
@@ -162,18 +162,20 @@ function historyFixture(points?: EtfRadarHistoryPoint[]): EtfRadarHistoryRespons
   };
 }
 
-function indexHistoryFixture(): EtfThreeFactorHistoryResponse {
+function priceHistoryFixture(): EtfPriceHistoryResponse {
   return {
     generated_at: '2026-07-18T15:05:00+08:00',
     trade_date: '2026-07-18',
     as_of: '2026-07-18T15:00:00+08:00',
     signal_stage: 'post_close',
-    model_version: 'three-factor-v1',
-    source_status: [],
+    model_version: 'etf-price-history-v1',
+    source_status: [{ source: '测试日K', status: 'success', detail: '测试' }],
     symbol: '510050.SH',
+    name: '华夏上证50ETF',
     points: [
-      { trade_date: '2026-07-17', symbol: '510050.SH', close_change_pct: 0.5, index_change_pct: 0.25, volume: null, average_volume_20d: null, volume_ratio: null, total_shares: null, share_change_pct: null, signal_score: null, level: 'incomplete' },
-      { trade_date: '2026-07-18', symbol: '510050.SH', close_change_pct: 1.25, index_change_pct: 0.75, volume: null, average_volume_20d: null, volume_ratio: null, total_shares: null, share_change_pct: null, signal_score: null, level: 'incomplete' }
+      { trade_date: '2026-07-16', close: 2.1 },
+      { trade_date: '2026-07-17', close: 2.2 },
+      { trade_date: '2026-07-18', close: 2.3 }
     ]
   };
 }
@@ -181,10 +183,12 @@ function indexHistoryFixture(): EtfThreeFactorHistoryResponse {
 type MountOverrides = Partial<{
   overview: EtfRadarOverviewResponse;
   history: EtfRadarHistoryResponse | null;
-  indexHistory: EtfThreeFactorHistoryResponse | null;
+  priceHistory: EtfPriceHistoryResponse | null;
   selectedSymbol: string;
   historyLoading: boolean;
+  priceHistoryLoading: boolean;
   historyError: string | null;
+  priceHistoryError: string | null;
 }>;
 
 function mountPanel(overrides: MountOverrides = {}) {
@@ -192,9 +196,12 @@ function mountPanel(overrides: MountOverrides = {}) {
     props: {
       overview: overviewFixture(),
       history: historyFixture(),
+      priceHistory: priceHistoryFixture(),
       selectedSymbol: '510050.SH',
       historyLoading: false,
+      priceHistoryLoading: false,
       historyError: null,
+      priceHistoryError: null,
       ...overrides
     },
     global: { stubs: { EChart: ChartStub } }
@@ -208,7 +215,7 @@ describe('HuijinTrajectoryPanel', () => {
     expect(wrapper.find('[data-testid="huijin-overview-chart"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="huijin-exception-list"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="huijin-ranking-list"]').exists()).toBe(true);
-    expect(wrapper.text()).toContain('ETF 份额代理趋势');
+    expect(wrapper.text()).toContain('份额与收盘价走势');
     expect(wrapper.text()).toContain('今日异常');
     expect(wrapper.text()).toContain('汇金确认持仓只在报告期更新');
 
@@ -250,12 +257,12 @@ describe('HuijinTrajectoryPanel', () => {
     const chart = wrapper.getComponent(ChartStub);
     const option = chart.props('option') as EChartsOption;
     const series = (option.series as Array<{ connectNulls?: boolean; data?: unknown[] }>)[0]!;
-    expect(chart.props('height')).toBe(320);
+    expect(chart.props('height')).toBe(380);
     expect(chart.props('loading')).toBe(false);
     expect(option.animation).toBe(false);
-    expect(Array.isArray(option.yAxis)).toBe(false);
+    expect(Array.isArray(option.yAxis)).toBe(true);
     expect(series.connectNulls).toBe(false);
-    expect(series.data).toEqual([100, 26, null, 24.45]);
+    expect(series.data).toEqual([566.63567693, 82.374668, null, 82.374668]);
 
     const detailRows = wrapper.findAll('[data-testid="huijin-detail-row"]');
     expect(detailRows).toHaveLength(7);
@@ -279,16 +286,33 @@ describe('HuijinTrajectoryPanel', () => {
     expect(source).toMatch(/\.huijin-ranking__zero\s*\{[^}]*z-index: 1;/s);
   });
 
-  it('plots the holdings trend and index trend together', () => {
-    const wrapper = mountPanel({ indexHistory: indexHistoryFixture() });
+  it('plots the holdings trend and close trend together', () => {
+    const wrapper = mountPanel();
 
     const chart = wrapper.getComponent(ChartStub);
     const option = chart.props('option') as EChartsOption;
     const series = option.series as Array<{ name?: string; type?: string }>;
 
     expect(series).toHaveLength(2);
-    expect(series.map(item => item.name)).toEqual(['ETF 份额代理', '指数走势']);
+    expect(series.map(item => item.name)).toEqual(['基金份额（亿份）', '收盘价（元）']);
     expect(series.every(item => item.type === 'line')).toBe(true);
+  });
+
+  it('plots real share units and closing price on separate axes', () => {
+    const wrapper = mountPanel({ priceHistory: priceHistoryFixture() });
+
+    const chart = wrapper.getComponent(ChartStub);
+    const option = chart.props('option') as EChartsOption;
+    const series = option.series as Array<{ name?: string; yAxisIndex?: number; data?: unknown[] }>;
+
+    expect(series.map(item => item.name)).toEqual(['基金份额（亿份）', '收盘价（元）']);
+    expect(series.map(item => item.yAxisIndex)).toEqual([0, 1]);
+    expect(series[0]!.data).toEqual([566.63567693, 82.374668, null, 82.374668]);
+    expect(series[1]!.data).toEqual([null, 2.1, 2.2, 2.3]);
+    expect(option.yAxis).toEqual([
+      expect.objectContaining({ type: 'value', name: '份额（亿份）' }),
+      expect.objectContaining({ type: 'value', name: '收盘价（元）', position: 'right' })
+    ]);
   });
 
   it('shows one neutral empty state when there are no meaningful exceptions', () => {
@@ -299,7 +323,7 @@ describe('HuijinTrajectoryPanel', () => {
       total_shares: 1_000_000,
       previous_total_shares: 990_000
     }));
-    const wrapper = mountPanel({ overview, history: historyFixture([]) });
+    const wrapper = mountPanel({ overview, history: historyFixture([]), priceHistory: null });
 
     expect(wrapper.get('[data-testid="huijin-exception-list"]').text()).toContain('今日无显著份额异常');
     expect(wrapper.find('[data-testid="huijin-exception-item"]').exists()).toBe(false);
@@ -354,28 +378,31 @@ describe('HuijinTrajectoryPanel', () => {
   });
 
   it('shows an empty state instead of a baseline-only chart for empty history points', () => {
-    const wrapper = mountPanel({ history: historyFixture([]) });
+    const wrapper = mountPanel({ history: historyFixture([]), priceHistory: null });
 
     expect(wrapper.findComponent(ChartStub).exists()).toBe(false);
     expect(wrapper.get('[data-testid="huijin-trajectory-empty"]').text()).toContain('暂无可用历史轨迹');
     expect(wrapper.get('[data-testid="huijin-trajectory-empty"]').attributes('aria-live')).toBe('polite');
   });
 
-  it('shows an empty state when the selected symbol has only null history', () => {
+  it('keeps the share chart when baseline deviation is unavailable', () => {
     const wrapper = mountPanel({
       history: historyFixture([
         historyPoint('2026-07-16', '510050.SH', null),
         historyPoint('2026-07-17', '510300.SH', 70),
         historyPoint('2026-07-18', '510050.SH', null)
-      ])
+      ]),
+      priceHistory: null
     });
 
-    expect(wrapper.findComponent(ChartStub).exists()).toBe(false);
-    expect(wrapper.get('[data-testid="huijin-trajectory-empty"]').text()).toContain('暂无可用历史轨迹');
+    expect(wrapper.findComponent(ChartStub).exists()).toBe(true);
+    expect(wrapper.getComponent(ChartStub).props('option')).toEqual(
+      expect.objectContaining({ yAxis: expect.any(Array) })
+    );
   });
 
   it('shows loading without history and keeps a stale chart visible while loading', async () => {
-    const wrapper = mountPanel({ history: null, historyLoading: true });
+    const wrapper = mountPanel({ history: null, priceHistory: null, historyLoading: true });
 
     expect(wrapper.findComponent(ChartStub).exists()).toBe(false);
     expect(wrapper.get('[data-testid="huijin-trajectory-empty"]').text()).toContain('历史加载中');
@@ -397,7 +424,7 @@ describe('HuijinTrajectoryPanel', () => {
   });
 
   it('announces an error when no chart is available', () => {
-    const wrapper = mountPanel({ history: null, historyError: '历史请求失败' });
+    const wrapper = mountPanel({ history: null, priceHistory: null, historyError: '历史请求失败' });
 
     expect(wrapper.findComponent(ChartStub).exists()).toBe(false);
     expect(wrapper.find('[data-testid="huijin-history-status"]').exists()).toBe(false);

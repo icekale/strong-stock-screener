@@ -4,6 +4,7 @@ import {
   getAuctionModelTop3,
   getCapitalSummary,
   getEtfActivityAlerts,
+  getEtfPriceHistory,
   getEtfRadarHistory,
   getEtfRadarHolders,
   getEtfRadarMethodology,
@@ -133,6 +134,7 @@ describe('apiRequest', () => {
     await getEtfRadarOverview();
     await getEtfRadarHistory();
     await getEtfRadarHistory(45);
+    await getEtfPriceHistory('510050.SH');
     await getEtfRadarHolders();
     await getEtfRadarMethodology();
 
@@ -141,6 +143,7 @@ describe('apiRequest', () => {
       expect.objectContaining({ pathname: '/api/etf-radar/overview', port: '8010' }),
       expect.objectContaining({ pathname: '/api/etf-radar/history', port: '8010', search: '?days=120' }),
       expect.objectContaining({ pathname: '/api/etf-radar/history', port: '8010', search: '?days=45' }),
+      expect.objectContaining({ pathname: '/api/etf-radar/price-history/510050.SH', port: '8010', search: '?days=120' }),
       expect.objectContaining({ pathname: '/api/etf-radar/holders', port: '8010' }),
       expect.objectContaining({ pathname: '/api/etf-radar/methodology', port: '8010' })
     ]);

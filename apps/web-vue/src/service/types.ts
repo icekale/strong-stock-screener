@@ -2228,6 +2228,17 @@ export type EtfRadarHistoryResponse = CapitalSignalMetadata & {
   points: EtfRadarHistoryPoint[];
 };
 
+export type EtfPriceHistoryPoint = {
+  trade_date: string;
+  close: number;
+};
+
+export type EtfPriceHistoryResponse = CapitalSignalMetadata & {
+  symbol: string;
+  name: string;
+  points: EtfPriceHistoryPoint[];
+};
+
 export type EtfExcessFlowPoint = {
   trade_date: string;
   net_excess_flow_cny: number | null;

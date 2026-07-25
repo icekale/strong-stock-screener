@@ -2,9 +2,9 @@
 import { computed, defineAsyncComponent } from 'vue';
 import type { EChartsOption } from 'echarts';
 import type {
+  EtfPriceHistoryResponse,
   EtfRadarHistoryResponse,
   EtfRadarOverviewResponse,
-  EtfThreeFactorHistoryResponse,
   HuijinEtfActivityItem
 } from '@/service/types';
 import {
@@ -15,8 +15,7 @@ import {
 import {
   buildHuijinExceptions,
   buildHuijinRanking,
-  buildHuijinTrajectory,
-  buildNormalizedTrend
+  buildShareTrajectory
 } from '@/utils/domain/huijinTrajectory';
 
 defineOptions({ name: 'HuijinTrajectoryPanel' });
@@ -26,12 +25,12 @@ const EChart = defineAsyncComponent(() => import('@/components/charts/EChart.vue
 const props = defineProps<{
   overview: EtfRadarOverviewResponse;
   history: EtfRadarHistoryResponse | null;
-  indexHistory?: EtfThreeFactorHistoryResponse | null;
+  priceHistory: EtfPriceHistoryResponse | null;
   selectedSymbol: string;
   historyLoading: boolean;
-  indexHistoryLoading?: boolean;
+  priceHistoryLoading: boolean;
   historyError: string | null;
-  indexHistoryError?: string | null;
+  priceHistoryError: string | null;
 }>();
 
 const emit = defineEmits<{
@@ -48,14 +47,14 @@ const selectedItem = computed(
 const realDates = computed(() =>
   [
     ...(props.history?.points ?? []).map(point => point.trade_date),
-    ...(props.indexHistory?.points ?? []).map(point => point.trade_date)
+    ...(props.priceHistory?.points ?? []).map(point => point.trade_date)
   ]
     .filter((date, index, dates) => dates.indexOf(date) === index)
     .sort()
 );
-const trajectory = computed(() =>
+const shareTrajectory = computed(() =>
   selectedItem.value
-    ? buildHuijinTrajectory(selectedItem.value, props.history?.points ?? [], realDates.value)
+    ? buildShareTrajectory(selectedItem.value, props.history?.points ?? [], realDates.value)
     : { dates: [], values: [] }
 );
 const baselineDate = computed(
@@ -64,18 +63,9 @@ const baselineDate = computed(
     props.overview.core_items.find(item => item.report_period)?.report_period ??
     '--'
 );
-const indexTrend = computed(() => {
-  const pointsByDate = new Map(
-    (props.indexHistory?.points ?? []).map(point => [point.trade_date, point.index_change_pct ?? null])
-  );
-  let cumulative = 0;
-  return trajectory.value.dates.map(date => {
-    if (date === baselineDate.value) return 0;
-    const change = pointsByDate.get(date);
-    if (change === null || change === undefined) return null;
-    cumulative = ((1 + cumulative / 100) * (1 + change / 100) - 1) * 100;
-    return cumulative;
-  });
+const closeTrend = computed(() => {
+  const closes = new Map((props.priceHistory?.points ?? []).map(point => [point.trade_date, point.close]));
+  return shareTrajectory.value.dates.map(date => closes.get(date) ?? null);
 });
 const availableCount = computed(() => props.overview.activity.available_core_count);
 const expansionCount = computed(
@@ -84,47 +74,67 @@ const expansionCount = computed(
 const contractionCount = computed(
   () => props.overview.core_items.filter(item => (item.cumulative_baseline_change_pct ?? 0) < 0).length
 );
-const selectedHistoryPoints = computed(() =>
-  (props.history?.points ?? []).filter(point => point.symbol === selectedItem.value?.symbol)
-);
-const hasIndexTrend = computed(() =>
-  indexTrend.value.some(
-    (value, index) => value !== null && trajectory.value.dates[index] !== baselineDate.value
+const hasShareTrend = computed(() =>
+  shareTrajectory.value.values.some(
+    (value, index) => value !== null && shareTrajectory.value.dates[index] !== baselineDate.value
   )
 );
-const hasRealHistory = computed(() =>
-  selectedHistoryPoints.value.some(point => point.cumulative_baseline_change_pct !== null) || hasIndexTrend.value
-);
-const normalizedTrend = computed(() => buildNormalizedTrend(trajectory.value.values, indexTrend.value));
+const hasCloseTrend = computed(() => closeTrend.value.some(value => value !== null));
+const hasRealHistory = computed(() => hasShareTrend.value || hasCloseTrend.value);
 const rankingMaxMagnitude = computed(() =>
   Math.max(0, ...ranking.value.map(item => Math.abs(item.cumulative_baseline_change_pct ?? 0)))
 );
 
 const chartOption = computed<EChartsOption>(() => ({
   animation: false,
-  aria: { enabled: true, description: `${selectedItem.value?.name ?? 'ETF'}持仓趋势与指数走势对比` },
-  grid: { left: 58, right: 18, top: 20, bottom: 34 },
-  legend: { show: hasIndexTrend.value, top: 0 },
+  aria: { enabled: true, description: `${selectedItem.value?.name ?? 'ETF'}份额与收盘价对比` },
+  color: ['#1677ff', '#f59e0b'],
+  grid: { left: 64, right: 64, top: 42, bottom: 34 },
+  legend: { show: true, top: 0 },
   tooltip: { trigger: 'axis' },
-  xAxis: { type: 'category', boundaryGap: false, data: trajectory.value.dates },
-  yAxis: { type: 'value', axisLabel: { formatter: (value: number) => `${value.toFixed(0)}%` } },
-  series: [
+  xAxis: { type: 'category', boundaryGap: false, data: shareTrajectory.value.dates },
+  yAxis: [
     {
-      name: 'ETF 份额代理',
-      type: 'line',
-      connectNulls: false,
-      showSymbol: true,
-      data: normalizedTrend.value.etf
+      type: 'value',
+      name: '份额（亿份）',
+      nameLocation: 'middle',
+      nameGap: 42,
+      axisLabel: { formatter: (value: number) => value.toFixed(0) }
     },
-    ...(hasIndexTrend.value
+    {
+      type: 'value',
+      name: '收盘价（元）',
+      nameLocation: 'middle',
+      nameGap: 42,
+      position: 'right',
+      axisLabel: { formatter: (value: number) => value.toFixed(2) }
+    }
+  ],
+  series: [
+    ...(hasShareTrend.value
       ? [
           {
-            name: '指数走势',
+            name: '基金份额（亿份）',
             type: 'line' as const,
+            yAxisIndex: 0,
             connectNulls: false,
-            showSymbol: true,
-            lineStyle: { type: 'dashed' as const },
-            data: normalizedTrend.value.index
+            showSymbol: false,
+            smooth: true,
+            areaStyle: { opacity: 0.08 },
+            data: shareTrajectory.value.values
+          }
+        ]
+      : []),
+    ...(hasCloseTrend.value
+      ? [
+          {
+            name: '收盘价（元）',
+            type: 'line' as const,
+            yAxisIndex: 1,
+            connectNulls: false,
+            showSymbol: false,
+            smooth: true,
+            data: closeTrend.value
           }
         ]
       : [])
@@ -211,16 +221,16 @@ function exceptionLabel(item: HuijinEtfActivityItem) {
     </div>
 
     <div class="huijin-trajectory__sources" aria-label="数据口径">
-      <span>ETF 份额代理趋势：交易所份额日度变化</span>
+      <span>蓝线：基金份额（亿份） · 橙线：真实收盘价（元）</span>
       <span>汇金确认持仓只在报告期更新</span>
     </div>
 
     <div class="huijin-trajectory__main">
-      <section class="huijin-selected" aria-label="ETF 份额代理趋势">
+      <section class="huijin-selected" aria-label="份额与收盘价走势">
         <div class="huijin-selected__heading">
           <div>
-            <span>ETF 份额代理趋势</span>
-            <small>相对报告期归一化 · 指数走势为对照，不代表汇金已确认增减持</small>
+            <span>份额与收盘价走势</span>
+            <small>按交易日对齐 · 份额变化不能直接证明汇金已确认增减持</small>
           </div>
           <strong data-testid="huijin-selected-symbol">{{ selectedItem?.symbol }}</strong>
         </div>
@@ -234,19 +244,19 @@ function exceptionLabel(item: HuijinEtfActivityItem) {
           {{ historyError }}
         </p>
         <p
-          v-if="indexHistoryError && hasRealHistory"
-          data-testid="huijin-index-history-status"
+          v-if="priceHistoryError && hasRealHistory"
+          data-testid="huijin-price-history-status"
           class="huijin-trajectory__status huijin-trajectory__status--error"
           role="status"
           aria-live="polite"
         >
-          {{ indexHistoryError }}
+          {{ priceHistoryError }}
         </p>
-        <div v-if="(history || indexHistory) && hasRealHistory" data-testid="huijin-overview-chart">
+        <div v-if="(history || priceHistory) && hasRealHistory" data-testid="huijin-overview-chart">
           <EChart
             :option="chartOption"
-            :height="320"
-            :loading="historyLoading || Boolean(indexHistoryLoading)"
+            :height="380"
+            :loading="historyLoading || priceHistoryLoading"
           />
         </div>
         <div

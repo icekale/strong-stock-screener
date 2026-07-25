@@ -1,13 +1,13 @@
 import type {
   AiAnalysisSettingsUpdate,
+  AuctionModelTop3Response,
   AuctionReviewSummary,
   AuctionSnapshotResponse,
   AuctionTimelineResponse,
-  AuctionModelTop3Response,
   AuctionTop3LiveConfirmationResponse,
   AuctionTop3PerformanceResponse,
-  AuctionTop3TrainingSettings,
   AuctionTop3TrainingGenerateResponse,
+  AuctionTop3TrainingSettings,
   AuctionTop3TrainingSummary,
   BackgroundJobState,
   CapitalSummaryResponse,
@@ -28,6 +28,7 @@ import type {
   EtfActivityAlertResponse,
   EtfAlertReadResponse,
   EtfExcessFlowResponse,
+  EtfPriceHistoryResponse,
   EtfRadarHistoryResponse,
   EtfRadarHoldersResponse,
   EtfRadarMethodologyResponse,
@@ -190,6 +191,17 @@ export async function getEtfRadarHistory(days = 120): Promise<EtfRadarHistoryRes
     throw new Error(`读取ETF份额历史失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<EtfRadarHistoryResponse>;
+}
+
+export async function getEtfPriceHistory(symbol: string, days = 120): Promise<EtfPriceHistoryResponse> {
+  const params = new URLSearchParams({ days: String(days) });
+  const response = await apiFetch(
+    `${API_BASE_URL}/api/etf-radar/price-history/${encodeURIComponent(symbol)}?${params.toString()}`
+  );
+  if (!response.ok) {
+    throw new Error(`读取ETF收盘价历史失败：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<EtfPriceHistoryResponse>;
 }
 
 export async function getEtfExcessFlow(days = 60): Promise<EtfExcessFlowResponse> {

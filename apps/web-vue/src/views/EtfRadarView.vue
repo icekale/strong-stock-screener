@@ -5,11 +5,12 @@ import { breakpointsTailwind, useBreakpoints } from '@vueuse/core';
 import { Skeleton as ASkeleton } from 'ant-design-vue';
 import dayjs from 'dayjs';
 import {
+  getEtfExcessFlow,
+  getEtfPriceHistory,
   getEtfRadarHistory,
   getEtfRadarHolders,
   getEtfRadarMethodology,
   getEtfRadarOverview,
-  getEtfExcessFlow,
   getEtfThreeFactor,
   getEtfThreeFactorHistory
 } from '@/service/product-api';
@@ -18,6 +19,7 @@ import type {
   EtfActivityDirection,
   EtfExcessFlowResponse,
   EtfHolderPosition,
+  EtfPriceHistoryResponse,
   EtfRadarHistoryResponse,
   EtfRadarHoldersResponse,
   EtfRadarMethodologyResponse,
@@ -65,12 +67,12 @@ const route = useRoute();
 const activeTab = ref<EtfTab>('trajectory');
 const overview = ref<EtfRadarOverviewResponse | null>(null);
 const history = ref<EtfRadarHistoryResponse | null>(null);
+const priceHistory = ref<EtfPriceHistoryResponse | null>(null);
 const holders = ref<EtfRadarHoldersResponse | null>(null);
 const methodology = ref<EtfRadarMethodologyResponse | null>(null);
 const selectedTrajectorySymbol = ref('');
-const trajectoryIndexHistory = ref<EtfThreeFactorHistoryResponse | null>(null);
-const trajectoryIndexHistoryLoading = ref(false);
-const trajectoryIndexHistoryError = ref<string | null>(null);
+const priceHistoryLoading = ref(false);
+const priceHistoryError = ref<string | null>(null);
 const threeFactor = ref<EtfThreeFactorResponse | null>(null);
 const threeFactorHistory = ref<EtfThreeFactorHistoryResponse | null>(null);
 const selectedThreeFactorSymbol = ref('');
@@ -325,31 +327,31 @@ async function loadTrajectory(force = false) {
     selectedTrajectorySymbol.value = pickDefaultHuijinSymbol(overview.value.core_items);
   }
   if (selectedTrajectorySymbol.value) {
-    await loadTrajectoryIndexHistory(selectedTrajectorySymbol.value, force);
+    await loadTrajectoryPriceHistory(selectedTrajectorySymbol.value, force);
   }
   loading.trajectory = false;
 }
 
-async function loadTrajectoryIndexHistory(symbol: string, force = false) {
+async function loadTrajectoryPriceHistory(symbol: string, force = false) {
   if (!symbol) return;
-  trajectoryIndexHistoryLoading.value = true;
-  trajectoryIndexHistoryError.value = null;
+  priceHistoryLoading.value = true;
+  priceHistoryError.value = null;
   try {
     const response = await requestCache.get(
-      `etf-three-factor-history:${symbol}`,
-      () => getEtfThreeFactorHistory(symbol, 40),
+      `etf-price-history:${symbol}`,
+      () => getEtfPriceHistory(symbol, 120),
       { force }
     );
     if (symbol === selectedTrajectorySymbol.value) {
-      trajectoryIndexHistory.value = response;
+      priceHistory.value = response;
     }
   } catch (error) {
     if (symbol === selectedTrajectorySymbol.value) {
-      trajectoryIndexHistoryError.value = errorMessage(error, '读取指数走势历史失败');
+      priceHistoryError.value = errorMessage(error, '读取ETF收盘价历史失败');
     }
   } finally {
     if (symbol === selectedTrajectorySymbol.value) {
-      trajectoryIndexHistoryLoading.value = false;
+      priceHistoryLoading.value = false;
     }
   }
 }
@@ -357,8 +359,8 @@ async function loadTrajectoryIndexHistory(symbol: string, force = false) {
 function selectTrajectorySymbol(symbol: string) {
   if (!overview.value?.core_items.some(item => item.symbol === symbol) || symbol === selectedTrajectorySymbol.value) return;
   selectedTrajectorySymbol.value = symbol;
-  trajectoryIndexHistory.value = null;
-  void loadTrajectoryIndexHistory(symbol);
+  priceHistory.value = null;
+  loadTrajectoryPriceHistory(symbol);
 }
 
 async function loadLazyTab(tab: 'holders' | 'methodology', force = false) {
@@ -554,12 +556,12 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
         v-else-if="overview"
         :overview="overview"
         :history="history"
-        :index-history="trajectoryIndexHistory"
+        :price-history="priceHistory"
         :selected-symbol="selectedTrajectorySymbol"
         :history-loading="historyLoading"
-        :index-history-loading="trajectoryIndexHistoryLoading"
+        :price-history-loading="priceHistoryLoading"
         :history-error="dataErrorMessage('history', history) || null"
-        :index-history-error="trajectoryIndexHistoryError"
+        :price-history-error="priceHistoryError"
         @select="selectTrajectorySymbol"
       />
       <div v-else-if="!errors.overview" class="etf-state">暂无持仓轨迹数据</div>

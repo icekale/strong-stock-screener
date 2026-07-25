@@ -59,6 +59,9 @@ def test_sampler_samples_only_trading_sessions_and_scheduled_refreshes() -> None
     current.current = datetime.fromisoformat("2026-07-25T10:00:00")
     assert sampler.sample_once() is False
 
+    current.current = datetime.fromisoformat("2026-10-01T10:00:00")
+    assert sampler.sample_once() is False
+
     assert [call["now"].strftime("%H:%M") for call in calls] == [
         "09:30",
         "11:30",

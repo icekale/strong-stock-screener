@@ -6,6 +6,8 @@ from threading import Event, Lock, Thread
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+from app.services.trading_calendar import is_open_session, local_date
+
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 logger = logging.getLogger(__name__)
@@ -20,7 +22,7 @@ def _local_now(now: datetime | None = None) -> datetime:
 
 def is_capital_signal_refresh_window(now: datetime | None = None) -> bool:
     current = _local_now(now)
-    if current.weekday() >= 5:
+    if not is_open_session(local_date(current)):
         return False
     seconds = current.hour * 3600 + current.minute * 60 + current.second
     return (19 * 3600 + 5 * 60) <= seconds < (23 * 3600 + 31 * 60)

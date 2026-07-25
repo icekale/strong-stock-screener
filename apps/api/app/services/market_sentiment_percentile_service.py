@@ -19,6 +19,7 @@ from app.services.market_sentiment_percentile import (
     validate_sentiment_bar,
 )
 from app.services.market_sentiment_percentile_store import MarketSentimentPercentileStore
+from app.services.trading_calendar import is_open_session
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -171,7 +172,7 @@ def _is_current_local_day(response: SentimentPercentileResponse, now: datetime) 
 def _is_reusable_cache(response: SentimentPercentileResponse, now: datetime) -> bool:
     if not _is_current_local_day(response, now):
         return False
-    if _is_after_completion_cutoff(now) and now.weekday() < 5:
+    if _is_after_completion_cutoff(now) and is_open_session(now.date()):
         return response.latest_complete_trade_date == now.date().isoformat()
     return True
 

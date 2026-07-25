@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -22,6 +22,7 @@ from app.models import (
     StrongStockSourceStatus,
 )
 from app.providers.heatmap import HeatmapProvider
+from app.services.trading_calendar import previous_open_session
 
 
 INDEX_SECIDS = ("1.000001", "0.399001", "0.899050")
@@ -1702,10 +1703,7 @@ def _is_complete_turnover_record(trade_date: str, updated_at: object) -> bool:
 def _previous_weekday(trade_day: date | None) -> date | None:
     if trade_day is None:
         return None
-    previous = trade_day - timedelta(days=1)
-    while previous.weekday() >= 5:
-        previous -= timedelta(days=1)
-    return previous
+    return previous_open_session(trade_day)
 
 
 def _datetime_from_iso(value: object) -> datetime | None:

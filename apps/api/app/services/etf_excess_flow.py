@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from math import isfinite
 from statistics import mean
 from zoneinfo import ZoneInfo
@@ -17,6 +17,7 @@ from app.models import (
 )
 from app.services.capital_signal_store import CapitalSignalStore
 from app.services.huijin_etf_activity import ALL_ETFS
+from app.services.trading_calendar import is_open_session, previous_open_session
 
 
 BASELINE_DAYS = 20
@@ -240,8 +241,8 @@ def _signed_excess_shares(delta: float, baseline: float) -> float:
 
 def _latest_weekday(now: datetime) -> str:
     current = now.date()
-    while current.weekday() >= 5:
-        current -= timedelta(days=1)
+    if not is_open_session(current):
+        current = previous_open_session(current)
     return current.isoformat()
 
 

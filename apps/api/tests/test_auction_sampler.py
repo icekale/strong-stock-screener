@@ -42,6 +42,7 @@ def test_auction_top3_lock_window_runs_after_0925_and_before_0930_on_trading_day
     assert is_auction_top3_lock_window(datetime(2026, 7, 1, 9, 29, 59))
     assert not is_auction_top3_lock_window(datetime(2026, 7, 1, 9, 30, 0))
     assert not is_auction_top3_lock_window(datetime(2026, 7, 5, 9, 25, 3))
+    assert not is_auction_top3_lock_window(datetime(2026, 10, 1, 9, 25, 3))
 
 
 def test_auction_sampler_generates_top3_once_per_trade_date_after_lock_time() -> None:

@@ -32,6 +32,7 @@ from app.services.etf_three_factor import (
 )
 from app.services.etf_three_factor_store import EtfThreeFactorStore
 from app.services.huijin_etf_activity import CORE_ETFS, VALIDATION_ETFS
+from app.services.trading_calendar import is_open_session, local_date
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -793,7 +794,7 @@ def _shanghai_now(now: datetime | None) -> datetime:
 
 
 def _is_quote_session(now: datetime) -> bool:
-    if now.weekday() >= 5:
+    if not is_open_session(local_date(now)):
         return False
     clock = (now.hour, now.minute)
     return (9, 30) <= clock <= (11, 30) or (13, 0) <= clock <= (15, 0)
@@ -804,11 +805,11 @@ def _is_post_close(now: datetime) -> bool:
 
 
 def _is_share_refresh(now: datetime) -> bool:
-    return now.weekday() < 5 and (now.hour, now.minute) in {(19, 5), (19, 35)}
+    return is_open_session(local_date(now)) and (now.hour, now.minute) in {(19, 5), (19, 35)}
 
 
 def _is_after_share_disclosure(now: datetime) -> bool:
-    return now.weekday() < 5 and (now.hour, now.minute) >= (19, 0)
+    return is_open_session(local_date(now)) and (now.hour, now.minute) >= (19, 0)
 
 
 def _has_pending_share_factors(snapshot: EtfThreeFactorResponse) -> bool:

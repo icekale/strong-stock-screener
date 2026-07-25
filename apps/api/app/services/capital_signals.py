@@ -46,6 +46,7 @@ from app.services.huijin_etf_activity import (
     calculate_activity,
     validate_pair,
 )
+from app.services.trading_calendar import is_open_session, previous_open_session
 
 
 _SZSE_HISTORY_BACKFILL_DAYS = 150
@@ -912,17 +913,17 @@ def synchronization_ratio(values: Iterable[bool | None]) -> EtfSynchronization:
 
 def _latest_weekday(now: datetime) -> str:
     value = now.date()
-    while value.weekday() >= 5:
-        value -= timedelta(days=1)
+    if not is_open_session(value):
+        value = previous_open_session(value)
     return value.isoformat()
 
 
 def _latest_disclosed_trade_date(now: datetime) -> str:
     value = now.date()
-    if value.weekday() < 5 and (now.hour, now.minute) < (19, 5):
-        value -= timedelta(days=1)
-    while value.weekday() >= 5:
-        value -= timedelta(days=1)
+    if is_open_session(value) and (now.hour, now.minute) < (19, 5):
+        value = previous_open_session(value)
+    elif not is_open_session(value):
+        value = previous_open_session(value)
     return value.isoformat()
 
 
@@ -936,10 +937,8 @@ def _expected_holder_period(now: datetime) -> str:
 
 
 def _previous_weekday(trade_date: str) -> str:
-    value = datetime.strptime(trade_date, "%Y-%m-%d").date() - timedelta(days=1)
-    while value.weekday() >= 5:
-        value -= timedelta(days=1)
-    return value.isoformat()
+    value = datetime.strptime(trade_date, "%Y-%m-%d").date()
+    return previous_open_session(value).isoformat()
 
 
 def _has_complete_core_coverage(rows: list[EtfSharePoint]) -> bool:

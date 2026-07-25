@@ -6,6 +6,8 @@ from threading import Event, Lock, Thread
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+from app.services.trading_calendar import is_open_session, local_date
+
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 logger = logging.getLogger(__name__)
@@ -20,7 +22,7 @@ def _local_now(now: datetime | None = None) -> datetime:
 
 def _scan_kind(now: datetime) -> str | None:
     current = _local_now(now)
-    if current.weekday() >= 5:
+    if not is_open_session(local_date(current)):
         return None
     clock = (current.hour, current.minute)
     if (9, 30) <= clock <= (11, 30) or (13, 0) <= clock <= (15, 0):

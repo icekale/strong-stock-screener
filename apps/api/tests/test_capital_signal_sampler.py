@@ -41,6 +41,7 @@ def _snapshot(
         (datetime(2026, 7, 3, 23, 31, tzinfo=SHANGHAI), False),
         (datetime(2026, 7, 4, 20, 0, tzinfo=SHANGHAI), False),
         (datetime(2026, 7, 5, 20, 0, tzinfo=SHANGHAI), False),
+        (datetime(2026, 10, 1, 20, 0, tzinfo=SHANGHAI), False),
     ],
 )
 def test_capital_signal_refresh_window_boundaries(now: datetime, expected: bool) -> None:

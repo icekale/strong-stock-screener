@@ -5,6 +5,8 @@ from threading import Event, RLock, Thread
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+from app.services.trading_calendar import is_open_session, local_date
+
 
 def _local_now(now: datetime | None = None) -> datetime:
     current = now or datetime.now(ZoneInfo("Asia/Shanghai"))
@@ -18,7 +20,7 @@ def _seconds_since_midnight(current: datetime) -> int:
 
 
 def is_trading_day(now: datetime | None = None) -> bool:
-    return _local_now(now).weekday() < 5
+    return is_open_session(local_date(_local_now(now)))
 
 
 def is_auction_sample_window(now: datetime | None = None) -> bool:

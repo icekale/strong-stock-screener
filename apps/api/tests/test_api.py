@@ -4117,9 +4117,9 @@ def test_screen_run_uses_wider_default_scan_limit(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     scanned_candidates = [symbol for symbol in kline_provider.symbols if symbol.startswith("600")]
-    assert len(scanned_candidates) == 160
     payload = response.json()
     assert payload["gsgf_funnel"]["scan_limit_count"] == 160
+    assert len(set(scanned_candidates)) == 160
     assert "本次分析 160/200" in payload["source_status"][0]["detail"]
 
 

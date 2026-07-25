@@ -7,6 +7,7 @@ from typing import Callable
 from zoneinfo import ZoneInfo
 
 from app.models import SentimentPercentileAnalysisResponse
+from app.services.trading_calendar import is_open_session
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
@@ -112,6 +113,6 @@ def is_generation_due(current: datetime, trade_date: str) -> bool:
         return False
     if target_date < current.date():
         return True
-    if target_date > current.date() or current.weekday() >= 5:
+    if target_date > current.date() or not is_open_session(current.date()):
         return False
     return current.timetz().replace(tzinfo=None) >= GENERATION_CUTOFF

@@ -30,3 +30,14 @@ def test_sector_workbench_sampler_samples_only_inside_market_window() -> None:
     current = datetime(2026, 7, 3, 13, 30, tzinfo=ZoneInfo("Asia/Shanghai"))
     assert sampler.sample_once() is True
     assert calls == ["sampled", "sampled"]
+
+
+def test_sector_workbench_sampler_does_not_sample_on_weekends() -> None:
+    calls: list[str] = []
+    current = datetime(2026, 7, 4, 9, 35, tzinfo=ZoneInfo("Asia/Shanghai"))
+
+    sampler = SectorWorkbenchSampler(clock=lambda: current, refresh=lambda: calls.append("sampled"))
+
+    assert is_sector_workbench_sample_window(current) is False
+    assert sampler.sample_once() is False
+    assert calls == []

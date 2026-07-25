@@ -8,6 +8,12 @@ from zoneinfo import ZoneInfo
 
 def is_sector_workbench_sample_window(now: datetime | None = None) -> bool:
     current = now or datetime.now(ZoneInfo("Asia/Shanghai"))
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=ZoneInfo("Asia/Shanghai"))
+    else:
+        current = current.astimezone(ZoneInfo("Asia/Shanghai"))
+    if current.weekday() >= 5:
+        return False
     seconds = current.hour * 3600 + current.minute * 60 + current.second
     morning = (9 * 3600 + 30 * 60) <= seconds <= (11 * 3600 + 30 * 60)
     afternoon = (13 * 3600) <= seconds <= (15 * 3600)

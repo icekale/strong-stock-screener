@@ -1,4 +1,27 @@
-import type { EtfRadarHistoryPoint, HuijinEtfActivityItem } from '@/service/types';
+import type { EtfRadarHistoryPoint, HuijinEtfActivityItem, HuijinEtfValidationGroup } from '@/service/types';
+
+export function buildNormalizedTrend(etf: Array<number | null>, index: Array<number | null>) {
+  const normalize = (values: Array<number | null>) => {
+    const base = values.find(value => value !== null);
+    return values.map(value => (value === null || base === undefined ? null : 100 + value - base));
+  };
+  return { etf: normalize(etf), index: normalize(index) };
+}
+
+export function buildHuijinExceptions(
+  items: HuijinEtfActivityItem[],
+  validationGroups: HuijinEtfValidationGroup[]
+) {
+  const groupByCore = new Map(validationGroups.map(group => [group.core_symbol, group]));
+  return items
+    .filter(item => item.role === 'core')
+    .filter(item => {
+      const group = groupByCore.get(item.symbol);
+      return item.is_tenfold || item.total_shares === null || item.previous_total_shares === null
+        || group?.state === 'divergent' || group?.state === 'incomplete';
+    })
+    .sort((left, right) => Math.abs(right.baseline_change_pct ?? 0) - Math.abs(left.baseline_change_pct ?? 0));
+}
 
 export function buildHuijinRanking(items: HuijinEtfActivityItem[]) {
   return [...items]

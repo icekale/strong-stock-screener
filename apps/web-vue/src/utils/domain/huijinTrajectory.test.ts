@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import type { EtfRadarHistoryPoint, HuijinEtfActivityItem } from '@/service/types';
+import type { EtfRadarHistoryPoint, HuijinEtfActivityItem, HuijinEtfValidationGroup } from '@/service/types';
 import {
+  buildHuijinExceptions,
   buildHuijinRanking,
   buildHuijinTrajectory,
+  buildNormalizedTrend,
   huijinActivityDataState,
   pickDefaultHuijinSymbol
 } from './huijinTrajectory';
@@ -121,5 +123,64 @@ describe('Huijin trajectory transforms', () => {
     ])).toBe('510050.SH');
     expect(pickDefaultHuijinSymbol([item('510300.SH', null)])).toBe('510300.SH');
     expect(pickDefaultHuijinSymbol([])).toBe('');
+  });
+
+  it('normalizes ETF and index cumulative series to the first valid point', () => {
+    expect(buildNormalizedTrend([0, 5, null, 15], [0, -10, -5, null])).toEqual({
+      etf: [100, 105, null, 115],
+      index: [100, 90, 95, null]
+    });
+  });
+
+  it('keeps all-null trend series unavailable instead of converting it to zero', () => {
+    expect(buildNormalizedTrend([null, null], [null, null])).toEqual({
+      etf: [null, null],
+      index: [null, null]
+    });
+  });
+
+  it('returns only tenfold, divergent, or incomplete exception items', () => {
+    const items = [
+      itemWith({ symbol: '510050.SH', baseline_change_pct: 30, is_tenfold: true }),
+      itemWith({
+        symbol: '510300.SH',
+        paired_symbol: '159919.SZ',
+        baseline_change_pct: -20,
+        is_tenfold: false
+      }),
+      itemWith({
+        symbol: '510500.SH',
+        paired_symbol: '159922.SZ',
+        baseline_change_pct: 15,
+        is_tenfold: false
+      }),
+      itemWith({ symbol: '512100.SH', baseline_change_pct: 10, total_shares: null, is_tenfold: false })
+    ];
+    const validationGroups: HuijinEtfValidationGroup[] = [
+      {
+        index_name: '沪深300',
+        core_symbol: '510300.SH',
+        validator_symbol: '159919.SZ',
+        state: 'divergent',
+        conservative_daily_change_pct: null,
+        conservative_baseline_change_pct: null,
+        conservative_multiple: null
+      },
+      {
+        index_name: '中证500',
+        core_symbol: '510500.SH',
+        validator_symbol: '159922.SZ',
+        state: 'confirmed_increase',
+        conservative_daily_change_pct: 1,
+        conservative_baseline_change_pct: 15,
+        conservative_multiple: 2
+      }
+    ];
+
+    expect(buildHuijinExceptions(items, validationGroups).map(row => row.symbol)).toEqual([
+      '510050.SH',
+      '510300.SH',
+      '512100.SH'
+    ]);
   });
 });

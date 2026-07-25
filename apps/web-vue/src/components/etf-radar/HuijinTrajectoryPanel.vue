@@ -135,7 +135,7 @@ const chartOption = computed<EChartsOption>(() => ({
       scale: true,
       splitNumber: 4,
       show: hasCloseTrend.value,
-      splitLine: { show: hasCloseTrend.value },
+      splitLine: { show: hasCloseTrend.value && !hasShareTrend.value },
       ...closeAxisRange.value,
       axisLabel: { formatter: (value: number) => value.toFixed(closeAxisPrecision.value) }
     }

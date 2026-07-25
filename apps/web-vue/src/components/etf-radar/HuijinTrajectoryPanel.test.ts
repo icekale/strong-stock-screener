@@ -428,6 +428,20 @@ describe('HuijinTrajectoryPanel', () => {
     expect(axes[1]).toEqual(expect.objectContaining({ show: true, splitLine: { show: true } }));
   });
 
+  it('assigns horizontal grid ownership to the active primary axis', () => {
+    const bothSeries = mountPanel();
+    const bothSeriesOption = bothSeries.getComponent(ChartStub).props('option') as EChartsOption;
+    const bothSeriesAxes = bothSeriesOption.yAxis as Array<{ splitLine?: { show?: boolean } }>;
+    const closeOnly = mountPanel({ history: null });
+    const closeOnlyOption = closeOnly.getComponent(ChartStub).props('option') as EChartsOption;
+    const closeOnlyAxes = closeOnlyOption.yAxis as Array<{ splitLine?: { show?: boolean } }>;
+
+    expect(bothSeriesAxes[0]!.splitLine?.show).toBe(true);
+    expect(bothSeriesAxes[1]!.splitLine?.show).toBe(false);
+    expect(closeOnlyAxes[0]!.splitLine?.show).toBe(false);
+    expect(closeOnlyAxes[1]!.splitLine?.show).toBe(true);
+  });
+
   it('shows one neutral empty state when there are no meaningful exceptions', () => {
     const overview = overviewFixture();
     overview.core_items = overview.core_items.map(item => ({

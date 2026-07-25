@@ -15,6 +15,7 @@ import {
 import {
   buildHuijinExceptions,
   buildHuijinRanking,
+  buildPaddedAxisRange,
   buildShareTrajectory
 } from '@/utils/domain/huijinTrajectory';
 
@@ -67,6 +68,10 @@ const closeTrend = computed(() => {
   const closes = new Map((props.priceHistory?.points ?? []).map(point => [point.trade_date, point.close]));
   return shareTrajectory.value.dates.map(date => closes.get(date) ?? null);
 });
+const shareAxisRange = computed(() => buildPaddedAxisRange(shareTrajectory.value.values));
+const closeAxisRange = computed(() => buildPaddedAxisRange(closeTrend.value));
+const latestShare = computed(() => [...shareTrajectory.value.values].reverse().find(value => value !== null) ?? null);
+const latestClose = computed(() => [...closeTrend.value].reverse().find(value => value !== null) ?? null);
 const availableCount = computed(() => props.overview.activity.available_core_count);
 const expansionCount = computed(
   () => props.overview.core_items.filter(item => (item.cumulative_baseline_change_pct ?? 0) > 0).length
@@ -89,16 +94,29 @@ const chartOption = computed<EChartsOption>(() => ({
   animation: false,
   aria: { enabled: true, description: `${selectedItem.value?.name ?? 'ETF'}份额与收盘价对比` },
   color: ['#1677ff', '#f59e0b'],
-  grid: { left: 64, right: 64, top: 42, bottom: 34 },
+  grid: { left: 64, right: 64, top: 42, bottom: 40 },
   legend: { show: true, top: 0 },
   tooltip: { trigger: 'axis' },
-  xAxis: { type: 'category', boundaryGap: false, data: shareTrajectory.value.dates },
+  xAxis: {
+    type: 'category',
+    boundaryGap: false,
+    data: shareTrajectory.value.dates,
+    axisLabel: {
+      interval: index => {
+        const lastIndex = shareTrajectory.value.dates.length - 1;
+        return index === 0 || index === lastIndex || lastIndex <= 4 || index % Math.ceil(lastIndex / 4) === 0;
+      }
+    }
+  },
   yAxis: [
     {
       type: 'value',
       name: '份额（亿份）',
       nameLocation: 'middle',
       nameGap: 42,
+      scale: true,
+      splitNumber: 4,
+      ...shareAxisRange.value,
       axisLabel: { formatter: (value: number) => value.toFixed(0) }
     },
     {
@@ -107,6 +125,9 @@ const chartOption = computed<EChartsOption>(() => ({
       nameLocation: 'middle',
       nameGap: 42,
       position: 'right',
+      scale: true,
+      splitNumber: 4,
+      ...closeAxisRange.value,
       axisLabel: { formatter: (value: number) => value.toFixed(2) }
     }
   ],
@@ -119,7 +140,8 @@ const chartOption = computed<EChartsOption>(() => ({
             yAxisIndex: 0,
             connectNulls: false,
             showSymbol: false,
-            smooth: true,
+            smooth: false,
+            lineStyle: { width: 3 },
             areaStyle: { opacity: 0.08 },
             data: shareTrajectory.value.values
           }
@@ -133,7 +155,8 @@ const chartOption = computed<EChartsOption>(() => ({
             yAxisIndex: 1,
             connectNulls: false,
             showSymbol: false,
-            smooth: true,
+            smooth: false,
+            lineStyle: { width: 2.5 },
             data: closeTrend.value
           }
         ]
@@ -147,6 +170,14 @@ function formatDirectionalPercent(value: number | null | undefined) {
 
 function formatPlainShares(value: number | null | undefined) {
   return formatPlainSharesValue(value ?? null);
+}
+
+function formatLatestShare(value: number | null) {
+  return value === null ? '--' : `${value.toFixed(2)} 亿份`;
+}
+
+function formatLatestClose(value: number | null) {
+  return value === null ? '--' : `${value.toFixed(2)} 元`;
 }
 
 function formatHoldingPct(value: number | null | undefined) {
@@ -231,6 +262,10 @@ function exceptionLabel(item: HuijinEtfActivityItem) {
           <div>
             <span>份额与收盘价走势</span>
             <small>按交易日对齐 · 份额变化不能直接证明汇金已确认增减持</small>
+            <div data-testid="huijin-latest-values" class="huijin-selected__latest-values">
+              <span>最新份额 <strong>{{ formatLatestShare(latestShare) }}</strong></span>
+              <span>最新收盘 <strong>{{ formatLatestClose(latestClose) }}</strong></span>
+            </div>
           </div>
           <strong data-testid="huijin-selected-symbol">{{ selectedItem?.symbol }}</strong>
         </div>
@@ -255,7 +290,7 @@ function exceptionLabel(item: HuijinEtfActivityItem) {
         <div v-if="(history || priceHistory) && hasRealHistory" data-testid="huijin-overview-chart">
           <EChart
             :option="chartOption"
-            :height="380"
+            height="clamp(360px, 42vw, 440px)"
             :loading="historyLoading || priceHistoryLoading"
           />
         </div>
@@ -730,6 +765,29 @@ function exceptionLabel(item: HuijinEtfActivityItem) {
 
 .huijin-selected__heading > div {
   min-width: 0;
+}
+
+.huijin-selected__latest-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 6px;
+  color: var(--wb-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+}
+
+.huijin-selected__latest-values span {
+  display: inline;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.huijin-selected__latest-values strong {
+  color: var(--wb-ink);
+  font-size: 12px;
 }
 
 .huijin-trajectory__empty {

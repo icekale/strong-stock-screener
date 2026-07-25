@@ -257,7 +257,7 @@ describe('HuijinTrajectoryPanel', () => {
     const chart = wrapper.getComponent(ChartStub);
     const option = chart.props('option') as EChartsOption;
     const series = (option.series as Array<{ connectNulls?: boolean; data?: unknown[] }>)[0]!;
-    expect(chart.props('height')).toBe(380);
+    expect(chart.props('height')).toBe('clamp(360px, 42vw, 440px)');
     expect(chart.props('loading')).toBe(false);
     expect(option.animation).toBe(false);
     expect(Array.isArray(option.yAxis)).toBe(true);
@@ -298,21 +298,60 @@ describe('HuijinTrajectoryPanel', () => {
     expect(series.every(item => item.type === 'line')).toBe(true);
   });
 
-  it('plots real share units and closing price on separate axes', () => {
+  it('uses padded independent axes and reference-style lines for the share and close trends', () => {
     const wrapper = mountPanel({ priceHistory: priceHistoryFixture() });
 
     const chart = wrapper.getComponent(ChartStub);
     const option = chart.props('option') as EChartsOption;
-    const series = option.series as Array<{ name?: string; yAxisIndex?: number; data?: unknown[] }>;
+    const series = option.series as Array<{
+      name?: string;
+      yAxisIndex?: number;
+      data?: unknown[];
+      smooth?: boolean;
+      areaStyle?: { opacity?: number };
+    }>;
+    const axes = option.yAxis as Array<{
+      type?: string;
+      name?: string;
+      position?: string;
+      scale?: boolean;
+      min?: number;
+      max?: number;
+      splitNumber?: number;
+    }>;
+    const xAxis = option.xAxis as {
+      axisLabel?: { interval?: (index: number, value: string) => boolean };
+    };
 
     expect(series.map(item => item.name)).toEqual(['基金份额（亿份）', '收盘价（元）']);
     expect(series.map(item => item.yAxisIndex)).toEqual([0, 1]);
     expect(series[0]!.data).toEqual([566.63567693, 82.374668, null, 82.374668]);
     expect(series[1]!.data).toEqual([null, 2.1, 2.2, 2.3]);
-    expect(option.yAxis).toEqual([
-      expect.objectContaining({ type: 'value', name: '份额（亿份）' }),
-      expect.objectContaining({ type: 'value', name: '收盘价（元）', position: 'right' })
-    ]);
+    expect(axes[0]).toEqual(expect.objectContaining({
+      type: 'value',
+      name: '份额（亿份）',
+      scale: true,
+      splitNumber: 4
+    }));
+    expect(axes[0]!.min).toBeCloseTo(43.6337872856);
+    expect(axes[0]!.max).toBeCloseTo(605.3765576444);
+    expect(axes[1]).toEqual(expect.objectContaining({
+      type: 'value',
+      name: '收盘价（元）',
+      position: 'right',
+      scale: true,
+      splitNumber: 4
+    }));
+    expect(axes[1]!.min).toBeCloseTo(2.084);
+    expect(axes[1]!.max).toBeCloseTo(2.316);
+    expect(series.map(item => item.smooth)).toEqual([false, false]);
+    expect(series[0]!.areaStyle).toEqual(expect.objectContaining({ opacity: 0.08 }));
+    expect(series[1]!.areaStyle).toBeUndefined();
+    expect(xAxis.axisLabel?.interval).toEqual(expect.any(Function));
+    expect(xAxis.axisLabel?.interval?.(0, '2025-12-31')).toBe(true);
+    expect(xAxis.axisLabel?.interval?.(3, '2026-07-18')).toBe(true);
+    expect(wrapper.get('[data-testid="huijin-latest-values"]').text()).toContain('82.37 亿份');
+    expect(wrapper.get('[data-testid="huijin-latest-values"]').text()).toContain('2.30 元');
   });
 
   it('shows one neutral empty state when there are no meaningful exceptions', () => {

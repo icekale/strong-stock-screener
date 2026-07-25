@@ -479,9 +479,27 @@ def test_default_provider_falls_back_to_rule_summary_after_contract_failures(
     response = service.generate(_input_payload(), _config())
 
     assert response.status == "ready"
+    assert response.result_source == "rule"
     assert response.result is not None
     assert "规则化统计摘要" in response.result.risk_note
     assert client.post.call_count == 3
+
+
+def test_rule_fallback_is_not_reused_as_a_successful_ai_analysis(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _Client([_Response("not-json")] * 6)
+    monkeypatch.setattr(httpx, "Client", lambda **_kwargs: client)
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path))
+
+    first = service.generate(_input_payload(), _config())
+    service.store.save(
+        first.model_copy(update={"retry_after": "2026-01-01T00:00:00+00:00"})
+    )
+    service.generate(_input_payload(), _config())
+
+    assert client.post.call_count == 6
 
 
 def test_provider_request_maps_compact_result_keys(tmp_path: Path) -> None:

@@ -73,6 +73,9 @@ def test_research_cli_help_lists_dataset_and_validation_commands() -> None:
 
 def test_research_cli_preserves_rc8_virtualenv_interpreter_path() -> None:
     repo_root = Path(__file__).parents[3]
+    configured_path = repo_root / "apps/api/rc8-worker/.venv/bin/python"
+    if not configured_path.exists():
+        pytest.skip("optional RC8 worker virtualenv is not installed")
     spec = importlib.util.spec_from_file_location(
         "czsc_research_cli",
         repo_root / "scripts/czsc-research.py",

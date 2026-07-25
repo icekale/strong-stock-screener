@@ -60,13 +60,13 @@ def test_summarize_gsgf_real_calibration_truncates_history_and_groups_target_buc
     assert len(summary.samples) == 2
     assert summary.samples[0].symbol == "603890.SH"
     assert summary.samples[0].bucket_names == ["确认买点", "放量突破确认"]
-    assert summary.samples[0].windows[0].realized_return_pct == 10
-    assert summary.samples[0].windows[1].max_drawdown_pct == 2.9
+    assert summary.samples[0].windows[0].realized_return_pct == 0
+    assert summary.samples[0].windows[1].max_drawdown_pct == -6.45
 
     buckets = {bucket.name: bucket for bucket in summary.buckets}
     assert buckets["确认买点"].sample_count == 1
-    assert buckets["确认买点"].windows[0].hit_rate == 100
-    assert buckets["确认买点"].windows[0].avg_return_pct == 10
+    assert buckets["确认买点"].windows[0].hit_rate == 0
+    assert buckets["确认买点"].windows[0].avg_return_pct == 0
     assert buckets["低吸观察"].sample_count == 1
     assert buckets["低吸观察"].windows[0].hit_rate == 0
     assert buckets["B区A点"].sample_count == 1
@@ -97,10 +97,10 @@ def test_summarize_gsgf_real_calibration_scores_buckets_across_windows() -> None
     )
 
     buckets = {bucket.name: bucket for bucket in summary.buckets}
-    assert buckets["确认买点"].composite_score == 72.92
-    assert buckets["确认买点"].calibration_rating == "强"
-    assert buckets["放量突破确认"].composite_score == 75.92
-    assert buckets["放量突破确认"].calibration_rating == "强"
+    assert buckets["确认买点"].composite_score == 33.02
+    assert buckets["确认买点"].calibration_rating == "弱"
+    assert buckets["放量突破确认"].composite_score == 36.02
+    assert buckets["放量突破确认"].calibration_rating == "弱"
     assert buckets["B区A点"].calibration_rating == "弱"
 
 

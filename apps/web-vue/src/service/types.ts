@@ -78,6 +78,7 @@ export type StrongStockSourceStatus = {
 export type SentimentPercentileLevel = "冰点" | "偏冷" | "中性" | "偏热" | "过热";
 export type SentimentPercentileCacheStatus = "fresh" | "cached" | "stale";
 export type SentimentAnalysisStatus = "not_generated" | "unconfigured" | "pending" | "ready" | "failed";
+export type SentimentAnalysisResultSource = "ai" | "rule";
 export type SentimentRiskPosture = "attack" | "balanced" | "defensive" | "wait";
 
 export type SentimentPercentileFactor = {
@@ -134,6 +135,7 @@ export type SentimentPercentileAnalysisResponse = {
   provider: string | null;
   llm_model: string | null;
   input_hash: string | null;
+  result_source?: SentimentAnalysisResultSource | null;
   attempts: number;
   requested_at: string | null;
   completed_at: string | null;

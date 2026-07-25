@@ -37,12 +37,11 @@ def summarize_gsgf_backtest(
         for index in range(min_history - 1, last_signal_index + 1):
             prefix = sorted_bars[: index + 1]
             analysis = analyze_gsgf(prefix)
-            current = sorted_bars[index]
             samples_by_status[analysis.final_status].append(
                 _BacktestSample(
                     symbol=symbol,
                     score=analysis.total_score,
-                    entry_close=current.close,
+                    entry_close=sorted_bars[index + 1].open,
                     future_bars=sorted_bars[index + 1 : index + max_window + 1],
                 )
             )

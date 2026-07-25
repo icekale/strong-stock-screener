@@ -1,4 +1,5 @@
-from app.models import KlineBar
+from app.models import GsgfAnalysis, KlineBar
+from app.services import gsgf_backtest as gsgf_backtest_module
 from app.services.gsgf_backtest import summarize_gsgf_backtest
 
 
@@ -49,3 +50,28 @@ def test_summarize_gsgf_backtest_skips_symbols_without_enough_future_bars() -> N
     assert result.sample_count == 0
     assert result.buckets == []
     assert "有效样本 0" in result.source_status[0].detail
+
+
+def test_backtest_enters_at_next_trading_day_open(monkeypatch) -> None:
+    bars = [
+        KlineBar(
+            date=f"2026-01-{index:03d}",
+            open=10,
+            high=11,
+            low=9,
+            close=10,
+            volume=100,
+        )
+        for index in range(61)
+    ]
+    bars[59] = bars[59].model_copy(update={"close": 100})
+    bars[60] = bars[60].model_copy(update={"open": 200, "high": 220, "low": 195, "close": 210})
+    monkeypatch.setattr(
+        gsgf_backtest_module,
+        "analyze_gsgf",
+        lambda _bars: GsgfAnalysis(final_status="确认买点"),
+    )
+
+    result = summarize_gsgf_backtest({"603890.SH": bars}, windows=[1], min_history=60)
+
+    assert result.buckets[0].windows[0].avg_return_pct == 5.0

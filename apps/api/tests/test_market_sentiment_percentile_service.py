@@ -155,7 +155,9 @@ def test_as_of_before_cached_range_returns_explicit_empty_selection(tmp_path: Pa
 
 
 def test_same_day_cache_hit_does_not_call_provider_twice(tmp_path: Path) -> None:
-    provider = FakeProvider(make_test_bars(1020))
+    bars = make_test_bars(1020)
+    bars[-1] = bars[-1].model_copy(update={"date": "2026-07-22"})
+    provider = FakeProvider(bars)
     service = service_for(tmp_path, provider)
     now = datetime.fromisoformat("2026-07-22T16:00:00+08:00")
 
@@ -178,6 +180,21 @@ def test_post_cutoff_call_refreshes_pre_cutoff_same_day_snapshot(tmp_path: Path)
     assert before_cutoff.latest_complete_trade_date == "2026-07-21"
     assert provider.calls == 2
     assert after_cutoff.latest_complete_trade_date == "2026-07-22"
+
+
+def test_post_cutoff_refreshes_cached_prior_trade_date_when_today_is_available(tmp_path: Path) -> None:
+    bars = make_test_bars(1020)
+    bars[-1] = bars[-1].model_copy(update={"date": "2026-07-21"})
+    provider = FakeProvider(bars)
+    service = service_for(tmp_path, provider)
+
+    first = service.get(now=datetime.fromisoformat("2026-07-22T16:00:00+08:00"))
+    provider.bars[-1] = provider.bars[-1].model_copy(update={"date": "2026-07-22"})
+    second = service.get(now=datetime.fromisoformat("2026-07-22T16:01:00+08:00"))
+
+    assert first.latest_complete_trade_date == "2026-07-21"
+    assert second.latest_complete_trade_date == "2026-07-22"
+    assert provider.calls == 2
 
 
 def test_corrupt_or_wrong_version_snapshot_is_ignored(tmp_path: Path) -> None:

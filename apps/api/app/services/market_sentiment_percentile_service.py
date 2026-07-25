@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time
+from threading import RLock
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -41,6 +42,7 @@ class MarketSentimentPercentileService:
     ) -> None:
         self.provider = provider
         self.store = store
+        self._refresh_lock = RLock()
 
     def get(
         self,
@@ -50,13 +52,14 @@ class MarketSentimentPercentileService:
     ) -> SentimentPercentileResponse:
         local_now = _shanghai_now(now)
         cached = self.store.load()
-        if cached is not None and not refresh and _is_current_local_day(cached, local_now):
+        if cached is not None and not refresh and _is_reusable_cache(cached, local_now):
             return _select_as_of(
                 cached.model_copy(update={"cache_status": "cached"}, deep=True), as_of
             )
 
         try:
-            canonical = self._refresh(local_now)
+            with self._refresh_lock:
+                canonical = self._refresh(local_now)
         except Exception as exc:
             if cached is None:
                 raise StrongStockDataUnavailable(
@@ -108,6 +111,12 @@ class MarketSentimentPercentileService:
             ],
             generated_at=now.isoformat(timespec="seconds"),
         )
+        existing = self.store.load()
+        if (
+            existing is not None
+            and existing.latest_complete_trade_date > response.latest_complete_trade_date
+        ):
+            return existing
         return self.store.save(response)
 
 
@@ -157,6 +166,14 @@ def _is_current_local_day(response: SentimentPercentileResponse, now: datetime) 
     return generated_local.date() == now.date() and (
         _is_after_completion_cutoff(generated_local) == _is_after_completion_cutoff(now)
     )
+
+
+def _is_reusable_cache(response: SentimentPercentileResponse, now: datetime) -> bool:
+    if not _is_current_local_day(response, now):
+        return False
+    if _is_after_completion_cutoff(now) and now.weekday() < 5:
+        return response.latest_complete_trade_date == now.date().isoformat()
+    return True
 
 
 def _is_after_completion_cutoff(value: datetime) -> bool:

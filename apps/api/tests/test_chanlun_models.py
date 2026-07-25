@@ -89,7 +89,7 @@ def test_chanlun_backfill_rejects_invalid_period() -> None:
 
 def test_chanlun_backfill_request_history_days_is_optional_in_backend_and_typescript() -> None:
     request = ChanlunBackfillRequest()
-    types_source = (Path(__file__).parents[2] / "web" / "lib" / "types.ts").read_text(
+    types_source = (Path(__file__).parents[2] / "web-vue" / "src" / "service" / "types.ts").read_text(
         encoding="utf-8"
     )
 

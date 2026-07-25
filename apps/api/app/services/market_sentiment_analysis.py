@@ -689,6 +689,7 @@ class MarketSentimentAnalysisService:
                 ready = pending.model_copy(
                     update={
                         "status": "ready",
+                        "result_source": "ai",
                         "attempts": attempt,
                         "completed_at": _now(),
                         "result": result,
@@ -705,8 +706,10 @@ class MarketSentimentAnalysisService:
                 pending.model_copy(
                     update={
                         "status": "ready",
+                        "result_source": "rule",
                         "attempts": attempts,
                         "completed_at": _now(),
+                        "retry_after": _retry_after(),
                         "result": fallback,
                     }
                 )
@@ -1608,7 +1611,16 @@ def _is_matching_ready(
     input_hash: str,
     config: EffectiveAiAnalysisSettings,
 ) -> bool:
-    return bool(record and record.status == "ready" and _same_identity(record, trade_date, input_hash, config))
+    if not record or record.status != "ready" or not _same_identity(record, trade_date, input_hash, config):
+        return False
+    if record.result_source != "rule":
+        return True
+    if not record.retry_after:
+        return False
+    try:
+        return datetime.fromisoformat(record.retry_after) > datetime.now(timezone.utc)
+    except ValueError:
+        return False
 
 
 def _is_matching_cooling_failure(

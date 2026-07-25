@@ -124,7 +124,10 @@ class StrongStockScreener:
         kdj_filtered = 0
         for candidate in candidates_to_scan:
             try:
-                bars = self.kline_provider.get_klines(candidate.symbol, count=220)
+                bars = _bars_through_trade_date(
+                    self.kline_provider.get_klines(candidate.symbol, count=220),
+                    trade_date,
+                )
             except Exception:
                 failures += 1
                 failed_candidates.append(f"{candidate.symbol} {candidate.name}")
@@ -247,6 +250,11 @@ class StrongStockScreener:
                 )
             )
         return risks
+
+
+def _bars_through_trade_date(bars: list[KlineBar], trade_date: str) -> list[KlineBar]:
+    cutoff = trade_date.replace("-", "")
+    return [bar for bar in bars if bar.date.replace("-", "") <= cutoff]
 
 
 def _industry_context(candidates: list[StrongStockCandidate]) -> dict[str, dict[str, int]]:

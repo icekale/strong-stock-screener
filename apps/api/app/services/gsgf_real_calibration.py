@@ -166,13 +166,12 @@ def _sample_from_bars(
     history = bars[: signal_index + 1]
     analysis = analyzer(history)
     bucket_names = _target_bucket_names(analysis)
-    current = bars[signal_index]
     return _CalibrationSample(
         trade_date=trade_date,
         symbol=candidate.symbol,
         name=candidate.name,
         analysis=analysis,
-        entry_close=current.close if current.close > 0 else None,
+        entry_close=future_bars[0].open if future_bars[0].open > 0 else None,
         future_bars=future_bars,
         bucket_names=bucket_names,
     )

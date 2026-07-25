@@ -75,6 +75,7 @@ from app.models import (
 )
 from app.providers.watchlist import WatchlistSnapshot, WatchlistItem
 from app.providers.tickflow import TickFlowIntradayBar, TickFlowQuote
+from app.services.gsgf_auto_review import GsgfAutoReviewConfig
 from app.services.plate_rotation_reference import (
     PlateRotationReferenceResponse,
     PlateRotationThemeItem,
@@ -84,6 +85,14 @@ from app.services.etf_excess_flow import EtfExcessFlowService
 from app.services.sector_workbench_store import SectorThemeRowsStore
 from app.services.etf_three_factor_store import EtfThreeFactorStore
 from app.providers.news_risk import NegativeNewsRisk
+from app.services.runtime_settings import (
+    AiAnalysisSettings,
+    AuctionTop3TrainingSettings,
+    SettingsUpdate,
+    load_runtime_settings,
+    save_runtime_settings,
+)
+from app.services.sentiment_monitor import SentimentMonitorConfig
 
 
 def _bars(closes: list[float]) -> list[KlineBar]:
@@ -2029,6 +2038,80 @@ def test_settings_can_save_ai_analysis_config_without_exposing_full_key(tmp_path
     assert payload["config"]["ai_analysis"]["api_key_preview"] != "deepseek_saved_secret"
     assert "api_key" not in payload["saved"]["ai_analysis"]
     assert "deepseek_saved_secret" not in response.text
+
+
+def test_settings_does_not_expose_notification_secrets(tmp_path: Path) -> None:
+    client = _client(tmp_path)
+
+    response = client.put(
+        "/api/settings",
+        json={
+            "candidate_provider": "recent_limit_up",
+            "kline_provider": "tickflow",
+            "quote_provider": "tickflow",
+            "tickflow_base_url": "https://api.example.test",
+            "provider_timeout_seconds": 3.5,
+            "notification_channels": [
+                {
+                    "id": "feishu-main",
+                    "type": "feishu",
+                    "name": "主通知",
+                    "webhook_url": "https://hooks.example.test/secret",
+                }
+            ],
+        },
+    )
+
+    assert response.status_code == 200
+    saved_channel = response.json()["saved"]["notification_channels"][0]
+    assert "webhook_url" not in saved_channel
+    assert saved_channel["webhook_configured"] is True
+    assert "https://hooks.example.test/secret" not in response.text
+
+
+def test_sentiment_monitor_update_preserves_unrelated_runtime_settings(tmp_path: Path) -> None:
+    path = tmp_path / "runtime_config.json"
+    save_runtime_settings(
+        path,
+        SettingsUpdate(
+            candidate_provider="recent_limit_up",
+            kline_provider="tickflow",
+            quote_provider="tickflow",
+            tickflow_base_url="https://api.tickflow.org",
+            ifind_base_url="https://api-mcp.51ifind.com:8643",
+            ifind_service_id="hexin-ifind-ds-stock-mcp",
+            provider_timeout_seconds=12,
+            gsgf_auto_review=GsgfAutoReviewConfig(
+                daily_review_enabled=True,
+                daily_review_time="16:01",
+            ),
+            ai_analysis=AiAnalysisSettings(
+                enabled=True,
+                provider="deepseek",
+                base_url="https://api.deepseek.com",
+                model="deepseek-reasoner",
+                api_key="ai-secret",
+            ),
+            auction_top3_training=AuctionTop3TrainingSettings(
+                record_signal_samples=False,
+                training_window_days=120,
+            ),
+        ),
+    )
+
+    app.state.runtime_config_path = path
+    try:
+        main_module._save_sentiment_monitor_config(SentimentMonitorConfig(enabled=True))
+    finally:
+        del app.state.runtime_config_path
+
+    loaded = load_runtime_settings(path)
+    assert loaded.gsgf_auto_review.daily_review_enabled is True
+    assert loaded.gsgf_auto_review.daily_review_time == "16:01"
+    assert loaded.ai_analysis.model == "deepseek-reasoner"
+    assert loaded.ai_analysis.api_key == "ai-secret"
+    assert loaded.auction_top3_training.record_signal_samples is False
+    assert loaded.auction_top3_training.training_window_days == 120
 
 
 def test_settings_can_be_saved_with_ifind_configuration(tmp_path: Path) -> None:

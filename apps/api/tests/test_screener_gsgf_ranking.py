@@ -6,7 +6,19 @@ from app.models import (
     StrongStockScreeningItem,
 )
 from app.services import screener as screener_module
-from app.services.screener import StrongStockScreener, _screening_rank_key
+from app.services.screener import StrongStockScreener, _bars_through_trade_date, _screening_rank_key
+
+
+def test_historical_screening_drops_bars_after_requested_trade_date() -> None:
+    bars = [
+        KlineBar(date="2026-06-10", open=10, high=11, low=9, close=10, volume=100),
+        KlineBar(date="2026-06-11", open=10, high=11, low=9, close=10, volume=100),
+        KlineBar(date="2026-06-12", open=10, high=11, low=9, close=10, volume=100),
+    ]
+
+    filtered = _bars_through_trade_date(bars, "2026-06-11")
+
+    assert [bar.date for bar in filtered] == ["2026-06-10", "2026-06-11"]
 
 
 def test_gsgf_ranking_prioritizes_confirmed_and_low_buy_over_standalone_b_zone() -> None:

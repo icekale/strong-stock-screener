@@ -207,6 +207,7 @@ from app.services.notification_channels import (
     DefaultSmtpClient,
     NotificationSendResult,
     NotificationSettings,
+    public_notification_settings,
     send_notification_message,
 )
 from app.services.screener import StrongStockScreener
@@ -4850,6 +4851,9 @@ def _save_sentiment_monitor_config(config: SentimentMonitorConfig) -> None:
             or effective.provider_timeout_seconds,
             notification_channels=current.notification_channels,
             sentiment_monitor=config,
+            gsgf_auto_review=current.gsgf_auto_review,
+            ai_analysis=current.ai_analysis,
+            auction_top3_training=current.auction_top3_training,
         ),
     )
 
@@ -4921,7 +4925,8 @@ def _estimated_sector_radar_item(sector: MarketSectorStrengthItem) -> SectorRada
 
 
 def _public_saved_settings() -> dict[str, object]:
-    return load_runtime_settings(_runtime_config_path()).model_dump(
+    runtime = load_runtime_settings(_runtime_config_path())
+    payload = runtime.model_dump(
         mode="json",
         exclude={
             "tickflow_api_key": True,
@@ -4931,6 +4936,10 @@ def _public_saved_settings() -> dict[str, object]:
         },
         exclude_none=True,
     )
+    payload["notification_channels"] = public_notification_settings(
+        NotificationSettings(channels=runtime.notification_channels)
+    )["channels"]
+    return payload
 
 
 def _read_watchlist_pool() -> str:

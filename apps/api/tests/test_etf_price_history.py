@@ -49,3 +49,16 @@ def test_raises_when_provider_returns_no_valid_close_points() -> None:
 
     with pytest.raises(EtfPriceHistoryUnavailable, match="没有可用的日收盘价"):
         EtfPriceHistoryService(provider=EmptyProvider()).history("510050.SH")
+
+
+def test_normalizes_compact_provider_trade_dates() -> None:
+    class CompactDateProvider(FakeProvider):
+        def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
+            return [
+                KlineBar(date="20260723", open=3.0, close=3.08, high=3.1, low=3.0, volume=1),
+                KlineBar(date="20260724", open=3.08, close=3.05, high=3.1, low=3.0, volume=1),
+            ]
+
+    response = EtfPriceHistoryService(provider=CompactDateProvider()).history("510050.SH", days=2)
+
+    assert [point.trade_date for point in response.points] == ["2026-07-23", "2026-07-24"]

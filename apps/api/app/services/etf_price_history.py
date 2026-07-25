@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from threading import RLock
 from typing import Callable, Protocol
 from zoneinfo import ZoneInfo
@@ -94,8 +94,26 @@ class EtfPriceHistoryService:
 def _close_points(bars: list[KlineBar]) -> list[EtfPriceHistoryPoint]:
     by_date: dict[str, EtfPriceHistoryPoint] = {}
     for bar in bars:
-        trade_date = str(bar.date or "")[:10]
-        if len(trade_date) != 10 or bar.close <= 0:
+        trade_date = _normalize_trade_date(bar.date)
+        if trade_date is None or bar.close <= 0:
             continue
         by_date[trade_date] = EtfPriceHistoryPoint(trade_date=trade_date, close=float(bar.close))
     return [by_date[trade_date] for trade_date in sorted(by_date)]
+
+
+def _normalize_trade_date(value: object) -> str | None:
+    text = str(value or "").strip()
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        text = text[:10]
+        pattern = "%Y-%m-%d"
+    elif len(text) >= 8 and text[:8].isdigit():
+        text = text[:8]
+        pattern = "%Y%m%d"
+    else:
+        return None
+    try:
+        if pattern == "%Y-%m-%d":
+            return date.fromisoformat(text).isoformat()
+        return datetime.strptime(text, pattern).date().isoformat()
+    except ValueError:
+        return None

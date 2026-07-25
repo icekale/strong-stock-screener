@@ -475,6 +475,7 @@ class SentimentPercentileAnalysisResponse(BaseModel):
     trade_date: str
     status: SentimentAnalysisStatus
     model_version: str = "market-sentiment-percentile-v2"
+    analysis_contract_version: str | None = None
     provider: str | None = None
     llm_model: str | None = None
     input_hash: str | None = None

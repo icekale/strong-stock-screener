@@ -34,6 +34,7 @@ _FACTOR_NAMES = (
 _RETRY_DELAY = timedelta(minutes=30)
 _PENDING_TIMEOUT = timedelta(minutes=3)
 _AI_PROVIDER_TIMEOUT_SECONDS = 180
+ANALYSIS_CONTRACT_VERSION = "sentiment-analysis-v1"
 
 
 class _StrictAnalysisInput(BaseModel):
@@ -605,6 +606,7 @@ class MarketSentimentAnalysisService:
             pending = SentimentPercentileAnalysisResponse(
                 trade_date=trade_date,
                 status="pending",
+                analysis_contract_version=ANALYSIS_CONTRACT_VERSION,
                 provider=config.provider,
                 llm_model=config.model,
                 input_hash=input_hash,
@@ -1648,6 +1650,7 @@ def _same_identity(
     return (
         record.trade_date == trade_date
         and record.model_version == MODEL_VERSION
+        and record.analysis_contract_version == ANALYSIS_CONTRACT_VERSION
         and record.provider == config.provider
         and record.llm_model == config.model
         and record.input_hash == input_hash

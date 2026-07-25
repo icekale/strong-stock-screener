@@ -19,6 +19,7 @@ from app.models import (
     StrongStockDataUnavailable,
 )
 from app.services.market_sentiment_analysis import (
+    ANALYSIS_CONTRACT_VERSION,
     build_sentiment_analysis_input,
     hash_sentiment_analysis_input,
 )
@@ -96,6 +97,9 @@ def analysis(
         status=status,  # type: ignore[arg-type]
         provider="openai_compatible" if status in {"pending", "ready", "failed"} else None,
         llm_model="test-model" if status in {"pending", "ready", "failed"} else None,
+        analysis_contract_version=ANALYSIS_CONTRACT_VERSION
+        if status in {"pending", "ready", "failed"}
+        else None,
         input_hash=(input_hash or "a" * 64) if status in {"pending", "ready", "failed"} else None,
         retry_after=retry_after,
         result=result,

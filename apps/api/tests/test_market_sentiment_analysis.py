@@ -30,6 +30,7 @@ from app.services.market_sentiment_analysis import (
     hash_sentiment_analysis_input,
     sentiment_analysis_record_is_reusable,
 )
+from app.services import market_sentiment_analysis as analysis_module
 from app.services.market_sentiment_analysis_store import MarketSentimentAnalysisStore
 from app.services.runtime_settings import EffectiveAiAnalysisSettings
 
@@ -500,6 +501,20 @@ def test_rule_fallback_is_not_reused_as_a_successful_ai_analysis(
     service.generate(_input_payload(), _config())
 
     assert client.post.call_count == 6
+
+
+def test_analysis_contract_change_invalidates_cached_ai_result(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _Client([_Response(json.dumps(_result_payload(), ensure_ascii=False))] * 2)
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    first = service.generate(_input_payload(), _config())
+    assert first.analysis_contract_version is not None
+    monkeypatch.setattr(analysis_module, "ANALYSIS_CONTRACT_VERSION", "sentiment-analysis-v-next")
+
+    second = service.generate(_input_payload(), _config())
+
+    assert second.analysis_contract_version == "sentiment-analysis-v-next"
+    assert client.post.call_count == 2
 
 
 def test_provider_request_maps_compact_result_keys(tmp_path: Path) -> None:

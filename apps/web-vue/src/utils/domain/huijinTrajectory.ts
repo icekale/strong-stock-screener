@@ -1,5 +1,20 @@
 import type { EtfRadarHistoryPoint, HuijinEtfActivityItem, HuijinEtfValidationGroup } from '@/service/types';
 
+export function buildPaddedAxisRange(values: Array<number | null>, paddingRatio = 0.08) {
+  const finiteValues = values.filter((value): value is number => value !== null && Number.isFinite(value));
+  if (finiteValues.length === 0) return {};
+
+  const min = Math.min(...finiteValues);
+  const max = Math.max(...finiteValues);
+  const span = max - min;
+  const padding = span === 0 ? Math.abs(min) * paddingRatio || 1 : span * paddingRatio;
+
+  return {
+    min: Math.max(0, min - padding),
+    max: max + padding
+  };
+}
+
 export function buildNormalizedTrend(etf: Array<number | null>, index: Array<number | null>) {
   const normalize = (values: Array<number | null>) => {
     const base = values.find(value => value !== null);

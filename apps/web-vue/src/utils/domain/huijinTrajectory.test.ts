@@ -4,6 +4,7 @@ import {
   buildHuijinExceptions,
   buildHuijinRanking,
   buildHuijinTrajectory,
+  buildPaddedAxisRange,
   buildNormalizedTrend,
   huijinActivityDataState,
   pickDefaultHuijinSymbol
@@ -59,6 +60,25 @@ function point(tradeDate: string, cumulative: number | null): EtfRadarHistoryPoi
 }
 
 describe('Huijin trajectory transforms', () => {
+  it('builds a padded range from finite values', () => {
+    expect(buildPaddedAxisRange([100, 120])).toEqual({ min: 98.4, max: 121.6 });
+  });
+
+  it('uses proportional padding for a single value', () => {
+    expect(buildPaddedAxisRange([3])).toEqual({ min: 2.76, max: 3.24 });
+  });
+
+  it('ignores null and non-finite values', () => {
+    expect(buildPaddedAxisRange([null, Number.NaN, Number.POSITIVE_INFINITY, 100, 120])).toEqual({
+      min: 98.4,
+      max: 121.6
+    });
+  });
+
+  it('returns an empty range when no finite values are available', () => {
+    expect(buildPaddedAxisRange([null, Number.NaN, Number.NEGATIVE_INFINITY])).toEqual({});
+  });
+
   it('sorts available core ETFs by absolute cumulative deviation', () => {
     const items = [
       item('510300.SH', -75.55),

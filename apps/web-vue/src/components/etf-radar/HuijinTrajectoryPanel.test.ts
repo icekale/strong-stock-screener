@@ -354,6 +354,80 @@ describe('HuijinTrajectoryPanel', () => {
     expect(wrapper.get('[data-testid="huijin-latest-values"]').text()).toContain('2.30 元');
   });
 
+  it('uses adaptive precision for narrow share and close axis ranges', () => {
+    const overview = overviewFixture();
+    overview.core_items[0]!.baseline_total_shares = 100_000_000;
+    const history = historyFixture([
+      { ...historyPoint('2026-07-16', '510050.SH', -74), total_shares: 100_100_000 },
+      { ...historyPoint('2026-07-17', '510050.SH', -75), total_shares: 100_200_000 },
+      { ...historyPoint('2026-07-18', '510050.SH', -75.55), total_shares: 100_300_000 }
+    ]);
+    const priceHistory = priceHistoryFixture();
+    priceHistory.points = [
+      { trade_date: '2026-07-16', close: 2.1 },
+      { trade_date: '2026-07-17', close: 2.101 },
+      { trade_date: '2026-07-18', close: 2.102 }
+    ];
+    const wrapper = mountPanel({ overview, history, priceHistory });
+    const option = wrapper.getComponent(ChartStub).props('option') as EChartsOption;
+    const axes = option.yAxis as Array<{ axisLabel?: { formatter?: (value: number) => string } }>;
+
+    expect(axes[0]!.axisLabel?.formatter?.(1)).toBe('1.0000');
+    expect(axes[0]!.axisLabel?.formatter?.(1.001)).toBe('1.0010');
+    expect(axes[1]!.axisLabel?.formatter?.(2.1)).toBe('2.1000');
+    expect(axes[1]!.axisLabel?.formatter?.(2.101)).toBe('2.1010');
+  });
+
+  it('keeps endpoint labels visible while thinning long date series', () => {
+    const dates = Array.from({ length: 12 }, (_, index) => `2026-07-${String(index + 1).padStart(2, '0')}`);
+    const history = historyFixture(
+      dates.map((tradeDate, index) => historyPoint(tradeDate, '510050.SH', -74 - index))
+    );
+    const priceHistory = priceHistoryFixture();
+    priceHistory.points = dates.map((trade_date, index) => ({ trade_date, close: 2.1 + index / 100 }));
+    const wrapper = mountPanel({ history, priceHistory });
+    const option = wrapper.getComponent(ChartStub).props('option') as EChartsOption;
+    const xAxis = option.xAxis as {
+      axisLabel?: {
+        showMinLabel?: boolean;
+        showMaxLabel?: boolean;
+        formatter?: (value: string) => string;
+        interval?: (index: number, value: string) => boolean;
+      };
+    };
+
+    expect(xAxis.axisLabel?.showMinLabel).toBe(true);
+    expect(xAxis.axisLabel?.showMaxLabel).toBe(true);
+    expect(xAxis.axisLabel?.formatter?.('2026-07-18')).toBe('07-18');
+    expect(xAxis.axisLabel?.interval?.(0, '2025-12-31')).toBe(true);
+    expect(xAxis.axisLabel?.interval?.(1, '2026-07-01')).toBe(false);
+    expect(xAxis.axisLabel?.interval?.(12, '2026-07-12')).toBe(true);
+  });
+
+  it('shows independently dated latest share and close values', () => {
+    const history = historyFixture([
+      historyPoint('2026-07-16', '510050.SH', -74),
+      historyPoint('2026-07-17', '510050.SH', -75),
+      historyPoint('2026-07-18', '510300.SH', 70)
+    ]);
+    const wrapper = mountPanel({ history });
+    const latestValues = wrapper.get('[data-testid="huijin-latest-values"]').text();
+
+    expect(latestValues).toContain('82.37 亿份');
+    expect(latestValues).toContain('2026-07-17');
+    expect(latestValues).toContain('2.30 元');
+    expect(latestValues).toContain('2026-07-18');
+  });
+
+  it('hides the absent share axis and its split lines when only close data is available', () => {
+    const wrapper = mountPanel({ history: null });
+    const option = wrapper.getComponent(ChartStub).props('option') as EChartsOption;
+    const axes = option.yAxis as Array<{ show?: boolean; splitLine?: { show?: boolean } }>;
+
+    expect(axes[0]).toEqual(expect.objectContaining({ show: false, splitLine: { show: false } }));
+    expect(axes[1]).toEqual(expect.objectContaining({ show: true, splitLine: { show: true } }));
+  });
+
   it('shows one neutral empty state when there are no meaningful exceptions', () => {
     const overview = overviewFixture();
     overview.core_items = overview.core_items.map(item => ({

@@ -70,8 +70,10 @@ const closeTrend = computed(() => {
 });
 const shareAxisRange = computed(() => buildPaddedAxisRange(shareTrajectory.value.values));
 const closeAxisRange = computed(() => buildPaddedAxisRange(closeTrend.value));
-const latestShare = computed(() => [...shareTrajectory.value.values].reverse().find(value => value !== null) ?? null);
-const latestClose = computed(() => [...closeTrend.value].reverse().find(value => value !== null) ?? null);
+const shareAxisPrecision = computed(() => axisLabelPrecision(shareAxisRange.value));
+const closeAxisPrecision = computed(() => axisLabelPrecision(closeAxisRange.value));
+const latestShare = computed(() => latestTrendPoint(shareTrajectory.value.dates, shareTrajectory.value.values));
+const latestClose = computed(() => latestTrendPoint(shareTrajectory.value.dates, closeTrend.value));
 const availableCount = computed(() => props.overview.activity.available_core_count);
 const expansionCount = computed(
   () => props.overview.core_items.filter(item => (item.cumulative_baseline_change_pct ?? 0) > 0).length
@@ -102,6 +104,9 @@ const chartOption = computed<EChartsOption>(() => ({
     boundaryGap: false,
     data: shareTrajectory.value.dates,
     axisLabel: {
+      showMinLabel: true,
+      showMaxLabel: true,
+      formatter: value => String(value).slice(5),
       interval: index => {
         const lastIndex = shareTrajectory.value.dates.length - 1;
         return index === 0 || index === lastIndex || lastIndex <= 4 || index % Math.ceil(lastIndex / 4) === 0;
@@ -116,8 +121,10 @@ const chartOption = computed<EChartsOption>(() => ({
       nameGap: 42,
       scale: true,
       splitNumber: 4,
+      show: hasShareTrend.value,
+      splitLine: { show: hasShareTrend.value },
       ...shareAxisRange.value,
-      axisLabel: { formatter: (value: number) => value.toFixed(0) }
+      axisLabel: { formatter: (value: number) => value.toFixed(shareAxisPrecision.value) }
     },
     {
       type: 'value',
@@ -127,8 +134,10 @@ const chartOption = computed<EChartsOption>(() => ({
       position: 'right',
       scale: true,
       splitNumber: 4,
+      show: hasCloseTrend.value,
+      splitLine: { show: hasCloseTrend.value },
       ...closeAxisRange.value,
-      axisLabel: { formatter: (value: number) => value.toFixed(2) }
+      axisLabel: { formatter: (value: number) => value.toFixed(closeAxisPrecision.value) }
     }
   ],
   series: [
@@ -172,12 +181,26 @@ function formatPlainShares(value: number | null | undefined) {
   return formatPlainSharesValue(value ?? null);
 }
 
-function formatLatestShare(value: number | null) {
-  return value === null ? '--' : `${value.toFixed(2)} 亿份`;
+function axisLabelPrecision(range: { min?: number; max?: number }, splitNumber = 4) {
+  if (range.min === undefined || range.max === undefined) return 0;
+  const step = (range.max - range.min) / splitNumber;
+  return Number.isFinite(step) && step > 0 ? Math.max(0, Math.ceil(-Math.log10(step))) : 0;
 }
 
-function formatLatestClose(value: number | null) {
-  return value === null ? '--' : `${value.toFixed(2)} 元`;
+function latestTrendPoint(dates: string[], values: Array<number | null>) {
+  for (let index = values.length - 1; index >= 0; index -= 1) {
+    const value = values[index];
+    if (value !== null) return { value, date: dates[index] ?? '--' };
+  }
+  return null;
+}
+
+function formatLatestShare(point: { value: number; date: string } | null) {
+  return point === null ? '--' : `${point.value.toFixed(2)} 亿份`;
+}
+
+function formatLatestClose(point: { value: number; date: string } | null) {
+  return point === null ? '--' : `${point.value.toFixed(2)} 元`;
 }
 
 function formatHoldingPct(value: number | null | undefined) {
@@ -263,8 +286,14 @@ function exceptionLabel(item: HuijinEtfActivityItem) {
             <span>份额与收盘价走势</span>
             <small>按交易日对齐 · 份额变化不能直接证明汇金已确认增减持</small>
             <div data-testid="huijin-latest-values" class="huijin-selected__latest-values">
-              <span>最新份额 <strong>{{ formatLatestShare(latestShare) }}</strong></span>
-              <span>最新收盘 <strong>{{ formatLatestClose(latestClose) }}</strong></span>
+              <span>
+                最新份额 <strong>{{ formatLatestShare(latestShare) }}</strong>
+                <time :datetime="latestShare?.date">{{ latestShare?.date ?? '--' }}</time>
+              </span>
+              <span>
+                最新收盘 <strong>{{ formatLatestClose(latestClose) }}</strong>
+                <time :datetime="latestClose?.date">{{ latestClose?.date ?? '--' }}</time>
+              </span>
             </div>
           </div>
           <strong data-testid="huijin-selected-symbol">{{ selectedItem?.symbol }}</strong>
@@ -788,6 +817,11 @@ function exceptionLabel(item: HuijinEtfActivityItem) {
 .huijin-selected__latest-values strong {
   color: var(--wb-ink);
   font-size: 12px;
+}
+
+.huijin-selected__latest-values time {
+  margin-inline-start: 4px;
+  color: var(--wb-muted);
 }
 
 .huijin-trajectory__empty {

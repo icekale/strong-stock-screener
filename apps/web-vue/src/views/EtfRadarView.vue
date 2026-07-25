@@ -546,8 +546,8 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
     </PageHeader>
 
     <a-tabs v-model:active-key="activeTab" class="etf-tabs" @change="changeTab">
-      <a-tab-pane key="trajectory" tab="持仓轨迹" />
-      <a-tab-pane key="activity" tab="日度活动" />
+      <a-tab-pane key="trajectory" tab="监控总览" />
+      <a-tab-pane key="activity" tab="今日异动" />
       <a-tab-pane key="holders" tab="确认持仓" />
       <a-tab-pane key="methodology" tab="方法与数据" />
     </a-tabs>
@@ -560,38 +560,6 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
         :message="dataErrorMessage('overview', overview)"
         show-icon
       />
-      <section v-if="overview" data-testid="daily-activity-home" class="etf-home-activity" aria-label="日度活动摘要">
-        <div class="etf-home-activity__header">
-          <div>
-            <h2>日度活动摘要</h2>
-            <p>份额活动与 ETF 最近收盘涨跌，作为持仓轨迹的当日背景。</p>
-          </div>
-          <span>{{ overview.trade_date }}</span>
-        </div>
-        <div class="etf-metrics">
-          <div v-for="metric in overviewMetrics" :key="metric.label" class="etf-metric">
-            <span class="etf-metric__label">{{ metric.label }}</span>
-            <strong :class="metric.className">{{ metric.value }}</strong>
-            <small>{{ metric.helper }}</small>
-          </div>
-        </div>
-        <div class="etf-home-activity__items">
-          <div v-for="item in overview.core_items" :key="item.symbol" class="etf-home-activity__item">
-            <div class="etf-home-activity__identity">
-              <strong :title="item.name">{{ item.name }}</strong>
-              <small>{{ item.symbol }} · {{ item.index_name }}</small>
-            </div>
-            <span>
-              <small>份额日变化</small>
-              <b :class="directionClass(item.direction)">{{ formatPercent(item.daily_change_pct) }}</b>
-            </span>
-            <span>
-              <small>收盘涨跌</small>
-              <b :class="valueTone(item.close_change_pct)">{{ formatPercent(item.close_change_pct) }}</b>
-            </span>
-          </div>
-        </div>
-      </section>
       <div v-if="loading.trajectory && !overview" class="etf-loading" aria-label="正在读取持仓轨迹">
         <a-skeleton active :paragraph="{ rows: 8 }" />
       </div>

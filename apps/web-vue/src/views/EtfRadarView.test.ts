@@ -51,8 +51,8 @@ const TabsStub = defineComponent({
   emits: ['update:activeKey', 'change'],
   setup(props, { emit }) {
     const tabs = [
-      ['trajectory', '持仓轨迹'],
-      ['activity', '日度活动'],
+      ['trajectory', '监控总览'],
+      ['activity', '今日异动'],
       ['holders', '确认持仓'],
       ['methodology', '方法与数据']
     ] as const;
@@ -385,16 +385,15 @@ afterEach(() => {
 });
 
 describe('EtfRadarView', () => {
-  it('renders the holdings trajectory first and keeps the Huijin daily activity available', async () => {
+  it('renders the monitor overview first and keeps the Huijin daily activity available', async () => {
     setDefaultApiResponses();
     const wrapper = await mountView();
 
     expect(wrapper.findAll('.etf-tab-trigger').map(tab => tab.text())).toEqual([
-      '持仓轨迹', '日度活动', '确认持仓', '方法与数据'
+      '监控总览', '今日异动', '确认持仓', '方法与数据'
     ]);
     expect(wrapper.text()).toContain('汇金持仓追踪');
-    expect(wrapper.get('[data-testid="daily-activity-home"]').text()).toContain('日度活动摘要');
-    expect(wrapper.get('[data-testid="daily-activity-home"]').text()).toContain('十倍量增加');
+    expect(wrapper.find('[data-testid="daily-activity-home"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="huijin-trajectory-panel"]').exists()).toBe(true);
     expect(api.getEtfRadarOverview).toHaveBeenCalledTimes(1);
     expect(api.getEtfRadarHistory).toHaveBeenCalledTimes(1);
@@ -449,6 +448,23 @@ describe('EtfRadarView', () => {
     expect(wrapper.get('[data-testid="activity-etf-row"] strong').attributes('title')).toBe('华夏上证50ETF');
     expect(wrapper.text()).not.toContain('OLD_GENERIC_SENTINEL');
     expect(wrapper.text()).not.toMatch(/证据强度|稳健分|同时间成交|相对指数|估算申购/);
+    wrapper.unmount();
+  });
+
+  it('accepts the legacy trajectory route and keeps the activity route available', async () => {
+    routeState.route.query = { tab: 'trajectory' };
+    setDefaultApiResponses();
+    const wrapper = await mountView();
+
+    expect(wrapper.find('[data-testid="huijin-trajectory-panel"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="daily-activity-home"]').exists()).toBe(false);
+
+    routeState.route.query = { tab: 'activity' };
+    await nextTick();
+    await flushPromises();
+
+    expect(wrapper.find('[data-testid="etf-excess-flow-panel"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="etf-activity-table"]').exists()).toBe(true);
     wrapper.unmount();
   });
 

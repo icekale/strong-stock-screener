@@ -356,6 +356,7 @@ async def lifespan(_app: FastAPI):
         shutdown_auction_sampler()
         shutdown_gsgf_auto_review()
         shutdown_sentiment_monitor()
+        _close_default_data_source_providers()
 
 
 app = FastAPI(title="强势股选股 API", version="0.1.0", lifespan=lifespan)
@@ -3285,12 +3286,69 @@ def _quote_valuation_for_symbol(
 
 def _clear_data_source_caches() -> None:
     CACHE_REGISTRY.clear()
+    _close_default_data_source_providers()
+    for attribute in (
+        "default_capital_signal_service",
+        "default_etf_excess_flow_service",
+        "default_etf_three_factor_monitor",
+        "market_sentiment_percentile_service",
+        "default_market_overview_provider",
+        "default_market_overview_provider_key",
+    ):
+        if hasattr(app.state, attribute):
+            delattr(app.state, attribute)
     with _CHANLUN_RESEARCH_LOCK:
         shutdown_chanlun_research()
         if hasattr(app.state, "chanlun_analysis_service"):
             delattr(app.state, "chanlun_analysis_service")
         if hasattr(app.state, "chanlun_paper_order_service"):
             delattr(app.state, "chanlun_paper_order_service")
+
+
+def _close_provider(provider: object | None) -> None:
+    close = getattr(provider, "close", None)
+    if callable(close):
+        try:
+            close()
+        except Exception:
+            logger.exception("failed to close data source provider")
+
+
+def _close_default_data_source_providers() -> None:
+    for attribute in (
+        "default_market_overview_provider",
+        "default_kline_provider",
+        "default_chanlun_daily_provider",
+        "default_quote_provider",
+        "default_ifind_provider",
+        "default_tdx_provider",
+    ):
+        provider = getattr(app.state, attribute, None)
+        if provider is not None:
+            _close_provider(provider)
+        if hasattr(app.state, attribute):
+            delattr(app.state, attribute)
+        key_attribute = f"{attribute}_key"
+        if hasattr(app.state, key_attribute):
+            delattr(app.state, key_attribute)
+
+
+def _cached_default_provider(
+    *,
+    attribute: str,
+    key: tuple[object, ...],
+    factory: object,
+) -> object:
+    key_attribute = f"{attribute}_key"
+    current = getattr(app.state, attribute, None)
+    if current is not None and getattr(app.state, key_attribute, None) == key:
+        return current
+    if current is not None:
+        _close_provider(current)
+    provider = factory()
+    setattr(app.state, attribute, provider)
+    setattr(app.state, key_attribute, key)
+    return provider
 
 
 def _system_jobs() -> list[dict[str, object]]:
@@ -3579,10 +3637,14 @@ def _kline_provider() -> object:
     if injected is not None:
         return injected
     settings = _effective_settings()
-    return TickFlowDailyKlineProvider(
-        api_key=settings.tickflow_api_key,
-        base_url=settings.tickflow_base_url,
-        timeout_seconds=settings.provider_timeout_seconds,
+    return _cached_default_provider(
+        attribute="default_kline_provider",
+        key=(settings.tickflow_api_key, settings.tickflow_base_url, settings.provider_timeout_seconds),
+        factory=lambda: TickFlowDailyKlineProvider(
+            api_key=settings.tickflow_api_key,
+            base_url=settings.tickflow_base_url,
+            timeout_seconds=settings.provider_timeout_seconds,
+        ),
     )
 
 
@@ -3848,11 +3910,15 @@ def _chanlun_daily_provider() -> object:
     if injected is not None:
         return injected
     settings = _effective_settings()
-    return TickFlowDailyKlineProvider(
-        api_key=settings.tickflow_api_key,
-        base_url=settings.tickflow_base_url,
-        timeout_seconds=settings.provider_timeout_seconds,
-        adjust="none",
+    return _cached_default_provider(
+        attribute="default_chanlun_daily_provider",
+        key=(settings.tickflow_api_key, settings.tickflow_base_url, settings.provider_timeout_seconds),
+        factory=lambda: TickFlowDailyKlineProvider(
+            api_key=settings.tickflow_api_key,
+            base_url=settings.tickflow_base_url,
+            timeout_seconds=settings.provider_timeout_seconds,
+            adjust="none",
+        ),
     )
 
 
@@ -3861,10 +3927,14 @@ def _quote_provider() -> object:
     if injected is not None:
         return injected
     settings = _effective_settings()
-    return TickFlowQuoteProvider(
-        api_key=settings.tickflow_api_key,
-        base_url=settings.tickflow_base_url,
-        timeout_seconds=settings.provider_timeout_seconds,
+    return _cached_default_provider(
+        attribute="default_quote_provider",
+        key=(settings.tickflow_api_key, settings.tickflow_base_url, settings.provider_timeout_seconds),
+        factory=lambda: TickFlowQuoteProvider(
+            api_key=settings.tickflow_api_key,
+            base_url=settings.tickflow_base_url,
+            timeout_seconds=settings.provider_timeout_seconds,
+        ),
     )
 
 
@@ -3963,11 +4033,15 @@ def _tdx_provider() -> TdxMcpProvider:
     if injected is not None:
         return injected
     settings = _effective_settings()
-    return TdxMcpProvider(
-        api_key=settings.tdx_api_key,
-        base_url=settings.tdx_base_url,
-        timeout_seconds=settings.provider_timeout_seconds,
-        http_client=getattr(app.state, "tdx_http_client", None),
+    return _cached_default_provider(
+        attribute="default_tdx_provider",
+        key=(settings.tdx_api_key, settings.tdx_base_url, settings.provider_timeout_seconds),
+        factory=lambda: TdxMcpProvider(
+            api_key=settings.tdx_api_key,
+            base_url=settings.tdx_base_url,
+            timeout_seconds=settings.provider_timeout_seconds,
+            http_client=getattr(app.state, "tdx_http_client", None),
+        ),
     )
 
 
@@ -4195,11 +4269,20 @@ def _ifind_provider() -> IfindMcpProvider:
     if injected is not None:
         return injected
     settings = _effective_settings()
-    return IfindMcpProvider(
-        api_key=settings.ifind_api_key,
-        base_url=settings.ifind_base_url,
-        timeout_seconds=settings.provider_timeout_seconds,
-        http_client=getattr(app.state, "ifind_http_client", None),
+    return _cached_default_provider(
+        attribute="default_ifind_provider",
+        key=(
+            settings.ifind_api_key,
+            settings.ifind_base_url,
+            settings.provider_timeout_seconds,
+            settings.ifind_service_id,
+        ),
+        factory=lambda: IfindMcpProvider(
+            api_key=settings.ifind_api_key,
+            base_url=settings.ifind_base_url,
+            timeout_seconds=settings.provider_timeout_seconds,
+            http_client=getattr(app.state, "ifind_http_client", None),
+        ),
     )
 
 
@@ -4209,14 +4292,27 @@ def _market_overview_provider() -> object:
         return injected
     settings = _effective_settings()
     base_settings = get_settings()
-    return EastmoneyMarketOverviewProvider(
-        timeout_seconds=settings.provider_timeout_seconds,
-        realtime_quote_provider=_quote_provider(),
-        ifind_index_provider=_ifind_provider(),
-        ifind_stock_provider=_ifind_provider(),
-        daily_kline_provider=_kline_provider(),
-        turnover_cache_path=base_settings.data_dir / "market-overview" / "turnover-history.json",
-        sentiment_snapshot_dir=base_settings.data_dir / "sentiment_snapshots",
+    quote_provider = _quote_provider()
+    ifind_provider = _ifind_provider()
+    kline_provider = _kline_provider()
+    return _cached_default_provider(
+        attribute="default_market_overview_provider",
+        key=(
+            settings.provider_timeout_seconds,
+            id(quote_provider),
+            id(ifind_provider),
+            id(kline_provider),
+            str(base_settings.data_dir),
+        ),
+        factory=lambda: EastmoneyMarketOverviewProvider(
+            timeout_seconds=settings.provider_timeout_seconds,
+            realtime_quote_provider=quote_provider,
+            ifind_index_provider=ifind_provider,
+            ifind_stock_provider=ifind_provider,
+            daily_kline_provider=kline_provider,
+            turnover_cache_path=base_settings.data_dir / "market-overview" / "turnover-history.json",
+            sentiment_snapshot_dir=base_settings.data_dir / "sentiment_snapshots",
+        ),
     )
 
 

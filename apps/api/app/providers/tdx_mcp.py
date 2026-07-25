@@ -27,9 +27,14 @@ class TdxMcpProvider:
         self.api_key = api_key.strip()
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self._owns_client = http_client is None
         self.http_client = http_client or httpx.Client(timeout=timeout_seconds)
         self._session_id: str | None = None
         self._request_id = 0
+
+    def close(self) -> None:
+        if self._owns_client:
+            self.http_client.close()
 
     def status(self) -> StrongStockSourceStatus:
         if not self.api_key:

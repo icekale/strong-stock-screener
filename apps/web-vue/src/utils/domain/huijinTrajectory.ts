@@ -3,7 +3,9 @@ import type { EtfRadarHistoryPoint, HuijinEtfActivityItem, HuijinEtfValidationGr
 export function buildNormalizedTrend(etf: Array<number | null>, index: Array<number | null>) {
   const normalize = (values: Array<number | null>) => {
     const base = values.find(value => value !== null);
-    return values.map(value => (value === null || base === undefined ? null : 100 + value - base));
+    return values.map(value =>
+      value === null || base === undefined ? null : Number((100 + value - base).toFixed(6))
+    );
   };
   return { etf: normalize(etf), index: normalize(index) };
 }

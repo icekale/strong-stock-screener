@@ -125,20 +125,12 @@ const activeData = computed<EtfResponse | null>(() => {
 
 const activeMetadata = computed<CapitalSignalMetadata | null>(() => activeData.value);
 
-const overviewMetrics = computed(() => {
-  const activity = overview.value?.activity;
-  return [
-    { label: '十倍量增加', value: activity?.tenfold_increase_count ?? '--', helper: '增加方向', className: 'etf-value--positive' },
-    { label: '十倍量减少', value: activity?.tenfold_decrease_count ?? '--', helper: '减少方向', className: 'etf-value--negative' },
-    {
-      label: '配对一致',
-      value: activity ? activity.confirmed_increase_group_count + activity.confirmed_decrease_group_count : '--',
-      helper: activity ? `增加 ${activity.confirmed_increase_group_count} / 减少 ${activity.confirmed_decrease_group_count}` : '增加 -- / 减少 --',
-      className: ''
-    },
-    { label: '方向分歧', value: activity?.divergent_group_count ?? '--', helper: '配对方向不一致', className: '' }
-  ];
-});
+const baselineReportPeriod = computed(
+  () => overview.value?.core_items.find(item => item.report_period)?.report_period ?? '--'
+);
+const activitySourceWarnings = computed(() =>
+  (overview.value?.source_status ?? []).filter(source => source.status !== 'success')
+);
 
 const validationItemsBySymbol = computed(() => {
   const items = [...(overview.value?.core_items ?? []), ...(overview.value?.validation_items ?? [])];
@@ -185,11 +177,6 @@ function formatPercent(value: number | null | undefined) {
 
 function formatHoldingPct(value: number | null | undefined) {
   return value == null ? '--' : `${value.toFixed(2)}%`;
-}
-
-function formatFingerprint(value: string | null | undefined) {
-  if (!value) return '--';
-  return value.length > 10 ? `${value.slice(0, 10)}...` : value;
 }
 
 function baselineCell(key: string, record: unknown) {
@@ -579,7 +566,7 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
     </section>
 
     <section v-else-if="activeTab === 'activity'" class="etf-panel">
-      <SectionHeader title="今日份额活动" source="交易所份额与报告基线" :updated-at="formatAsOf(overview?.as_of)">
+      <SectionHeader title="今日异动" source="交易所份额与报告基线" :updated-at="formatAsOf(overview?.as_of)">
         <StatusTag :status="activityStatus()" />
       </SectionHeader>
       <a-alert v-if="errors.overview" data-testid="etf-panel-error" type="warning" :message="activeErrorMessage()" show-icon />
@@ -589,32 +576,20 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
       </div>
       <div v-else class="etf-panel-content">
         <template v-if="overview">
-          <div class="etf-metrics" aria-label="今日活动摘要">
-            <div v-for="metric in overviewMetrics" :key="metric.label" class="etf-metric">
-              <span class="etf-metric__label">{{ metric.label }}</span>
-              <strong :class="metric.className">{{ metric.value }}</strong>
-              <small>{{ metric.helper }}</small>
-            </div>
-          </div>
-
-          <div class="etf-compact-meta">
-            <span>核心池 {{ overview.pool_version || '--' }}</span>
-            <span>报告基线 {{ overview.baseline_version || '--' }}</span>
-            <span
-              data-testid="baseline-fingerprint"
-              class="etf-fingerprint"
-              :title="overview.baseline_fingerprint || undefined"
-            >基线指纹 {{ formatFingerprint(overview.baseline_fingerprint) }}</span>
-            <span>模型 {{ overview.model_version || '--' }}</span>
-          </div>
-
-          <div class="etf-source-statuses">
-            <div v-for="source in activeSources()" :key="source.source" class="etf-source-status">
-              <span class="etf-source-status__summary">
-                {{ source.source }} <StatusTag :status="sourceStatusTone(source.status)" />
-              </span>
-              <span class="etf-source-status__detail">{{ source.detail || '--' }}</span>
-            </div>
+          <div data-testid="etf-activity-summary" class="etf-activity-summary" aria-label="今日异动摘要">
+            <span>覆盖 <strong>{{ overview.activity.available_core_count }} / {{ overview.activity.core_count }}</strong></span>
+            <span>
+              十倍量
+              <b class="etf-value--positive">+{{ overview.activity.tenfold_increase_count }}</b>
+              /
+              <b class="etf-value--negative">-{{ overview.activity.tenfold_decrease_count }}</b>
+            </span>
+            <span>配对一致 <strong>{{ overview.activity.confirmed_increase_group_count + overview.activity.confirmed_decrease_group_count }}</strong></span>
+            <span>方向分歧 <strong>{{ overview.activity.divergent_group_count }}</strong></span>
+            <span>报告基线 {{ baselineReportPeriod }}</span>
+            <span v-for="source in activitySourceWarnings" :key="source.source" class="etf-activity-summary__warning">
+              {{ source.source }}：{{ source.detail || '数据状态异常' }}
+            </span>
           </div>
         </template>
 
@@ -894,119 +869,48 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
   padding: 8px 16px 20px;
 }
 
-.etf-home-activity {
-  margin: 0 16px 16px;
-  border: 1px solid var(--wb-border);
-  border-radius: var(--wb-radius);
-  background: var(--wb-surface-muted);
-}
-
-.etf-home-activity__header {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
-  padding: 14px 16px 8px;
-}
-
-.etf-home-activity__header h2 {
-  margin: 0;
-  color: var(--wb-ink);
-  font-size: 15px;
-  line-height: 22px;
-}
-
-.etf-home-activity__header p {
-  margin: 2px 0 0;
-  color: var(--wb-muted);
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.etf-home-activity__header > span {
-  flex: none;
-  color: var(--wb-muted);
-  font-size: 12px;
-  line-height: 22px;
-}
-
-.etf-home-activity .etf-metrics {
-  margin: 0 16px 8px;
-  border-top: 1px solid var(--wb-border);
-}
-
-.etf-home-activity__items {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 16px;
-  padding: 0 16px 10px;
-}
-
-.etf-home-activity__item {
-  display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(88px, 0.8fr) minmax(88px, 0.8fr);
-  gap: 12px;
-  align-items: center;
-  min-width: 0;
-  padding: 8px 0;
-  border-bottom: 1px solid var(--wb-border);
-  font-size: 12px;
-}
-
-.etf-home-activity__identity,
-.etf-home-activity__item > span {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.etf-home-activity__identity strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.etf-home-activity__identity small,
-.etf-home-activity__item small {
-  color: var(--wb-muted);
-  font-size: 11px;
-}
-
-.etf-home-activity__item b {
-  font-weight: 600;
-}
-
-.etf-metrics {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  margin-bottom: 12px;
-  border-bottom: 1px solid var(--wb-border);
-}
-
-.etf-metric {
-  min-width: 0;
-  padding: 4px 12px 12px;
-  border-inline-end: 1px solid var(--wb-border);
-}
-
-.etf-metric:last-child {
-  border-inline-end: 0;
-}
-
-.etf-metric__label,
-.etf-metric small,
 .etf-name-cell span {
   display: block;
   color: var(--wb-muted);
   font-size: 12px;
 }
 
-.etf-metric strong {
-  display: block;
-  margin: 3px 0;
-  font-size: 18px;
-  line-height: 24px;
+.etf-activity-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  align-items: center;
+  min-width: 0;
+  margin-bottom: 12px;
+  padding: 8px 0;
+  color: var(--wb-muted);
+  font-size: 12px;
+  line-height: 18px;
+  border-bottom: 1px solid var(--wb-border);
+}
+
+.etf-activity-summary > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.etf-activity-summary strong,
+.etf-activity-summary b {
+  color: var(--wb-ink);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.etf-activity-summary .etf-value--positive {
+  color: var(--wb-positive);
+}
+
+.etf-activity-summary .etf-value--negative {
+  color: var(--wb-negative);
+}
+
+.etf-activity-summary__warning {
+  color: var(--wb-warning);
 }
 
 .etf-compact-meta,
@@ -1244,27 +1148,6 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
 }
 
 @media (max-width: 760px) {
-  .etf-home-activity__items {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .etf-home-activity__item {
-    grid-template-columns: minmax(0, 1.3fr) minmax(82px, 0.8fr) minmax(82px, 0.8fr);
-    gap: 8px;
-  }
-
-  .etf-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
-  .etf-metric:nth-child(2) {
-    border-inline-end: 0;
-  }
-
-  .etf-metric:nth-child(-n + 2) {
-    border-bottom: 1px solid var(--wb-border);
-  }
-
   .etf-methodology-grid,
   .etf-rule-list {
     grid-template-columns: minmax(0, 1fr);

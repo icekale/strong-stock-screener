@@ -404,8 +404,10 @@ describe('EtfRadarView', () => {
 
     expect(api.getEtfExcessFlow).toHaveBeenCalledWith(60);
     expect(wrapper.find('[data-testid="etf-excess-flow-panel"]').exists()).toBe(true);
-    expect(wrapper.text()).toContain('十倍量增加');
-    expect(wrapper.text()).toContain('十倍量减少');
+    expect(wrapper.get('[data-testid="etf-activity-summary"]').text()).toContain('方向分歧');
+    expect(wrapper.get('[data-testid="etf-activity-summary"]').text()).toContain('覆盖');
+    expect(wrapper.findAll('.etf-metric')).toHaveLength(0);
+    expect(wrapper.find('.etf-source-statuses').exists()).toBe(false);
     expect(wrapper.text()).toContain('交叉验证');
     expect(wrapper.text()).toContain('方向分歧');
     expect(wrapper.findAll('[data-testid="etf-activity-table"]')).toHaveLength(1);
@@ -436,10 +438,6 @@ describe('EtfRadarView', () => {
     expect(wrapper.text()).toContain('▲ +10.50%');
     expect(wrapper.text()).toContain('▼ -9.25%');
     expect(wrapper.text()).toContain('10.5倍');
-    const fingerprint = wrapper.get('[data-testid="baseline-fingerprint"]');
-    expect(fingerprint.text()).toContain('基线指纹 0123456789...');
-    expect(fingerprint.attributes('title')).toBe(BASELINE_FINGERPRINT);
-    expect(wrapper.text()).not.toContain(BASELINE_FINGERPRINT);
     const activityTable = wrapper.get('[data-testid="etf-activity-table"]');
     expect(activityTable.get('[aria-label="ETF活动统一表"]').attributes()).toMatchObject({ role: 'region', tabindex: '0' });
     expect(wrapper.get('button[aria-expanded="true"]').attributes('aria-controls')).toBe('etf-validation-content');
@@ -769,8 +767,8 @@ describe('EtfRadarView', () => {
     const wrapper = await mountView();
     await openTab(wrapper, 1);
     await wrapper.get('button[aria-expanded="false"]').trigger('click');
-    const divergenceMetric = wrapper.findAll('.etf-metric').find(metric => metric.text().includes('方向分歧'))!;
-    expect(divergenceMetric.get('strong').classes()).not.toContain('etf-value--warning');
+    const activitySummary = wrapper.get('[data-testid="etf-activity-summary"]');
+    expect(activitySummary.text()).toContain('方向分歧');
 
     for (const label of ['方向分歧', '数据不全']) {
       const row = wrapper.findAll('[data-testid="validation-row"]').find(item => item.text().includes(label))!;

@@ -12,7 +12,12 @@ import {
   formatPlainShares as formatPlainSharesValue,
   validationStateLabel
 } from '@/utils/domain/capitalSignals';
-import { buildHuijinRanking, buildHuijinTrajectory } from '@/utils/domain/huijinTrajectory';
+import {
+  buildHuijinExceptions,
+  buildHuijinRanking,
+  buildHuijinTrajectory,
+  buildNormalizedTrend
+} from '@/utils/domain/huijinTrajectory';
 
 defineOptions({ name: 'HuijinTrajectoryPanel' });
 
@@ -34,6 +39,9 @@ const emit = defineEmits<{
 }>();
 
 const ranking = computed(() => buildHuijinRanking(props.overview.core_items));
+const exceptions = computed(() =>
+  buildHuijinExceptions(props.overview.core_items, props.overview.validation_groups)
+);
 const selectedItem = computed(
   () => props.overview.core_items.find(item => item.symbol === props.selectedSymbol) ?? ranking.value[0] ?? null
 );
@@ -50,24 +58,25 @@ const trajectory = computed(() =>
     ? buildHuijinTrajectory(selectedItem.value, props.history?.points ?? [], realDates.value)
     : { dates: [], values: [] }
 );
-const indexTrend = computed(() => {
-  const pointsByDate = new Map(
-    (props.indexHistory?.points ?? []).map(point => [point.trade_date, point.index_change_pct ?? null])
-  );
-  let cumulative = 0;
-  return realDates.value.map(date => {
-    const change = pointsByDate.get(date);
-    if (change === null || change === undefined) return null;
-    cumulative = ((1 + cumulative / 100) * (1 + change / 100) - 1) * 100;
-    return cumulative;
-  });
-});
 const baselineDate = computed(
   () =>
     selectedItem.value?.report_period ??
     props.overview.core_items.find(item => item.report_period)?.report_period ??
     '--'
 );
+const indexTrend = computed(() => {
+  const pointsByDate = new Map(
+    (props.indexHistory?.points ?? []).map(point => [point.trade_date, point.index_change_pct ?? null])
+  );
+  let cumulative = 0;
+  return trajectory.value.dates.map(date => {
+    if (date === baselineDate.value) return 0;
+    const change = pointsByDate.get(date);
+    if (change === null || change === undefined) return null;
+    cumulative = ((1 + cumulative / 100) * (1 + change / 100) - 1) * 100;
+    return cumulative;
+  });
+});
 const availableCount = computed(() => props.overview.activity.available_core_count);
 const expansionCount = computed(
   () => props.overview.core_items.filter(item => (item.cumulative_baseline_change_pct ?? 0) > 0).length
@@ -78,10 +87,15 @@ const contractionCount = computed(
 const selectedHistoryPoints = computed(() =>
   (props.history?.points ?? []).filter(point => point.symbol === selectedItem.value?.symbol)
 );
+const hasIndexTrend = computed(() =>
+  indexTrend.value.some(
+    (value, index) => value !== null && trajectory.value.dates[index] !== baselineDate.value
+  )
+);
 const hasRealHistory = computed(() =>
   selectedHistoryPoints.value.some(point => point.cumulative_baseline_change_pct !== null) || hasIndexTrend.value
 );
-const hasIndexTrend = computed(() => indexTrend.value.some(value => value !== null));
+const normalizedTrend = computed(() => buildNormalizedTrend(trajectory.value.values, indexTrend.value));
 const rankingMaxMagnitude = computed(() =>
   Math.max(0, ...ranking.value.map(item => Math.abs(item.cumulative_baseline_change_pct ?? 0)))
 );
@@ -96,11 +110,11 @@ const chartOption = computed<EChartsOption>(() => ({
   yAxis: { type: 'value', axisLabel: { formatter: (value: number) => `${value.toFixed(0)}%` } },
   series: [
     {
-      name: '持仓趋势',
+      name: 'ETF 份额代理',
       type: 'line',
       connectNulls: false,
       showSymbol: true,
-      data: trajectory.value.values
+      data: normalizedTrend.value.etf
     },
     ...(hasIndexTrend.value
       ? [
@@ -109,7 +123,8 @@ const chartOption = computed<EChartsOption>(() => ({
             type: 'line' as const,
             connectNulls: false,
             showSymbol: true,
-            data: indexTrend.value
+            lineStyle: { type: 'dashed' as const },
+            data: normalizedTrend.value.index
           }
         ]
       : [])
@@ -164,6 +179,14 @@ function itemDataDate(item: HuijinEtfActivityItem) {
 function detailAriaLabel(item: HuijinEtfActivityItem) {
   return `${item.name} ${item.symbol}，确认持仓比例 ${formatHoldingPct(item.confirmed_huijin_holding_pct)}，累计偏离 ${formatDirectionalPercent(item.cumulative_baseline_change_pct)} · ${deviationDirection(item.cumulative_baseline_change_pct)}，最近日变化 ${formatDirectionalPercent(item.daily_change_pct)}，验证状态 ${itemValidationState(item)}，数据日期 ${itemDataDate(item)}`;
 }
+
+function exceptionLabel(item: HuijinEtfActivityItem) {
+  if (item.is_tenfold || item.is_tenfold_share_change) {
+    return item.direction === 'decrease' ? '超量赎回' : '超量申购';
+  }
+  if (item.total_shares === null || item.previous_total_shares === null) return '数据待补齐';
+  return itemValidationState(item);
+}
 </script>
 
 <template>
@@ -187,50 +210,18 @@ function detailAriaLabel(item: HuijinEtfActivityItem) {
       </div>
     </div>
 
-    <div class="huijin-trajectory__sources" aria-label="数据来源状态">
-      <span v-for="source in overview.source_status" :key="`${source.source}-${source.detail}`">
-        {{ source.source }} · {{ source.status }} · {{ source.detail }}
-      </span>
+    <div class="huijin-trajectory__sources" aria-label="数据口径">
+      <span>ETF 份额代理趋势：交易所份额日度变化</span>
+      <span>汇金确认持仓只在报告期更新</span>
     </div>
 
     <div class="huijin-trajectory__main">
-      <ul class="huijin-ranking" aria-label="核心 ETF 累计偏离排行">
-        <li v-for="item in ranking" :key="item.symbol">
-          <button
-            data-testid="huijin-ranking-row"
-            type="button"
-            :class="[
-              valueClass(item.cumulative_baseline_change_pct),
-              { 'huijin-ranking__row--selected': item.symbol === selectedItem?.symbol }
-            ]"
-            :aria-pressed="item.symbol === selectedItem?.symbol"
-            @click="emit('select', item.symbol)"
-          >
-            <span class="huijin-ranking__identity">
-              <strong>{{ item.name }}</strong>
-              <small>{{ item.symbol }}</small>
-            </span>
-            <span class="huijin-ranking__value">
-              {{ formatDirectionalPercent(item.cumulative_baseline_change_pct) }} ·
-              {{ deviationDirection(item.cumulative_baseline_change_pct) }}
-            </span>
-            <span data-testid="huijin-ranking-track" class="huijin-ranking__track" aria-hidden="true">
-              <span data-testid="huijin-ranking-zero" class="huijin-ranking__zero" aria-hidden="true" />
-              <span
-                data-testid="huijin-ranking-bar"
-                class="huijin-ranking__bar"
-                :class="rankingBarClass(item.cumulative_baseline_change_pct)"
-                :style="rankingBarStyle(item.cumulative_baseline_change_pct)"
-                aria-hidden="true"
-              />
-            </span>
-          </button>
-        </li>
-      </ul>
-
-      <div class="huijin-selected">
+      <section class="huijin-selected" aria-label="ETF 份额代理趋势">
         <div class="huijin-selected__heading">
-          <span>选中 ETF 持仓与指数走势</span>
+          <div>
+            <span>ETF 份额代理趋势</span>
+            <small>相对报告期归一化 · 指数走势为对照，不代表汇金已确认增减持</small>
+          </div>
           <strong data-testid="huijin-selected-symbol">{{ selectedItem?.symbol }}</strong>
         </div>
         <p
@@ -251,12 +242,13 @@ function detailAriaLabel(item: HuijinEtfActivityItem) {
         >
           {{ indexHistoryError }}
         </p>
-        <EChart
-          v-if="(history || indexHistory) && hasRealHistory"
-          :option="chartOption"
-          :height="286"
-          :loading="historyLoading || Boolean(indexHistoryLoading)"
-        />
+        <div v-if="(history || indexHistory) && hasRealHistory" data-testid="huijin-overview-chart">
+          <EChart
+            :option="chartOption"
+            :height="320"
+            :loading="historyLoading || Boolean(indexHistoryLoading)"
+          />
+        </div>
         <div
           v-else
           data-testid="huijin-trajectory-empty"
@@ -266,6 +258,78 @@ function detailAriaLabel(item: HuijinEtfActivityItem) {
         >
           {{ historyError || (historyLoading ? '历史加载中' : '暂无可用历史轨迹') }}
         </div>
+      </section>
+
+      <div class="huijin-trajectory__side">
+        <section data-testid="huijin-exception-list" class="huijin-exceptions" aria-label="今日异常">
+          <div class="huijin-section-heading">
+            <div>
+              <span>今日异常</span>
+              <small>优先查看份额变化异常或验证不完整的 ETF</small>
+            </div>
+            <strong>{{ exceptions.length }}</strong>
+          </div>
+          <p v-if="exceptions.length === 0" class="huijin-exceptions__empty">今日无显著份额异常</p>
+          <button
+            v-for="item in exceptions"
+            :key="item.symbol"
+            data-testid="huijin-exception-item"
+            type="button"
+            class="huijin-exceptions__item"
+            @click="emit('select', item.symbol)"
+          >
+            <span>
+              <strong>{{ item.name }}</strong>
+              <small>{{ item.symbol }}</small>
+            </span>
+            <span :class="valueClass(item.share_delta)">
+              {{ exceptionLabel(item) }}
+              <small>{{ formatDirectionalPercent(item.daily_change_pct) }}</small>
+            </span>
+          </button>
+        </section>
+
+        <section data-testid="huijin-ranking-list" class="huijin-ranking" aria-label="核心 ETF 累计偏离排行">
+          <div class="huijin-section-heading">
+            <div>
+              <span>核心 ETF 排行</span>
+              <small>按相对确认基线的累计偏离排序</small>
+            </div>
+          </div>
+          <ul>
+            <li v-for="item in ranking" :key="item.symbol">
+              <button
+                data-testid="huijin-ranking-row"
+                type="button"
+                :class="[
+                  valueClass(item.cumulative_baseline_change_pct),
+                  { 'huijin-ranking__row--selected': item.symbol === selectedItem?.symbol }
+                ]"
+                :aria-pressed="item.symbol === selectedItem?.symbol"
+                @click="emit('select', item.symbol)"
+              >
+                <span class="huijin-ranking__identity">
+                  <strong>{{ item.name }}</strong>
+                  <small>{{ item.symbol }}</small>
+                </span>
+                <span class="huijin-ranking__value">
+                  {{ formatDirectionalPercent(item.cumulative_baseline_change_pct) }} ·
+                  {{ deviationDirection(item.cumulative_baseline_change_pct) }}
+                </span>
+                <span data-testid="huijin-ranking-track" class="huijin-ranking__track" aria-hidden="true">
+                  <span data-testid="huijin-ranking-zero" class="huijin-ranking__zero" aria-hidden="true" />
+                  <span
+                    data-testid="huijin-ranking-bar"
+                    class="huijin-ranking__bar"
+                    :class="rankingBarClass(item.cumulative_baseline_change_pct)"
+                    :style="rankingBarStyle(item.cumulative_baseline_change_pct)"
+                    aria-hidden="true"
+                  />
+                </span>
+              </button>
+            </li>
+          </ul>
+        </section>
       </div>
     </div>
 
@@ -400,21 +464,63 @@ function detailAriaLabel(item: HuijinEtfActivityItem) {
 
 .huijin-trajectory__main {
   display: grid;
-  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+  grid-template-columns: minmax(0, 1.3fr) minmax(300px, 0.7fr);
   gap: var(--wb-gap);
   min-width: 0;
 }
 
 .huijin-ranking,
-.huijin-selected {
+.huijin-selected,
+.huijin-exceptions {
   min-width: 0;
   background: var(--wb-surface);
   border-block: 1px solid var(--wb-border);
 }
 
-.huijin-ranking {
+.huijin-trajectory__side {
+  display: grid;
+  align-content: start;
+  gap: var(--wb-gap);
+  min-width: 0;
+}
+
+.huijin-section-heading {
   display: flex;
-  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--wb-border);
+}
+
+.huijin-section-heading span {
+  display: block;
+  color: var(--wb-ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.huijin-section-heading small,
+.huijin-selected__heading small {
+  display: block;
+  margin-top: 3px;
+  color: var(--wb-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.huijin-section-heading > strong {
+  color: var(--wb-primary);
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.huijin-ranking {
+  margin: 0;
+  padding: 0;
+}
+
+.huijin-ranking ul {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -422,7 +528,6 @@ function detailAriaLabel(item: HuijinEtfActivityItem) {
 
 .huijin-ranking li {
   display: flex;
-  flex: 1 1 0;
   min-width: 0;
   border-bottom: 1px solid var(--wb-border);
 }
@@ -452,6 +557,76 @@ function detailAriaLabel(item: HuijinEtfActivityItem) {
   flex: 1 1 0;
   padding: 8px 12px;
   border-bottom: 0;
+}
+
+.huijin-exceptions {
+  padding-bottom: 2px;
+}
+
+.huijin-exceptions__empty {
+  margin: 0;
+  padding: 18px 12px;
+  color: var(--wb-muted);
+  font-size: 12px;
+  text-align: center;
+}
+
+.huijin-exceptions__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 9px 12px;
+  color: var(--wb-ink);
+  font: inherit;
+  text-align: start;
+  background: var(--wb-surface);
+  border: 0;
+  border-bottom: 1px solid var(--wb-border);
+  cursor: pointer;
+}
+
+.huijin-exceptions__item:last-child {
+  border-bottom: 0;
+}
+
+.huijin-exceptions__item:hover {
+  background: var(--wb-primary-soft);
+}
+
+.huijin-exceptions__item > span {
+  min-width: 0;
+}
+
+.huijin-exceptions__item > span:first-child {
+  overflow: hidden;
+}
+
+.huijin-exceptions__item strong,
+.huijin-exceptions__item small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.huijin-exceptions__item strong {
+  font-size: 12px;
+}
+
+.huijin-exceptions__item small {
+  margin-top: 2px;
+  color: var(--wb-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.huijin-exceptions__item > span:last-child {
+  flex: 0 0 auto;
+  color: var(--wb-warning);
+  font-size: 11px;
+  font-weight: 700;
+  text-align: end;
 }
 
 .huijin-trajectory__table button:last-child {
@@ -541,6 +716,10 @@ function detailAriaLabel(item: HuijinEtfActivityItem) {
   color: var(--wb-ink);
   font-size: 13px;
   font-variant-numeric: tabular-nums;
+}
+
+.huijin-selected__heading > div {
+  min-width: 0;
 }
 
 .huijin-trajectory__empty {
@@ -705,5 +884,11 @@ function detailAriaLabel(item: HuijinEtfActivityItem) {
     border-bottom: 0;
   }
 
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .huijin-trajectory button {
+    transition: none;
+  }
 }
 </style>

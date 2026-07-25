@@ -205,6 +205,13 @@ describe('HuijinTrajectoryPanel', () => {
   it('renders the approved holdings trajectory and emits ranking selection', async () => {
     const wrapper = mountPanel();
 
+    expect(wrapper.find('[data-testid="huijin-overview-chart"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="huijin-exception-list"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="huijin-ranking-list"]').exists()).toBe(true);
+    expect(wrapper.text()).toContain('ETF 份额代理趋势');
+    expect(wrapper.text()).toContain('今日异常');
+    expect(wrapper.text()).toContain('汇金确认持仓只在报告期更新');
+
     const rankingRows = wrapper.findAll('[data-testid="huijin-ranking-row"]');
     expect(rankingRows).toHaveLength(7);
     expect(wrapper.get('[data-testid="huijin-baseline-date"]').text()).toContain('2025-12-31');
@@ -243,11 +250,12 @@ describe('HuijinTrajectoryPanel', () => {
     const chart = wrapper.getComponent(ChartStub);
     const option = chart.props('option') as EChartsOption;
     const series = (option.series as Array<{ connectNulls?: boolean; data?: unknown[] }>)[0]!;
-    expect(chart.props('height')).toBe(286);
+    expect(chart.props('height')).toBe(320);
     expect(chart.props('loading')).toBe(false);
     expect(option.animation).toBe(false);
+    expect(Array.isArray(option.yAxis)).toBe(false);
     expect(series.connectNulls).toBe(false);
-    expect(series.data).toEqual([0, -74, null, -75.55]);
+    expect(series.data).toEqual([100, 26, null, 24.45]);
 
     const detailRows = wrapper.findAll('[data-testid="huijin-detail-row"]');
     expect(detailRows).toHaveLength(7);
@@ -279,8 +287,22 @@ describe('HuijinTrajectoryPanel', () => {
     const series = option.series as Array<{ name?: string; type?: string }>;
 
     expect(series).toHaveLength(2);
-    expect(series.map(item => item.name)).toEqual(['持仓趋势', '指数走势']);
+    expect(series.map(item => item.name)).toEqual(['ETF 份额代理', '指数走势']);
     expect(series.every(item => item.type === 'line')).toBe(true);
+  });
+
+  it('shows one neutral empty state when there are no meaningful exceptions', () => {
+    const overview = overviewFixture();
+    overview.core_items = overview.core_items.map(item => ({
+      ...item,
+      is_tenfold: false,
+      total_shares: 1_000_000,
+      previous_total_shares: 990_000
+    }));
+    const wrapper = mountPanel({ overview, history: historyFixture([]) });
+
+    expect(wrapper.get('[data-testid="huijin-exception-list"]').text()).toContain('今日无显著份额异常');
+    expect(wrapper.find('[data-testid="huijin-exception-item"]').exists()).toBe(false);
   });
 
   it('renders daily change, validation status, and data date in the detail table', () => {

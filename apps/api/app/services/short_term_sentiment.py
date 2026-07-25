@@ -85,14 +85,16 @@ def build_short_term_sentiment(
     ]
     break_board_pool = [item for item in items if item.break_board_count > 0]
 
-    limit_up_pool = sorted(limit_up_pool, key=_stock_sort_key)[:limit]
-    break_board_pool = sorted(break_board_pool, key=_break_sort_key)[:limit]
+    full_limit_up_pool = sorted(limit_up_pool, key=_stock_sort_key)
+    full_break_board_pool = sorted(break_board_pool, key=_break_sort_key)
+    limit_up_pool = full_limit_up_pool[:limit]
+    break_board_pool = full_break_board_pool[:limit]
     ladder = _build_ladder(limit_up_pool)
-    hot_industries = _build_hot_industries(limit_up_pool, break_board_pool)
+    hot_industries = _build_hot_industries(full_limit_up_pool, full_break_board_pool)
     metrics = ShortTermSentimentMetrics(
-        limit_up_count=len(limit_up_pool),
-        break_board_count=len(break_board_pool),
-        max_consecutive_boards=max((item.board_count for item in limit_up_pool), default=0),
+        limit_up_count=len(full_limit_up_pool),
+        break_board_count=len(full_break_board_pool),
+        max_consecutive_boards=max((item.board_count for item in full_limit_up_pool), default=0),
         hot_industry_count=len(hot_industries),
     )
 

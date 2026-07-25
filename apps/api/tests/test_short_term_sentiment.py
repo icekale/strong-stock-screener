@@ -244,6 +244,20 @@ def test_short_term_sentiment_builds_limit_up_pool_ladder_and_break_pool() -> No
     assert result.source_status[0].status == "success"
 
 
+def test_short_term_sentiment_counts_full_pools_but_limits_display_rows() -> None:
+    result = build_short_term_sentiment(
+        FakeSentimentCandidateProvider(),
+        trade_date="2026-06-26",
+        limit=2,
+    )
+
+    assert result.metrics.limit_up_count == 3
+    assert result.metrics.break_board_count == 2
+    assert len(result.limit_up_pool) == 2
+    assert len(result.break_board_pool) == 2
+    assert result.metrics.max_consecutive_boards == 3
+
+
 def test_market_emotion_snapshot_combines_limit_up_pool_and_realtime_market_overview() -> None:
     result = build_market_emotion_snapshot(
         FakeSentimentCandidateProvider(),

@@ -214,6 +214,38 @@ class FakeCapitalProvider:
         )
 
 
+class OfficialBaselineFakeProvider(FakeCapitalProvider):
+    def __init__(self) -> None:
+        super().__init__()
+        self.baseline_calls: list[tuple[str, tuple[str, ...]]] = []
+
+    def get_etf_baseline_rows(
+        self,
+        baseline_date: str,
+        symbols: list[str] | tuple[str, ...],
+    ) -> CapitalProviderResult[EtfSharePoint]:
+        self.baseline_calls.append((baseline_date, tuple(symbols)))
+        rows = [
+            EtfSharePoint(
+                trade_date=baseline_date,
+                symbol=symbol,
+                total_shares=(88_829_587_700 if symbol == "510300.SH" else 100_000),
+                date_validation="exchange_official_v1",
+            )
+            for symbol in symbols
+        ]
+        return CapitalProviderResult(
+            rows=rows,
+            source_status=[
+                StrongStockSourceStatus(
+                    source="交易所年末 ETF 份额",
+                    status="success",
+                    detail="fake official baseline",
+                )
+            ],
+        )
+
+
 class FakeQuoteProvider:
     def get_quotes(self, symbols: list[str]) -> list[SimpleNamespace]:
         return [SimpleNamespace(symbol=symbol, last_price=4.25) for symbol in symbols]
@@ -391,6 +423,26 @@ def test_service_builds_complete_huijin_activity_and_legacy_mapping(tmp_path: Pa
     assert holder_provider.calls == [
         {symbol: definition.name for symbol, definition in ALL_ETFS.items()}
     ]
+
+
+def test_overview_prefers_official_year_end_shares_over_derived_holder_ratio(
+    tmp_path: Path,
+) -> None:
+    provider = OfficialBaselineFakeProvider()
+    service, store = _service(
+        tmp_path,
+        provider=provider,
+        holder_provider=FakeHolderProvider(),
+    )
+    _seed_prior_rows(store)
+
+    snapshot = service.overview(force=True)
+
+    item = next(row for row in snapshot.core_items if row.symbol == "510300.SH")
+    assert item.baseline_total_shares == 88_829_587_700
+    assert item.baseline_source_kind == "official"
+    assert item.baseline_change_pct == pytest.approx(20 / 88_829_587_700 * 100)
+    assert provider.baseline_calls == [("2025-12-31", tuple(ALL_ETFS))]
 
 
 def test_overview_before_disclosure_uses_latest_completed_trade_date(tmp_path: Path) -> None:

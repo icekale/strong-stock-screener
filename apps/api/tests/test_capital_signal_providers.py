@@ -19,6 +19,7 @@ from app.providers.capital_signals import (
     parse_szse_etf_share_payload,
     parse_szse_margin_payload,
 )
+from app.models import EtfSharePoint, StrongStockSourceStatus
 
 
 SSE_MARGIN_FIXTURE = {
@@ -32,6 +33,62 @@ SSE_MARGIN_FIXTURE = {
         }
     ]
 }
+
+
+def test_provider_combines_dated_sse_snapshot_and_szse_history_for_baseline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = OfficialCapitalDataProvider()
+
+    def sse_rows(_trade_date: str, symbols: list[str] | tuple[str, ...]):
+        return CapitalProviderResult(
+            rows=[
+                EtfSharePoint(
+                    trade_date="2025-12-31",
+                    symbol=symbol,
+                    total_shares=100,
+                )
+                for symbol in symbols
+            ],
+            source_status=[
+                StrongStockSourceStatus(source="SSE", status="success", detail="ok")
+            ],
+        )
+
+    def szse_rows(
+        _start_date: str,
+        _end_date: str,
+        symbols: list[str] | tuple[str, ...],
+    ):
+        return CapitalProviderResult(
+            rows=[
+                EtfSharePoint(
+                    trade_date="2025-12-31",
+                    symbol=symbol,
+                    total_shares=200,
+                    date_validation="szse_daily_v1",
+                )
+                for symbol in symbols
+            ],
+            source_status=[
+                StrongStockSourceStatus(source="SZSE", status="success", detail="ok")
+            ],
+        )
+
+    monkeypatch.setattr(provider, "get_etf_share_rows", sse_rows)
+    monkeypatch.setattr(provider, "get_etf_share_history_rows", szse_rows)
+
+    result = provider.get_etf_baseline_rows(
+        "2025-12-31", ("510300.SH", "159915.SZ")
+    )
+
+    assert [(row.symbol, row.total_shares) for row in result.rows] == [
+        ("510300.SH", 100),
+        ("159915.SZ", 200),
+    ]
+    assert result.failed_symbols == ()
+    assert result.rejected_symbols == ()
+    assert result.empty_symbols == ()
 
 SZSE_MARGIN_FIXTURE = [
     {

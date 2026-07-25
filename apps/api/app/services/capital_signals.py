@@ -43,6 +43,7 @@ from app.services.huijin_etf_activity import (
     TENFOLD_BASELINE_PCT,
     VALIDATION_ETFS,
     build_baselines,
+    build_official_baselines,
     calculate_activity,
     validate_pair,
 )
@@ -67,6 +68,10 @@ class CapitalDataProvider(Protocol):
         start_date: str,
         end_date: str,
         symbols: list[str] | tuple[str, ...],
+    ) -> CapitalProviderResult[EtfSharePoint]: ...
+
+    def get_etf_baseline_rows(
+        self, baseline_date: str, symbols: list[str] | tuple[str, ...]
     ) -> CapitalProviderResult[EtfSharePoint]: ...
 
 
@@ -611,7 +616,7 @@ class CapitalSignalService:
                     key="baseline_change_pct",
                     name="报告基准变化率",
                     description="baseline_change_pct = share_delta / baseline_total_shares * 100",
-                    availability="持仓报告基准可用时计算",
+                    availability="优先使用 2025-12-31 交易所官方总份额；官方源失败时降级为持仓报告推导",
                 ),
                 EtfRadarFactorDefinition(
                     key="cumulative_baseline_change_pct",
@@ -623,6 +628,8 @@ class CapitalSignalService:
             ],
             limitations=[
                 "深交所历史份额从本服务上线后逐日归档，不向前填充。",
+                "当前活动基准固定为 2025-12-31 交易所官方 ETF 总份额，与公开追踪口径一致。",
+                "基金持有人披露的汇金份额和比例只用于确认信息及官方基准失败时的降级推导。",
                 "ETF 总份额活动不能识别具体投资者或买方身份。",
                 "付费内容中的“7 月 6 日新规”不实现，也不作推测。",
             ],
@@ -643,10 +650,20 @@ class CapitalSignalService:
         baselines_complete = _has_complete_baseline_period(
             cached_baselines, expected_period
         )
+        official_baselines_complete = _has_complete_official_baseline_period(
+            cached_baselines, expected_period
+        )
         positions_complete = _has_position_coverage(
             cached_positions, cached_baselines, expected_period
         )
-        if baselines_complete and (not positions_required or positions_complete):
+        official_loader = getattr(self.provider, "get_etf_baseline_rows", None)
+        if (
+            (
+                (official_loader is None and baselines_complete)
+                or official_baselines_complete
+            )
+            and (not positions_required or positions_complete)
+        ):
             return (
                 cached_positions,
                 cached_baselines,
@@ -656,6 +673,7 @@ class CapitalSignalService:
                         status="success",
                         detail=(
                             f"完整报告期 {expected_period}，池版本 {POOL_VERSION}"
+                            + ("，交易所官方年末总份额" if official_baselines_complete else "")
                             + ("，持有人记录完整" if positions_required else "")
                         ),
                     )
@@ -691,8 +709,45 @@ class CapitalSignalService:
             )
 
         result = None
-        if self.holder_provider is not None:
+        official_status: list[StrongStockSourceStatus] = []
+        if official_loader is not None and not official_baselines_complete:
             self._baseline_refresh_attempts[attempt_key] = now
+            try:
+                official_result = official_loader(expected_period, tuple(ALL_ETFS))
+            except Exception as exc:
+                official_result = CapitalProviderResult(
+                    rows=[],
+                    source_status=[
+                        StrongStockSourceStatus(
+                            source="交易所 ETF 年末基准",
+                            status="failed",
+                            detail=str(exc),
+                        )
+                    ],
+                )
+            official_status = list(official_result.source_status)
+            fetched_official_baselines = build_official_baselines(
+                official_result.rows,
+                positions=cached_positions,
+            )
+            if _has_complete_baseline_period(fetched_official_baselines, expected_period):
+                baselines = _merge_baselines(cached_baselines, fetched_official_baselines)
+                self.store.save_huijin_baselines(baselines)
+                cached_baselines = baselines
+                baselines_complete = _has_complete_baseline_period(
+                    baselines, expected_period
+                )
+                official_baselines_complete = _has_complete_official_baseline_period(
+                    baselines, expected_period
+                )
+                positions_complete = _has_position_coverage(
+                    cached_positions, baselines, expected_period
+                )
+                if not positions_required or positions_complete:
+                    return cached_positions, baselines, official_status
+
+        if self.holder_provider is not None:
+            self._baseline_refresh_attempts.setdefault(attempt_key, now)
             try:
                 result = self.holder_provider.get_holder_positions(
                     {symbol: definition.name for symbol, definition in ALL_ETFS.items()}
@@ -728,11 +783,12 @@ class CapitalSignalService:
                 positions, baselines, expected_period
             )
             if baselines_complete and (not positions_required or positions_complete):
-                return positions, baselines, result_status
+                return positions, baselines, [*official_status, *result_status]
             return (
                 positions,
                 baselines,
                 [
+                    *official_status,
                     *result_status,
                     StrongStockSourceStatus(
                         source="汇金 ETF 基准缓存",
@@ -747,7 +803,10 @@ class CapitalSignalService:
                 ],
             )
 
-        source_status = list(result.source_status) if result is not None else []
+        source_status = [
+            *official_status,
+            *(list(result.source_status) if result is not None else []),
+        ]
         source_status = _position_aware_statuses(
             source_status,
             cached_positions,
@@ -1293,6 +1352,19 @@ def _has_complete_baseline_period(
     return symbols == set(ALL_ETFS)
 
 
+def _has_complete_official_baseline_period(
+    baselines: list[HuijinEtfBaseline], report_period: str
+) -> bool:
+    symbols = {
+        row.symbol
+        for row in baselines
+        if row.pool_version == POOL_VERSION
+        and row.report_period == report_period
+        and row.source_kind == "official"
+    }
+    return symbols == set(ALL_ETFS)
+
+
 def _has_position_coverage(
     positions: list[EtfHolderPosition],
     baselines: list[HuijinEtfBaseline],
@@ -1322,6 +1394,14 @@ def _has_position_coverage(
         if row.pool_version == POOL_VERSION and row.report_period == report_period
     }
     if set(position_by_symbol) != set(expected_by_symbol):
+        return False
+    if any(
+        position_by_symbol[symbol].confirmed_huijin_shares is None
+        or position_by_symbol[symbol].confirmed_huijin_holding_pct is None
+        or baseline.confirmed_huijin_shares is None
+        or baseline.confirmed_huijin_holding_pct is None
+        for symbol, baseline in expected_by_symbol.items()
+    ):
         return False
     return all(
         isclose(
@@ -1379,13 +1459,20 @@ def _merge_baselines(
         for row in cached
         if row.symbol in ALL_ETFS
     }
-    merged.update(
-        {
-            (row.pool_version, row.report_period, row.symbol): row
-            for row in fetched
-            if row.symbol in ALL_ETFS
-        }
-    )
+    for row in fetched:
+        if row.symbol not in ALL_ETFS:
+            continue
+        key = (row.pool_version, row.report_period, row.symbol)
+        existing = merged.get(key)
+        if existing is not None and existing.source_kind == "official" and row.source_kind == "derived":
+            merged[key] = existing.model_copy(
+                update={
+                    "confirmed_huijin_shares": row.confirmed_huijin_shares,
+                    "confirmed_huijin_holding_pct": row.confirmed_huijin_holding_pct,
+                }
+            )
+        else:
+            merged[key] = row
     return sorted(
         merged.values(),
         key=lambda row: (row.report_period, row.pool_version, row.symbol),

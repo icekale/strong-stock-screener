@@ -8,6 +8,7 @@ from types import MappingProxyType
 from app.models import (
     EtfActivityDirection,
     EtfHolderPosition,
+    EtfSharePoint,
     HuijinEtfActivityItem,
     HuijinEtfBaseline,
     HuijinEtfRole,
@@ -127,6 +128,59 @@ def build_baselines(positions: list[EtfHolderPosition]) -> list[HuijinEtfBaselin
                     source="基金持有人披露持仓与比例推导",
                 )
             )
+    return baselines
+
+
+def build_official_baselines(
+    rows: list[EtfSharePoint],
+    *,
+    positions: list[EtfHolderPosition] | None = None,
+) -> list[HuijinEtfBaseline]:
+    """Build year-end baselines from exchange-reported ETF total shares.
+
+    Holder disclosures remain auxiliary evidence. They may enrich the official
+    baseline with confirmed Huijin fields, but never replace its total shares.
+    """
+    holder_by_symbol = {
+        row.symbol: row
+        for row in build_baselines(positions or [])
+        if row.report_period == "2025-12-31"
+    }
+    rows_by_symbol = {
+        row.symbol: row
+        for row in rows
+        if row.symbol in ALL_ETFS
+        and row.trade_date == "2025-12-31"
+        and isfinite(row.total_shares)
+        and row.total_shares > 0
+    }
+    baselines: list[HuijinEtfBaseline] = []
+    for symbol, definition in ALL_ETFS.items():
+        row = rows_by_symbol.get(symbol)
+        if row is None:
+            continue
+        holder = holder_by_symbol.get(symbol)
+        baselines.append(
+            HuijinEtfBaseline(
+                baseline_id=f"2025-12-31:{POOL_VERSION}:{symbol}",
+                pool_version=POOL_VERSION,
+                symbol=symbol,
+                name=definition.name,
+                index_name=definition.index_name,
+                role=definition.role,
+                paired_symbol=definition.paired_symbol,
+                report_period="2025-12-31",
+                baseline_total_shares=row.total_shares,
+                confirmed_huijin_shares=(
+                    holder.confirmed_huijin_shares if holder is not None else None
+                ),
+                confirmed_huijin_holding_pct=(
+                    holder.confirmed_huijin_holding_pct if holder is not None else None
+                ),
+                source_kind="official",
+                source="交易所 2025-12-31 ETF 总份额",
+            )
+        )
     return baselines
 
 

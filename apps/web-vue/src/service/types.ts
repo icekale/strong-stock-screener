@@ -2074,7 +2074,7 @@ export type EtfAlertType = "single_high" | "single_upgrade" | "market_watch" | "
 export type HuijinEtfRole = "core" | "validator";
 export type EtfActivityDirection = "increase" | "decrease" | "flat" | "unknown";
 export type EtfValidationState = "confirmed_increase" | "confirmed_decrease" | "divergent" | "incomplete";
-export type HuijinBaselineSourceKind = "reported" | "derived";
+export type HuijinBaselineSourceKind = "reported" | "derived" | "official";
 
 export type CapitalSignalMetadata = {
   generated_at: string;
@@ -2106,8 +2106,8 @@ export type HuijinEtfBaseline = {
   paired_symbol: string | null;
   report_period: string;
   baseline_total_shares: number;
-  confirmed_huijin_shares: number;
-  confirmed_huijin_holding_pct: number;
+  confirmed_huijin_shares: number | null;
+  confirmed_huijin_holding_pct: number | null;
   source_kind: HuijinBaselineSourceKind;
   source: string;
 };

@@ -2110,7 +2110,7 @@ EtfActivityDirection = Literal["increase", "decrease", "flat", "unknown"]
 EtfValidationState = Literal[
     "confirmed_increase", "confirmed_decrease", "divergent", "incomplete"
 ]
-HuijinBaselineSourceKind = Literal["reported", "derived"]
+HuijinBaselineSourceKind = Literal["reported", "derived", "official"]
 
 
 class MarginMarketPoint(BaseModel):
@@ -2127,7 +2127,13 @@ class EtfSharePoint(BaseModel):
     symbol: str
     name: str | None = None
     total_shares: float
-    date_validation: Literal["unverified", "szse_dqgm_v1", "szse_daily_v1"] = "unverified"
+    date_validation: Literal[
+        "unverified",
+        "sse_official_v1",
+        "szse_dqgm_v1",
+        "szse_daily_v1",
+        "exchange_official_v1",
+    ] = "unverified"
     close: float | None = None
     share_change: float | None = None
     estimated_subscription_cny: float | None = None
@@ -2262,8 +2268,8 @@ class HuijinEtfBaseline(BaseModel):
     paired_symbol: str | None = None
     report_period: str
     baseline_total_shares: float = Field(gt=0)
-    confirmed_huijin_shares: float = Field(ge=0)
-    confirmed_huijin_holding_pct: float = Field(ge=0, le=100)
+    confirmed_huijin_shares: float | None = Field(default=None, ge=0)
+    confirmed_huijin_holding_pct: float | None = Field(default=None, ge=0, le=100)
     source_kind: HuijinBaselineSourceKind
     source: str
 

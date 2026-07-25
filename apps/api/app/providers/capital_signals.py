@@ -263,6 +263,64 @@ class OfficialCapitalDataProvider:
             empty_symbols=tuple(symbol for symbol in symbols if symbol in empty_symbols),
         )
 
+    def get_etf_baseline_rows(
+        self,
+        baseline_date: str,
+        symbols: Sequence[str],
+    ) -> CapitalProviderResult[EtfSharePoint]:
+        """Read the fixed year-end baseline from official exchange data.
+
+        SSE exposes the requested date through its dated snapshot endpoint;
+        SZSE requires the historical workbook endpoint because its snapshot
+        endpoint only returns the latest disclosed date.
+        """
+        sse_symbols = [symbol for symbol in symbols if symbol.endswith(".SH")]
+        szse_symbols = [symbol for symbol in symbols if symbol.endswith(".SZ")]
+        sse_result = self.get_etf_share_rows(baseline_date, sse_symbols)
+        szse_result = self.get_etf_share_history_rows(
+            baseline_date, baseline_date, szse_symbols
+        )
+        rows = [
+            row.model_copy(update={"date_validation": "sse_official_v1"})
+            for row in sse_result.rows
+            if row.trade_date == baseline_date and row.symbol in sse_symbols
+        ]
+        rows.extend(
+            row
+            for row in szse_result.rows
+            if row.trade_date == baseline_date and row.symbol in szse_symbols
+        )
+        expected = set(symbols)
+        covered = {row.symbol for row in rows}
+        return CapitalProviderResult(
+            rows=rows,
+            source_status=[*sse_result.source_status, *szse_result.source_status],
+            request_failures=sse_result.request_failures + szse_result.request_failures,
+            available_trade_dates=tuple(
+                sorted(
+                    set(sse_result.available_trade_dates)
+                    | set(szse_result.available_trade_dates)
+                )
+            ),
+            failed_symbols=tuple(
+                symbol
+                for symbol in symbols
+                if symbol in set(sse_result.failed_symbols) | set(szse_result.failed_symbols)
+            ),
+            rejected_symbols=tuple(
+                symbol
+                for symbol in symbols
+                if symbol in set(sse_result.rejected_symbols) | set(szse_result.rejected_symbols)
+            ),
+            empty_symbols=tuple(
+                symbol
+                for symbol in symbols
+                if symbol in expected - covered
+                and symbol not in set(sse_result.failed_symbols)
+                and symbol not in set(szse_result.failed_symbols)
+            ),
+        )
+
     def get_etf_share_history_rows(
         self,
         start_date: str,

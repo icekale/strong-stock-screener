@@ -5,7 +5,7 @@ from collections.abc import Mapping
 
 import pytest
 
-from app.models import EtfHolderPosition, HuijinEtfActivityItem, HuijinEtfBaseline
+from app.models import EtfHolderPosition, EtfSharePoint, HuijinEtfActivityItem, HuijinEtfBaseline
 from app.services import huijin_etf_activity
 from app.services.huijin_etf_activity import (
     ALL_ETFS,
@@ -13,6 +13,7 @@ from app.services.huijin_etf_activity import (
     VALIDATION_ETFS,
     EtfDefinition,
     calculate_activity,
+    build_official_baselines,
     validate_pair,
 )
 
@@ -164,6 +165,35 @@ def test_build_baselines_derives_confirmed_huijin_fixture() -> None:
     assert baseline.baseline_total_shares == pytest.approx(88_826_848_719, rel=1e-6)
     assert baseline.source_kind == "derived"
     assert baseline.source == "基金持有人披露持仓与比例推导"
+
+
+def test_build_official_baselines_keeps_exchange_total_shares_as_authoritative() -> None:
+    positions = [
+        _position(
+            symbol="510300.SH",
+            report_period="2025-12-31",
+            shares=73_513_100_000,
+            holding_pct=82.76,
+        )
+    ]
+    rows = [
+        EtfSharePoint(
+            trade_date="2025-12-31",
+            symbol="510300.SH",
+            total_shares=88_829_587_700,
+            date_validation="sse_official_v1",
+        )
+    ]
+
+    baselines = build_official_baselines(rows, positions=positions)
+
+    assert len(baselines) == 1
+    baseline = baselines[0]
+    assert baseline.baseline_total_shares == 88_829_587_700
+    assert baseline.source_kind == "official"
+    assert baseline.source == "交易所 2025-12-31 ETF 总份额"
+    assert baseline.confirmed_huijin_shares == 73_513_100_000
+    assert baseline.confirmed_huijin_holding_pct == pytest.approx(82.76)
 
 
 def test_build_baselines_skips_incomplete_groups_and_orders_snapshots() -> None:

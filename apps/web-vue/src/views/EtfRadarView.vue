@@ -197,7 +197,10 @@ function baselineCell(key: string, record: unknown) {
   if (key === 'baseline_total_shares') return formatPlainShares(baseline.baseline_total_shares);
   if (key === 'confirmed_huijin_shares') return formatPlainShares(baseline.confirmed_huijin_shares);
   if (key === 'confirmed_huijin_holding_pct') return formatHoldingPct(baseline.confirmed_huijin_holding_pct);
-  if (key === 'source_kind') return baseline.source_kind === 'reported' ? '报告披露' : '数据推导';
+  if (key === 'source_kind') {
+    if (baseline.source_kind === 'official') return '交易所官方';
+    return baseline.source_kind === 'reported' ? '报告披露' : '数据推导';
+  }
   return String(baseline[key as keyof HuijinEtfBaseline] ?? '--');
 }
 

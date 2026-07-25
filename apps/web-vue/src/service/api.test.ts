@@ -389,7 +389,7 @@ describe('apiRequest', () => {
     expectTypeOf<EtfValidationState>().toEqualTypeOf<
       'confirmed_increase' | 'confirmed_decrease' | 'divergent' | 'incomplete'
     >();
-    expectTypeOf<HuijinBaselineSourceKind>().toEqualTypeOf<'reported' | 'derived'>();
+    expectTypeOf<HuijinBaselineSourceKind>().toEqualTypeOf<'reported' | 'derived' | 'official'>();
     expectTypeOf<Pick<EtfRadarSummary, 'activity'>>().toEqualTypeOf<{
       activity: HuijinEtfActivitySummary;
     }>();

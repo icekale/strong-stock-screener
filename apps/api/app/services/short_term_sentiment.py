@@ -83,7 +83,15 @@ def build_short_term_sentiment(
         for item in items
         if item.last_limit_up_date is not None and _date_key(item.last_limit_up_date) == trade_date_key
     ]
-    break_board_pool = [item for item in items if item.break_board_count > 0]
+    break_board_pool = [
+        item
+        for item in items
+        if item.break_board_count > 0
+        and (
+            item.last_limit_up_date is None
+            or _date_key(item.last_limit_up_date) == trade_date_key
+        )
+    ]
 
     full_limit_up_pool = sorted(limit_up_pool, key=_stock_sort_key)
     full_break_board_pool = sorted(break_board_pool, key=_break_sort_key)

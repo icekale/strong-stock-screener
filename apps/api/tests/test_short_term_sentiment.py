@@ -227,14 +227,14 @@ def test_short_term_sentiment_builds_limit_up_pool_ladder_and_break_pool() -> No
 
     assert result.trade_date == "2026-06-26"
     assert result.metrics.limit_up_count == 3
-    assert result.metrics.break_board_count == 2
+    assert result.metrics.break_board_count == 1
     assert result.metrics.max_consecutive_boards == 3
     assert [item.symbol for item in result.limit_up_pool] == [
         "603001.SH",
         "603002.SH",
         "002003.SZ",
     ]
-    assert [item.symbol for item in result.break_board_pool] == ["002004.SZ", "603002.SH"]
+    assert [item.symbol for item in result.break_board_pool] == ["603002.SH"]
     assert result.ladder[0].board_count == 3
     assert result.ladder[0].items[0].name == "三板科技"
     assert result.ladder[1].board_count == 2
@@ -242,6 +242,16 @@ def test_short_term_sentiment_builds_limit_up_pool_ladder_and_break_pool() -> No
     assert result.hot_industries[0].limit_up_count == 2
     assert result.source_status[0].source == "fake涨停池"
     assert result.source_status[0].status == "success"
+
+
+def test_short_term_sentiment_excludes_historical_break_board_rows() -> None:
+    result = build_short_term_sentiment(
+        FakeSentimentCandidateProvider(),
+        trade_date="2026-06-26",
+        limit=20,
+    )
+
+    assert [item.symbol for item in result.break_board_pool] == ["603002.SH"]
 
 
 def test_short_term_sentiment_counts_full_pools_but_limits_display_rows() -> None:
@@ -252,9 +262,9 @@ def test_short_term_sentiment_counts_full_pools_but_limits_display_rows() -> Non
     )
 
     assert result.metrics.limit_up_count == 3
-    assert result.metrics.break_board_count == 2
+    assert result.metrics.break_board_count == 1
     assert len(result.limit_up_pool) == 2
-    assert len(result.break_board_pool) == 2
+    assert len(result.break_board_pool) == 1
     assert result.metrics.max_consecutive_boards == 3
 
 
@@ -268,12 +278,12 @@ def test_market_emotion_snapshot_combines_limit_up_pool_and_realtime_market_over
 
     assert result.trade_date == "2026-06-26"
     assert result.metrics.limit_up_count == 3
-    assert result.metrics.break_board_count == 2
+    assert result.metrics.break_board_count == 1
     assert result.metrics.limit_down_count == 30
     assert result.metrics.max_consecutive_boards == 3
     assert result.metrics.advance_count == 802
     assert result.metrics.decline_count == 4738
-    assert result.metrics.seal_rate_pct == 60.0
+    assert result.metrics.seal_rate_pct == 75.0
     assert 0 <= result.metrics.emotion_score <= 100
     assert result.metrics.emotion_level in {"冰点", "一般", "良好", "火爆"}
     assert result.metrics.turnover_cny == 3_575_720_000_000
@@ -419,7 +429,7 @@ def test_build_sentiment_summary_combines_short_term_and_market_emotion() -> Non
     assert summary.trade_date == "2026-06-26"
     assert summary.snapshot_status == "fresh"
     assert summary.metrics.limit_up_count == 3
-    assert summary.metrics.break_board_count == 2
+    assert summary.metrics.break_board_count == 1
     assert summary.metrics.advance_count == 802
     assert summary.metrics.emotion_level in {"冰点", "一般", "良好", "火爆"}
     assert summary.hot_industries[0].name == "机器人"
@@ -466,7 +476,7 @@ def test_market_emotion_snapshot_api_uses_configured_sources(tmp_path: Path) -> 
     payload = response.json()
     assert payload["metrics"]["limit_up_count"] == 3
     assert payload["metrics"]["advance_count"] == 802
-    assert payload["metrics"]["seal_rate_pct"] == 60.0
+    assert payload["metrics"]["seal_rate_pct"] == 75.0
     assert payload["buckets"][0]["label"] == ">10%"
     assert payload["buckets"][0]["count"] == 1
     assert payload["samples"] == []
@@ -856,14 +866,14 @@ def test_short_term_intraday_sentiment_adds_tickflow_actions_and_pool_tags() -> 
     )
 
     assert result.trade_date == "2026-06-26"
-    assert result.metrics.watched_count == 4
+    assert result.metrics.watched_count == 3
     assert result.metrics.alert_count >= 2
-    assert result.items[0].symbol == "002004.SZ"
-    assert "炸板池" in result.items[0].pool_tags
-    assert result.items[0].action in {"low_buy_watch", "avoid_chase"}
-    assert result.items[1].symbol == "603001.SH"
-    assert "涨停池" in result.items[1].pool_tags
-    assert "3连板" in result.items[1].pool_tags
+    assert result.items[0].symbol == "603001.SH"
+    assert "涨停池" in result.items[0].pool_tags
+    assert "3连板" in result.items[0].pool_tags
+    assert result.items[0].action == "reduce"
+    assert result.items[1].symbol == "603002.SH"
+    assert "炸板池" in result.items[1].pool_tags
     assert result.source_status[0].source == "TickFlow 实时行情"
 
 
@@ -880,7 +890,7 @@ def test_short_term_intraday_sentiment_api_uses_quote_provider() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["metrics"]["watched_count"] == 4
+    assert payload["metrics"]["watched_count"] == 3
     assert payload["items"][0]["pool_tags"]
 
 
@@ -930,7 +940,7 @@ def test_short_term_intraday_sentiment_degrades_when_minute_bars_rate_limited() 
         limit=20,
     )
 
-    assert result.metrics.watched_count == 4
+    assert result.metrics.watched_count == 3
     assert result.source_status[0].source == "TickFlow 实时行情"
     assert result.source_status[0].status == "success"
     assert result.source_status[1].source == "TickFlow 当日分钟线"
@@ -952,6 +962,6 @@ def test_short_term_intraday_sentiment_api_degrades_when_minute_bars_rate_limite
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["metrics"]["watched_count"] == 4
+    assert payload["metrics"]["watched_count"] == 3
     assert payload["source_status"][1]["status"] == "failed"
     assert "HTTP 429" in payload["source_status"][1]["detail"]

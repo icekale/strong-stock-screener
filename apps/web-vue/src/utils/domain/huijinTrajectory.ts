@@ -83,16 +83,11 @@ export function buildShareTrajectory(
       .filter(point => point.symbol === item.symbol)
       .map(point => [point.trade_date, point.total_shares])
   );
-  const dates = [
-    ...new Set([
-      ...(item.report_period ? [item.report_period] : []),
-      ...realDates.filter(date => !item.report_period || date > item.report_period)
-    ])
-  ].sort();
+  const dates = [...new Set(realDates)].sort();
   return {
     dates,
     values: dates.map(date => {
-      const shares = date === item.report_period ? item.baseline_total_shares : values.get(date);
+      const shares = values.get(date);
       return shares === null || shares === undefined ? null : Number((shares / 100_000_000).toFixed(8));
     })
   };

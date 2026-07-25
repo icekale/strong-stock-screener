@@ -5,6 +5,7 @@ import {
   buildHuijinRanking,
   buildHuijinTrajectory,
   buildPaddedAxisRange,
+  buildShareTrajectory,
   buildNormalizedTrend,
   huijinActivityDataState,
   pickDefaultHuijinSymbol
@@ -127,6 +128,22 @@ describe('Huijin trajectory transforms', () => {
     )).toEqual({
       dates: ['2026-06-30', '2026-07-01'],
       values: [0, 2],
+    });
+  });
+
+  it('builds the share chart from daily history without an isolated report baseline point', () => {
+    const points = [
+      { ...point('2026-07-16', -84), total_shares: 23_800_000_000 },
+      { ...point('2026-07-18', -85.46), total_shares: 7_440_000_000 }
+    ];
+
+    expect(buildShareTrajectory(
+      itemWith({ baseline_total_shares: 59_400_000_000 }),
+      points,
+      ['2026-07-16', '2026-07-17', '2026-07-18'],
+    )).toEqual({
+      dates: ['2026-07-16', '2026-07-17', '2026-07-18'],
+      values: [238, null, 74.4]
     });
   });
 

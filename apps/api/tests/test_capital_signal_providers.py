@@ -621,6 +621,59 @@ def test_share_provider_reads_official_szse_daily_history_for_requested_range() 
     assert result.source_status[0].status == "success"
 
 
+def test_share_provider_reads_official_sse_history_and_rejects_mismatched_dates() -> None:
+    requested_dates: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.host == "query.sse.com.cn"
+        assert request.url.path == "/commonQuery.do"
+        assert request.url.params["sqlId"] == "COMMON_SSE_ZQPZ_ETFZL_XXPL_ETFGM_SEARCH_L"
+        requested_date = request.url.params["STAT_DATE"]
+        requested_dates.append(requested_date)
+        actual_date = "2026-07-20" if requested_date == "2026-07-21" else requested_date
+        return httpx.Response(
+            200,
+            json={
+                "result": [
+                    {
+                        "STAT_DATE": actual_date,
+                        "SEC_CODE": "510050",
+                        "SEC_NAME": "上证50ETF华夏",
+                        "TOT_VOL": "100",
+                    },
+                    {
+                        "STAT_DATE": actual_date,
+                        "SEC_CODE": "510300",
+                        "SEC_NAME": "沪深300ETF华泰柏瑞",
+                        "TOT_VOL": "200",
+                    },
+                ]
+            },
+        )
+
+    provider = OfficialCapitalDataProvider(
+        http_client=httpx.Client(transport=httpx.MockTransport(handler))
+    )
+
+    result = provider.get_etf_share_history_rows(
+        "2026-07-20",
+        "2026-07-22",
+        ["510050.SH", "510300.SH"],
+    )
+
+    assert sorted(requested_dates) == ["2026-07-20", "2026-07-21", "2026-07-22"]
+    assert [(row.trade_date, row.symbol, row.total_shares) for row in result.rows] == [
+        ("2026-07-20", "510050.SH", 1_000_000),
+        ("2026-07-20", "510300.SH", 2_000_000),
+        ("2026-07-22", "510050.SH", 1_000_000),
+        ("2026-07-22", "510300.SH", 2_000_000),
+    ]
+    assert {row.date_validation for row in result.rows} == {"sse_official_v1"}
+    assert result.available_trade_dates == ("2026-07-20", "2026-07-22")
+    assert result.source_status[0].source == "上交所ETF份额历史"
+    assert result.source_status[0].status == "success"
+
+
 def test_share_provider_reports_invalid_szse_history_workbook_as_failure() -> None:
     provider = OfficialCapitalDataProvider(
         http_client=httpx.Client(

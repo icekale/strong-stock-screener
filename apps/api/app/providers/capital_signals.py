@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from html.parser import HTMLParser
 from io import BytesIO
 from typing import Any, Generic, TypeVar
@@ -42,6 +42,7 @@ _HOLDER_ENTITIES = frozenset(
     }
 )
 _ISO_DATE_PATTERN = re.compile(r"(?<!\d)(\d{4}-\d{2}-\d{2})(?!\d)")
+_SSE_HISTORY_WORKERS = 6
 
 
 @dataclass(frozen=True)
@@ -327,9 +328,18 @@ class OfficialCapitalDataProvider:
         end_date: str,
         symbols: Sequence[str],
     ) -> CapitalProviderResult[EtfSharePoint]:
+        sse_symbols = [symbol for symbol in symbols if symbol.endswith(".SH")]
         szse_symbols = [symbol for symbol in symbols if symbol.endswith(".SZ")]
-        if not szse_symbols:
+        if not sse_symbols and not szse_symbols:
             return CapitalProviderResult(rows=[], source_status=[])
+
+        sse_result = self._get_sse_etf_share_history_rows(
+            start_date,
+            end_date,
+            sse_symbols,
+        )
+        if not szse_symbols:
+            return sse_result
 
         try:
             response = self.http_client.get(
@@ -350,35 +360,146 @@ class OfficialCapitalDataProvider:
             response.raise_for_status()
             rows = parse_szse_daily_share_workbook(response.content, symbols=szse_symbols)
         except Exception as exc:
-            return CapitalProviderResult(
+            szse_result = CapitalProviderResult(
                 rows=[],
                 source_status=[_failure_status("深交所ETF份额历史", exc)],
                 request_failures=1,
                 failed_symbols=tuple(szse_symbols),
             )
+        else:
+            rows = [row for row in rows if start_date <= row.trade_date <= end_date]
+            covered_symbols = {row.symbol for row in rows}
+            missing_symbols = set(szse_symbols) - covered_symbols
+            available_dates = tuple(sorted({row.trade_date for row in rows}))
+            status = "success" if rows and not missing_symbols else "stale"
+            detail = (
+                f"官方日频 {len(available_dates)} 个交易日；"
+                f"覆盖 {len(covered_symbols)}/{len(szse_symbols)} 只"
+            )
+            szse_result = CapitalProviderResult(
+                rows=rows,
+                source_status=[
+                    StrongStockSourceStatus(
+                        source="深交所ETF份额历史",
+                        status=status,
+                        detail=detail,
+                    )
+                ],
+                available_trade_dates=available_dates,
+                empty_symbols=tuple(
+                    symbol for symbol in szse_symbols if symbol in missing_symbols
+                ),
+            )
 
-        rows = [row for row in rows if start_date <= row.trade_date <= end_date]
-        covered_symbols = {row.symbol for row in rows}
-        missing_symbols = set(szse_symbols) - covered_symbols
-        available_dates = tuple(sorted({row.trade_date for row in rows}))
-        status = "success" if rows and not missing_symbols else "stale"
-        detail = (
-            f"官方日频 {len(available_dates)} 个交易日；"
-            f"覆盖 {len(covered_symbols)}/{len(szse_symbols)} 只"
+        return CapitalProviderResult(
+            rows=sorted(
+                [*sse_result.rows, *szse_result.rows],
+                key=lambda row: (row.trade_date, row.symbol),
+            ),
+            source_status=[*sse_result.source_status, *szse_result.source_status],
+            request_failures=sse_result.request_failures + szse_result.request_failures,
+            available_trade_dates=tuple(
+                sorted(
+                    set(sse_result.available_trade_dates)
+                    | set(szse_result.available_trade_dates)
+                )
+            ),
+            failed_symbols=tuple(
+                symbol
+                for symbol in symbols
+                if symbol in set(sse_result.failed_symbols) | set(szse_result.failed_symbols)
+            ),
+            rejected_symbols=tuple(
+                symbol
+                for symbol in symbols
+                if symbol in set(sse_result.rejected_symbols)
+                | set(szse_result.rejected_symbols)
+            ),
+            empty_symbols=tuple(
+                symbol
+                for symbol in symbols
+                if symbol in set(sse_result.empty_symbols) | set(szse_result.empty_symbols)
+            ),
         )
+
+    def _get_sse_etf_share_history_rows(
+        self,
+        start_date: str,
+        end_date: str,
+        symbols: Sequence[str],
+    ) -> CapitalProviderResult[EtfSharePoint]:
+        if not symbols:
+            return CapitalProviderResult(rows=[], source_status=[])
+
+        requested_dates = _weekday_dates(start_date, end_date)
+        rows: list[EtfSharePoint] = []
+        failures: list[Exception] = []
+
+        def fetch_snapshot(requested_date: str) -> list[EtfSharePoint]:
+            response = self.http_client.get(
+                f"{_SSE_BASE_URL}/commonQuery.do",
+                params={
+                    "isPagination": "true",
+                    "sqlId": "COMMON_SSE_ZQPZ_ETFZL_XXPL_ETFGM_SEARCH_L",
+                    "STAT_DATE": requested_date,
+                    "pageHelp.pageSize": 1000,
+                    "pageHelp.pageNo": 1,
+                    "pageHelp.beginPage": 1,
+                    "pageHelp.cacheSize": 1,
+                },
+                headers=_HEADERS,
+            )
+            response.raise_for_status()
+            return [
+                row.model_copy(update={"date_validation": "sse_official_v1"})
+                for row in parse_sse_etf_share_payload(response.json(), symbols=symbols)
+                if row.trade_date == requested_date
+            ]
+
+        with ThreadPoolExecutor(
+            max_workers=min(_SSE_HISTORY_WORKERS, max(1, len(requested_dates)))
+        ) as executor:
+            futures = {
+                executor.submit(fetch_snapshot, requested_date): requested_date
+                for requested_date in requested_dates
+            }
+            for future in as_completed(futures):
+                try:
+                    rows.extend(future.result())
+                except Exception as exc:
+                    failures.append(exc)
+
+        rows.sort(key=lambda row: (row.trade_date, row.symbol))
+        available_dates = tuple(sorted({row.trade_date for row in rows}))
+        covered_symbols = {row.symbol for row in rows}
+        missing_symbols = set(symbols) - covered_symbols
+        if failures and not rows:
+            return CapitalProviderResult(
+                rows=[],
+                source_status=[_failure_status("上交所ETF份额历史", failures[0])],
+                request_failures=len(failures),
+                failed_symbols=tuple(symbols),
+            )
+
+        status = "success" if rows and not missing_symbols and not failures else "stale"
+        detail = (
+            f"官方日频 {len(available_dates)}/{len(requested_dates)} 个请求日期；"
+            f"覆盖 {len(covered_symbols)}/{len(symbols)} 只"
+        )
+        if failures:
+            detail += f"；{len(failures)} 个日期请求失败"
         return CapitalProviderResult(
             rows=rows,
             source_status=[
                 StrongStockSourceStatus(
-                    source="深交所ETF份额历史",
+                    source="上交所ETF份额历史",
                     status=status,
                     detail=detail,
                 )
             ],
+            request_failures=len(failures),
             available_trade_dates=available_dates,
-            empty_symbols=tuple(
-                symbol for symbol in szse_symbols if symbol in missing_symbols
-            ),
+            empty_symbols=tuple(symbol for symbol in symbols if symbol in missing_symbols),
         )
 
 
@@ -492,6 +613,17 @@ def parse_sse_margin_payload(payload: Any) -> list[MarginMarketPoint]:
                 financing_buy_cny=_number(row.get("rzmre")),
             )
         )
+    return output
+
+
+def _weekday_dates(start_date: str, end_date: str) -> list[str]:
+    current = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date)
+    output: list[str] = []
+    while current <= end:
+        if current.weekday() < 5:
+            output.append(current.isoformat())
+        current += timedelta(days=1)
     return output
 
 

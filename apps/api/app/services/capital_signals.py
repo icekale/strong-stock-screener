@@ -54,6 +54,10 @@ _SZSE_HISTORY_BACKFILL_DAYS = 150
 _SZSE_HISTORY_MIN_POINTS = 60
 _SZSE_HISTORY_OLDEST_TOLERANCE_DAYS = 30
 _SZSE_HISTORY_RETRY_SECONDS = 15 * 60
+_SSE_HISTORY_BACKFILL_DAYS = 150
+_SSE_HISTORY_MIN_POINTS = 60
+_SSE_HISTORY_OLDEST_TOLERANCE_DAYS = 30
+_SSE_HISTORY_RETRY_SECONDS = 15 * 60
 
 
 class CapitalDataProvider(Protocol):
@@ -109,6 +113,10 @@ class CapitalSignalService:
             str,
             tuple[datetime, list[StrongStockSourceStatus]],
         ] = {}
+        self._sse_history_refresh_attempts: dict[
+            str,
+            tuple[datetime, list[StrongStockSourceStatus]],
+        ] = {}
 
     def overview(self, *, force: bool = False) -> EtfRadarOverviewResponse:
         with self._lock:
@@ -126,11 +134,16 @@ class CapitalSignalService:
                 and cached.baseline_fingerprint == active_baseline_fingerprint
             )
             history = self.store.load_share_history()
+            history, sse_history_status, sse_history_changed = (
+                self._ensure_sse_share_history(history, trade_date, now)
+            )
             history, history_status, history_changed = self._ensure_szse_share_history(
                 history,
                 trade_date,
                 now,
             )
+            history_status = [*sse_history_status, *history_status]
+            history_changed = sse_history_changed or history_changed
             if (
                 not force
                 and reusable_snapshot
@@ -406,6 +419,56 @@ class CapitalSignalService:
             self.store.save_snapshot(snapshot)
             return snapshot
 
+    def _ensure_sse_share_history(
+        self,
+        history: list[EtfSharePoint],
+        trade_date: str,
+        now: datetime,
+    ) -> tuple[list[EtfSharePoint], list[StrongStockSourceStatus], bool]:
+        sse_symbols = tuple(symbol for symbol in ALL_ETFS if symbol.endswith(".SH"))
+        history_end_date = _previous_weekday(trade_date)
+        start_date = (
+            datetime.fromisoformat(history_end_date).date()
+            - timedelta(days=_SSE_HISTORY_BACKFILL_DAYS)
+        ).isoformat()
+        if _has_sse_history_coverage(
+            history,
+            symbols=sse_symbols,
+            start_date=start_date,
+            end_date=history_end_date,
+        ):
+            return history, [], False
+
+        fetch_history = getattr(self.provider, "get_etf_share_history_rows", None)
+        if not callable(fetch_history):
+            return history, [], False
+
+        previous_attempt = self._sse_history_refresh_attempts.get(history_end_date)
+        if previous_attempt is not None:
+            attempted_at, previous_status = previous_attempt
+            elapsed = (now - attempted_at).total_seconds()
+            if 0 <= elapsed <= _SSE_HISTORY_RETRY_SECONDS:
+                return history, list(previous_status), False
+
+        result = fetch_history(start_date, history_end_date, sse_symbols)
+        history_status = list(result.source_status)
+        self._sse_history_refresh_attempts[history_end_date] = (
+            now,
+            history_status,
+        )
+        fetched_rows = [
+            row
+            for row in result.rows
+            if row.symbol in sse_symbols
+            and start_date <= row.trade_date <= history_end_date
+            and row.date_validation == "sse_official_v1"
+        ]
+        merged = _merge_share_history(history, fetched_rows)
+        changed = merged != history
+        if changed:
+            self.store.save_share_history(merged)
+        return merged, history_status, changed
+
     def _ensure_szse_share_history(
         self,
         history: list[EtfSharePoint],
@@ -484,11 +547,17 @@ class CapitalSignalService:
             now = self.clock()
             trade_date = _latest_weekday(now)
             history = self.store.load_share_history()
+            history, sse_history_status, _ = self._ensure_sse_share_history(
+                history,
+                trade_date,
+                now,
+            )
             history, history_status, _ = self._ensure_szse_share_history(
                 history,
                 trade_date,
                 now,
             )
+            history_status = [*sse_history_status, *history_status]
             snapshot = self.store.load_snapshot()
             if (
                 snapshot is not None
@@ -1121,20 +1190,59 @@ def _has_szse_history_coverage(
     start_date: str,
     end_date: str,
 ) -> bool:
+    return _has_exchange_history_coverage(
+        history,
+        symbols=symbols,
+        start_date=start_date,
+        end_date=end_date,
+        date_validation="szse_daily_v1",
+        min_points=_SZSE_HISTORY_MIN_POINTS,
+        oldest_tolerance_days=_SZSE_HISTORY_OLDEST_TOLERANCE_DAYS,
+    )
+
+
+def _has_sse_history_coverage(
+    history: list[EtfSharePoint],
+    *,
+    symbols: tuple[str, ...],
+    start_date: str,
+    end_date: str,
+) -> bool:
+    return _has_exchange_history_coverage(
+        history,
+        symbols=symbols,
+        start_date=start_date,
+        end_date=end_date,
+        date_validation="sse_official_v1",
+        min_points=_SSE_HISTORY_MIN_POINTS,
+        oldest_tolerance_days=_SSE_HISTORY_OLDEST_TOLERANCE_DAYS,
+    )
+
+
+def _has_exchange_history_coverage(
+    history: list[EtfSharePoint],
+    *,
+    symbols: tuple[str, ...],
+    start_date: str,
+    end_date: str,
+    date_validation: str,
+    min_points: int,
+    oldest_tolerance_days: int,
+) -> bool:
     oldest_cutoff = (
         datetime.fromisoformat(start_date).date()
-        + timedelta(days=_SZSE_HISTORY_OLDEST_TOLERANCE_DAYS)
+        + timedelta(days=oldest_tolerance_days)
     ).isoformat()
     for symbol in symbols:
         dates = {
             row.trade_date
             for row in history
             if row.symbol == symbol
-            and row.date_validation == "szse_daily_v1"
+            and row.date_validation == date_validation
             and start_date <= row.trade_date <= end_date
         }
         if (
-            len(dates) < _SZSE_HISTORY_MIN_POINTS
+            len(dates) < min_points
             or min(dates, default=end_date) > oldest_cutoff
             or max(dates, default=start_date) != end_date
         ):

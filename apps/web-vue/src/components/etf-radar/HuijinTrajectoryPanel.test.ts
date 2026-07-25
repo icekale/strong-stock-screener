@@ -262,7 +262,7 @@ describe('HuijinTrajectoryPanel', () => {
     expect(option.animation).toBe(false);
     expect(Array.isArray(option.yAxis)).toBe(true);
     expect(series.connectNulls).toBe(false);
-    expect(series.data).toEqual([566.63567693, 82.374668, null, 82.374668]);
+    expect(series.data).toEqual([82.374668, null, 82.374668]);
 
     const detailRows = wrapper.findAll('[data-testid="huijin-detail-row"]');
     expect(detailRows).toHaveLength(7);
@@ -325,16 +325,16 @@ describe('HuijinTrajectoryPanel', () => {
 
     expect(series.map(item => item.name)).toEqual(['基金份额（亿份）', '收盘价（元）']);
     expect(series.map(item => item.yAxisIndex)).toEqual([0, 1]);
-    expect(series[0]!.data).toEqual([566.63567693, 82.374668, null, 82.374668]);
-    expect(series[1]!.data).toEqual([null, 2.1, 2.2, 2.3]);
+    expect(series[0]!.data).toEqual([82.374668, null, 82.374668]);
+    expect(series[1]!.data).toEqual([2.1, 2.2, 2.3]);
     expect(axes[0]).toEqual(expect.objectContaining({
       type: 'value',
       name: '份额（亿份）',
       scale: true,
       splitNumber: 4
     }));
-    expect(axes[0]!.min).toBeCloseTo(43.6337872856);
-    expect(axes[0]!.max).toBeCloseTo(605.3765576444);
+    expect(axes[0]!.min).toBeCloseTo(75.78469456);
+    expect(axes[0]!.max).toBeCloseTo(88.96464144);
     expect(axes[1]).toEqual(expect.objectContaining({
       type: 'value',
       name: '收盘价（元）',
@@ -348,8 +348,8 @@ describe('HuijinTrajectoryPanel', () => {
     expect(series[0]!.areaStyle).toEqual(expect.objectContaining({ opacity: 0.08 }));
     expect(series[1]!.areaStyle).toBeUndefined();
     expect(xAxis.axisLabel?.interval).toEqual(expect.any(Function));
-    expect(xAxis.axisLabel?.interval?.(0, '2025-12-31')).toBe(true);
-    expect(xAxis.axisLabel?.interval?.(3, '2026-07-18')).toBe(true);
+    expect(xAxis.axisLabel?.interval?.(0, '2026-07-16')).toBe(true);
+    expect(xAxis.axisLabel?.interval?.(2, '2026-07-18')).toBe(true);
     expect(wrapper.get('[data-testid="huijin-latest-values"]').text()).toContain('82.37 亿份');
     expect(wrapper.get('[data-testid="huijin-latest-values"]').text()).toContain('2.30 元');
   });
@@ -399,9 +399,9 @@ describe('HuijinTrajectoryPanel', () => {
     expect(xAxis.axisLabel?.showMinLabel).toBe(true);
     expect(xAxis.axisLabel?.showMaxLabel).toBe(true);
     expect(xAxis.axisLabel?.formatter?.('2026-07-18')).toBe('07-18');
-    expect(xAxis.axisLabel?.interval?.(0, '2025-12-31')).toBe(true);
+    expect(xAxis.axisLabel?.interval?.(0, '2026-07-01')).toBe(true);
     expect(xAxis.axisLabel?.interval?.(1, '2026-07-01')).toBe(false);
-    expect(xAxis.axisLabel?.interval?.(12, '2026-07-12')).toBe(true);
+    expect(xAxis.axisLabel?.interval?.(11, '2026-07-12')).toBe(true);
   });
 
   it('shows independently dated latest share and close values', () => {

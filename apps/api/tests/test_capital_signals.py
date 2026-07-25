@@ -1852,6 +1852,91 @@ def test_overview_backfills_szse_history_even_when_snapshot_is_fresh(tmp_path: P
     )
 
 
+def test_history_backfills_and_reuses_official_sse_history(tmp_path: Path) -> None:
+    history_end = datetime.fromisoformat("2026-07-16")
+    history_start = history_end - timedelta(days=150)
+    weekdays = [
+        (history_start + timedelta(days=offset)).date().isoformat()
+        for offset in range(151)
+        if (history_start + timedelta(days=offset)).weekday() < 5
+    ]
+    coverage_dates = [weekdays[0], *weekdays[-59:]]
+    store = CapitalSignalStore(tmp_path)
+    store.save_share_history(
+        [
+            EtfSharePoint(
+                trade_date=trade_date,
+                symbol=symbol,
+                name=ALL_ETFS[symbol].name,
+                total_shares=1_000,
+                date_validation="szse_daily_v1",
+            )
+            for trade_date in coverage_dates
+            for symbol in ALL_ETFS
+            if symbol.endswith(".SZ")
+        ]
+    )
+
+    class HistoricalSseProvider(FakeCapitalProvider):
+        def __init__(self) -> None:
+            super().__init__()
+            self.history_calls: list[tuple[str, str, tuple[str, ...]]] = []
+
+        def get_etf_share_history_rows(
+            self,
+            start_date: str,
+            end_date: str,
+            symbols: list[str] | tuple[str, ...],
+        ) -> CapitalProviderResult[EtfSharePoint]:
+            self.history_calls.append((start_date, end_date, tuple(symbols)))
+            return CapitalProviderResult(
+                rows=[
+                    EtfSharePoint(
+                        trade_date=trade_date,
+                        symbol=symbol,
+                        name=ALL_ETFS[symbol].name,
+                        total_shares=1_000 + offset,
+                        date_validation="sse_official_v1",
+                    )
+                    for offset, trade_date in enumerate(coverage_dates)
+                    for symbol in symbols
+                ],
+                source_status=[
+                    StrongStockSourceStatus(
+                        source="上交所ETF份额历史",
+                        status="success",
+                        detail="fake",
+                    )
+                ],
+            )
+
+    provider = HistoricalSseProvider()
+    service = CapitalSignalService(
+        provider=provider,
+        store=store,
+        holder_provider=FakeHolderProvider(),
+        clock=_clock,
+    )
+
+    first = service.history()
+    second = service.history()
+
+    sse_symbols = tuple(symbol for symbol in ALL_ETFS if symbol.endswith(".SH"))
+    assert provider.history_calls == [(weekdays[0], "2026-07-16", sse_symbols)]
+    assert len(
+        {
+            point.trade_date
+            for point in first.points
+            if point.symbol == "510050.SH"
+        }
+    ) >= 60
+    assert second.points == first.points
+    assert any(
+        row.symbol == "510050.SH" and row.date_validation == "sse_official_v1"
+        for row in store.load_share_history()
+    )
+
+
 def test_history_does_not_repeat_failed_szse_backfill_inside_one_request(tmp_path: Path) -> None:
     class FailingHistoricalProvider(FakeCapitalProvider):
         def __init__(self) -> None:
@@ -1888,7 +1973,20 @@ def test_history_does_not_repeat_failed_szse_backfill_inside_one_request(tmp_pat
 
     result = service.history()
 
-    assert len(provider.history_calls) == 1
+    assert len(
+        [
+            call
+            for call in provider.history_calls
+            if all(symbol.endswith(".SH") for symbol in call[2])
+        ]
+    ) == 1
+    assert len(
+        [
+            call
+            for call in provider.history_calls
+            if all(symbol.endswith(".SZ") for symbol in call[2])
+        ]
+    ) == 1
     assert any(
         status.source == "深交所ETF份额历史" and status.status == "failed"
         for status in result.source_status

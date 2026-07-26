@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     )
     ai_analysis_provider: str = "openai_compatible"
     ai_analysis_base_url: str = "https://api.openai.com/v1"
-    ai_analysis_model: str = "gpt-4.1-mini"
+    ai_analysis_model: str = "gpt-5.6-sol"
     provider_timeout_seconds: float = 12
     cors_allow_origins: str = "http://localhost:3110,http://127.0.0.1:3110"
     screen_run_retention_count: int = Field(default=120, ge=1, le=2000)

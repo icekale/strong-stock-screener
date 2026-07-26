@@ -217,6 +217,9 @@ describe('SentimentPercentilePanel', () => {
     expect(option.xAxis.data).toHaveLength(500);
     expect(wrapper.get('[data-testid="ai-ready"]').text()).toContain('综合分 62.4');
     expect(wrapper.get('[data-testid="ai-ready"]').text()).toContain('平衡');
+    expect(wrapper.get('[data-testid="ai-ready"]').text()).toContain('一句话判断');
+    expect(wrapper.get('[data-testid="ai-ready"]').text()).toContain('盘面事实');
+    expect(wrapper.get('[data-testid="ai-ready"]').text()).toContain('需要留意');
     expect(wrapper.text()).toContain('gpt-5-mini');
     expect(wrapper.text()).toContain('15:17');
     expect(wrapper.text()).toContain('不构成买卖建议');

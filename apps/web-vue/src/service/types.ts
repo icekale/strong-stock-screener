@@ -134,6 +134,7 @@ export type SentimentPercentileAnalysisResponse = {
   model_version: string;
   provider: string | null;
   llm_model: string | null;
+  reasoning_effort?: 'low' | 'medium' | 'high' | 'xhigh' | null;
   input_hash: string | null;
   result_source?: SentimentAnalysisResultSource | null;
   attempts: number;
@@ -1329,6 +1330,7 @@ export type AiAnalysisPublicConfig = {
   provider: ModelMaintenanceProvider;
   base_url: string;
   model: string;
+  reasoning_effort: 'low' | 'medium' | 'high' | 'xhigh';
   api_key_configured: boolean;
   api_key_preview: string;
   api_key_source: "runtime" | "env" | "none";
@@ -1341,6 +1343,7 @@ export type AiAnalysisSettingsUpdate = {
   provider: ModelMaintenanceProvider;
   base_url: string;
   model: string;
+  reasoning_effort: 'low' | 'medium' | 'high' | 'xhigh';
   api_key?: string | null;
   run_after_daily_review: boolean;
   run_after_weekly_calibration: boolean;

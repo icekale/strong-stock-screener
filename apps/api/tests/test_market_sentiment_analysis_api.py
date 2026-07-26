@@ -97,6 +97,7 @@ def analysis(
         status=status,  # type: ignore[arg-type]
         provider="openai_compatible" if status in {"pending", "ready", "failed"} else None,
         llm_model="test-model" if status in {"pending", "ready", "failed"} else None,
+        reasoning_effort="xhigh" if status in {"pending", "ready", "failed"} else None,
         analysis_contract_version=ANALYSIS_CONTRACT_VERSION
         if status in {"pending", "ready", "failed"}
         else None,

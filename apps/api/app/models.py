@@ -478,6 +478,7 @@ class SentimentPercentileAnalysisResponse(BaseModel):
     analysis_contract_version: str | None = None
     provider: str | None = None
     llm_model: str | None = None
+    reasoning_effort: Literal["low", "medium", "high", "xhigh"] | None = None
     input_hash: str | None = None
     result_source: Literal["ai", "rule"] | None = None
     attempts: int = Field(default=0, ge=0, le=3)

@@ -207,7 +207,8 @@ function defaultAiDraft(): AiAnalysisDraft {
     enabled: false,
     provider: 'openai_compatible',
     base_url: 'https://api.openai.com/v1',
-    model: 'gpt-4.1-mini',
+    model: 'gpt-5.6-sol',
+    reasoning_effort: 'xhigh',
     api_key: '',
     run_after_daily_review: false,
     run_after_weekly_calibration: false
@@ -221,6 +222,7 @@ function applyAiDraft(config: RuntimeSettingsConfig) {
     provider: value.provider,
     base_url: value.base_url,
     model: value.model,
+    reasoning_effort: value.reasoning_effort,
     api_key: '',
     run_after_daily_review: value.run_after_daily_review,
     run_after_weekly_calibration: value.run_after_weekly_calibration
@@ -247,6 +249,7 @@ function buildRuntimeSettingsPayload(current: RuntimeSettingsResponse, draft: Ai
       provider: draft.provider,
       base_url: draft.base_url.trim(),
       model: draft.model.trim(),
+      reasoning_effort: draft.reasoning_effort,
       api_key: draft.api_key.trim() || undefined,
       run_after_daily_review: draft.run_after_daily_review,
       run_after_weekly_calibration: draft.run_after_weekly_calibration
@@ -296,7 +299,20 @@ onMounted(() => void load());
         </label>
         <label class="ai-settings-field">
           <span>模型名称</span>
-          <a-input v-model:value="aiDraft.model" data-testid="ai-analysis-model" placeholder="deepseek-reasoner / gpt-4.1-mini" />
+          <a-input v-model:value="aiDraft.model" data-testid="ai-analysis-model" placeholder="gpt-5.6-sol" />
+        </label>
+        <label class="ai-settings-field">
+          <span>推理强度</span>
+          <a-select
+            v-model:value="aiDraft.reasoning_effort"
+            data-testid="ai-analysis-reasoning-effort"
+            :options="[
+              { label: '低', value: 'low' },
+              { label: '中', value: 'medium' },
+              { label: '高', value: 'high' },
+              { label: '极高（xhigh）', value: 'xhigh' }
+            ]"
+          />
         </label>
         <label class="ai-settings-field">
           <span>API Key</span>

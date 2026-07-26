@@ -24,13 +24,15 @@ IfindServiceId = Literal[
     "hexin-ifind-ds-index-mcp",
 ]
 AiAnalysisProvider = Literal["openai", "deepseek", "openai_compatible"]
+AiReasoningEffort = Literal["low", "medium", "high", "xhigh"]
 
 
 class AiAnalysisSettings(BaseModel):
     enabled: bool = False
     provider: AiAnalysisProvider = "openai_compatible"
     base_url: str = "https://api.openai.com/v1"
-    model: str = "gpt-4.1-mini"
+    model: str = "gpt-5.6-sol"
+    reasoning_effort: AiReasoningEffort = "xhigh"
     api_key: str | None = None
     run_after_daily_review: bool = False
     run_after_weekly_calibration: bool = False
@@ -41,6 +43,7 @@ class EffectiveAiAnalysisSettings(BaseModel):
     provider: AiAnalysisProvider
     base_url: str
     model: str
+    reasoning_effort: AiReasoningEffort = "xhigh"
     api_key: str
     api_key_source: Literal["runtime", "env", "none"]
     run_after_daily_review: bool
@@ -263,6 +266,7 @@ def _effective_ai_analysis_settings(
         provider=runtime.provider or base.ai_analysis_provider,  # type: ignore[arg-type]
         base_url=(runtime.base_url or base.ai_analysis_base_url).rstrip("/"),
         model=runtime.model or base.ai_analysis_model,
+        reasoning_effort=runtime.reasoning_effort,
         api_key=runtime_key or env_key,
         api_key_source=key_source,
         run_after_daily_review=runtime.run_after_daily_review,
@@ -276,6 +280,7 @@ def _public_ai_analysis_settings(config: EffectiveAiAnalysisSettings) -> dict[st
         "provider": config.provider,
         "base_url": config.base_url,
         "model": config.model,
+        "reasoning_effort": config.reasoning_effort,
         "api_key_configured": bool(config.api_key),
         "api_key_preview": _mask_key(config.api_key),
         "api_key_source": config.api_key_source,

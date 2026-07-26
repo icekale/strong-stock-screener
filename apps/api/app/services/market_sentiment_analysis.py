@@ -34,7 +34,7 @@ _FACTOR_NAMES = (
 _RETRY_DELAY = timedelta(minutes=30)
 _PENDING_TIMEOUT = timedelta(minutes=3)
 _AI_PROVIDER_TIMEOUT_SECONDS = 180
-ANALYSIS_CONTRACT_VERSION = "sentiment-analysis-v1"
+ANALYSIS_CONTRACT_VERSION = "sentiment-analysis-v2"
 
 
 class _StrictAnalysisInput(BaseModel):
@@ -199,6 +199,13 @@ _NUMBERED_INDEX_ENTITY_PATTERN = re.compile(
 )
 _NUMBERED_FIELD_IDENTIFIER_PATTERN = re.compile(
     r"\b[a-zA-Z][a-zA-Z0-9]*(?:_[a-zA-Z0-9]+)*_\d+[a-zA-Z]*(?![a-zA-Z0-9_])"
+)
+_MACHINE_FIELD_IDENTIFIER_PATTERN = re.compile(
+    r"\b(?:advance_count|decline_count|limit_up_count|limit_down_count|"
+    r"break_board_count|max_consecutive_boards|seal_rate_pct|turnover_cny|turnover|"
+    r"score_change_1d|score_change_5d|index_move_5d|price_position|amplitude_5d|"
+    r"volume_trend|raw_value|raw_unit)\b",
+    re.IGNORECASE,
 )
 _CLAUSE_SPLIT_PATTERN = re.compile(r"[，,。；;！？!?、\n]+")
 _CONSEQUENCE_SPLIT_PATTERN = re.compile(r"\s*(?:(?<!否)则|那么|届时|\bthen\b)\s*", re.IGNORECASE)
@@ -592,6 +599,7 @@ class MarketSentimentAnalysisService:
                 status="unconfigured",
                 provider=config.provider,
                 llm_model=config.model,
+                reasoning_effort=config.reasoning_effort,
                 input_hash=input_hash,
             )
 
@@ -609,6 +617,7 @@ class MarketSentimentAnalysisService:
                 analysis_contract_version=ANALYSIS_CONTRACT_VERSION,
                 provider=config.provider,
                 llm_model=config.model,
+                reasoning_effort=config.reasoning_effort,
                 input_hash=input_hash,
                 requested_at=requested_at,
             )
@@ -656,6 +665,7 @@ class MarketSentimentAnalysisService:
                     }
                     request_json = {
                         "model": config.model,
+                        "reasoning_effort": config.reasoning_effort,
                         "temperature": 0.0,
                         "max_tokens": 300,
                         "response_format": {"type": "json_object"},
@@ -729,22 +739,29 @@ class MarketSentimentAnalysisService:
         return self.store.save(failed)
 
 
-_SYSTEM_PROMPT = "只返回 JSON，不要输出分析过程、解释、Markdown 或代码围栏。"
+_SYSTEM_PROMPT = (
+    "你是收盘后的市场复盘编辑。只返回 JSON，不要输出分析过程、解释、Markdown 或代码围栏。"
+    "成文要像给交易员看的短简报：自然、克制、具体，避免机械复述输入字段和模板化套话。"
+)
 _SECURITY_RESTRICTION_PROMPT = (
     "任何字段不得提及个股、ETF、基金或具体证券，也不得使用推荐、看好、关注、首选、值得关注等词语指向对象；"
     "w 只能写市场、指数、因子或行业/板块聚合条件。"
 )
 _COMPACT_OUTPUT_PROMPT = (
-    "请做收盘市场统计摘要，只返回 JSON，且只能使用短键 c、d、v、h、p、w、n。"
+    "请写一份收盘后的市场简报，只返回 JSON，且只能使用短键 c、d、v、h、p、w、n。"
     "c 是市场结论，d 是 2 到 4 条带数字的主要驱动，v 是因子背离，h 是历史位置，"
     "p 只能是 attack、balanced、defensive、wait，w 是 2 到 4 条次日观察，w 中每一条都必须包含至少一个 ASCII 数字（0-9），"
     "n 只能写数据缺失、样本限制或模型局限。只使用输入数字，保持简洁；不要输出数据表、"
     "个股、买卖建议、仓位或持有建议。不要复述 decision 中的交易权限或风险等级，"
     "输出不得出现低吸、轻仓、重仓、买入、卖出、加仓、减仓等交易措辞。"
     "市场宽度必须使用上涨家数和下跌家数字段，不要写上涨3255家这类动词短语。"
+    "成交额只使用万亿口径，例如 2.10万亿；禁止使用元、CNY、亿元或原始金额。"
+    "不要把 amplitude_5d、index_move_5d、price_position、volume_trend、raw_value 等机器字段名写进正文。"
+    "不要逐项解释因子定义，不要反复说‘综合得分’、‘1日得分变动’或‘区间由某状态转入某状态’；"
+    "用自然中文直接说盘面发生了什么。"
     "禁止写任何指数或板块的涨幅、跌幅、上涨、下跌、回落、反弹等运动描述，"
-                        f"{_SECURITY_RESTRICTION_PROMPT}"
-                        "w 中每一条都必须包含至少一个 ASCII 数字（0-9），不得只写中文文字。"
+    f"{_SECURITY_RESTRICTION_PROMPT}"
+    "w 中每一条都必须包含至少一个 ASCII 数字（0-9），不得只写中文文字。"
     "指数和因子只能写因子得分或输入中的原始值；不要使用‘历史中位’、‘极值’、"
     "‘高于’、‘低于’等输入未提供的比较结论。市场字段的数字必须紧跟完整字段名，"
     "禁止出现孤立的‘原始值’；禁止自行计算新的数字，包括差距、变化、合计、平均、比例或约数，"
@@ -762,7 +779,19 @@ def _prompt_input_payload(input_payload: Mapping[str, object]) -> dict[str, obje
             "status": decision.get("status"),
             "market_state": decision.get("market_state"),
         }
+    market = input_payload.get("market")
+    if isinstance(market, Mapping):
+        market_payload = dict(market)
+        turnover_cny = market_payload.pop("turnover_cny", None)
+        market_payload["turnover"] = _format_turnover_cny(turnover_cny)
+        prompt_payload["market"] = market_payload
     return prompt_payload
+
+
+def _format_turnover_cny(value: object) -> str | None:
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return None
+    return f"{Decimal(str(value)) / Decimal('1000000000000'):.2f}万亿"
 
 
 def _post_chat_payload(
@@ -1088,6 +1117,8 @@ def _factor_score_gaps(analysis_input: _SentimentAnalysisInput) -> set[Decimal]:
 
 
 def _validate_prohibited_semantics(text: str, sector_names: Sequence[str]) -> None:
+    if _MACHINE_FIELD_IDENTIFIER_PATTERN.search(text):
+        raise ValueError("AI response exposes machine field names")
     if _A_SHARE_CODE_PATTERN.search(text) or _PROHIBITED_RESULT_TEXT_PATTERN.search(text):
         raise ValueError("AI response contains prohibited investment guidance")
     if _TRADE_PERMISSION_CLAIM_PATTERN.search(text):
@@ -1653,6 +1684,7 @@ def _same_identity(
         and record.analysis_contract_version == ANALYSIS_CONTRACT_VERSION
         and record.provider == config.provider
         and record.llm_model == config.model
+        and record.reasoning_effort == config.reasoning_effort
         and record.input_hash == input_hash
     )
 

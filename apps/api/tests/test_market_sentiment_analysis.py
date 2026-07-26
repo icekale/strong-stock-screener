@@ -1305,6 +1305,33 @@ def test_prompt_forbids_security_recommendations_explicitly(tmp_path: Path) -> N
     assert "w 中每一条都必须包含至少一个 ASCII 数字" in instruction
 
 
+def test_provider_request_uses_xhigh_reasoning_and_human_turnover_units(tmp_path: Path) -> None:
+    client = _Client([_Response(json.dumps(_compact_result_payload(), ensure_ascii=False))])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "ready"
+    request_json = client.post.call_args.kwargs["json"]
+    assert request_json["reasoning_effort"] == "xhigh"
+    user_message = json.loads(request_json["messages"][1]["content"])
+    assert user_message["data"]["market"]["turnover"] == "1.25万亿"
+    assert "成交额只使用万亿" in user_message["instruction"]
+    assert "自然中文" in user_message["instruction"]
+
+
+def test_semantic_contract_rejects_machine_field_names(tmp_path: Path) -> None:
+    result = _result_payload()
+    result["factor_divergence"] = "index_move_5d 与 volume_trend 存在分化。"
+    client = _Client([_Response(json.dumps(result, ensure_ascii=False))] * 3)
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(_input_payload(), _config())
+
+    assert response.status == "failed"
+    assert response.attempts == 3
+
+
 @pytest.mark.parametrize(
     "claim",
     [

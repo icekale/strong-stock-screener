@@ -366,7 +366,7 @@ watch(
 
     <section v-if="percentile" class="sentiment-percentile__analysis" aria-labelledby="sentiment-analysis-title">
       <div class="sentiment-percentile__analysis-heading">
-        <h3 id="sentiment-analysis-title">AI 盘后解读</h3>
+        <h3 id="sentiment-analysis-title">盘后简报</h3>
         <span>{{ selectedTradeDate }}</span>
       </div>
 
@@ -409,7 +409,7 @@ watch(
       >
         <div class="sentiment-percentile__analysis-lead">
           <div>
-            <span>市场结论</span>
+            <span>一句话判断</span>
             <p>{{ analysis.result.market_conclusion }}</p>
           </div>
           <div>
@@ -419,28 +419,31 @@ watch(
         </div>
         <div class="sentiment-percentile__analysis-grid">
           <div>
-            <h4>主要驱动</h4>
+            <h4>盘面事实</h4>
             <ul>
               <li v-for="item in analysis.result.key_drivers" :key="item">{{ item }}</li>
             </ul>
           </div>
           <div>
-            <h4>次日观察</h4>
+            <h4>需要留意</h4>
             <ul>
               <li v-for="item in analysis.result.next_session_watch" :key="item">{{ item }}</li>
             </ul>
           </div>
           <div>
-            <h4>因子背离</h4>
+            <h4>分歧点</h4>
             <p>{{ analysis.result.factor_divergence }}</p>
           </div>
           <div>
-            <h4>历史位置</h4>
+            <h4>历史参照</h4>
             <p>{{ analysis.result.historical_context }}</p>
           </div>
         </div>
         <footer class="sentiment-percentile__analysis-meta">
-          <span>{{ analysis.provider || 'OpenAI 兼容接口' }} · {{ analysis.llm_model || '--' }}</span>
+          <span>
+            {{ analysis.provider || 'OpenAI 兼容接口' }} · {{ analysis.llm_model || '--' }}
+            <template v-if="analysis.reasoning_effort"> · {{ analysis.reasoning_effort }}</template>
+          </span>
           <span>生成 {{ formatCompletedAt(analysis.completed_at) }}</span>
           <span>{{ analysis.result.risk_note }}</span>
         </footer>

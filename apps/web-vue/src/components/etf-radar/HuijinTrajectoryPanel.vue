@@ -316,12 +316,12 @@ function exceptionLabel(item: HuijinEtfActivityItem) {
         >
           {{ priceHistoryError }}
         </p>
-        <div v-if="(history || priceHistory) && hasRealHistory" data-testid="huijin-overview-chart">
-          <EChart
-            :option="chartOption"
-            height="clamp(360px, 42vw, 440px)"
-            :loading="historyLoading || priceHistoryLoading"
-          />
+        <div
+          v-if="(history || priceHistory) && hasRealHistory"
+          data-testid="huijin-overview-chart"
+          class="huijin-selected__chart"
+        >
+          <EChart :option="chartOption" height="100%" :loading="historyLoading || priceHistoryLoading" />
         </div>
         <div
           v-else
@@ -708,9 +708,9 @@ function exceptionLabel(item: HuijinEtfActivityItem) {
 }
 
 .huijin-ranking button:hover,
-.huijin-ranking__row--selected,
+.huijin-ranking button.huijin-ranking__row--selected,
 .huijin-trajectory__table button:hover,
-.huijin-trajectory__table-row--selected {
+.huijin-trajectory__table button.huijin-trajectory__table-row--selected {
   background: var(--wb-primary-soft);
 }
 
@@ -822,6 +822,10 @@ function exceptionLabel(item: HuijinEtfActivityItem) {
 .huijin-selected__latest-values time {
   margin-inline-start: 4px;
   color: var(--wb-muted);
+}
+
+.huijin-selected__chart {
+  height: clamp(360px, 42vw, 440px);
 }
 
 .huijin-trajectory__empty {
@@ -937,6 +941,19 @@ function exceptionLabel(item: HuijinEtfActivityItem) {
 .huijin-trajectory__details dd.huijin-value--decrease,
 .huijin-trajectory__table span.huijin-value--decrease {
   color: var(--wb-negative);
+}
+
+@media (min-width: 901px) {
+  .huijin-selected {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .huijin-selected__chart {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 440px;
+  }
 }
 
 @media (max-width: 900px) {

@@ -257,7 +257,7 @@ describe('HuijinTrajectoryPanel', () => {
     const chart = wrapper.getComponent(ChartStub);
     const option = chart.props('option') as EChartsOption;
     const series = (option.series as Array<{ connectNulls?: boolean; data?: unknown[] }>)[0]!;
-    expect(chart.props('height')).toBe('clamp(360px, 42vw, 440px)');
+    expect(chart.props('height')).toBe('100%');
     expect(chart.props('loading')).toBe(false);
     expect(option.animation).toBe(false);
     expect(Array.isArray(option.yAxis)).toBe(true);
@@ -284,6 +284,22 @@ describe('HuijinTrajectoryPanel', () => {
     expect(source).toMatch(/\.huijin-trajectory__table-head,[^{]*\{[^}]*min-width: 760px;/s);
     expect(source).not.toMatch(/\.huijin-trajectory__table-head\s*\{\s*display: none;/s);
     expect(source).toMatch(/\.huijin-ranking__zero\s*\{[^}]*z-index: 1;/s);
+  });
+
+  it('keeps the selected ETF visible after hover ends', () => {
+    expect(source).toMatch(
+      /\.huijin-ranking button\.huijin-ranking__row--selected[^{]*\{[^}]*background: var\(--wb-primary-soft\);/s
+    );
+  });
+
+  it('expands the desktop chart canvas instead of leaving blank space below it', () => {
+    expect(source).toMatch(/\.huijin-selected__chart\s*\{[^}]*height: clamp\(360px, 42vw, 440px\);/s);
+    expect(source).toMatch(
+      /@media \(min-width: 901px\)[\s\S]*\.huijin-selected\s*\{[^}]*display: flex;[^}]*flex-direction: column;/s
+    );
+    expect(source).toMatch(
+      /@media \(min-width: 901px\)[\s\S]*\.huijin-selected__chart\s*\{[^}]*flex: 1 1 auto;[^}]*height: auto;[^}]*min-height: 440px;/s
+    );
   });
 
   it('plots the holdings trend and close trend together', () => {

@@ -7,7 +7,6 @@ import { defineComponent, nextTick } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type {
-  EtfExcessFlowResponse,
   EtfPriceHistoryResponse,
   EtfRadarHistoryResponse,
   EtfRadarHoldersResponse,
@@ -341,29 +340,6 @@ function setDefaultApiResponses() {
   api.getEtfRadarMethodology.mockResolvedValue(methodologyFixture());
   api.getEtfThreeFactor.mockResolvedValue(threeFactorFixture());
   api.getEtfThreeFactorHistory.mockImplementation((symbol: string) => Promise.resolve(threeFactorHistoryFixture(symbol)));
-  api.getEtfExcessFlow.mockResolvedValue(excessFlowFixture());
-}
-
-function excessFlowFixture(): EtfExcessFlowResponse {
-  return {
-    ...metadata(),
-    model_version: 'etf-excess-flow-v1',
-    formula: 'test formula',
-    expected_count: 7,
-    points: [
-      {
-        trade_date: '2026-07-18',
-        net_excess_flow_cny: 120_000_000,
-        excess_inflow_cny: 180_000_000,
-        excess_outflow_cny: 60_000_000,
-        coverage_count: 6,
-        expected_count: 7,
-        tenfold_increase_count: 2,
-        tenfold_decrease_count: 1,
-        trigger_symbols: ['510050.SH', '510300.SH']
-      }
-    ]
-  };
 }
 
 function mountViewImmediately() {
@@ -423,8 +399,8 @@ describe('EtfRadarView', () => {
 
     await openTab(wrapper, 1);
 
-    expect(api.getEtfExcessFlow).toHaveBeenCalledWith(60);
-    expect(wrapper.find('[data-testid="etf-excess-flow-panel"]').exists()).toBe(true);
+    expect(api.getEtfExcessFlow).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="etf-excess-flow-panel"]').exists()).toBe(false);
     expect(wrapper.get('[data-testid="etf-activity-summary"]').text()).toContain('方向分歧');
     expect(wrapper.get('[data-testid="etf-activity-summary"]').text()).toContain('覆盖');
     expect(wrapper.findAll('.etf-metric')).toHaveLength(0);
@@ -482,7 +458,8 @@ describe('EtfRadarView', () => {
     await nextTick();
     await flushPromises();
 
-    expect(wrapper.find('[data-testid="etf-excess-flow-panel"]').exists()).toBe(true);
+    expect(api.getEtfExcessFlow).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="etf-excess-flow-panel"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="etf-activity-table"]').exists()).toBe(true);
     wrapper.unmount();
   });
@@ -490,11 +467,11 @@ describe('EtfRadarView', () => {
   it('keeps the activity table and three-factor workbench usable when excess flow fails', async () => {
     routeState.route.query = { tab: 'activity' };
     setDefaultApiResponses();
-    api.getEtfExcessFlow.mockRejectedValueOnce(new Error('超量趋势暂不可用'));
 
     const wrapper = await mountView();
 
-    expect(wrapper.get('[data-testid="excess-flow-error"]').text()).toContain('超量趋势暂不可用');
+    expect(api.getEtfExcessFlow).not.toHaveBeenCalled();
+    expect(wrapper.find('[data-testid="excess-flow-error"]').exists()).toBe(false);
     expect(wrapper.findAll('[data-testid="activity-etf-row"]')).toHaveLength(7);
     expect(wrapper.find('[data-testid="three-factor-table"]').exists()).toBe(false);
     expect(wrapper.text()).toContain('交叉验证');

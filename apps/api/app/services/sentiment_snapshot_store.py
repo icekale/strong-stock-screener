@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from shutil import rmtree
 from threading import RLock
 
 from app.models import (
     MarketEmotionSnapshotResponse,
+    SENTIMENT_SNAPSHOT_VERSION,
     SentimentSummaryResponse,
     ShortTermSentimentResponse,
     StrongStockSourceStatus,
@@ -77,7 +79,13 @@ class SentimentSnapshotStore:
         if not path.exists():
             return None
         try:
-            return model_cls.model_validate_json(path.read_text(encoding="utf-8"))
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if (
+                not isinstance(payload, dict)
+                or payload.get("snapshot_version") != SENTIMENT_SNAPSHOT_VERSION
+            ):
+                return None
+            return model_cls.model_validate(payload)
         except Exception:
             return None
 

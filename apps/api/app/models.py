@@ -411,6 +411,7 @@ SentimentPercentileLevel = Literal["冰点", "偏冷", "中性", "偏热", "过�
 SentimentPercentileCacheStatus = Literal["fresh", "cached", "stale"]
 SentimentAnalysisStatus = Literal["not_generated", "unconfigured", "pending", "ready", "failed"]
 SentimentRiskPosture = Literal["attack", "balanced", "defensive", "wait"]
+SENTIMENT_SNAPSHOT_VERSION = "sentiment-snapshot-v2"
 
 
 class SentimentPercentileFactor(BaseModel):
@@ -1816,6 +1817,7 @@ class ShortTermSentimentMetrics(BaseModel):
 
 
 class ShortTermSentimentResponse(BaseModel):
+    snapshot_version: str = SENTIMENT_SNAPSHOT_VERSION
     trade_date: str
     metrics: ShortTermSentimentMetrics = Field(default_factory=ShortTermSentimentMetrics)
     limit_up_pool: list[ShortTermSentimentStockItem] = Field(default_factory=list)
@@ -1932,6 +1934,7 @@ class MarketEmotionSample(BaseModel):
 
 
 class MarketEmotionSnapshotResponse(BaseModel):
+    snapshot_version: str = SENTIMENT_SNAPSHOT_VERSION
     trade_date: str
     metrics: MarketEmotionMetrics = Field(default_factory=MarketEmotionMetrics)
     buckets: list[MarketEmotionBucket] = Field(default_factory=list)
@@ -1960,6 +1963,7 @@ class SentimentSummaryMetrics(BaseModel):
 
 
 class SentimentSummaryResponse(BaseModel):
+    snapshot_version: str = SENTIMENT_SNAPSHOT_VERSION
     trade_date: str
     snapshot_status: SentimentSnapshotStatus = "fresh"
     cached_at: str | None = None

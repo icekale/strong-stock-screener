@@ -1,3 +1,4 @@
+import json
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -409,6 +410,29 @@ def test_sentiment_snapshot_store_deduplicates_legacy_summary_source_status(tmp_
     assert persisted_summary is not None
     persisted_keys = [(item.source, item.status, item.detail) for item in persisted_summary.source_status]
     assert len(persisted_keys) == len(set(persisted_keys))
+
+
+def test_sentiment_snapshot_store_rejects_snapshot_without_current_version(tmp_path: Path) -> None:
+    sentiment = build_short_term_sentiment(
+        FakeSentimentCandidateProvider(),
+        trade_date="2026-06-26",
+        limit=20,
+    )
+    emotion = build_market_emotion_snapshot(
+        FakeSentimentCandidateProvider(),
+        FakeEmotionMarketOverviewProvider(),
+        trade_date="2026-06-26",
+        limit=20,
+    )
+    store = SentimentSnapshotStore(tmp_path)
+    store.save(sentiment=sentiment, market_emotion=emotion)
+
+    summary_path = store.root_dir / "2026-06-26" / "summary.json"
+    legacy_summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    legacy_summary.pop("snapshot_version", None)
+    summary_path.write_text(json.dumps(legacy_summary), encoding="utf-8")
+
+    assert store.load_summary("2026-06-26") is None
 
 
 def test_build_sentiment_summary_combines_short_term_and_market_emotion() -> None:

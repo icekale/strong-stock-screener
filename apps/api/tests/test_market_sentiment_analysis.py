@@ -1332,6 +1332,21 @@ def test_semantic_contract_rejects_machine_field_names(tmp_path: Path) -> None:
     assert response.attempts == 3
 
 
+def test_semantic_contract_allows_zero_unavailable_validation_sample_claim(
+    tmp_path: Path,
+) -> None:
+    payload = build_sentiment_analysis_input(_point(), [_point()], _summary(), _decision(), None)
+    result = _result_payload()
+    result["historical_context"] = "历史验证样本数0，验证结论不可用。"
+    client = _Client([_Response(json.dumps(result, ensure_ascii=False))])
+    service = MarketSentimentAnalysisService(MarketSentimentAnalysisStore(tmp_path), http_client=client)
+
+    response = service.generate(payload, _config())
+
+    assert response.status == "ready"
+    assert response.result_source == "ai"
+
+
 @pytest.mark.parametrize(
     "claim",
     [

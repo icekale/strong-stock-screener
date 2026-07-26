@@ -314,6 +314,9 @@ _VALIDATION_CLAIM_PATTERN = re.compile(r"历史样本|验证样本|样本(?:数|
 _UNAVAILABLE_VALIDATION_NOTE_PATTERN = re.compile(
     r"暂无|尚无|不可用|缺失|缺少|未(?:提供|形成|更新)|不足以|无法(?:提供|验证|获取)"
 )
+_ZERO_VALIDATION_SAMPLE_CLAIM_PATTERN = re.compile(
+    r"样本(?:数|数量)\s*(?:为|是|=|:|：)?\s*0(?:\.0+)?(?:个|条|项)?"
+)
 _HISTORICAL_LEVEL_CUE_PATTERN = re.compile(r"历史|过去|此前|曾经|曾|前一日|前日|昨日|上日|\d+日前")
 _CURRENT_CUE_PATTERN = re.compile(r"当前|目前|现时|now|current", re.IGNORECASE)
 _MOVEMENT_PATTERN = re.compile(
@@ -1487,7 +1490,11 @@ def _validate_source_availability(
         and analysis_input.validation.status == "unavailable"
         and not _UNAVAILABLE_VALIDATION_NOTE_PATTERN.search(clause)
     ):
-        raise ValueError("AI response claims unavailable validation metrics")
+        if not (
+            analysis_input.validation.sample_count == 0
+            and _ZERO_VALIDATION_SAMPLE_CLAIM_PATTERN.search(clause)
+        ):
+            raise ValueError("AI response claims unavailable validation metrics")
 
 
 def _validate_numeric_evidence(

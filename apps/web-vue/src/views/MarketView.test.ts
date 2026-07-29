@@ -26,14 +26,14 @@ vi.mock('@/service/product-api', () => api);
 const SegmentedStub = defineComponent({
   name: 'ASegmented',
   props: ['options', 'value'],
-  emits: ['change'],
+  emits: ['change', 'update:value'],
   template: `
     <div>
       <button
         v-for="option in options"
         :key="option.value"
         :data-value="option.value"
-        @click="$emit('change', option.value)"
+        @click="$emit('update:value', option.value); $emit('change', option.value)"
       >{{ option.label }}</button>
     </div>
   `
@@ -44,13 +44,17 @@ afterEach(() => {
   navigation.route.query = {};
 });
 
-function mockSectorResponses() {
-  api.getSectorReplicaRadar.mockResolvedValue({
+function sectorRadar(code: string, name: string) {
+  return {
     axis: ['09:30'],
     generated_at: '2026-07-29T09:30:00+08:00',
-    plates: [{ code: '801220', name: '食品饮料', val: 100, ztcount: 1, display_value: '100' }],
-    series: [{ name: '食品饮料', type: 'line', data: [100], smooth: true, showSymbol: false }]
-  });
+    plates: [{ code, name, val: 100, ztcount: 1, display_value: '100' }],
+    series: [{ name, type: 'line', data: [100], smooth: true, showSymbol: false }]
+  };
+}
+
+function mockSectorResponses() {
+  api.getSectorReplicaRadar.mockResolvedValue(sectorRadar('801220', '食品饮料'));
   api.getSectorReplicaBoardStocks.mockResolvedValue({
     board_code: '801220',
     sub_theme: null,
@@ -101,6 +105,41 @@ describe('MarketView sector-only workbench', () => {
       '801220',
       expect.objectContaining({ boardName: '食品饮料', mode: 'strength', limit: 50 })
     );
+    expect(api.getSectorReplicaBoardStocks).toHaveBeenCalledTimes(1);
+    wrapper.unmount();
+  });
+
+  it('selects a valid board after changing radar mode', async () => {
+    api.getSectorReplicaRadar
+      .mockResolvedValueOnce(sectorRadar('801220', '食品饮料'))
+      .mockResolvedValueOnce(sectorRadar('801330', 'AI应用'));
+    api.getSectorReplicaBoardStocks.mockResolvedValue({
+      board_code: '801220',
+      sub_theme: null,
+      rows: [],
+      related_tags: [],
+      source_status: [],
+      generated_at: '2026-07-29T09:30:00+08:00'
+    });
+    const wrapper = mount(MarketView, {
+      global: {
+        stubs: {
+          ASegmented: SegmentedStub,
+          HeatmapTreemap: true,
+          SectorRadarChart: true
+        }
+      }
+    });
+    await flushPromises();
+
+    await wrapper.find('button[data-value="main_flow"]').trigger('click');
+    await flushPromises();
+
+    expect(api.getSectorReplicaBoardStocks).toHaveBeenLastCalledWith(
+      '801330',
+      expect.objectContaining({ boardName: 'AI应用', mode: 'main_flow', limit: 50 })
+    );
+    expect(api.getSectorReplicaBoardStocks).toHaveBeenCalledTimes(2);
     wrapper.unmount();
   });
 });

@@ -433,6 +433,36 @@ class BatchIndustryFallbackHttpClient(FailingAshareIndustryHttpClient):
         return super().get(url, **kwargs)
 
 
+class FastStockIndustryHttpClient:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, object]] = []
+
+    def get(self, url: str, **kwargs: object) -> FakeResponse:
+        self.requests.append({"url": url, **kwargs})
+        return FakeResponse(
+            {
+                "data": {
+                    "diff": [
+                        {"f12": "300001", "f14": "创业一", "f100": "电网设备"},
+                    ]
+                }
+            }
+        )
+
+
+def test_market_overview_fast_stock_industries_uses_short_timeout_and_cache() -> None:
+    client = FastStockIndustryHttpClient()
+    provider = EastmoneyMarketOverviewProvider(timeout_seconds=12, http_client=client)
+
+    first = provider.get_stock_industries_fast(["300001.SZ"], timeout_seconds=0.25)
+    second = provider.get_stock_industries_fast(["300001.SZ"], timeout_seconds=0.25)
+
+    assert first == {"300001.SZ": "电网设备"}
+    assert second == first
+    assert len(client.requests) == 1
+    assert client.requests[0]["timeout"] == 0.25
+
+
 class ThsIndustryFallbackHttpClient(FailingAshareIndustryHttpClient):
     def get(self, url: str, **kwargs: object) -> FakeResponse:
         if "files.688798.xyz/ths/industries.json" in url:

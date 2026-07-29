@@ -62,7 +62,9 @@ async function loadSectors() {
   error.value = null;
   try {
     radar.value = await getSectorReplicaRadar({ mode: mode.value, limit: 8, stockLimit: 80 });
-    if (radar.value.plates[0] && !selectedBoard.value) selectedBoard.value = radar.value.plates[0].code;
+    if (!radar.value.plates.some(plate => plate.code === selectedBoard.value)) {
+      selectedBoard.value = radar.value.plates[0]?.code ?? null;
+    }
     await loadBoardStocks();
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '读取板块雷达失败';
@@ -72,13 +74,22 @@ async function loadSectors() {
 }
 
 async function loadBoardStocks() {
-  if (!selectedBoard.value) return;
+  if (!selectedBoard.value) {
+    stocks.value = null;
+    return;
+  }
   const boardName = radar.value?.plates.find(plate => plate.code === selectedBoard.value)?.name;
   try {
     stocks.value = await getSectorReplicaBoardStocks(selectedBoard.value, { boardName, mode: mode.value, limit: 50 });
   } catch {
     stocks.value = null;
   }
+}
+
+function selectBoard(boardCode: string) {
+  if (selectedBoard.value === boardCode) return;
+  selectedBoard.value = boardCode;
+  void loadBoardStocks();
 }
 
 function asPlate(value: unknown) {
@@ -90,7 +101,6 @@ function asStock(value: unknown) {
 }
 
 watch(mode, () => void loadSectors());
-watch(selectedBoard, () => void loadBoardStocks());
 onMounted(() => void loadSectors());
 </script>
 
@@ -121,7 +131,7 @@ onMounted(() => void loadSectors());
               class="market-board-row"
               :class="asPlate(item).code === selectedBoard ? 'market-board-row--selected' : undefined"
               type="button"
-              @click="selectedBoard = asPlate(item).code"
+              @click="selectBoard(asPlate(item).code)"
             >
               <span class="min-w-0 truncate">{{ asPlate(item).name }}</span>
               <span :class="changeTone(asPlate(item).val)" class="wb-tabular-nums">{{ asPlate(item).display_value || asPlate(item).val }}</span>

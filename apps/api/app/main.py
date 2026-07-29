@@ -421,6 +421,7 @@ STOCK_KLINE_CACHE: TtlCache[StockKlineResponse] = TtlCache(ttl_seconds=300, name
 STOCK_RESEARCH_CACHE: TtlCache[StockResearchResponse] = TtlCache(
     ttl_seconds=900, name="stock_research"
 )
+SECTOR_STOCK_INDUSTRY_TIMEOUT_SECONDS = 2.0
 CACHE_DEFINITIONS = (
     ("short_term_sentiment", "sentiment", SHORT_TERM_SENTIMENT_CACHE),
     ("market_emotion", "sentiment", MARKET_EMOTION_CACHE),
@@ -1978,7 +1979,9 @@ def _enrich_sector_replica_stock_rows(
     industry_status: StrongStockSourceStatus | None = None
     if missing_symbols:
         provider = _market_overview_provider()
-        if not hasattr(provider, "get_stock_industries"):
+        if not hasattr(provider, "get_stock_industries_fast") and not hasattr(
+            provider, "get_stock_industries"
+        ):
             industry_status = StrongStockSourceStatus(
                 source="成分股行业补充",
                 status="disabled",
@@ -1986,7 +1989,13 @@ def _enrich_sector_replica_stock_rows(
             )
         else:
             try:
-                raw_industries = provider.get_stock_industries(missing_symbols)
+                if hasattr(provider, "get_stock_industries_fast"):
+                    raw_industries = provider.get_stock_industries_fast(
+                        missing_symbols,
+                        timeout_seconds=SECTOR_STOCK_INDUSTRY_TIMEOUT_SECONDS,
+                    )
+                else:
+                    raw_industries = provider.get_stock_industries(missing_symbols)
                 industry_by_symbol = {
                     str(symbol).strip().upper(): str(industry).strip()
                     for symbol, industry in raw_industries.items()

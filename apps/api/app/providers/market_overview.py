@@ -72,6 +72,7 @@ class EastmoneyMarketOverviewProvider:
         self._owns_client = http_client is None
         self.http_client = http_client or httpx.Client()
         self._a_share_realtime_rows_cache: list[dict[str, Any]] | None = None
+        self._stock_industry_cache: dict[str, str] = {}
         self._ths_industry_map_cache: dict[str, str] | None = None
         self._heatmap_baseline_industry_map_cache: dict[str, str] | None = None
 
@@ -766,7 +767,12 @@ class EastmoneyMarketOverviewProvider:
 
     def get_stock_industries(self, symbols: list[str]) -> dict[str, str]:
         missing_symbols = _dedupe_symbols(symbols)
-        output: dict[str, str] = {}
+        output = {
+            symbol: self._stock_industry_cache[symbol]
+            for symbol in missing_symbols
+            if symbol in self._stock_industry_cache
+        }
+        missing_symbols = [symbol for symbol in missing_symbols if symbol not in output]
         if not missing_symbols:
             return output
 
@@ -804,11 +810,57 @@ class EastmoneyMarketOverviewProvider:
                 output.update(self._fetch_eastmoney_f10_industries_by_symbols(missing_symbols))
             except Exception:
                 pass
+        self._stock_industry_cache.update(output)
         return output
 
-    def _fetch_stock_industries_by_symbols(self, symbols: list[str], batch_size: int = 100) -> dict[str, str]:
+    def get_stock_industries_fast(
+        self,
+        symbols: list[str],
+        *,
+        timeout_seconds: float = 2.0,
+    ) -> dict[str, str]:
+        missing_symbols = _dedupe_symbols(symbols)
+        output = {
+            symbol: self._stock_industry_cache[symbol]
+            for symbol in missing_symbols
+            if symbol in self._stock_industry_cache
+        }
+        missing_symbols = [symbol for symbol in missing_symbols if symbol not in output]
+        if not missing_symbols:
+            return output
+
+        bounded_timeout = max(0.1, min(float(timeout_seconds), self.timeout_seconds))
+        try:
+            output.update(
+                self._fetch_stock_industries_by_symbols(
+                    missing_symbols,
+                    timeout_seconds=bounded_timeout,
+                )
+            )
+        except Exception:
+            pass
+        missing_symbols = [symbol for symbol in missing_symbols if symbol not in output]
+        if missing_symbols and self._ths_industry_map_cache is not None:
+            output.update(self._fetch_ths_industries_by_symbols(missing_symbols))
+        missing_symbols = [symbol for symbol in missing_symbols if symbol not in output]
+        if missing_symbols:
+            try:
+                output.update(self._fetch_heatmap_baseline_industries_by_symbols(missing_symbols))
+            except Exception:
+                pass
+        self._stock_industry_cache.update(output)
+        return output
+
+    def _fetch_stock_industries_by_symbols(
+        self,
+        symbols: list[str],
+        batch_size: int = 100,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> dict[str, str]:
         output: dict[str, str] = {}
         bounded_batch_size = max(1, min(batch_size, 100))
+        request_timeout = self.timeout_seconds if timeout_seconds is None else timeout_seconds
         for start in range(0, len(symbols), bounded_batch_size):
             batch = symbols[start : start + bounded_batch_size]
             secids = [_eastmoney_stock_secid(symbol) for symbol in batch]
@@ -822,7 +874,7 @@ class EastmoneyMarketOverviewProvider:
                     "fields": "f12,f14,f100",
                 },
                 headers={"User-Agent": USER_AGENT},
-                timeout=self.timeout_seconds,
+                timeout=request_timeout,
             )
             response.raise_for_status()
             for row in _extract_diff(response.json()):

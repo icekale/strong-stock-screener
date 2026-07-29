@@ -75,6 +75,7 @@ from app.models import (
     SectorWorkbenchStatusResponse,
     SectorReplicaMode,
     SectorReplicaRadarResponse,
+    SectorReplicaStockRow,
     SectorReplicaStocksResponse,
     SentimentDetailResponse,
     SentimentPercentileAnalysisResponse,
@@ -1912,18 +1913,25 @@ def get_sector_replica_board_stocks(
                 )
             else:
                 if rows:
+                    rows, industry_status = _enrich_sector_replica_stock_rows(
+                        rows,
+                        board_name=board_name,
+                    )
+                    source_status = [
+                        StrongStockSourceStatus(
+                            source="短线侠 qxlive 成分股",
+                            status="success",
+                            detail=f"读取真实开盘啦板块成分股 {len(rows)} 条",
+                        )
+                    ]
+                    if industry_status is not None:
+                        source_status.append(industry_status)
                     return SectorReplicaStocksResponse(
                         board_code=board_code,
                         sub_theme=sub_theme,
                         rows=rows,
                         related_tags=related_tags,
-                        source_status=[
-                            StrongStockSourceStatus(
-                                source="短线侠 qxlive 成分股",
-                                status="success",
-                                detail=f"读取真实开盘啦板块成分股 {len(rows)} 条",
-                            )
-                        ],
+                        source_status=source_status,
                         generated_at=_sector_now().isoformat(timespec="seconds"),
                     )
                 live_status = StrongStockSourceStatus(
@@ -1958,6 +1966,62 @@ def get_sector_replica_board_stocks(
         source_status=source_status,
         generated_at=_sector_now().isoformat(timespec="seconds"),
     )
+
+
+def _enrich_sector_replica_stock_rows(
+    rows: list[SectorReplicaStockRow],
+    *,
+    board_name: str | None,
+) -> tuple[list[SectorReplicaStockRow], StrongStockSourceStatus | None]:
+    missing_symbols = list(dict.fromkeys(row.symbol for row in rows if not row.industry))
+    industry_by_symbol: dict[str, str] = {}
+    industry_status: StrongStockSourceStatus | None = None
+    if missing_symbols:
+        provider = _market_overview_provider()
+        if not hasattr(provider, "get_stock_industries"):
+            industry_status = StrongStockSourceStatus(
+                source="成分股行业补充",
+                status="disabled",
+                detail=f"{len(missing_symbols)} 只成分股缺少行业，当前数据源不支持补充",
+            )
+        else:
+            try:
+                raw_industries = provider.get_stock_industries(missing_symbols)
+                industry_by_symbol = {
+                    str(symbol).strip().upper(): str(industry).strip()
+                    for symbol, industry in raw_industries.items()
+                    if str(symbol).strip() and str(industry).strip()
+                }
+            except Exception as exc:
+                industry_status = StrongStockSourceStatus(
+                    source="成分股行业补充",
+                    status="failed",
+                    detail=f"{len(missing_symbols)} 只成分股行业补充失败: {exc.__class__.__name__}",
+                )
+
+    normalized_board_name = (board_name or "").strip()
+    enriched_rows = [
+        row.model_copy(
+            update={
+                "industry": row.industry or industry_by_symbol.get(row.symbol.strip().upper()),
+                "themes": row.themes or ([normalized_board_name] if normalized_board_name else []),
+            }
+        )
+        for row in rows
+    ]
+    if missing_symbols and industry_status is None:
+        missing_symbol_set = {symbol.strip().upper() for symbol in missing_symbols}
+        enriched_count = sum(
+            1
+            for row in enriched_rows
+            if row.symbol.strip().upper() in missing_symbol_set and row.industry
+        )
+        industry_status = StrongStockSourceStatus(
+            source="成分股行业补充",
+            status="success" if enriched_count == len(missing_symbols) else "stale",
+            detail=f"补齐 {enriched_count}/{len(missing_symbols)} 只成分股行业",
+        )
+    return enriched_rows, industry_status
 
 
 @app.get("/api/sectors/replica/status")

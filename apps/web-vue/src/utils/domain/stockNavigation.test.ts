@@ -11,4 +11,11 @@ describe('stockNavigation', () => {
   it('returns unknown origins to the product home page', () => {
     expect(resolveStockDetailContext(new URLSearchParams('from=https://example.com')).returnHref).toBe('/');
   });
+
+  it('returns legacy heatmap links to the sector radar', () => {
+    const context = resolveStockDetailContext(new URLSearchParams('from=heatmap'));
+
+    expect(context.returnHref).toBe('/market');
+    expect(context.returnLabel).toBe('返回板块雷达');
+  });
 });

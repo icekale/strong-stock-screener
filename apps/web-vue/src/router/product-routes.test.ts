@@ -31,6 +31,10 @@ describe('product route table', () => {
     });
   });
 
+  it('labels the market workbench as sector radar', () => {
+    expect(productRoutes.find(route => route.path === '/market')?.meta?.title).toBe('板块雷达');
+  });
+
   it('registers the ETF radar in the generated route contract', () => {
     const path: RouteMap['etf-radar'] = '/etf-radar';
 
@@ -45,7 +49,7 @@ describe('product route table', () => {
   it('keeps legacy paths as redirects', () => {
     expect(productRoutes.find(route => route.path === '/settings')?.redirect).toBe('/system?tab=data');
     expect(productRoutes.find(route => route.path === '/sectors')?.redirect).toBe('/market?view=sectors');
-    expect(productRoutes.find(route => route.path === '/heatmap')?.redirect).toBe('/market?view=heatmap');
+    expect(productRoutes.find(route => route.path === '/heatmap')?.redirect).toBe('/market');
     expect(productRoutes.find(route => route.path === '/model-maintenance')?.redirect).toBe('/system?tab=model');
   });
 

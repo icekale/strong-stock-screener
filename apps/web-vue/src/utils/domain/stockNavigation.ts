@@ -55,24 +55,24 @@ export function resolveStockDetailContext(params: ReadableSearchParams): StockDe
       from === "auction" || from === "auction-model"
         ? "/auction"
         : from === "heatmap"
-          ? "/market?view=heatmap"
+          ? "/market"
           : from === "screener"
             ? "/screener"
-          : from === "sectors"
-            ? "/market?view=sectors"
-            : "/",
+            : from === "sectors"
+              ? "/market?view=sectors"
+              : "/",
     returnLabel:
       from === "auction"
         ? "返回竞价雷达"
         : from === "auction-model"
           ? "返回竞价模型"
           : from === "heatmap"
-            ? "返回市场热图"
+            ? "返回板块雷达"
             : from === "screener"
               ? "返回选股工作台"
-            : from === "sectors"
-              ? "返回题材工作台"
-              : "返回选股工作台",
+              : from === "sectors"
+                ? "返回题材工作台"
+                : "返回选股工作台",
   };
 }
 

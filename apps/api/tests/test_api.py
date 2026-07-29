@@ -1110,6 +1110,20 @@ class FakeStockIndustryProvider(FakeMarketOverviewProvider):
         return {symbol: "贵金属" for symbol in symbols if symbol == "000506.SZ"}
 
 
+class RecordingSectorStockIndustryProvider(FakeMarketOverviewProvider):
+    def __init__(self) -> None:
+        self.industry_calls: list[list[str]] = []
+
+    def get_stock_industries(self, symbols: list[str]) -> dict[str, str]:
+        self.industry_calls.append(symbols)
+        return {"603137.SH": "装修建材"}
+
+
+class FailingSectorStockIndustryProvider(FakeMarketOverviewProvider):
+    def get_stock_industries(self, _symbols: list[str]) -> dict[str, str]:
+        raise RuntimeError("industry source unavailable")
+
+
 class CountingSectorRadarProvider(FakeMarketOverviewProvider):
     source_name = "counting fake板块雷达"
 
@@ -3713,6 +3727,48 @@ def test_sector_replica_board_stocks_endpoint_prefers_live_numeric_board_code(
     assert payload["rows"][0]["leader_tag"] == "龙一"
     assert payload["source_status"][0]["source"] == "短线侠 qxlive 成分股"
     assert provider.stock_calls == [("801001", 10)]
+
+
+def test_sector_replica_board_stocks_endpoint_enriches_live_metadata(tmp_path: Path) -> None:
+    industry_provider = RecordingSectorStockIndustryProvider()
+    client = _client(tmp_path, market_overview_provider=industry_provider)
+    provider = FakeSectorReplicaLiveProvider()
+    app.state.sector_replica_live_provider = provider
+
+    response = client.get(
+        "/api/sectors/replica/boards/801001/stocks"
+        "?mode=strength&board_name=装配式建筑&limit=10"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["rows"][0]["industry"] == "装修建材"
+    assert payload["rows"][0]["themes"] == ["装配式建筑"]
+    assert industry_provider.industry_calls == [["603137.SH"]]
+
+
+def test_sector_replica_board_stocks_endpoint_survives_industry_enrichment_failure(
+    tmp_path: Path,
+) -> None:
+    client = _client(
+        tmp_path,
+        market_overview_provider=FailingSectorStockIndustryProvider(),
+    )
+    provider = FakeSectorReplicaLiveProvider()
+    app.state.sector_replica_live_provider = provider
+
+    response = client.get(
+        "/api/sectors/replica/boards/801001/stocks"
+        "?mode=strength&board_name=装配式建筑&limit=10"
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["rows"][0]["symbol"] == "603137.SH"
+    assert any(
+        status["source"] == "成分股行业补充" and status["status"] == "failed"
+        for status in payload["source_status"]
+    )
 
 
 def test_sector_replica_board_stocks_endpoint_uses_live_subplate_code(tmp_path: Path) -> None:

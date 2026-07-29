@@ -23,7 +23,7 @@ export const productRoutes: ElegantConstRoute[] = [
     name: 'market',
     path: '/market',
     component: 'layout.base$view.market',
-    meta: { title: '板块与热图', icon: 'ant-design:line-chart-outlined', order: 4, constant: true }
+    meta: { title: '板块雷达', icon: 'ant-design:line-chart-outlined', order: 4, constant: true }
   },
   {
     name: 'etf-radar',
@@ -77,7 +77,7 @@ export const productRoutes: ElegantConstRoute[] = [
   {
     name: 'heatmap',
     path: '/heatmap',
-    redirect: '/market?view=heatmap',
+    redirect: '/market',
     meta: { title: '市场热图', constant: true, hideInMenu: true }
   },
   {

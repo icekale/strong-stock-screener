@@ -36,6 +36,7 @@ const showMovingAverages = ref(false);
 const movingAverages = ref<KlineMovingAverage[]>([]);
 const subIndicators = ref<KlineSubIndicator[]>(['volume']);
 const paperQuantity = ref(100);
+let analysisRequestId = 0;
 
 const periods = [
   { label: '日线', value: '1d' },
@@ -45,7 +46,7 @@ const periods = [
 ];
 const layerLabels: Record<ChanlunLayerKey, string> = { zones: '中枢', strokes: '笔', segments: '线段', divergences: '背驰', signals: '买卖点', fractals: '分型' };
 
-const chartBars = computed(() => analysis.value?.bars ?? workspace.value?.analysis.bars ?? []);
+const chartBars = computed(() => analysis.value?.bars ?? []);
 const availablePeriods = computed(() => workspace.value?.periods ?? []);
 const latestZone = computed(() => analysis.value?.zones.at(-1) ?? null);
 const latestDivergence = computed(() => analysis.value?.divergences.at(-1) ?? null);
@@ -106,29 +107,76 @@ const paperOrderStatusLabels: Record<string, string> = {
 };
 
 async function loadWorkspace() {
+  analysisRequestId += 1;
+  const requestId = analysisRequestId;
+  const requestedSymbol = symbol.value;
+  const requestedPeriod = period.value;
   loading.value = true;
   error.value = null;
+  analysis.value = null;
+  if (workspace.value?.symbol !== requestedSymbol) workspace.value = null;
   try {
-    workspace.value = await getChanlunWorkspace(symbol.value);
-    analysis.value = workspace.value.analysis;
+    const nextWorkspace = await getChanlunWorkspace(requestedSymbol);
+    if (!isCurrentAnalysisRequest(requestId, requestedSymbol, requestedPeriod)) return;
+    workspace.value = nextWorkspace;
+    if (requestedPeriod === '1d') {
+      analysis.value = nextWorkspace.analysis;
+      return;
+    }
+    const nextAnalysis = await getChanlunAnalysis(requestedSymbol, {
+      period: requestedPeriod,
+      lookback: 220,
+      includeObserving: true
+    });
+    if (isCurrentAnalysisRequest(requestId, requestedSymbol, requestedPeriod)) {
+      analysis.value = nextAnalysis;
+    }
   } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : '读取缠论工作台失败';
+    if (isCurrentAnalysisRequest(requestId, requestedSymbol, requestedPeriod)) {
+      error.value = cause instanceof Error ? cause.message : '读取缠论工作台失败';
+    }
   } finally {
-    loading.value = false;
+    if (requestId === analysisRequestId) loading.value = false;
   }
 }
 
 async function changePeriod(value: ChanlunPeriod) {
   period.value = value;
   if (!symbol.value) return;
-  loading.value = true;
-  try {
-    analysis.value = await getChanlunAnalysis(symbol.value, { period: value, lookback: 220, includeObserving: true });
-  } catch (cause) {
-    error.value = cause instanceof Error ? cause.message : '读取缠论周期分析失败';
-  } finally {
-    loading.value = false;
+  if (workspace.value?.symbol !== symbol.value) {
+    await loadWorkspace();
+    return;
   }
+  analysisRequestId += 1;
+  const requestId = analysisRequestId;
+  const requestedSymbol = symbol.value;
+  loading.value = true;
+  error.value = null;
+  analysis.value = null;
+  try {
+    const nextAnalysis = await getChanlunAnalysis(requestedSymbol, {
+      period: value,
+      lookback: 220,
+      includeObserving: true
+    });
+    if (isCurrentAnalysisRequest(requestId, requestedSymbol, value)) {
+      analysis.value = nextAnalysis;
+    }
+  } catch (cause) {
+    if (isCurrentAnalysisRequest(requestId, requestedSymbol, value)) {
+      error.value = cause instanceof Error ? cause.message : '读取缠论周期分析失败';
+    }
+  } finally {
+    if (requestId === analysisRequestId) loading.value = false;
+  }
+}
+
+function isCurrentAnalysisRequest(
+  requestId: number,
+  requestedSymbol: string,
+  requestedPeriod: ChanlunPeriod
+) {
+  return requestId === analysisRequestId && symbol.value === requestedSymbol && period.value === requestedPeriod;
 }
 
 function applySymbol() {
@@ -239,7 +287,7 @@ watch(() => route.query.symbol, value => { if (value && value !== symbol.value) 
       <a-segmented :value="period" size="small" :options="periods" @change="value => changePeriod(value as ChanlunPeriod)" />
     </PageHeader>
 
-    <a-alert v-if="error" :message="error" show-icon type="warning" />
+    <a-alert v-if="error" :title="error" show-icon type="warning" />
     <MetricStrip :items="chanlunMetrics" />
 
     <section class="chanlun-chart-panel border border-border rounded-6px bg-container p-12px">
@@ -308,7 +356,7 @@ watch(() => route.query.symbol, value => { if (value && value !== symbol.value) 
         <SectionHeader title="人工确认模拟盘" source="纸面账户">
           <StatusTag v-if="order" :status="paperOrderStatusTone(order.status)" />
         </SectionHeader>
-        <a-alert v-if="paperError" class="mt-12px" :message="paperError" show-icon type="warning" />
+        <a-alert v-if="paperError" class="mt-12px" :title="paperError" show-icon type="warning" />
         <div v-if="account" class="chanlun-account-grid mt-12px">
           <div><span>可用资金</span><strong>{{ account.available_cash.toFixed(2) }}</strong></div>
           <div><span>总权益</span><strong>{{ account.total_equity.toFixed(2) }}</strong></div>

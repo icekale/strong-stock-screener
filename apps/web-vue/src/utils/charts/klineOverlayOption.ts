@@ -1,5 +1,5 @@
 import type { ChanlunAnalysisResponse, ChanlunLayerKey, GsgfChartAnnotation, KlineBar, StockKlinePeriod } from '@/service/types';
-import type { EChartsOption } from 'echarts';
+import type { ECharts, EChartsOption } from 'echarts';
 import { buildChanlunOverlaySeries } from './chanlunOverlay';
 import {
   buildKlineIndicatorOptions,
@@ -38,7 +38,10 @@ export type KlineOverlayOptionInput = {
   chanlun?: ChanlunAnalysisResponse | null;
   chanlunLayers?: Partial<Record<ChanlunLayerKey, boolean>>;
   visibleBarCount?: number;
+  zoomRange?: KlineZoomRange;
 };
+
+export type KlineZoomRange = { start: number; end: number };
 
 export type KlineOverlayOption = {
   animation: boolean;
@@ -69,12 +72,7 @@ const MA_COLORS: Record<KlineMovingAverage, string> = {
 const INDICATOR_COLORS = ['#1677ff', '#f59e0b', '#7c3aed', '#0891b2'];
 const MAX_SUB_INDICATORS = 3;
 
-export type EChartLifecycleTarget = {
-  setOption: (option: EChartsOption, notMerge?: boolean) => void;
-  dispatchAction: (payload: { type: 'dataZoom'; start: number; end: number }) => void;
-  resize: () => void;
-  dispose: () => void;
-};
+export type EChartLifecycleTarget = Pick<ECharts, 'setOption' | 'dispatchAction' | 'resize' | 'dispose'>;
 
 export type EChartResizeObserver = { disconnect: () => void };
 
@@ -87,7 +85,7 @@ export type EChartLifecycleAction =
 export function runEChartLifecycle(chart: EChartLifecycleTarget, action: EChartLifecycleAction): void {
   switch (action.type) {
     case 'setOption':
-      chart.setOption(action.option, true);
+      chart.setOption(action.option, { notMerge: false, replaceMerge: ['series'] });
       return;
     case 'restore':
       chart.dispatchAction({ type: 'dataZoom', start: 0, end: 100 });
@@ -116,7 +114,8 @@ export function buildKlineOverlayOption({
   gsgfAnnotations = [],
   chanlun,
   chanlunLayers,
-  visibleBarCount
+  visibleBarCount,
+  zoomRange = { start: 0, end: 100 }
 }: KlineOverlayOptionInput): KlineOverlayOption {
   const selectedSubIndicators = subIndicators.slice(0, MAX_SUB_INDICATORS);
   const dates = bars.map(bar => normalizeKlineDate(bar.date));
@@ -126,6 +125,7 @@ export function buildKlineOverlayOption({
   const yAxes = buildYAxes(grids.length);
   const series: Array<Record<string, unknown>> = [
     {
+      id: 'kline-price',
       name: 'K线',
       type: 'candlestick',
       data: bars.map(bar => [bar.open, bar.close, bar.low, bar.high]),
@@ -137,6 +137,7 @@ export function buildKlineOverlayOption({
 
   movingAverages.forEach(field => {
     series.push({
+      id: `kline-${field}`,
       name: field.toUpperCase(),
       type: 'line',
       data: bars.map(bar => bar[MA_FIELDS[field]]),
@@ -175,8 +176,22 @@ export function buildKlineOverlayOption({
     yAxis: yAxes,
     legend: legends,
     dataZoom: [
-      { type: 'inside', xAxisIndex: axisIndexes(grids.length), start: 0, end: 100 },
-      { type: 'slider', xAxisIndex: axisIndexes(grids.length), bottom: 8, height: 18 }
+      {
+        id: 'kline-inside-zoom',
+        type: 'inside',
+        xAxisIndex: axisIndexes(grids.length),
+        start: zoomRange.start,
+        end: zoomRange.end
+      },
+      {
+        id: 'kline-slider-zoom',
+        type: 'slider',
+        xAxisIndex: axisIndexes(grids.length),
+        start: zoomRange.start,
+        end: zoomRange.end,
+        bottom: 8,
+        height: 18
+      }
     ],
     tooltip: {
       trigger: 'axis',

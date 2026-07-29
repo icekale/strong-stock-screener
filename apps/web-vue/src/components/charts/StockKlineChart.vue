@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
 import type { ChanlunAnalysisResponse, ChanlunLayerKey, GsgfChartAnnotation, KlineBar, StockKlinePeriod } from '@/service/types';
+import type { KlineZoomRange } from '@/utils/charts/klineOverlayOption';
 import { buildKlineOverlayOption } from '@/utils/charts/klineOverlayOption';
+import { resolveVisibleBarCount } from '@/utils/charts/chanlunOverlay';
 import type { KlineMovingAverage, KlineSubIndicator } from '@/utils/charts/klineIndicatorLayout';
 import EChart from './EChart.vue';
 
@@ -25,11 +27,10 @@ const props = withDefaults(
 
 const chartKey = computed(() => [
   props.symbol ?? props.chanlun?.symbol ?? 'stock',
-  props.period ?? props.chanlun?.period ?? '1d',
-  props.bars.length,
-  props.bars[0]?.date ?? '',
-  props.bars.at(-1)?.date ?? ''
+  props.period ?? props.chanlun?.period ?? '1d'
 ].join(':'));
+const zoomRange = ref<KlineZoomRange>({ start: 0, end: 100 });
+const visibleBarCount = computed(() => resolveVisibleBarCount(props.bars.length, zoomRange.value));
 
 const option = computed(() =>
   buildKlineOverlayOption({
@@ -38,12 +39,23 @@ const option = computed(() =>
     subIndicators: props.subIndicators,
     gsgfAnnotations: props.gsgfAnnotations,
     chanlun: props.chanlun,
-    chanlunLayers: props.chanlunLayers
+    chanlunLayers: props.chanlunLayers,
+    visibleBarCount: visibleBarCount.value,
+    zoomRange: zoomRange.value
   })
 );
+
+function handleDataZoom(range: KlineZoomRange) {
+  if (zoomRange.value.start === range.start && zoomRange.value.end === range.end) return;
+  zoomRange.value = range;
+}
+
+watch(chartKey, () => {
+  zoomRange.value = { start: 0, end: 100 };
+});
 </script>
 
 <template>
   <div v-if="bars.length === 0" class="flex min-h-80 items-center justify-center text-sm text-text-secondary">暂无 K 线数据</div>
-  <EChart v-else :key="chartKey" :height="height" :loading="loading" :option="option" />
+  <EChart v-else :key="chartKey" :height="height" :loading="loading" :option="option" @datazoom="handleDataZoom" />
 </template>

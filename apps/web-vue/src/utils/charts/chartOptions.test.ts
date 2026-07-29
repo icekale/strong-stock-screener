@@ -246,11 +246,12 @@ describe('chart options', () => {
     const option = buildKlineOverlayOption({
       bars: [bar('20260715', 10), bar('20260716', 12)],
       subIndicators: ['volume', 'macd', 'kdj'],
-      chanlun
+      chanlun,
+      zoomRange: { start: 25, end: 75 }
     });
     const axes = option.xAxis as Array<{ data: string[]; gridIndex: number }>;
     const yAxes = option.yAxis as Array<{ gridIndex: number }>;
-    const dataZoom = option.dataZoom as Array<{ xAxisIndex: number[] }>;
+    const dataZoom = option.dataZoom as Array<{ xAxisIndex: number[]; start: number; end: number }>;
     const overlaySeries = (option.series as Array<{ name: string; xAxisIndex: number; yAxisIndex: number }>).filter(item => item.name.startsWith('缠论'));
 
     expect(axes.map(axis => axis.data)).toEqual([
@@ -264,6 +265,7 @@ describe('chart options', () => {
     expect(dataZoom).toHaveLength(2);
     expect(dataZoom[0]?.xAxisIndex).toEqual([0, 1, 2, 3]);
     expect(dataZoom[1]?.xAxisIndex).toEqual([0, 1, 2, 3]);
+    expect(dataZoom.map(item => [item.start, item.end])).toEqual([[25, 75], [25, 75]]);
     expect(overlaySeries.every(item => item.xAxisIndex === 0 && item.yAxisIndex === 0)).toBe(true);
     expect(option.tooltip).toMatchObject({ trigger: 'axis', axisPointer: { type: 'cross' } });
   });
@@ -283,7 +285,10 @@ describe('chart options', () => {
     runEChartLifecycle(chart, { type: 'resize' });
     runEChartLifecycle(chart, { type: 'dispose', resizeObserver });
 
-    expect(chart.setOption).toHaveBeenCalledWith(option, true);
+    expect(chart.setOption).toHaveBeenCalledWith(option, {
+      notMerge: false,
+      replaceMerge: ['series']
+    });
     expect(chart.dispatchAction).toHaveBeenCalledWith({ type: 'dataZoom', start: 0, end: 100 });
     expect(chart.resize).toHaveBeenCalledOnce();
     expect(resizeObserver.disconnect).toHaveBeenCalledOnce();

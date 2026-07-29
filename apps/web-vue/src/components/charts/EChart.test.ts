@@ -61,7 +61,10 @@ it('wires EChart rendering, exposed controls, and cleanup to the chart instance'
   await nextTick();
 
   expect(mocks.init).toHaveBeenCalledOnce();
-  expect(mocks.chart.setOption).toHaveBeenCalledWith(option, true);
+  expect(mocks.chart.setOption).toHaveBeenCalledWith(option, {
+    notMerge: false,
+    replaceMerge: ['series']
+  });
   expect(resizeObserver.observe).toHaveBeenCalledWith(wrapper.element);
   expect(resizeObserver.callback).not.toBeNull();
   resizeObserver.callback?.([] as ResizeObserverEntry[], {} as ResizeObserver);
@@ -78,4 +81,22 @@ it('wires EChart rendering, exposed controls, and cleanup to the chart instance'
 
   expect(resizeObserver.disconnect).toHaveBeenCalledOnce();
   expect(mocks.chart.dispose).toHaveBeenCalledOnce();
+});
+
+it('emits normalized data zoom ranges from direct and batched events', async () => {
+  const wrapper = mount(EChart, { props: { option: { series: [] } } });
+  await nextTick();
+  await nextTick();
+
+  const dataZoomHandler = mocks.chart.on.mock.calls.find(([event]) => event === 'datazoom')?.[1];
+  expect(dataZoomHandler).toBeTypeOf('function');
+
+  dataZoomHandler?.({ start: 20, end: 80 });
+  dataZoomHandler?.({ batch: [{ start: 35, end: 65 }] });
+
+  expect(wrapper.emitted('datazoom')).toEqual([
+    [{ start: 20, end: 80 }],
+    [{ start: 35, end: 65 }]
+  ]);
+  wrapper.unmount();
 });

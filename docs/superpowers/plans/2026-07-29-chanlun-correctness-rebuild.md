@@ -31,25 +31,25 @@
 - Consumes: `native.finished_bis`, mapped `(native_bi, ChanlunStroke)` pairs, and `czsc.utils.sig.get_zs_seq`.
 - Produces: `map_confirmed_zones(completed_pairs) -> list[ChanlunZone]` and rule version `cl-v2-visual`.
 
-- [ ] **Step 1: Write failing adapter tests**
+- [x] **Step 1: Write failing adapter tests**
 
 Add tests proving that official CZSC zone groups map once, groups shorter than three strokes are ignored, confirmed and virtual zones never duplicate, and output segments/divergences/signals are empty while the correctness gate is active.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `/Users/kale/Documents/strong-stock-screener/apps/api/.venv/bin/pytest apps/api/tests/test_chanlun_adapter.py -q`
 
 Expected: failures showing duplicate virtual zones and custom segments/signals are still emitted.
 
-- [ ] **Step 3: Implement the minimal mapping layer**
+- [x] **Step 3: Implement the minimal mapping layer**
 
 Use `get_zs_seq` rather than `native.zs_list` or sliding three-stroke overlap. Require at least three native strokes and `zone.is_valid`; map `zd`/`zg` as low/high and native BI endpoints as the time range. Remove the call sites for `_segments`, `_virtual_zone`, and `derive_confirmed_events` from the active response path. Append source status explaining that segments and trading signals are disabled pending validation.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: `/Users/kale/Documents/strong-stock-screener/apps/api/.venv/bin/pytest apps/api/tests/test_chanlun_adapter.py apps/api/tests/test_chanlun_service.py -q`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api/app/services/chanlun/structures.py apps/api/app/services/chanlun/adapter.py apps/api/app/services/chanlun/service.py apps/api/tests/test_chanlun_adapter.py apps/api/tests/test_chanlun_service.py
@@ -69,25 +69,25 @@ git commit -m "fix(chanlun): gate unvalidated structures"
 - Consumes: `_ClosedPeriodData.freshness`.
 - Produces: public `ChanlunAnalysisResponse.availability="stale"` whenever complete bars are older than `_expected_latest_close`.
 
-- [ ] **Step 1: Write failing stale-data tests**
+- [x] **Step 1: Write failing stale-data tests**
 
 Add an analysis-level test where the provider succeeds but the latest completed bar is behind the expected close, then assert `analysis.availability == "stale"`. Add an alert test proving stale input does not call `store.observe`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `/Users/kale/Documents/strong-stock-screener/apps/api/.venv/bin/pytest apps/api/tests/test_chanlun_service.py apps/api/tests/test_chanlun_alerts.py -q`
 
 Expected: the successful-but-old payload is still reported as `ready`, and stale alerts are accepted.
 
-- [ ] **Step 3: Implement fail-closed propagation**
+- [x] **Step 3: Implement fail-closed propagation**
 
 In `_analyze_closed_period_data`, convert a ready adapter result to stale whenever `period_data.freshness == "stale"`, independent of whether the live call raised. Restrict alert refresh to `availability == "ready"`; keep paper-order rejection on any non-ready period.
 
-- [ ] **Step 4: Verify GREEN**
+- [x] **Step 4: Verify GREEN**
 
 Run: `/Users/kale/Documents/strong-stock-screener/apps/api/.venv/bin/pytest apps/api/tests/test_chanlun_service.py apps/api/tests/test_chanlun_alerts.py apps/api/tests/test_chanlun_paper.py -q`
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add apps/api/app/services/chanlun/service.py apps/api/app/services/chanlun/alert_service.py apps/api/tests/test_chanlun_service.py apps/api/tests/test_chanlun_alerts.py apps/api/tests/test_chanlun_paper.py
@@ -109,23 +109,23 @@ git commit -m "fix(chanlun): reject stale analysis inputs"
 **Interfaces:**
 - Produces: `EChart` event `datazoom`, retained ECharts zoom during option updates, and request-generation guards for period/symbol loads.
 
-- [ ] **Step 1: Write failing UI-state tests**
+- [x] **Step 1: Write failing UI-state tests**
 
 Test that changing symbols while a non-daily period is selected loads that same period, that an older request cannot overwrite the latest selection, and that `datazoom` is emitted and does not require `setOption(..., true)`.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `pnpm exec vitest run src/components/charts/EChart.test.ts src/utils/charts/chanlunOverlay.test.ts src/views/ChanlunView.test.ts`
 
-- [ ] **Step 3: Implement minimal request and chart state handling**
+- [x] **Step 3: Implement minimal request and chart state handling**
 
 Use a monotonically increasing request token in `ChanlunView`; load workspace summaries and then fetch the currently selected period when it is not daily. Emit normalized zoom ranges from `EChart`, use merge-by-series-id updates, and pass visible bar count into overlay generation so labels respond to the visible range.
 
-- [ ] **Step 4: Replace deprecated alert props**
+- [x] **Step 4: Replace deprecated alert props**
 
 Change Ant Design Vue alert bindings from `message` to `title` in the workbench.
 
-- [ ] **Step 5: Verify GREEN**
+- [x] **Step 5: Verify GREEN**
 
 Run:
 
@@ -134,7 +134,7 @@ pnpm exec vitest run src/components/charts/EChart.test.ts src/utils/charts/chanl
 pnpm typecheck
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/web-vue/src/views/ChanlunView.vue apps/web-vue/src/views/ChanlunView.test.ts apps/web-vue/src/components/charts/EChart.vue apps/web-vue/src/components/charts/EChart.test.ts apps/web-vue/src/components/charts/StockKlineChart.vue apps/web-vue/src/utils/charts/klineOverlayOption.ts apps/web-vue/src/utils/charts/chanlunOverlay.ts apps/web-vue/src/utils/charts/chanlunOverlay.test.ts
@@ -146,14 +146,14 @@ git commit -m "fix(chanlun): preserve chart selection and zoom"
 **Files:**
 - Modify: `docs/superpowers/plans/2026-07-29-chanlun-correctness-rebuild.md`
 
-- [ ] **Step 1: Run backend verification**
+- [x] **Step 1: Run backend verification**
 
 ```bash
 /Users/kale/Documents/strong-stock-screener/apps/api/.venv/bin/pytest apps/api/tests/test_chanlun_*.py -q
 /Users/kale/Documents/strong-stock-screener/apps/api/.venv/bin/ruff check apps/api/app/services/chanlun apps/api/tests/test_chanlun_*.py
 ```
 
-- [ ] **Step 2: Run frontend verification**
+- [x] **Step 2: Run frontend verification**
 
 ```bash
 cd apps/web-vue
@@ -162,11 +162,18 @@ pnpm typecheck
 pnpm build
 ```
 
-- [ ] **Step 3: Validate live invariants against recorded API bars**
+- [x] **Step 3: Validate live invariants against recorded API bars**
 
 For `300308.SZ` and `600000.SH`, verify: no overlapping duplicate zone records, no virtual/confirmed duplicate bounds, no custom segments or trading signals, and stale intraday bars are not marked ready.
 
-- [ ] **Step 4: Record the next independent phase**
+- [x] **Step 4: Record the next independent phase**
 
 Do not re-enable segments or trading signals in this plan. The next plan must establish manually reviewed golden fixtures and truncation-stability tests before implementing line segments, divergence, or buy/sell points. Treat 15-minute and 90-minute period semantics as a separate data-contract task rather than copying the old branch.
 
+## Verification Record
+
+- Backend: `351 passed, 1 skipped`; Ruff passed for the Chanlun service domain and tests.
+- Frontend: `245 passed`; Vue typecheck and production build passed.
+- Production-bar replay on 2026-07-30: `300308.SZ` and `600000.SH` each used 220 daily bars and produced two non-overlapping confirmed CZSC zones, zero virtual zones, zero custom segments, zero divergences, and zero trading signals.
+- Freshness gate: successful-but-old provider payloads are publicly reported as `stale`; stale analyses do not update alert baselines or enter paper-order decisions.
+- Deferred scope: line segments, divergence, buy/sell points, 15-minute bars, and 90-minute session semantics require separate golden-fixture and data-contract work before activation.

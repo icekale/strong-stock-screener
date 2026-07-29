@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 from threading import Event
+from types import SimpleNamespace
 
 import app.services.etf_three_factor_sampler as sampler_module
 from app.services.etf_three_factor_sampler import EtfThreeFactorSampler
@@ -13,6 +14,19 @@ class Clock:
 
     def __call__(self) -> datetime:
         return self.current
+
+
+def share_snapshot(trade_date: str, *, complete: bool) -> SimpleNamespace:
+    return SimpleNamespace(
+        trade_date=trade_date,
+        items=[
+            SimpleNamespace(
+                share_change_pct=1.0 if complete else None,
+                share_factor=SimpleNamespace(status="available" if complete else "stale"),
+            )
+            for _ in range(7)
+        ],
+    )
 
 
 def test_sampler_runs_intraday_once_per_minute() -> None:
@@ -105,6 +119,42 @@ def test_sampler_catches_up_overdue_refresh_windows() -> None:
         "19:36",
     ]
     assert [call.get("force", False) for call in calls] == [False, True, True]
+
+
+def test_sampler_retries_late_shares_once_per_15_minute_bucket_until_complete() -> None:
+    current = Clock("2026-07-22T19:35:00")
+    calls: list[str] = []
+    results = iter([
+        share_snapshot("2026-07-22", complete=False),
+        share_snapshot("2026-07-22", complete=True),
+    ])
+
+    def scan(**kwargs: object) -> object:
+        calls.append(kwargs["now"].strftime("%H:%M"))
+        return next(results)
+
+    sampler = EtfThreeFactorSampler(scan=scan, clock=current)
+
+    assert sampler.sample_once() is True
+    current.current = datetime.fromisoformat("2026-07-22T19:49:00")
+    assert sampler.sample_once() is False
+    current.current = datetime.fromisoformat("2026-07-22T19:50:00")
+    assert sampler.sample_once() is True
+    current.current = datetime.fromisoformat("2026-07-22T20:05:00")
+    assert sampler.sample_once() is False
+    assert calls == ["19:35", "19:50"]
+
+
+def test_sampler_stops_late_share_retries_at_2331() -> None:
+    current = Clock("2026-07-22T23:30:00")
+    sampler = EtfThreeFactorSampler(
+        scan=lambda **_kwargs: share_snapshot("2026-07-22", complete=False),
+        clock=current,
+    )
+
+    assert sampler.sample_once() is True
+    current.current = datetime.fromisoformat("2026-07-22T23:31:00")
+    assert sampler.sample_once() is False
 
 
 def test_sampler_stops_and_joins_cleanly() -> None:

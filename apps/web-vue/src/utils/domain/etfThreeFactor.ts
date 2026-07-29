@@ -7,6 +7,8 @@ export type UnifiedEtfActivityRow = {
   closeChangePct: number | null;
   dailyChangePct: number | null;
   baselineChangePct: number | null;
+  baselineMultiple: number | null;
+  shareChange20dMultiple: number | null;
   volumeRatio: number | null;
   signalScore: number | null;
   signalLevel: EtfThreeFactorLevel;
@@ -47,6 +49,8 @@ export function buildUnifiedEtfActivityRows(
       closeChangePct: null,
       dailyChangePct: null,
       baselineChangePct: null,
+      baselineMultiple: null,
+      shareChange20dMultiple: null,
       volumeRatio: null,
       signalScore: null,
       signalLevel: 'incomplete',
@@ -68,11 +72,24 @@ export function buildUnifiedEtfActivityRows(
       row.indexName = activity.index_name;
       row.closeChangePct = activity.close_change_pct ?? row.closeChangePct;
       row.dailyChangePct = activity.daily_change_pct;
-      row.baselineChangePct = activity.cumulative_baseline_change_pct ?? activity.baseline_change_pct;
+      row.baselineChangePct = activity.baseline_change_pct;
+      row.baselineMultiple = signedMultiple(activity.multiple, activity.direction);
+      row.shareChange20dMultiple = signedMultiple(activity.share_change_20d_multiple, activity.direction);
     }
 
     return row;
   });
+}
+
+function signedMultiple(
+  value: number | null | undefined,
+  direction: HuijinEtfActivityItem['direction']
+): number | null {
+  if (value === null || value === undefined) return null;
+  if (direction === 'decrease') return -Math.abs(value);
+  if (direction === 'increase') return Math.abs(value);
+  if (direction === 'flat') return 0;
+  return null;
 }
 
 export function pickDefaultEtfActivitySymbol(rows: UnifiedEtfActivityRow[]): string {

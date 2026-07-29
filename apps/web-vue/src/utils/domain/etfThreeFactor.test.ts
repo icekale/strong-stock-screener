@@ -130,6 +130,39 @@ describe('ETF three-factor display helpers', () => {
     expect(pickDefaultEtfActivitySymbol(rows)).toBe('510300.SH');
   });
 
+  it('keeps daily baseline change separate from cumulative deviation and signs both share multiples', () => {
+    const [increase] = buildUnifiedEtfActivityRows([
+      activityItem({
+        baseline_change_pct: 6.35,
+        cumulative_baseline_change_pct: -39.77,
+        multiple: 63.5,
+        share_change_20d_multiple: 4.5,
+        direction: 'increase'
+      })
+    ], []);
+    const [decrease] = buildUnifiedEtfActivityRows([
+      activityItem({
+        symbol: '510500.SH',
+        baseline_change_pct: -2.53,
+        cumulative_baseline_change_pct: -70.34,
+        multiple: 25.3,
+        share_change_20d_multiple: 2.8,
+        direction: 'decrease'
+      })
+    ], []);
+
+    expect(increase).toMatchObject({
+      baselineChangePct: 6.35,
+      baselineMultiple: 63.5,
+      shareChange20dMultiple: 4.5
+    });
+    expect(decrease).toMatchObject({
+      baselineChangePct: -2.53,
+      baselineMultiple: -25.3,
+      shareChange20dMultiple: -2.8
+    });
+  });
+
   it('labels every signal level and assigns a visual tone', () => {
     expect(signalLevelLabel('high')).toBe('高确信');
     expect(signalLevelLabel('medium')).toBe('中确信');

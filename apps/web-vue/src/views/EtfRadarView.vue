@@ -562,7 +562,7 @@ watch(() => [route.query.tab, route.query.symbol], syncRouteQuery);
           <div data-testid="etf-activity-summary" class="etf-activity-summary" aria-label="今日异动摘要">
             <span>覆盖 <strong>{{ overview.activity.available_core_count }} / {{ overview.activity.core_count }}</strong></span>
             <span>
-              十倍量
+              年末基准10x
               <b class="etf-value--positive">+{{ overview.activity.tenfold_increase_count }}</b>
               /
               <b class="etf-value--negative">-{{ overview.activity.tenfold_decrease_count }}</b>

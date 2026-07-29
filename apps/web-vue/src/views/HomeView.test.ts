@@ -251,7 +251,8 @@ describe('HomeView capital dashboard', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('融资融券余额');
-    expect(wrapper.text()).toContain('十倍量增加 5');
+    expect(wrapper.text()).toContain('年末基准10x增加 5');
+    expect(wrapper.text()).not.toContain('十倍量增加');
     wrapper.unmount();
   });
 
@@ -277,10 +278,14 @@ describe('HomeView capital dashboard', () => {
     expect(wrapper.text()).toContain('▼ -386.8亿');
     expect(wrapper.text()).toContain('数据日 2026-07-17');
     expect(wrapper.text()).toContain('盘后确认 · huijin-public-rule-v1');
-    expect(wrapper.text()).toContain('十倍量增加 5');
-    expect(wrapper.text()).toContain('十倍量减少 1');
-    expect(wrapper.text()).toContain('确认增加 2组');
-    expect(wrapper.text()).toContain('确认减少 0组');
+    expect(wrapper.text()).toContain('年末基准10x增加 5');
+    expect(wrapper.text()).toContain('年末基准10x减少 1');
+    expect(wrapper.text()).toContain('配对一致增加 2组');
+    expect(wrapper.text()).toContain('配对一致减少 0组');
+    expect(wrapper.text()).not.toContain('十倍量增加');
+    expect(wrapper.text()).not.toContain('十倍量减少');
+    expect(wrapper.text()).not.toContain('确认增加');
+    expect(wrapper.text()).not.toContain('确认减少');
     expect(wrapper.text()).toContain('方向分歧 1组');
     expect(wrapper.text()).toContain('数据不全 0组');
     expect(wrapper.text()).toContain('159915.SZ');

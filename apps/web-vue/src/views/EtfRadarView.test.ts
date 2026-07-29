@@ -441,6 +441,8 @@ describe('EtfRadarView', () => {
     expect(tableText).toContain('基准10x');
     expect(tableText).toContain('20日10x');
     expect(tableText).toContain('高确信');
+    expect(wrapper.text()).toContain('年末基准10x');
+    expect(wrapper.text()).not.toContain('十倍量');
     expect(wrapper.text()).toContain('配对一致增加');
     expect(wrapper.text()).toContain('配对一致减少');
     expect(wrapper.text()).not.toContain('确认增加');

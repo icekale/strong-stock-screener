@@ -365,21 +365,21 @@ onBeforeUnmount(() => {
             <div class="home-etf-count-strip">
               <div>
                 <strong class="home-positive" data-testid="tenfold-increase">
-                  十倍量增加 {{ capitalData.etf_radar.activity.tenfold_increase_count }}
+                  年末基准10x增加 {{ capitalData.etf_radar.activity.tenfold_increase_count }}
                 </strong>
               </div>
               <div>
                 <strong class="home-negative" data-testid="tenfold-decrease">
-                  十倍量减少 {{ capitalData.etf_radar.activity.tenfold_decrease_count }}
+                  年末基准10x减少 {{ capitalData.etf_radar.activity.tenfold_decrease_count }}
                 </strong>
               </div>
             </div>
             <div class="home-etf-facts">
               <div>
-                <strong class="home-positive">确认增加 {{ capitalData.etf_radar.activity.confirmed_increase_group_count }}组</strong>
+                <strong class="home-positive">配对一致增加 {{ capitalData.etf_radar.activity.confirmed_increase_group_count }}组</strong>
               </div>
               <div>
-                <strong class="home-negative">确认减少 {{ capitalData.etf_radar.activity.confirmed_decrease_group_count }}组</strong>
+                <strong class="home-negative">配对一致减少 {{ capitalData.etf_radar.activity.confirmed_decrease_group_count }}组</strong>
               </div>
               <div>
                 <strong data-testid="divergent-groups">方向分歧 {{ capitalData.etf_radar.activity.divergent_group_count }}组</strong>

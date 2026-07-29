@@ -70,3 +70,33 @@ def test_alert_service_only_emits_signal_that_appears_after_the_baseline(tmp_pat
     assert initial.baselined is True
     assert initial.created == []
     assert [item.key for item in refreshed.created] == ["600000.SH:5m:two_buy:2026-07-10T10:05:00+08:00:cl-v1"]
+
+
+def test_alert_service_does_not_observe_stale_analysis() -> None:
+    class AnalysisService:
+        def analysis(self, symbol, *, period, lookback, include_observing):
+            return ChanlunAnalysisResponse(
+                symbol=symbol,
+                period=period,
+                availability="stale",
+                signals=[signal("signal:stale", "2026-07-10T10:00:00+08:00")],
+                source_status=[
+                    StrongStockSourceStatus(source="fixture", status="stale", detail="fixture")
+                ],
+            )
+
+    class SpyStore:
+        observe_calls = 0
+
+        def observe(self, symbol, period, signals):
+            self.observe_calls += 1
+            raise AssertionError("stale analysis must not update the alert store")
+
+    store = SpyStore()
+    service = ChanlunAlertService(analysis_service=AnalysisService(), store=store)  # type: ignore[arg-type]
+
+    result = service.refresh("600000.SH", period="5m", lookback=120)
+
+    assert store.observe_calls == 0
+    assert result.baselined is False
+    assert result.created == []

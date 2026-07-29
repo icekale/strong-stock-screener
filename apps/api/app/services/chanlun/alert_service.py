@@ -22,7 +22,7 @@ class ChanlunAlertService:
             lookback=lookback,
             include_observing=False,
         )
-        if analysis.availability not in {"ready", "stale"}:
+        if analysis.availability != "ready":
             return ChanlunAlertRefreshResponse(
                 symbol=analysis.symbol,
                 period=period,

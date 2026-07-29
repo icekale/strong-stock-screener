@@ -564,6 +564,30 @@ def test_successful_daily_payload_is_stale_when_previous_day_is_missing_at_close
     assert period_data.freshness == "stale"
 
 
+def test_successful_but_old_daily_payload_is_publicly_reported_as_stale(
+    tmp_path: Path,
+) -> None:
+    service = ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider(),
+        history_provider=FakeHistoryProvider(),
+        adapter=FakeAdapter(),
+        daily_provider=FakeDailyProvider(daily_bars(43)),
+        cache=build_test_cache(),
+    )
+
+    analysis = service.analysis(
+        "600000.SH",
+        period="1d",
+        lookback=20,
+        include_observing=False,
+        now=shanghai("2026-07-14 15:00"),
+    )
+
+    assert analysis.availability == "stale"
+    assert analysis.last_closed_bar_at == "2026-07-13T15:00:00+08:00"
+
+
 @pytest.mark.parametrize(
     ("period", "now", "current_minutes", "last_close"),
     [

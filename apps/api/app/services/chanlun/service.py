@@ -494,7 +494,7 @@ class ChanlunAnalysisService:
             source_status=source_status,
             adjustment_mode=period_data.adjustment_mode,
         )
-        if period_data.availability == "stale" and result.availability == "ready":
+        if period_data.freshness == "stale" and result.availability == "ready":
             return result.model_copy(deep=True, update={"availability": "stale"})
         return result
 

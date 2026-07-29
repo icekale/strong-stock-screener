@@ -9,11 +9,10 @@ from app.models import (
     ChanlunFractal,
     ChanlunPeriod,
     ChanlunStroke,
-    ChanlunZone,
     KlineBar,
     StrongStockSourceStatus,
 )
-from app.services.chanlun.signals import derive_confirmed_events
+from app.services.chanlun.structures import VISUAL_RULE_VERSION, map_confirmed_zones
 
 
 def _load_czsc() -> tuple[object, object, object]:
@@ -162,11 +161,7 @@ class ChanlunAdapter:
             elif include_observing:
                 fractals.append(_map_fractal(native_fx, dates_by_id, status="observing"))
 
-        zones = _confirmed_zones(native, completed_pairs, dates_by_id)
-        virtual_zone = _virtual_zone(completed_strokes)
-        if virtual_zone:
-            zones.append(virtual_zone)
-        divergences, signals = derive_confirmed_events(bars, completed_strokes, zones)
+        zones = map_confirmed_zones(completed_pairs)
 
         strokes = list(completed_strokes)
         if include_observing:
@@ -181,18 +176,24 @@ class ChanlunAdapter:
             bars=bars,
             fractals=fractals,
             strokes=strokes,
-            segments=_segments(completed_strokes),
+            segments=[],
             zones=zones,
-            divergences=divergences,
-            signals=signals,
+            divergences=[],
+            signals=[],
             source_status=[
                 StrongStockSourceStatus(
                     source=self.source_name,
                     status="success",
-                    detail="czsc native structures mapped to project-owned layers",
-                )
+                    detail="czsc native fractals, strokes, and maintained zone sequence mapped",
+                ),
+                StrongStockSourceStatus(
+                    source="Chanlun衍生结构",
+                    status="disabled",
+                    detail="线段、背驰和买卖点等待黄金样本验证，当前不参与预警、回测或模拟盘",
+                ),
             ],
             last_closed_bar_at=last_closed_bar_at,
+            rule_version=VISUAL_RULE_VERSION,
         )
 
     def _response(
@@ -213,6 +214,7 @@ class ChanlunAdapter:
                 StrongStockSourceStatus(source=self.source_name, status="failed", detail=detail)
             ],
             last_closed_bar_at=last_closed_bar_at,
+            rule_version=VISUAL_RULE_VERSION,
         )
 
 
@@ -243,91 +245,6 @@ def _map_stroke(native_bi: object, dates_by_id: dict[int, str], *, status: str) 
         direction=direction,
         status=status,
     )
-
-
-def _confirmed_zones(
-    native: object,
-    completed_pairs: list[tuple[object, ChanlunStroke]],
-    dates_by_id: dict[int, str],
-) -> list[ChanlunZone]:
-    native_zones = getattr(native, "zs_list", None)
-    if native_zones is not None:
-        mapped_strokes = {id(native_bi): stroke for native_bi, stroke in completed_pairs}
-        zones: list[ChanlunZone] = []
-        for native_zone in native_zones:
-            strokes = [mapped_strokes[id(bi)] for bi in getattr(native_zone, "bis", []) if id(bi) in mapped_strokes]
-            zone = _zone(strokes, virtual=False, status="confirmed")
-            if zone:
-                zones.append(zone)
-        return zones
-
-    zones: list[ChanlunZone] = []
-    strokes = [stroke for _, stroke in completed_pairs]
-    for index in range(len(strokes) - 2):
-        candidate = _zone(strokes[index : index + 3], virtual=False, status="confirmed")
-        if candidate is None:
-            continue
-        if zones and candidate.low <= zones[-1].high and candidate.high >= zones[-1].low:
-            previous = zones[-1]
-            merged_high = min(previous.high, candidate.high)
-            merged_low = max(previous.low, candidate.low)
-            zones[-1] = ChanlunZone(
-                id=f"zone:{previous.start_at}:{candidate.end_at}",
-                start_at=previous.start_at,
-                end_at=candidate.end_at,
-                high=merged_high,
-                low=merged_low,
-                status="confirmed",
-            )
-        else:
-            zones.append(candidate)
-    return zones
-
-
-def _virtual_zone(strokes: list[ChanlunStroke]) -> ChanlunZone | None:
-    return _zone(strokes[-3:], virtual=True, status="provisional") if len(strokes) >= 3 else None
-
-
-def _zone(
-    strokes: list[ChanlunStroke], *, virtual: bool, status: str
-) -> ChanlunZone | None:
-    if len(strokes) < 3 or not _alternating(strokes):
-        return None
-    high = min(max(stroke.start_price, stroke.end_price) for stroke in strokes)
-    low = max(min(stroke.start_price, stroke.end_price) for stroke in strokes)
-    if high < low:
-        return None
-    prefix = "virtual-zone" if virtual else "zone"
-    return ChanlunZone(
-        id=f"{prefix}:{strokes[0].start_at}:{strokes[-1].end_at}",
-        start_at=strokes[0].start_at,
-        end_at=strokes[-1].end_at,
-        high=high,
-        low=low,
-        virtual=virtual,
-        status=status,
-    )
-
-
-def _segments(strokes: list[ChanlunStroke]) -> list[ChanlunStroke]:
-    segments: list[ChanlunStroke] = []
-    for index in range(0, len(strokes) - 2, 3):
-        window = strokes[index : index + 3]
-        if not _alternating(window):
-            continue
-        direction = "up" if window[-1].end_price >= window[0].start_price else "down"
-        segments.append(
-            ChanlunStroke(
-                id=f"segment:{window[0].start_at}:{window[-1].end_at}",
-                start_at=window[0].start_at,
-                start_price=window[0].start_price,
-                end_at=window[-1].end_at,
-                end_price=window[-1].end_price,
-                direction=direction,
-                status="confirmed",
-            )
-        )
-    return segments
 
 
 def _observing_stroke(
@@ -392,7 +309,3 @@ def _direction(direction: object) -> Literal["up", "down"]:
     if value in {"down", "向下"}:
         return "down"
     raise ValueError(f"unsupported stroke direction: {direction}")
-
-
-def _alternating(strokes: list[ChanlunStroke]) -> bool:
-    return all(current.direction != previous.direction for previous, current in zip(strokes, strokes[1:]))

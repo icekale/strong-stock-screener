@@ -286,177 +286,32 @@ def test_adapter_maps_czsc_fractals_strokes_and_confirmed_zone() -> None:
     virtual_zones = [zone for zone in analysis.zones if zone.virtual]
     assert len(confirmed_zones) == 1
     assert confirmed_zones[0].high == 20.4
-    assert confirmed_zones[0].low == 13.6
+    assert confirmed_zones[0].low == 11.6
     assert confirmed_zones[0].status in {"confirmed", "final"}
-    assert len(virtual_zones) == 1
-    assert virtual_zones[0].status == "provisional"
-    assert (virtual_zones[0].high, virtual_zones[0].low) != (
-        confirmed_zones[0].high,
-        confirmed_zones[0].low,
+    assert virtual_zones == []
+    assert analysis.segments == []
+    assert analysis.divergences == []
+    assert analysis.signals == []
+    assert any(
+        item.source == "Chanlun衍生结构" and item.status == "disabled"
+        for item in analysis.source_status
     )
-    assert len(analysis.segments) == 2
     assert len({item.id for item in analysis.fractals}) == len(analysis.fractals)
     assert len({item.id for item in analysis.strokes}) == len(analysis.strokes)
 
 
-def test_adapter_emits_confirmed_consolidation_bottom_divergence_without_future_leakage() -> None:
-    adapter_instance = ChanlunAdapter()
-    truncated_bars = fixture_bottom_divergence_bars()
-    full_bars = fixture_bottom_divergence_bars(include_future_tail=True)
-
-    truncated = adapter_instance._map_native(
+def test_adapter_does_not_publish_unvalidated_segments_or_trading_signals() -> None:
+    analysis = ChanlunAdapter()._map_native(
         "600000.SH",
         "1d",
-        truncated_bars,
-        bottom_divergence_native(),
-        include_observing=False,
-    )
-    full = adapter_instance._map_native(
-        "600000.SH",
-        "1d",
-        full_bars,
+        fixture_bottom_divergence_bars(),
         bottom_divergence_native(),
         include_observing=False,
     )
 
-    assert len(truncated.divergences) == 1
-    assert truncated.divergences[0].type == "consolidation"
-    assert truncated.divergences[0].status == "confirmed"
-    assert truncated.divergences[0].direction == "down"
-    assert truncated.divergences[0].current_price == 9.0
-    assert truncated.divergences[0].reference_price == 10.0
-    assert 0 < truncated.divergences[0].coefficient < 1
-    assert [(item.type, item.price, item.status) for item in truncated.signals] == [
-        ("one_buy", 9.0, "confirmed")
-    ]
-    assert [item.model_dump() for item in full.divergences] == [item.model_dump() for item in truncated.divergences]
-    assert [item.model_dump() for item in full.signals] == [item.model_dump() for item in truncated.signals]
-
-
-def test_adapter_emits_confirmed_consolidation_top_divergence_and_one_sell() -> None:
-    analysis = ChanlunAdapter()._map_native(
-        "600000.SH",
-        "1d",
-        fixture_top_divergence_bars(),
-        top_divergence_native(),
-        include_observing=False,
-    )
-
-    assert len(analysis.divergences) == 1
-    assert analysis.divergences[0].type == "consolidation"
-    assert analysis.divergences[0].direction == "up"
-    assert analysis.divergences[0].current_price == 21.0
-    assert analysis.divergences[0].reference_price == 20.0
-    assert 0 < analysis.divergences[0].coefficient < 1
-    assert [(item.type, item.price, item.status) for item in analysis.signals] == [
-        ("one_sell", 21.0, "confirmed")
-    ]
-
-
-def test_adapter_classifies_a_second_confirmed_zone_as_bottom_divergence() -> None:
-    analysis = ChanlunAdapter()._map_native(
-        "600000.SH",
-        "1d",
-        fixture_double_zone_bottom_divergence_bars(),
-        double_zone_bottom_divergence_native(),
-        include_observing=False,
-    )
-
-    assert [item.type for item in analysis.divergences] == ["consolidation", "bottom"]
-    assert [item.zone_count for item in analysis.divergences] == [1, 2]
-    assert [(item.type, item.price) for item in analysis.signals] == [
-        ("one_buy", 9.0),
-        ("one_buy", 8.0),
-    ]
-
-
-def test_adapter_emits_confirmed_second_buy_and_sell_from_five_stroke_ma_rules() -> None:
-    buy = ChanlunAdapter()._map_native(
-        "600000.SH",
-        "1d",
-        fixture_second_buy_bars(),
-        five_stroke_native(),
-        include_observing=False,
-    )
-    sell = ChanlunAdapter()._map_native(
-        "600000.SH",
-        "1d",
-        fixture_second_buy_bars(mirror=True),
-        five_stroke_native(mirror=True),
-        include_observing=False,
-    )
-
-    buy_second = [item for item in buy.signals if item.type == "two_buy"]
-    sell_second = [item for item in sell.signals if item.type == "two_sell"]
-    assert [(item.price, item.divergence_id, item.status) for item in buy_second] == [
-        (11.0, None, "confirmed")
-    ]
-    assert [(item.price, item.divergence_id, item.status) for item in sell_second] == [
-        (9.0, None, "confirmed")
-    ]
-
-
-def test_adapter_emits_confirmed_third_buy_and_sell_after_zone_exit_without_reentry() -> None:
-    buy = ChanlunAdapter()._map_native(
-        "600000.SH",
-        "1d",
-        fixture_third_buy_bars(),
-        five_stroke_native(third=True),
-        include_observing=False,
-    )
-    sell = ChanlunAdapter()._map_native(
-        "600000.SH",
-        "1d",
-        fixture_third_buy_bars(mirror=True),
-        five_stroke_native(mirror=True, third=True),
-        include_observing=False,
-    )
-
-    assert [(item.price, item.divergence_id, item.status) for item in buy.signals if item.type == "three_buy"] == [
-        (11.0, None, "confirmed")
-    ]
-    assert [(item.price, item.divergence_id, item.status) for item in sell.signals if item.type == "three_sell"] == [
-        (9.0, None, "confirmed")
-    ]
-
-
-def test_adapter_second_and_third_points_are_unchanged_by_future_bars() -> None:
-    truncated_bars = fixture_third_buy_bars()
-    full_bars = list(truncated_bars)
-    future_at = datetime.fromisoformat(full_bars[-1].date)
-    for price in (18.0, 6.0, 19.0):
-        future_at += timedelta(days=1)
-        full_bars.append(
-            KlineBar(
-                date=future_at.isoformat(timespec="seconds"),
-                open=price,
-                close=price,
-                high=price + 0.2,
-                low=price - 0.2,
-                volume=100,
-                amount=1_000,
-            )
-        )
-
-    truncated = ChanlunAdapter()._map_native(
-        "600000.SH",
-        "1d",
-        truncated_bars,
-        five_stroke_native(third=True),
-        include_observing=False,
-    )
-    full = ChanlunAdapter()._map_native(
-        "600000.SH",
-        "1d",
-        full_bars,
-        five_stroke_native(third=True),
-        include_observing=False,
-    )
-
-    secondary_types = {"two_buy", "two_sell", "three_buy", "three_sell"}
-    assert [item.model_dump() for item in full.signals if item.type in secondary_types] == [
-        item.model_dump() for item in truncated.signals if item.type in secondary_types
-    ]
+    assert analysis.segments == []
+    assert analysis.divergences == []
+    assert analysis.signals == []
 
 
 def test_adapter_does_not_confirm_the_observing_tail() -> None:
@@ -484,7 +339,7 @@ def test_adapter_maps_observing_stroke_to_ubi_extreme_before_retracing_tail() ->
     assert observing[0].end_price == 17.6
 
 
-def test_adapter_keeps_provisional_zone_when_bounds_match_confirmed_fallback_zone() -> None:
+def test_adapter_does_not_duplicate_a_confirmed_zone_as_provisional() -> None:
     bars = fixture_bars()
 
     def fractal(index: int, price: float) -> SimpleNamespace:
@@ -505,10 +360,9 @@ def test_adapter_keeps_provisional_zone_when_bounds_match_confirmed_fallback_zon
         "600000.SH", "1d", bars, native, include_observing=False
     )
 
-    assert [(zone.virtual, zone.status, zone.high, zone.low) for zone in analysis.zones] == [
-        (False, "confirmed", 20.0, 10.0),
-        (True, "provisional", 20.0, 10.0),
-    ]
+    assert not any(zone.virtual for zone in analysis.zones)
+    bounds = [(zone.start_at, zone.end_at, zone.high, zone.low) for zone in analysis.zones]
+    assert len(bounds) == len(set(bounds))
 
 
 def test_adapter_returns_unavailable_when_native_runtime_cannot_import(monkeypatch) -> None:

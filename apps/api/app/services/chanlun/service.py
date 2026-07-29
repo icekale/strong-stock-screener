@@ -28,13 +28,14 @@ from app.services.background_jobs import CancelCheck, ProgressCallback
 from app.services.chanlun.bars import aggregate_closed_intraday_bars, normalize_intraday_bars
 from app.services.chanlun.confluence import derive_confluence_signals
 from app.services.chanlun.store import ChanlunMinuteBarStore, StoredMinuteBar
+from app.services.chanlun.structures import VISUAL_RULE_VERSION
 from app.services.chanlun.symbols import normalize_chanlun_symbol
 from app.services.short_term_cache import TtlCache
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
 _MIN_COMPLETED_BARS = 20
-_RULE_VERSION = "cl-v1"
+_RULE_VERSION = VISUAL_RULE_VERSION
 _RAW_ADJUSTMENT = "raw_unadjusted"
 _INTRADAY_PERIOD_MINUTES = {"5m": 5, "30m": 30, "60m": 60}
 _DEFAULT_BACKTEST_HORIZONS = [1, 3, 5, 10]

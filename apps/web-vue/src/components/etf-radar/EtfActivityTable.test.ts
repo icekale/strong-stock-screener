@@ -14,6 +14,8 @@ function row(overrides: Partial<UnifiedEtfActivityRow> = {}): UnifiedEtfActivity
     closeChangePct: 1.2,
     dailyChangePct: 0.8,
     baselineChangePct: 12.5,
+    baselineMultiple: 12.5,
+    shareChange20dMultiple: 2.5,
     volumeRatio: 1.8,
     signalScore: 90,
     signalLevel: 'high',
@@ -30,14 +32,16 @@ const rows = [
 ];
 
 const sortableRows = [
-  row({ symbol: 'A', closeChangePct: 3, dailyChangePct: -3, baselineChangePct: 30, volumeRatio: 3, signalScore: 90 }),
-  row({ symbol: 'B', closeChangePct: 1, dailyChangePct: 1, baselineChangePct: 10, volumeRatio: 1, signalScore: 70 }),
-  row({ symbol: 'C', closeChangePct: -1, dailyChangePct: -1, baselineChangePct: -10, volumeRatio: 2, signalScore: 50 }),
+  row({ symbol: 'A', closeChangePct: 3, dailyChangePct: -3, baselineChangePct: 30, baselineMultiple: 30, shareChange20dMultiple: -3, volumeRatio: 3, signalScore: 90 }),
+  row({ symbol: 'B', closeChangePct: 1, dailyChangePct: 1, baselineChangePct: 10, baselineMultiple: 10, shareChange20dMultiple: 1, volumeRatio: 1, signalScore: 70 }),
+  row({ symbol: 'C', closeChangePct: -1, dailyChangePct: -1, baselineChangePct: -10, baselineMultiple: -10, shareChange20dMultiple: -1, volumeRatio: 2, signalScore: 50 }),
   row({
     symbol: 'NULL',
     closeChangePct: null,
     dailyChangePct: null,
     baselineChangePct: null,
+    baselineMultiple: null,
+    shareChange20dMultiple: null,
     volumeRatio: null,
     signalScore: null
   })
@@ -61,8 +65,10 @@ describe('EtfActivityTable', () => {
     expect(wrapper.get('[data-testid="etf-activity-table"]').text()).toContain('ETF / 指数');
     expect(wrapper.get('[data-testid="etf-activity-table"]').text()).toContain('收盘涨跌');
     expect(wrapper.get('[data-testid="etf-activity-table"]').text()).toContain('份额日变化');
-    expect(wrapper.get('[data-testid="etf-activity-table"]').text()).toContain('报告基线偏离');
-    expect(wrapper.get('[data-testid="etf-activity-table"]').text()).toContain('20日量比');
+    expect(wrapper.get('[data-testid="etf-activity-table"]').text()).toContain('年末基准日变');
+    expect(wrapper.get('[data-testid="etf-activity-table"]').text()).toContain('年末基准倍量');
+    expect(wrapper.get('[data-testid="etf-activity-table"]').text()).toContain('20日份额异常');
+    expect(wrapper.get('[data-testid="etf-activity-table"]').text()).toContain('成交量/20日均量');
     expect(wrapper.get('[data-testid="etf-activity-table"]').text()).toContain('状态');
     expect(rowSymbols(wrapper)).toEqual(['510300.SH', '510050.SH', '159915.SZ']);
   });
@@ -79,10 +85,14 @@ describe('EtfActivityTable', () => {
       expect.arrayContaining(['etf-activity-table__cell--numeric']),
       expect.arrayContaining(['etf-activity-table__cell--numeric']),
       expect.arrayContaining(['etf-activity-table__cell--numeric']),
+      expect.arrayContaining(['etf-activity-table__cell--numeric']),
+      expect.arrayContaining(['etf-activity-table__cell--numeric']),
       expect.arrayContaining(['etf-activity-table__cell--status'])
     ]);
     expect(firstRowCells.map(cell => cell.classes())).toEqual([
       expect.arrayContaining(['etf-activity-table__cell--identity']),
+      expect.arrayContaining(['etf-activity-table__cell--numeric']),
+      expect.arrayContaining(['etf-activity-table__cell--numeric']),
       expect.arrayContaining(['etf-activity-table__cell--numeric']),
       expect.arrayContaining(['etf-activity-table__cell--numeric']),
       expect.arrayContaining(['etf-activity-table__cell--numeric']),
@@ -119,8 +129,10 @@ describe('EtfActivityTable', () => {
     const cases = [
       ['收盘涨跌', ['A', 'B', 'C', 'NULL'], ['C', 'B', 'A', 'NULL']],
       ['份额日变化', ['B', 'C', 'A', 'NULL'], ['A', 'C', 'B', 'NULL']],
-      ['报告基线偏离', ['A', 'B', 'C', 'NULL'], ['C', 'B', 'A', 'NULL']],
-      ['20日量比', ['A', 'C', 'B', 'NULL'], ['B', 'C', 'A', 'NULL']],
+      ['年末基准日变', ['A', 'B', 'C', 'NULL'], ['C', 'B', 'A', 'NULL']],
+      ['年末基准倍量', ['A', 'B', 'C', 'NULL'], ['C', 'B', 'A', 'NULL']],
+      ['20日份额异常', ['B', 'C', 'A', 'NULL'], ['A', 'C', 'B', 'NULL']],
+      ['成交量/20日均量', ['A', 'C', 'B', 'NULL'], ['B', 'C', 'A', 'NULL']],
       ['三因子评分', ['A', 'B', 'C', 'NULL'], ['C', 'B', 'A', 'NULL']]
     ] as const;
 
@@ -172,7 +184,7 @@ describe('EtfActivityTable', () => {
   it('renders signed direction values and explicit rise/fall classes', () => {
     const wrapper = mount(EtfActivityTable, {
       props: {
-        rows: [row({ symbol: 'RISE', closeChangePct: 1.25, dailyChangePct: -0.5, baselineChangePct: 0 })],
+        rows: [row({ symbol: 'RISE', closeChangePct: 1.25, dailyChangePct: -0.5, baselineChangePct: 0, baselineMultiple: 12, shareChange20dMultiple: -2 })],
         selectedSymbol: 'RISE'
       }
     });
@@ -189,16 +201,22 @@ describe('EtfActivityTable', () => {
         rows: [
           row({
             symbol: 'BUY',
+            baselineMultiple: 12,
+            shareChange20dMultiple: 10,
             activity: {
               direction: 'increase',
+              is_tenfold: true,
               is_tenfold_share_change: true,
               share_change_20d_multiple: 10
             } as HuijinEtfActivityItem
           }),
           row({
             symbol: 'SELL',
+            baselineMultiple: -11,
+            shareChange20dMultiple: -11.25,
             activity: {
               direction: 'decrease',
+              is_tenfold: true,
               is_tenfold_share_change: true,
               share_change_20d_multiple: 11.25
             } as HuijinEtfActivityItem
@@ -208,10 +226,12 @@ describe('EtfActivityTable', () => {
       }
     });
 
-    expect(wrapper.get('[data-testid="activity-etf-row"][data-symbol="BUY"]').text()).toContain('10×申购');
-    expect(wrapper.get('[data-testid="activity-etf-row"][data-symbol="BUY"]').text()).toContain('10.0倍');
-    expect(wrapper.get('[data-testid="activity-etf-row"][data-symbol="SELL"]').text()).toContain('10×赎回');
-    expect(wrapper.get('[data-testid="activity-etf-row"][data-symbol="SELL"]').text()).toContain('11.3倍');
-    expect(wrapper.findAll('thead th')).toHaveLength(6 + 1);
+    expect(wrapper.get('[data-testid="activity-etf-row"][data-symbol="BUY"]').text()).toContain('基准10x');
+    expect(wrapper.get('[data-testid="activity-etf-row"][data-symbol="BUY"]').text()).toContain('20日10x');
+    expect(wrapper.get('[data-testid="activity-etf-row"][data-symbol="BUY"]').text()).toContain('+12.0x');
+    expect(wrapper.get('[data-testid="activity-etf-row"][data-symbol="BUY"]').text()).toContain('+10.0x');
+    expect(wrapper.get('[data-testid="activity-etf-row"][data-symbol="SELL"]').text()).toContain('-11.0x');
+    expect(wrapper.get('[data-testid="activity-etf-row"][data-symbol="SELL"]').text()).toContain('-11.3x');
+    expect(wrapper.findAll('thead th')).toHaveLength(8 + 1);
   });
 });

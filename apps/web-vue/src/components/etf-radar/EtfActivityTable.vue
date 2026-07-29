@@ -2,7 +2,6 @@
 import { computed, ref } from 'vue';
 import type { UnifiedEtfActivityRow } from '@/utils/domain/etfThreeFactor';
 import { closeChangeTone, signalLevelLabel } from '@/utils/domain/etfThreeFactor';
-import { shareChangeEventLabel } from '@/utils/domain/etfExcessFlow';
 
 defineOptions({ name: 'EtfActivityTable' });
 
@@ -15,7 +14,14 @@ const emit = defineEmits<{
   select: [symbol: string];
 }>();
 
-type SortKey = 'closeChangePct' | 'dailyChangePct' | 'baselineChangePct' | 'volumeRatio' | 'signalScore';
+type SortKey =
+  | 'closeChangePct'
+  | 'dailyChangePct'
+  | 'baselineChangePct'
+  | 'baselineMultiple'
+  | 'shareChange20dMultiple'
+  | 'volumeRatio'
+  | 'signalScore';
 
 const sortKey = ref<SortKey>('signalScore');
 const sortDirection = ref<'asc' | 'desc'>('desc');
@@ -52,6 +58,10 @@ function formatPercent(value: number | null) {
   return value === null ? '--' : `${value > 0 ? '+' : ''}${value.toFixed(2)}%`;
 }
 
+function formatMultiple(value: number | null) {
+  return value === null ? '--' : `${value > 0 ? '+' : ''}${value.toFixed(1)}x`;
+}
+
 function formatScore(value: number | null) {
   return value === null ? '--' : value.toFixed(0);
 }
@@ -67,14 +77,22 @@ function valueClass(value: number | null) {
   return '';
 }
 
+function activityFlags(row: UnifiedEtfActivityRow) {
+  if (!row.activity) return [];
+  return [row.activity.is_tenfold ? '基准10x' : null, row.activity.is_tenfold_share_change ? '20日10x' : null].filter(
+    (value): value is string => value !== null
+  );
+}
+
 function statusText(row: UnifiedEtfActivityRow) {
   const level = signalLevelLabel(row.signalLevel);
+  const flags = activityFlags(row);
+  const flagText = flags.length > 0 ? ` · ${flags.join(' · ')}` : '';
   if (!row.activity) return level;
-  const event = shareChangeEventLabel(row.activity);
-  if (row.activity.direction === 'increase') return `${level} · +增加（申购代理）${event ? ` · ${event}` : ''}`;
-  if (row.activity.direction === 'decrease') return `${level} · -减少（赎回代理）${event ? ` · ${event}` : ''}`;
-  if (row.activity.direction === 'flat') return `${level} · 持平`;
-  return `${level} · 待确认`;
+  if (row.activity.direction === 'increase') return `${level} · +增加（申购代理）${flagText}`;
+  if (row.activity.direction === 'decrease') return `${level} · -减少（赎回代理）${flagText}`;
+  if (row.activity.direction === 'flat') return `${level} · 持平${flagText}`;
+  return `${level} · 待确认${flagText}`;
 }
 </script>
 
@@ -84,6 +102,8 @@ function statusText(row: UnifiedEtfActivityRow) {
       <table class="etf-activity-table__table">
         <colgroup>
           <col class="etf-activity-table__col--identity" />
+          <col class="etf-activity-table__col--numeric" />
+          <col class="etf-activity-table__col--numeric" />
           <col class="etf-activity-table__col--numeric" />
           <col class="etf-activity-table__col--numeric" />
           <col class="etf-activity-table__col--numeric" />
@@ -115,15 +135,37 @@ function statusText(row: UnifiedEtfActivityRow) {
             <th scope="col" class="etf-activity-table__cell--numeric">
               <button
                 type="button"
-                :aria-label="`报告基线偏离 ${sortLabel('baselineChangePct')}`"
+                :aria-label="`年末基准日变 ${sortLabel('baselineChangePct')}`"
                 @click="sortBy('baselineChangePct')"
               >
-                报告基线偏离
+                年末基准日变
               </button>
             </th>
             <th scope="col" class="etf-activity-table__cell--numeric">
-              <button type="button" :aria-label="`20日量比 ${sortLabel('volumeRatio')}`" @click="sortBy('volumeRatio')">
-                20日量比
+              <button
+                type="button"
+                :aria-label="`年末基准倍量 ${sortLabel('baselineMultiple')}`"
+                @click="sortBy('baselineMultiple')"
+              >
+                年末基准倍量
+              </button>
+            </th>
+            <th scope="col" class="etf-activity-table__cell--numeric">
+              <button
+                type="button"
+                :aria-label="`20日份额异常 ${sortLabel('shareChange20dMultiple')}`"
+                @click="sortBy('shareChange20dMultiple')"
+              >
+                20日份额异常
+              </button>
+            </th>
+            <th scope="col" class="etf-activity-table__cell--numeric">
+              <button
+                type="button"
+                :aria-label="`成交量/20日均量 ${sortLabel('volumeRatio')}`"
+                @click="sortBy('volumeRatio')"
+              >
+                成交量/20日均量
               </button>
             </th>
             <th scope="col" class="etf-activity-table__cell--numeric">
@@ -163,32 +205,22 @@ function statusText(row: UnifiedEtfActivityRow) {
               {{ formatPercent(row.closeChangePct) }}
             </td>
             <td class="etf-activity-table__cell--numeric" :class="valueClass(row.dailyChangePct)">
-              <div class="etf-activity-table__share-change">
-                <span>{{ formatPercent(row.dailyChangePct) }}</span>
-                <span
-                  v-if="row.activity && shareChangeEventLabel(row.activity)"
-                  data-testid="tenfold-share-change"
-                  class="etf-activity-table__event"
-                  :class="
-                    row.activity.direction === 'increase'
-                      ? 'etf-activity-table__event--increase'
-                      : 'etf-activity-table__event--decrease'
-                  "
-                >
-                  {{ shareChangeEventLabel(row.activity) }}
-                </span>
-                <small
-                  v-if="
-                    row.activity?.share_change_20d_multiple !== null &&
-                    row.activity?.share_change_20d_multiple !== undefined
-                  "
-                >
-                  {{ row.activity.share_change_20d_multiple.toFixed(1) }}倍
-                </small>
-              </div>
+              {{ formatPercent(row.dailyChangePct) }}
             </td>
             <td class="etf-activity-table__cell--numeric" :class="valueClass(row.baselineChangePct)">
               {{ formatPercent(row.baselineChangePct) }}
+            </td>
+            <td class="etf-activity-table__cell--numeric" :class="valueClass(row.baselineMultiple)">
+              <div class="etf-activity-table__multiple">
+                <span>{{ formatMultiple(row.baselineMultiple) }}</span>
+                <span v-if="activityFlags(row).includes('基准10x')" class="etf-activity-table__event">基准10x</span>
+              </div>
+            </td>
+            <td class="etf-activity-table__cell--numeric" :class="valueClass(row.shareChange20dMultiple)">
+              <div class="etf-activity-table__multiple">
+                <span>{{ formatMultiple(row.shareChange20dMultiple) }}</span>
+                <span v-if="activityFlags(row).includes('20日10x')" class="etf-activity-table__event">20日10x</span>
+              </div>
             </td>
             <td class="etf-activity-table__cell--numeric">{{ formatVolumeRatio(row.volumeRatio) }}</td>
             <td class="etf-activity-table__cell--numeric">{{ formatScore(row.signalScore) }}</td>
@@ -214,7 +246,7 @@ function statusText(row: UnifiedEtfActivityRow) {
 
 .etf-activity-table__table {
   width: 100%;
-  min-width: 1010px;
+  min-width: 1270px;
   border-collapse: collapse;
   table-layout: fixed;
 }
@@ -324,19 +356,13 @@ tbody th span {
   font-weight: 700;
 }
 
-.etf-activity-table__share-change {
+.etf-activity-table__multiple {
   display: inline-flex;
   min-height: 42px;
   flex-direction: column;
   justify-content: center;
   align-items: flex-end;
   gap: 2px;
-}
-
-.etf-activity-table__share-change small {
-  color: var(--wb-muted, #64748b);
-  font-size: 11px;
-  font-weight: 400;
 }
 
 .etf-activity-table__event {
@@ -348,16 +374,6 @@ tbody th span {
   font-size: 11px;
   font-weight: 700;
   line-height: 18px;
-}
-
-.etf-activity-table__event--increase {
-  color: var(--wb-negative, #b91c1c);
-  background: color-mix(in srgb, var(--wb-negative, #b91c1c) 10%, transparent);
-}
-
-.etf-activity-table__event--decrease {
-  color: var(--wb-positive, #15803d);
-  background: color-mix(in srgb, var(--wb-positive, #15803d) 10%, transparent);
 }
 
 .etf-activity-table__status {

@@ -155,6 +155,9 @@ function activityItem(overrides: Partial<HuijinEtfActivityItem> = {}): HuijinEtf
     multiple: 12,
     direction: 'increase',
     is_tenfold: true,
+    share_change_20d_avg_abs: 20_000_000,
+    share_change_20d_multiple: 10.5,
+    is_tenfold_share_change: true,
     report_period: '2025-12-31',
     baseline_total_shares: 10_000_000_000,
     confirmed_huijin_shares: 1_234_000_000,
@@ -426,8 +429,18 @@ describe('EtfRadarView', () => {
     expect(wrapper.find('[aria-label="ETF 配对交叉验证"]').exists()).toBe(false);
     await wrapper.get('button[aria-expanded="false"]').trigger('click');
     expect(wrapper.get('[aria-label="ETF 配对交叉验证"]')).toBeTruthy();
-    expect(wrapper.get('[data-testid="etf-activity-table"]').text()).toContain('+14.50%');
-    expect(wrapper.get('[data-testid="etf-activity-table"]').text()).toContain('高确信');
+    const tableText = wrapper.get('[data-testid="etf-activity-table"]').text();
+    expect(tableText).toContain('年末基准日变');
+    expect(tableText).toContain('年末基准倍量');
+    expect(tableText).toContain('20日份额异常');
+    expect(tableText).toContain('成交量/20日均量');
+    expect(tableText).toContain('+12.00%');
+    expect(tableText).not.toContain('+14.50%');
+    expect(tableText).toContain('+12.0x');
+    expect(tableText).toContain('+10.5x');
+    expect(tableText).toContain('基准10x');
+    expect(tableText).toContain('20日10x');
+    expect(tableText).toContain('高确信');
     expect(wrapper.text()).toContain('配对一致增加');
     expect(wrapper.text()).toContain('配对一致减少');
     expect(wrapper.text()).not.toContain('确认增加');

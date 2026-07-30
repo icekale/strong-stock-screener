@@ -103,6 +103,20 @@ function analysisFixture(symbol: string, period: ChanlunPeriod): ChanlunAnalysis
       ma20: null,
       ma60: null
     }],
+    coverage: {
+      status: 'unverified',
+      required_period_bars: 0,
+      available_period_bars: 0,
+      required_raw_minutes: null,
+      available_raw_minutes: null,
+      complete_sessions: 0,
+      incomplete_sessions: 0,
+      missing_minutes: 0,
+      earliest_at: null,
+      latest_at: null,
+      reason: '尚未执行覆盖审计',
+      backfill_required: true
+    },
     fractals: [],
     strokes: [],
     segments: [],

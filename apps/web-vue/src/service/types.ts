@@ -1740,7 +1740,7 @@ export type ChanlunAnalysisResponse = {
   divergences: ChanlunDivergence[];
   signals: ChanlunSignal[];
   source_status: StrongStockSourceStatus[];
-  coverage?: ChanlunCoverage;
+  coverage: ChanlunCoverage;
   calculated_at: string;
   last_closed_bar_at: string | null;
   adjustment_mode: string;

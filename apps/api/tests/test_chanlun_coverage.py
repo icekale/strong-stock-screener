@@ -1,6 +1,8 @@
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from app.services.chanlun.coverage import (
     audit_intraday_coverage,
     open_sessions_in_calendar_window,
@@ -35,7 +37,7 @@ def test_two_sessions_with_a_28_day_trading_gap_are_incomplete() -> None:
     result = audit_intraday_coverage(
         timestamps,
         period="5m",
-        lookback=20,
+        lookback=96,
         now=shanghai("2026-06-29 15:05"),
         expected_trade_dates={date(2026, 6, 1), date(2026, 6, 29)},
     )
@@ -52,7 +54,7 @@ def test_220_60m_bars_require_14400_raw_minutes() -> None:
 
 def test_missing_one_minute_does_not_cross_a_5m_bucket() -> None:
     timestamps = full_session("2026-07-10")
-    timestamps.remove(shanghai("2026-07-10 09:32").isoformat())
+    timestamps.remove(shanghai("2026-07-10 14:32").isoformat())
 
     result = audit_intraday_coverage(
         timestamps,
@@ -64,6 +66,53 @@ def test_missing_one_minute_does_not_cross_a_5m_bucket() -> None:
 
     assert result.status == "incomplete"
     assert result.missing_minutes == 1
+
+
+@pytest.mark.parametrize(
+    ("period", "lookback"),
+    [("5m", 6), ("30m", 3), ("60m", 2)],
+)
+def test_trailing_window_ignores_older_missing_minutes(
+    period: str, lookback: int
+) -> None:
+    older = full_session("2026-07-09")
+    older.remove(shanghai("2026-07-09 09:32").isoformat())
+
+    result = audit_intraday_coverage(
+        older + full_session("2026-07-10"),
+        period=period,  # type: ignore[arg-type]
+        lookback=lookback,
+        now=shanghai("2026-07-10 15:05"),
+        expected_trade_dates={date(2026, 7, 9), date(2026, 7, 10)},
+    )
+
+    assert result.status == "complete"
+    assert result.available_period_bars == lookback
+    assert result.missing_minutes == 0
+    assert result.incomplete_sessions == 0
+
+
+@pytest.mark.parametrize(
+    ("period", "lookback", "missing_at"),
+    [("5m", 6, "14:32"), ("30m", 3, "14:02"), ("60m", 2, "14:02")],
+)
+def test_trailing_window_still_rejects_a_missing_minute(
+    period: str, lookback: int, missing_at: str
+) -> None:
+    timestamps = full_session("2026-07-10")
+    timestamps.remove(shanghai(f"2026-07-10 {missing_at}").isoformat())
+
+    result = audit_intraday_coverage(
+        timestamps,
+        period=period,  # type: ignore[arg-type]
+        lookback=lookback,
+        now=shanghai("2026-07-10 15:05"),
+        expected_trade_dates={date(2026, 7, 10)},
+    )
+
+    assert result.status == "incomplete"
+    assert result.missing_minutes == 1
+    assert result.incomplete_sessions == 1
 
 
 def test_current_open_bucket_does_not_count_as_missing_minutes() -> None:
@@ -95,7 +144,7 @@ def test_complete_day_has_no_lunch_gap() -> None:
 
     assert result.status == "complete"
     assert result.missing_minutes == 0
-    assert result.available_period_bars == 48
+    assert result.available_period_bars == 20
 
 
 def test_duplicate_timestamps_do_not_inflate_available_raw_minutes() -> None:
@@ -109,7 +158,7 @@ def test_duplicate_timestamps_do_not_inflate_available_raw_minutes() -> None:
         expected_trade_dates={date(2026, 7, 10)},
     )
 
-    assert result.available_raw_minutes == 240
+    assert result.available_raw_minutes == 100
 
 
 def test_missing_trade_date_reference_is_unverified() -> None:

@@ -77,18 +77,27 @@ def audit_intraday_coverage(
     expected_minutes = set().union(*expected_by_date.values()) if expected_by_date else set()
     available_minutes = normalized & expected_minutes
     expected_buckets = _expected_buckets(expected_minutes, period, cutoff)
-    complete_bucket_count = sum(
-        expected <= available_minutes for expected in expected_buckets.values()
+    selected_bucket_starts = sorted(expected_buckets)[-lookback:] if lookback else []
+    selected_buckets = {
+        bucket_start: expected_buckets[bucket_start] for bucket_start in selected_bucket_starts
+    }
+    selected_expected_minutes = (
+        set().union(*selected_buckets.values()) if selected_buckets else set()
     )
-    missing_minutes = len(expected_minutes - available_minutes)
+    selected_available_minutes = available_minutes & selected_expected_minutes
+    selected_expected_by_date = _bucket_minutes_by_date(selected_buckets)
+    complete_bucket_count = sum(
+        expected <= selected_available_minutes for expected in selected_buckets.values()
+    )
+    missing_minutes = len(selected_expected_minutes - selected_available_minutes)
     incomplete_sessions = sum(
-        not expected <= available_minutes
-        for expected in expected_by_date.values()
+        not expected <= selected_available_minutes
+        for expected in selected_expected_by_date.values()
         if expected
-    ) + _separated_session_gaps(expected_by_date)
+    ) + _separated_session_gaps(selected_expected_by_date)
     complete_sessions = sum(
-        bool(expected) and expected <= available_minutes
-        for expected in expected_by_date.values()
+        bool(expected) and expected <= selected_available_minutes
+        for expected in selected_expected_by_date.values()
     )
     status = (
         "complete"
@@ -101,12 +110,12 @@ def audit_intraday_coverage(
         required_period_bars=lookback,
         available_period_bars=complete_bucket_count,
         required_raw_minutes=required_raw_minutes,
-        available_raw_minutes=len(available_minutes),
+        available_raw_minutes=len(selected_available_minutes),
         complete_sessions=complete_sessions,
         incomplete_sessions=incomplete_sessions,
         missing_minutes=missing_minutes,
-        earliest_at=_iso_or_none(available_minutes, first=True),
-        latest_at=_iso_or_none(available_minutes, first=False),
+        earliest_at=_iso_or_none(selected_available_minutes, first=True),
+        latest_at=_iso_or_none(selected_available_minutes, first=False),
         reason=_coverage_reason(status, complete_bucket_count, lookback, missing_minutes, incomplete_sessions),
         backfill_required=status != "complete" or complete_bucket_count < lookback,
     )
@@ -150,6 +159,13 @@ def _expected_buckets(
         if bucket_start + timedelta(minutes=PERIOD_MINUTES[period]) <= cutoff:
             buckets.setdefault(bucket_start, set()).add(timestamp)
     return buckets
+
+
+def _bucket_minutes_by_date(buckets: dict[datetime, set[datetime]]) -> dict[date, set[datetime]]:
+    grouped: dict[date, set[datetime]] = {}
+    for bucket_start, expected_minutes in buckets.items():
+        grouped.setdefault(bucket_start.date(), set()).update(expected_minutes)
+    return grouped
 
 
 def _separated_session_gaps(expected_by_date: dict[date, set[datetime]]) -> int:

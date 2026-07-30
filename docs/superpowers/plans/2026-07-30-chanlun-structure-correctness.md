@@ -62,7 +62,7 @@
 - Changes `ChanlunBackfillRequest` to `periods: list[Literal["5m", "30m", "60m"]]`, `lookback: int`, and optional legacy `history_days`.
 - Changes `chanlun_backfill_max_bars` default from `4800` to `16000`; retain validation bounds `240..24000`.
 
-- [ ] **Step 1: Write failing model and TypeScript contract tests**
+- [x] **Step 1: Write failing model and TypeScript contract tests**
 
 Add these assertions to `apps/api/tests/test_chanlun_models.py`:
 
@@ -84,7 +84,7 @@ def test_backfill_contract_defaults_to_all_minute_periods_and_220_bars() -> None
 
 Update the existing settings assertion to require `16000`, and assert the TypeScript source contains the same optional `history_days`, `periods`, and `lookback` fields.
 
-- [ ] **Step 2: Run the focused tests and verify RED**
+- [x] **Step 2: Run the focused tests and verify RED**
 
 Run:
 
@@ -95,7 +95,7 @@ cd /Users/kale/Documents/strong-stock-screener/apps/api
 
 Expected: collection or assertion failures because `ChanlunCoverage`, the new request fields, and the `16000` default do not exist yet.
 
-- [ ] **Step 3: Implement the public models and settings**
+- [x] **Step 3: Implement the public models and settings**
 
 Add the Pydantic model before `ChanlunAnalysisResponse`:
 
@@ -119,7 +119,7 @@ class ChanlunCoverage(BaseModel):
 
 Add `coverage` to `ChanlunAnalysisResponse`, add the new fields and duplicate-period validation to `ChanlunBackfillRequest`, and update `Settings.chanlun_backfill_max_bars` to `Field(default=16000, ge=240, le=24000)`. Mirror these exact fields in `apps/web-vue/src/service/types.ts` and update `ChanlunBackfillRequest` in the TypeScript client type.
 
-- [ ] **Step 4: Run the focused tests and verify GREEN**
+- [x] **Step 4: Run the focused tests and verify GREEN**
 
 Run:
 
@@ -133,7 +133,7 @@ pnpm typecheck
 
 Expected: all focused backend tests pass; the frontend typecheck passes with the expanded response type.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/kale/Documents/strong-stock-screener
@@ -155,7 +155,7 @@ git commit -m "feat(chanlun): add coverage contracts"
 - Produces `audit_intraday_coverage(timestamps: Iterable[str], *, period: Literal["5m", "30m", "60m"], lookback: int, now: datetime, expected_trade_dates: set[date] | None) -> ChanlunCoverage`.
 - The auditor treats `expected_trade_dates=None` as `unverified`, ignores lunch/weekends/holidays, and never treats two separated sessions as one continuous sample.
 
-- [ ] **Step 1: Write failing coverage tests**
+- [x] **Step 1: Write failing coverage tests**
 
 Use deterministic Shanghai timestamps and test all of these cases in `test_chanlun_coverage.py`:
 
@@ -199,7 +199,7 @@ def test_missing_one_minute_does_not_cross_a_5m_bucket() -> None:
 
 Also test that a complete 09:30-11:29 and 13:00-14:59 day has no lunch gap, duplicate timestamps do not inflate `available_raw_minutes`, and `expected_trade_dates=None` returns `unverified`.
 
-- [ ] **Step 2: Run the coverage tests and verify RED**
+- [x] **Step 2: Run the coverage tests and verify RED**
 
 Run:
 
@@ -210,7 +210,7 @@ cd /Users/kale/Documents/strong-stock-screener/apps/api
 
 Expected: import failures because the auditor module and functions do not exist.
 
-- [ ] **Step 3: Implement session and bucket auditing**
+- [x] **Step 3: Implement session and bucket auditing**
 
 In `coverage.py`, normalize every timestamp to `Asia/Shanghai`, deduplicate it, and build expected minute starts only inside `09:30..11:29` and `13:00..14:59` for `expected_trade_dates`. Group timestamps into the existing session-aligned period buckets from `bars.py`; a bucket is complete only when it contains every expected minute. Select the trailing `lookback` complete buckets, count missing minutes and incomplete sessions in that selected history, and set:
 
@@ -220,7 +220,7 @@ status = "complete" if selected_count >= lookback and missing_minutes == 0 and d
 
 Use `status="unverified"` when no symbol trading-date reference was provided. Set `backfill_required` whenever status is not `complete` or fewer than `lookback` buckets exist. Keep `required_raw_minutes` equal to the formula above and round fetch counts up to the TDX page size of 800.
 
-- [ ] **Step 4: Run coverage and existing bar tests**
+- [x] **Step 4: Run coverage and existing bar tests**
 
 Run:
 
@@ -232,7 +232,7 @@ cd /Users/kale/Documents/strong-stock-screener/apps/api
 
 Expected: all coverage and existing aggregation tests pass.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/kale/Documents/strong-stock-screener
@@ -253,7 +253,7 @@ git commit -m "feat(chanlun): audit minute coverage"
 - Uses `required_intraday_raw_minutes` and `round_intraday_fetch_count` before calling `history_provider.get_minute_bars`.
 - Adds `coverage` to every service-created `ChanlunAnalysisResponse`, including stale, insufficient, unavailable, and adapter-failure responses.
 
-- [ ] **Step 1: Write failing service tests**
+- [x] **Step 1: Write failing service tests**
 
 Update the fake history provider assertions and add tests like:
 
@@ -288,7 +288,7 @@ def test_internal_minute_gap_is_insufficient_even_when_20_period_bars_exist(tmp_
 
 Add a cap test asserting a request whose computed raw count is greater than `settings.chanlun_backfill_max_bars` fails before the history provider is called, and a stale test asserting complete historical coverage with an old latest bucket remains `availability="stale"` while `coverage.status="complete"`.
 
-- [ ] **Step 2: Run the service tests and verify RED**
+- [x] **Step 2: Run the service tests and verify RED**
 
 Run:
 
@@ -299,13 +299,13 @@ cd /Users/kale/Documents/strong-stock-screener/apps/api
 
 Expected: signature failures, the old 4,800-count assertion, or a false `ready` result for the gapped history.
 
-- [ ] **Step 3: Load the symbol trading-date reference and audit before analysis**
+- [x] **Step 3: Load the symbol trading-date reference and audit before analysis**
 
 In `_load_closed_intraday_periods`, fetch the closed daily bars needed for the raw-history window through the configured `daily_provider`. Build `expected_trade_dates` from completed daily bars with positive volume; include a live date when normalized TickFlow minutes exist. If the daily reference fails, keep the raw archive but pass `None` to the auditor and append a source status explaining that continuity is unverified.
 
 Run `audit_intraday_coverage` on stored closed-minute timestamps before treating aggregated bars as usable. Store its result in `_ClosedPeriodData`. Keep the existing live failure behavior, but let coverage decide whether a successful provider response still yields `insufficient_bars` or `stale`.
 
-- [ ] **Step 4: Implement dynamic fetch sizing and coverage propagation**
+- [x] **Step 4: Implement dynamic fetch sizing and coverage propagation**
 
 Compute the raw target as:
 
@@ -320,7 +320,7 @@ if target > self.history_max_bars:
 
 Pass `target` to `get_minute_bars`, then upsert, prune, clear caches, and return `requested_bars`, `written_bars`, and coverage results for every requested period. In `_analyze_closed_period_data`, return `insufficient_bars` when coverage is not complete, convert only a complete but old input to `stale`, and pass coverage through `_unavailable_response` and adapter results. Never run the adapter for an incomplete or unverified window.
 
-- [ ] **Step 5: Run the service tests and verify GREEN**
+- [x] **Step 5: Run the service tests and verify GREEN**
 
 Run:
 
@@ -332,7 +332,7 @@ cd /Users/kale/Documents/strong-stock-screener/apps/api
 
 Expected: all service and fail-closed consumer tests pass; stale, insufficient, and unavailable responses contain truthful coverage.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/kale/Documents/strong-stock-screener
@@ -352,7 +352,7 @@ git commit -m "fix(chanlun): gate analysis on continuous history"
 - Changes `_occurred_at(native_item, dates_by_id)` to `_occurred_at(native_item, chart_dates)`; the function reads native public `dt`, normalizes to Shanghai, and requires exact membership in `chart_dates`.
 - `map_confirmed_zones(completed_pairs)` raises `StructureMappingError` for native mapping/runtime errors and returns `[]` only when CZSC returns a normal empty zone sequence.
 
-- [ ] **Step 1: Write failing mapping and error tests**
+- [x] **Step 1: Write failing mapping and error tests**
 
 Add a native fixture where the endpoint has `id=3` but `dt` equals the canonical bar at index 5. Assert that the output uses the `dt` bar, not index 3:
 
@@ -370,7 +370,7 @@ def test_adapter_maps_inclusion_endpoint_by_native_dt_not_old_id() -> None:
 
 Add tests that a native `dt` absent from `bars[].date`, a zone referring to an unmapped BI, and a `get_zs_seq` exception produce `availability="unavailable"` with a failed Chanlun source status. Retain the existing duplicate-zone and disabled-derived-layer assertions.
 
-- [ ] **Step 2: Run adapter tests and verify RED**
+- [x] **Step 2: Run adapter tests and verify RED**
 
 Run:
 
@@ -381,7 +381,7 @@ cd /Users/kale/Documents/strong-stock-screener/apps/api
 
 Expected: the deliberately different `id`/`dt` fixture resolves to the old wrong date or the zone exception is swallowed as an empty result.
 
-- [ ] **Step 3: Use native `dt` and fail closed on mapping ambiguity**
+- [x] **Step 3: Use native `dt` and fail closed on mapping ambiguity**
 
 Normalize a native datetime as follows:
 
@@ -396,7 +396,7 @@ def _native_datetime(value: object) -> str:
 
 Use this function for `FX.dt`, `BI.fx_a.dt`, `BI.fx_b.dt`, and the observing extreme. Validate exact membership, preserve endpoint prices and direction, and remove timestamp decisions based on `elements[].id` or nearest-bar lookup. In `structures.py`, validate every native BI reference and let `StructureMappingError` escape. Catch that exception in `ChanlunAdapter.analyze` and build an unavailable response containing the original bars and no structure layers.
 
-- [ ] **Step 4: Run adapter and service tests and verify GREEN**
+- [x] **Step 4: Run adapter and service tests and verify GREEN**
 
 Run:
 
@@ -408,7 +408,7 @@ cd /Users/kale/Documents/strong-stock-screener/apps/api
 
 Expected: exact endpoint tests pass, invalid native mappings are unavailable, and normal empty zone sequences remain valid empty output.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/kale/Documents/strong-stock-screener
@@ -432,7 +432,7 @@ git commit -m "fix(chanlun): map native endpoints by timestamp"
 - Produces `load_golden_fixture(path: Path) -> GoldenFixture` and `validate_golden_fixture(path: Path) -> GoldenFixtureResult`; tests use `GOLDEN_FIXTURE_DIR / "300308_SZ_1d.json"` rather than an adapter-generated expected value. The CLI writes a deterministic Markdown report with exact match counts, coverage, truncation stability, and rule version.
 - Does not regenerate expected labels from the adapter during test setup.
 
-- [ ] **Step 1: Write the fixture loader and failing exact-match tests**
+- [x] **Step 1: Write the fixture loader and failing exact-match tests**
 
 Implement a loader that rejects missing `review_status="approved"`, malformed bars, unsupported periods, and missing expected structure arrays. Add tests that compare every timestamp, price, direction, status, and zone bound rather than only list lengths:
 
@@ -453,7 +453,7 @@ def test_golden_result_requires_exact_stroke_coordinates() -> None:
     assert result.confirmed_coordinate_drifts == 0
 ```
 
-- [ ] **Step 2: Run the fixture tests and verify RED**
+- [x] **Step 2: Run the fixture tests and verify RED**
 
 Run:
 
@@ -464,7 +464,7 @@ cd /Users/kale/Documents/strong-stock-screener/apps/api
 
 Expected: import or fixture-schema failures because the loader, fixtures, and report command do not exist.
 
-- [ ] **Step 3: Capture and independently review the four real samples**
+- [x] **Step 3: Capture and independently review the four real samples**
 
 Freeze exactly 220 canonical closed bars for `300308.SZ` and `600000.SH` at daily and 60-minute periods. Store no live response or generated expected labels; store the bars and manually reviewed expected structures. The reviewer must verify each fractal extreme, each adjacent stroke endpoint, and each confirmed zone overlap against the frozen bars, then set:
 
@@ -479,11 +479,11 @@ Freeze exactly 220 canonical closed bars for `300308.SZ` and `600000.SH` at dail
 
 The synthetic fixture must contain a deliberate inclusion chain where a native `id` differs from the endpoint bar represented by native `dt`. Each real fixture must contain at least one inclusion chain, both stroke directions, and one confirmed zone; choose a frozen window that meets those criteria rather than accepting an empty-zone sample.
 
-- [ ] **Step 4: Implement exact matching and truncation stability**
+- [x] **Step 4: Implement exact matching and truncation stability**
 
 Compare frozen expected structures against adapter output with `1e-6` price tolerance and exact timestamp/enum equality. For every expected structure, replay prefixes from the minimum required bar count through the full fixture; assert no structure is emitted before its recorded `confirmed_at`, and after confirmation its ID, coordinates, and zone bounds match the frozen label. Keep segments, divergences, and signals excluded from this validator.
 
-- [ ] **Step 5: Implement the deterministic validation report CLI**
+- [x] **Step 5: Implement the deterministic validation report CLI**
 
 Create `run_chanlun_golden_validation.py` with `argparse` options `--fixture-dir` and `--output`. It must sort fixture paths, run the same `validate_golden_fixture` function used by tests, and write stable Markdown rows for fixture name, symbol, period, bar count, coverage status, fractal matches, stroke matches, zone matches, early confirmations, coordinate drifts, and rule version. Exit `0` only when every fixture passes and `1` otherwise.
 
@@ -498,11 +498,11 @@ cd /Users/kale/Documents/strong-stock-screener/apps/api
 
 Expected: five passing fixtures and a reproducible report; the report must not include current-time values or network response ordering.
 
-- [ ] **Step 6: Promote the rule version only after all fixtures pass**
+- [x] **Step 6: Promote the rule version only after all fixtures pass**
 
 Keep `VISUAL_RULE_VERSION` as `cl-v2-visual` while any fixture fails. After the five fixtures and truncation tests pass, change it to `cl-v3-validated` and update the model/TypeScript fixture assertions to require that version.
 
-- [ ] **Step 7: Run golden tests and commit**
+- [x] **Step 7: Run golden tests and commit**
 
 Run:
 
@@ -533,7 +533,7 @@ git commit -m "test(chanlun): freeze validated structure samples"
 - The background-job result contains `requested_bars`, `written_bars`, and per-period coverage payloads.
 - Existing active-job deduplication remains keyed by normalized symbol.
 
-- [ ] **Step 1: Write the failing HTTP contract test**
+- [x] **Step 1: Write the failing HTTP contract test**
 
 Extend `BlockingChanlunService` to record the parameters it receives and assert:
 
@@ -549,7 +549,7 @@ assert service.backfill_requests == [(
 )]
 ```
 
-- [ ] **Step 2: Run the API test and verify RED**
+- [x] **Step 2: Run the API test and verify RED**
 
 Run:
 
@@ -560,7 +560,7 @@ cd /Users/kale/Documents/strong-stock-screener/apps/api
 
 Expected: the fake service receives no new request fields because the current lambda only passes the symbol and callbacks.
 
-- [ ] **Step 3: Pass request fields through the job and client**
+- [x] **Step 3: Pass request fields through the job and client**
 
 Change the job lambda to call:
 
@@ -577,7 +577,7 @@ _chanlun_analysis_service().backfill(
 
 Serialize only provided optional `history_days` from `createChanlunBackfillJob`; always send `periods` and `lookback` from the workbench. Keep the response polling function unchanged except for the richer `result` type.
 
-- [ ] **Step 4: Run API and frontend checks**
+- [x] **Step 4: Run API and frontend checks**
 
 Run:
 
@@ -590,7 +590,7 @@ pnpm typecheck
 
 Expected: the request recorder sees the exact tuple and TypeScript compiles.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 cd /Users/kale/Documents/strong-stock-screener
@@ -614,7 +614,7 @@ git commit -m "fix(chanlun): honor backfill request parameters"
 - Overlay availability is `true` only for `analysis.availability === "ready"`; stale/insufficient/unavailable data may still provide fallback price bars but never render Chanlun layers.
 - Workbench exposes `createChanlunBackfillJob` and `getChanlunBackfillJob` through a local polling state without changing the order-confirmation flow.
 
-- [ ] **Step 1: Write failing canonical-bar and UI-state tests**
+- [x] **Step 1: Write failing canonical-bar and UI-state tests**
 
 Add to `stockViewState.test.ts`:
 
@@ -636,7 +636,7 @@ it('keeps weekly charts on the stock K-line source', () => {
 
 Extend `ChanlunView.test.ts` to assert that a response with `coverage.backfill_required=true` shows the backfill command, sends `periods=["5m","30m","60m"]` and `lookback=220`, and disables segments/divergences/signals. Add a stale response case where the K-line chart remains mounted but the Chanlun overlay prop is `null`.
 
-- [ ] **Step 2: Run frontend tests and verify RED**
+- [x] **Step 2: Run frontend tests and verify RED**
 
 Run:
 
@@ -647,7 +647,7 @@ pnpm exec vitest run src/utils/domain/stockViewState.test.ts src/views/ChanlunVi
 
 Expected: the canonical selector and backfill/layer assertions fail against the current two-source chart and always-enabled checkboxes.
 
-- [ ] **Step 3: Select canonical bars in StockView**
+- [x] **Step 3: Select canonical bars in StockView**
 
 Implement:
 
@@ -664,11 +664,11 @@ export function selectCanonicalStockBars(
 
 Use it before `buildStockViewChartBars`; retain the stock K-line response for GSGF annotations and the fallback path. Set `chartChanlun` to `null` unless the analysis is `ready` and its `bars` dates exactly equal the displayed canonical dates. Keep weekly out of the Chanlun request and overlay path.
 
-- [ ] **Step 4: Add truthful workbench layer and backfill state**
+- [x] **Step 4: Add truthful workbench layer and backfill state**
 
 In `ChanlunView.vue`, initialize `layers.segments`, `layers.divergences`, and `layers.signals` to `false`, define `validatedLayerKeys = new Set(['fractals', 'strokes', 'zones'])`, and render the checkbox `disabled` when the key is not validated or `analysis?.availability !== 'ready'`. Display “尚未通过黄金样本验证” for segments, divergences, and signals. Display coverage counts/reason and a “补齐分钟历史” button when `coverage.backfill_required` is true. Poll the returned `BackgroundJobState` every 1 second, stop on `success`, `failed`, or `canceled`, reload the workspace on success, and show the job error on failure. Read `latest_signal` and `latest_divergence` in period summaries; show “未启用” for disabled derived layers.
 
-- [ ] **Step 5: Run frontend tests and typecheck**
+- [x] **Step 5: Run frontend tests and typecheck**
 
 Run:
 
@@ -680,7 +680,7 @@ pnpm typecheck
 
 Expected: canonical bars, stale overlay suppression, backfill polling, and disabled-layer tests pass.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 cd /Users/kale/Documents/strong-stock-screener
@@ -698,7 +698,7 @@ git commit -m "fix(chanlun): use canonical bars and honest layer states"
 - Produces a passing backend/frontend verification record and the Markdown golden report from Task 5.
 - Does not enable segments, divergences, signals, alerts, backtests, screening scores, or paper-order decisions.
 
-- [ ] **Step 1: Run the complete backend suite and lint**
+- [x] **Step 1: Run the complete backend suite and lint**
 
 Run:
 
@@ -710,7 +710,7 @@ cd /Users/kale/Documents/strong-stock-screener/apps/api
 
 Expected: all backend tests pass and Ruff reports no errors.
 
-- [ ] **Step 2: Run the complete frontend suite, typecheck, and build**
+- [x] **Step 2: Run the complete frontend suite, typecheck, and build**
 
 Run:
 
@@ -723,7 +723,7 @@ pnpm build
 
 Expected: all frontend tests pass, typecheck succeeds, and the production build completes.
 
-- [ ] **Step 3: Run the golden report and live invariant checks**
+- [x] **Step 3: Run the golden report and live invariant checks**
 
 Run:
 
@@ -736,7 +736,7 @@ cd /Users/kale/Documents/strong-stock-screener/apps/api
 
 Verify the report has five passing fixtures, zero endpoint/zone mismatches, zero early confirmations, zero post-confirmation coordinate drifts, and the expected rule version. For `300308.SZ` and `600000.SH`, also verify the API response has no duplicate zones, no virtual zones, no derived trading layers, and no `ready` response when the minute archive contains an internal gap.
 
-- [ ] **Step 4: Record and commit the verification boundary**
+- [x] **Step 4: Record and commit the verification boundary**
 
 Update only the checkbox state and verification record in this plan. The record must list the exact test commands, fixture count, rule version, and the explicit deferred layers. Then commit:
 
@@ -747,3 +747,15 @@ git commit -m "docs(chanlun): record correctness phase verification"
 ```
 
 The phase is complete only when the frozen samples, coverage audit, canonical bar selection, and full test suites pass together. The next plan must separately establish golden samples for line segments, divergences, and buy/sell points before any of those layers can be enabled.
+
+### Verification Record (2026-07-30)
+
+- Backend: `.venv/bin/pytest -q` -> `1387 passed, 1 skipped in 38.13s`.
+- Backend lint: `.venv/bin/ruff check app tests` -> `All checks passed!`.
+- Frontend: `pnpm exec vitest run` -> `38 files passed, 250 tests passed`.
+- Frontend typecheck: `pnpm typecheck` -> exit code `0`.
+- Frontend build: `pnpm build` -> `Build successful`.
+- Golden validation: five fixtures passed with exact fractal/stroke/zone coordinates, `Early=0`, `Drifts=0`, and rule version `cl-v3-validated`.
+- Post-promotion focused checks: backend golden/adapter tests `21 passed`; frontend Chanlun/stock-state tests `14 passed`.
+- The first concurrent full-suite attempt exposed a scheduling-sensitive failure in the pre-existing noisy-worker benchmark test. The test passed in isolation and in eight consecutive repetitions; a subsequent full backend run passed completely.
+- Deferred by design: line segments, divergences, buy/sell points, alerts, screening scores, backtests, and paper-order decisions remain disabled until separate golden fixtures and no-future-function validation exist.

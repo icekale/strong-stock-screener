@@ -6,7 +6,7 @@
   "source": "baidu-kline-provider historical daily bars (frozen)",
   "adjustment_mode": "provider_default",
   "czsc_version": "0.10.12",
-  "rule_version": "cl-v2-visual",
+  "rule_version": "cl-v3-validated",
   "bars": [
     {
       "date": "2018-05-11T00:00:00+08:00",

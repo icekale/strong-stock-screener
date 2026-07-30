@@ -15,7 +15,7 @@ from app.models import ChanlunFractal, ChanlunPeriod, ChanlunStroke, ChanlunZone
 from app.services.chanlun.adapter import ChanlunAdapter  # noqa: E402
 
 
-GOLDEN_RULE_VERSION = "cl-v2-visual"
+GOLDEN_RULE_VERSION = "cl-v3-validated"
 GOLDEN_FIXTURE_DIR = API_ROOT / "tests" / "fixtures" / "chanlun" / "golden"
 SUPPORTED_PERIODS: set[str] = {"1d", "60m", "30m", "5m"}
 PRICE_TOLERANCE = 1e-6

@@ -6,7 +6,7 @@
   "source": "synthetic-inclusion-fixture",
   "adjustment_mode": "none",
   "czsc_version": "0.10.12",
-  "rule_version": "cl-v2-visual",
+  "rule_version": "cl-v3-validated",
   "bars": [
     {
       "date": "2026-01-01T00:00:00+08:00",

@@ -141,7 +141,7 @@ function analysisFixture(symbol: string, period: ChanlunPeriod): ChanlunAnalysis
     calculated_at: '2026-07-29T15:01:00+08:00',
     last_closed_bar_at: '2026-07-29T15:00:00+08:00',
     adjustment_mode: 'raw_unadjusted',
-    rule_version: 'cl-v2-visual'
+    rule_version: 'cl-v3-validated'
   };
 }
 

@@ -5,7 +5,7 @@ from math import isfinite
 from app.models import ChanlunStroke, ChanlunZone
 
 
-VISUAL_RULE_VERSION = "cl-v2-visual"
+VISUAL_RULE_VERSION = "cl-v3-validated"
 
 
 class StructureMappingError(ValueError):

@@ -177,7 +177,7 @@ def test_golden_validator_cli_writes_deterministic_report(tmp_path: Path) -> Non
     assert first.returncode == 0, first.stderr
     assert second.returncode == 0, second.stderr
     assert first_report == second_report
-    assert "cl-v2-visual" in first_report
+    assert "cl-v3-validated" in first_report
     assert "generated_at" not in first_report
 
 

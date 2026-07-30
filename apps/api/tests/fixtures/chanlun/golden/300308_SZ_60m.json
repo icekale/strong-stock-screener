@@ -6,7 +6,7 @@
   "source": "sina-kline-provider 60-minute bars (frozen)",
   "adjustment_mode": "raw_unadjusted",
   "czsc_version": "0.10.12",
-  "rule_version": "cl-v2-visual",
+  "rule_version": "cl-v3-validated",
   "bars": [
     {
       "date": "2026-05-14T10:30:00+08:00",

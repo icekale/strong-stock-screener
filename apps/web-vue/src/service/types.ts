@@ -1553,6 +1553,7 @@ export type ChanlunPeriod = StockKlinePeriod;
 export type ChanlunStatus = "observing" | "provisional" | "confirmed" | "final";
 export type ChanlunDirection = "up" | "down" | "unknown";
 export type ChanlunAvailability = "ready" | "backfilling" | "insufficient_bars" | "stale" | "unavailable";
+export type ChanlunCoverageStatus = "complete" | "incomplete" | "unverified";
 export type ChanlunDivergenceType = "top" | "bottom" | "consolidation";
 export type ChanlunSignalType = "one_buy" | "one_sell" | "two_buy" | "two_sell" | "three_buy" | "three_sell";
 export type ChanlunConfluenceType =
@@ -1712,6 +1713,21 @@ export type ChanlunConfluenceSignal = {
   rule_version: string;
 };
 
+export type ChanlunCoverage = {
+  status: ChanlunCoverageStatus;
+  required_period_bars: number;
+  available_period_bars: number;
+  required_raw_minutes: number | null;
+  available_raw_minutes: number | null;
+  complete_sessions: number;
+  incomplete_sessions: number;
+  missing_minutes: number;
+  earliest_at: string | null;
+  latest_at: string | null;
+  reason: string;
+  backfill_required: boolean;
+};
+
 export type ChanlunAnalysisResponse = {
   symbol: string;
   period: ChanlunPeriod;
@@ -1724,6 +1740,7 @@ export type ChanlunAnalysisResponse = {
   divergences: ChanlunDivergence[];
   signals: ChanlunSignal[];
   source_status: StrongStockSourceStatus[];
+  coverage?: ChanlunCoverage;
   calculated_at: string;
   last_closed_bar_at: string | null;
   adjustment_mode: string;
@@ -1884,6 +1901,8 @@ export type ChanlunPaperAccount = {
 };
 
 export type ChanlunBackfillRequest = {
+  periods?: ("5m" | "30m" | "60m")[];
+  lookback?: number;
   history_days?: number;
 };
 

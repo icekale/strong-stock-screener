@@ -90,6 +90,7 @@ StockKlinePeriod = Literal["1d", "60m", "30m", "5m"]
 ChanlunStatus = Literal["observing", "provisional", "confirmed", "final"]
 ChanlunDirection = Literal["up", "down", "unknown"]
 ChanlunAvailability = Literal["ready", "backfilling", "insufficient_bars", "stale", "unavailable"]
+ChanlunCoverageStatus = Literal["complete", "incomplete", "unverified"]
 ChanlunDivergenceType = Literal["top", "bottom", "consolidation"]
 ChanlunSignalType = Literal[
     "one_buy",
@@ -645,6 +646,21 @@ class ChanlunConfluenceSignal(BaseModel):
     rule_version: str = "cl-v1"
 
 
+class ChanlunCoverage(BaseModel):
+    status: ChanlunCoverageStatus = "unverified"
+    required_period_bars: int = Field(default=0, ge=0)
+    available_period_bars: int = Field(default=0, ge=0)
+    required_raw_minutes: int | None = Field(default=None, ge=0)
+    available_raw_minutes: int | None = Field(default=None, ge=0)
+    complete_sessions: int = Field(default=0, ge=0)
+    incomplete_sessions: int = Field(default=0, ge=0)
+    missing_minutes: int = Field(default=0, ge=0)
+    earliest_at: str | None = None
+    latest_at: str | None = None
+    reason: str = "尚未执行覆盖审计"
+    backfill_required: bool = True
+
+
 class ChanlunAnalysisResponse(BaseModel):
     symbol: str
     period: ChanlunPeriod
@@ -657,6 +673,7 @@ class ChanlunAnalysisResponse(BaseModel):
     divergences: list[ChanlunDivergence] = Field(default_factory=list)
     signals: list[ChanlunSignal] = Field(default_factory=list)
     source_status: list[StrongStockSourceStatus] = Field(default_factory=list)
+    coverage: ChanlunCoverage = Field(default_factory=ChanlunCoverage)
     calculated_at: str = Field(
         default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
     )
@@ -810,7 +827,16 @@ class ChanlunPaperAccount(BaseModel):
 
 
 class ChanlunBackfillRequest(BaseModel):
-    history_days: int = Field(default=60, ge=5, le=240)
+    periods: list[Literal["5m", "30m", "60m"]] = Field(default_factory=lambda: ["5m", "30m", "60m"])
+    lookback: int = 220
+    history_days: int | None = None
+
+    @field_validator("periods")
+    @classmethod
+    def reject_duplicate_periods(cls, value: list[Literal["5m", "30m", "60m"]]) -> list[Literal["5m", "30m", "60m"]]:
+        if len(value) != len(set(value)):
+            raise ValueError("periods must not contain duplicates")
+        return value
 
 
 class ChanlunSymbolMatch(BaseModel):

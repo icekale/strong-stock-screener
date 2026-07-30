@@ -34,6 +34,13 @@ def test_chanlun_analysis_response_serializes_contract_defaults() -> None:
     assert payload["rule_version"] == "cl-v1"
 
 
+def test_coverage_contract_has_unknown_safe_default() -> None:
+    response = ChanlunAnalysisResponse(symbol="600000.SH", period="5m", availability="unavailable")
+
+    assert response.coverage.status == "unverified"
+    assert response.coverage.backfill_required is True
+
+
 def test_chanlun_analysis_response_serializes_empty_confirmed_event_layers() -> None:
     response = ChanlunAnalysisResponse(
         symbol="600000.SH",
@@ -87,14 +94,23 @@ def test_chanlun_backfill_rejects_invalid_period() -> None:
         )
 
 
-def test_chanlun_backfill_request_history_days_is_optional_in_backend_and_typescript() -> None:
+def test_chanlun_backfill_contract_defaults_to_all_minute_periods_and_220_bars() -> None:
     request = ChanlunBackfillRequest()
     types_source = (Path(__file__).parents[2] / "web-vue" / "src" / "service" / "types.ts").read_text(
         encoding="utf-8"
     )
 
-    assert request.history_days == 60
-    assert "export type ChanlunBackfillRequest = {\n  history_days?: number;\n};" in types_source
+    assert request.periods == ["5m", "30m", "60m"]
+    assert request.lookback == 220
+    assert request.history_days is None
+    assert "  periods?: (\"5m\" | \"30m\" | \"60m\")[];" in types_source
+    assert "  lookback?: number;" in types_source
+    assert "  history_days?: number;" in types_source
+
+
+def test_chanlun_backfill_request_rejects_duplicate_periods() -> None:
+    with pytest.raises(ValidationError):
+        ChanlunBackfillRequest(periods=["5m", "5m"])
 
 
 def test_chanlun_settings_have_bounded_defaults() -> None:
@@ -103,7 +119,7 @@ def test_chanlun_settings_have_bounded_defaults() -> None:
     assert settings.chanlun_history_days == 60
     assert settings.chanlun_minute_retention_days == 180
     assert settings.chanlun_cache_seconds == 30
-    assert settings.chanlun_backfill_max_bars == 4800
+    assert settings.chanlun_backfill_max_bars == 16000
 
 
 @pytest.mark.parametrize(

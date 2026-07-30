@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from functools import lru_cache
 from statistics import mean, median
-from threading import RLock
+from threading import Lock, RLock
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -52,6 +52,7 @@ _BUY_SIGNAL_TYPES = {"one_buy", "two_buy", "three_buy"}
 _WORKSPACE_PERIODS: tuple[ChanlunPeriod, ...] = ("1d", "60m", "30m", "5m")
 _CALENDAR_SOURCE = "CZSC内置交易日历"
 _CALENDAR_UNAVAILABLE_DETAIL = "CZSC内置交易日历覆盖不可用，研究新鲜度按过期处理"
+_ANALYSIS_STATE_INIT_GUARD = Lock()
 
 ClosedInputFreshness = Literal["fresh", "stale", "insufficient"]
 
@@ -184,15 +185,21 @@ class ChanlunAnalysisService:
     def _get_analysis_cache_guard(self) -> RLock:
         guard = getattr(self, "_analysis_cache_guard", None)
         if guard is None:
-            guard = RLock()
-            self._analysis_cache_guard = guard
+            with _ANALYSIS_STATE_INIT_GUARD:
+                guard = getattr(self, "_analysis_cache_guard", None)
+                if guard is None:
+                    guard = RLock()
+                    self._analysis_cache_guard = guard
         return guard
 
     def _get_analysis_inflight(self) -> dict[str, Future[ChanlunAnalysisResponse]]:
         inflight = getattr(self, "_analysis_inflight", None)
         if inflight is None:
-            inflight = {}
-            self._analysis_inflight = inflight
+            with _ANALYSIS_STATE_INIT_GUARD:
+                inflight = getattr(self, "_analysis_inflight", None)
+                if inflight is None:
+                    inflight = {}
+                    self._analysis_inflight = inflight
         return inflight
 
     def _cache_generation_snapshot(self) -> int:
@@ -1083,7 +1090,8 @@ class ChanlunAnalysisService:
             future.set_result(cached)
             return decorate(cached)
         except BaseException as exc:
-            future.set_exception(exc)
+            if not future.done():
+                future.set_exception(exc)
             raise
         finally:
             with guard:

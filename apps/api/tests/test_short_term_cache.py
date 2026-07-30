@@ -3,6 +3,7 @@ from __future__ import annotations
 from threading import Event, Lock, Thread
 from time import sleep
 
+from app.services import short_term_cache as short_term_cache_module
 from app.services.short_term_cache import TtlCache
 
 
@@ -78,12 +79,16 @@ def test_get_or_set_does_not_hold_lock_while_factory_runs() -> None:
     assert not thread_errors
 
 
-def test_get_or_set_evicts_expired_unrelated_entries() -> None:
+def test_get_or_set_evicts_expired_unrelated_entries(
+    monkeypatch,
+) -> None:
     cache = TtlCache[str](ttl_seconds=0.01, name="bounded-cache")
+    clock = [0.0]
+    monkeypatch.setattr(short_term_cache_module, "monotonic", lambda: clock[0])
 
     assert cache.get_or_set("old-a", lambda: "a") == "a"
     assert cache.get_or_set("old-b", lambda: "b") == "b"
-    sleep(0.02)
+    clock[0] = 0.02
 
     assert cache.get_or_set("current", lambda: "current") == "current"
 
@@ -214,7 +219,7 @@ def test_get_or_refresh_returns_stale_none_while_refreshing() -> None:
 def test_same_key_get_or_set_cold_miss_only_runs_factory_once() -> None:
     cache = TtlCache[str](ttl_seconds=60, name="test-cache")
     factory_started = Event()
-    factory_called_twice = Event()
+    second_call_started = Event()
     release_factory = Event()
     calls: list[int] = []
     results: list[str] = []
@@ -225,8 +230,6 @@ def test_same_key_get_or_set_cold_miss_only_runs_factory_once() -> None:
         with lock:
             call_number = len(calls) + 1
             calls.append(call_number)
-            if call_number > 1:
-                factory_called_twice.set()
         factory_started.set()
         release_factory.wait()
         return f"value-{call_number}"
@@ -239,14 +242,18 @@ def test_same_key_get_or_set_cold_miss_only_runs_factory_once() -> None:
         except BaseException as exc:
             thread_errors.append(exc)
 
+    def run_second_call() -> None:
+        second_call_started.set()
+        run_call()
+
     first_thread = Thread(target=run_call)
-    second_thread = Thread(target=run_call)
     first_thread.start()
     assert factory_started.wait(timeout=1)
+    second_thread = Thread(target=run_second_call)
     second_thread.start()
 
     try:
-        assert not factory_called_twice.wait(timeout=0.2)
+        assert second_call_started.wait(timeout=1)
     finally:
         release_factory.set()
         first_thread.join(timeout=1)

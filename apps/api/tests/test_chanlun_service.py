@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, time, timedelta
 from pathlib import Path
-from threading import Event, Lock
+from threading import Barrier, Event, Lock
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -1021,6 +1021,74 @@ def test_adapter_failure_is_not_cached_and_retry_can_recover(tmp_path: Path) -> 
     assert first.availability == "unavailable"
     assert second.availability == "ready"
     assert adapter.calls == 2
+
+
+@pytest.mark.parametrize(
+    ("attribute_name", "getter_name"),
+    [
+        ("_analysis_cache_guard", "_get_analysis_cache_guard"),
+        ("_analysis_inflight", "_get_analysis_inflight"),
+    ],
+)
+def test_uninitialized_analysis_state_is_initialized_once_under_concurrency(
+    attribute_name: str,
+    getter_name: str,
+) -> None:
+    class UninitializedService(ChanlunAnalysisService):
+        read_count = 0
+        read_count_lock = Lock()
+        first_reads = Barrier(2)
+
+        def __getattribute__(self, name: str):  # type: ignore[no-untyped-def]
+            if name == attribute_name:
+                with type(self).read_count_lock:
+                    is_first_read = type(self).read_count < 2
+                    if is_first_read:
+                        type(self).read_count += 1
+                if is_first_read:
+                    type(self).first_reads.wait(timeout=2)
+                    return None
+            return super().__getattribute__(name)
+
+    service = object.__new__(UninitializedService)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = list(executor.map(lambda _: getattr(service, getter_name)(), range(2)))
+
+    assert results[0] is results[1]
+
+
+def test_analysis_preserves_decorate_error_after_future_completion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider(),
+        history_provider=FakeHistoryProvider(),
+        adapter=FakeAdapter(),
+        daily_provider=FakeDailyProvider(daily_bars(20)),
+        cache=build_test_cache(),
+    )
+    original_model_copy = ChanlunAnalysisResponse.model_copy
+    calls = 0
+
+    def fail_during_decorate(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("decorate failed")
+        return original_model_copy(self, *args, **kwargs)
+
+    monkeypatch.setattr(ChanlunAnalysisResponse, "model_copy", fail_during_decorate)
+
+    with pytest.raises(RuntimeError, match="decorate failed"):
+        service.analysis(
+            "600000.SH",
+            period="1d",
+            lookback=20,
+            include_observing=False,
+            now=shanghai("2026-06-20 16:00"),
+        )
 
 
 def test_concurrent_same_key_analysis_single_flights_adapter(tmp_path: Path) -> None:

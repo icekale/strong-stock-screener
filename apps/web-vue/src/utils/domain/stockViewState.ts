@@ -1,4 +1,4 @@
-import type { KlineBar, StockKlinePeriod } from '@/service/types';
+import type { ChanlunAnalysisResponse, KlineBar, StockKlinePeriod } from '@/service/types';
 import { aggregateWeeklyBars } from '@/utils/charts/klinePeriod';
 import {
   buildKlineIndicatorState,
@@ -63,6 +63,20 @@ export function buildStockViewChartBars(bars: KlineBar[], period: StockKlinePeri
     ma20: index >= 19 ? bar.ma20 ?? averages.ma20[index] ?? null : null,
     ma60: index >= 59 ? bar.ma60 ?? averages.ma60[index] ?? null : null
   }));
+}
+
+export function selectCanonicalStockBars(
+  fallbackBars: KlineBar[],
+  analysis: ChanlunAnalysisResponse | null,
+  period: StockKlinePeriod | 'weekly'
+): KlineBar[] {
+  if (period !== 'weekly' && analysis?.bars?.length) return analysis.bars;
+  return fallbackBars;
+}
+
+export function hasCanonicalBarDates(bars: KlineBar[], analysis: ChanlunAnalysisResponse | null): boolean {
+  if (!analysis?.bars?.length || bars.length !== analysis.bars.length) return false;
+  return bars.every((bar, index) => bar.date === analysis.bars[index]?.date);
 }
 
 export function buildStockKlineQuery({ period, count = 220 }: { period: StockKlinePeriod; count?: number }): StockKlineQuery {

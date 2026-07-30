@@ -3,7 +3,7 @@
 import { defineComponent } from 'vue';
 import { flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ChanlunAnalysisResponse, ChanlunPeriod, ChanlunWorkspaceResponse } from '@/service/types';
+import type { BackgroundJobState, ChanlunAnalysisResponse, ChanlunPeriod, ChanlunWorkspaceResponse } from '@/service/types';
 import ChanlunView from './ChanlunView.vue';
 
 type Deferred<T> = {
@@ -18,9 +18,11 @@ const navigation = vi.hoisted(() => ({
 
 const api = vi.hoisted(() => ({
   approveChanlunPaperOrder: vi.fn(),
+  createChanlunBackfillJob: vi.fn(),
   createChanlunPaperOrderDraft: vi.fn(),
   fillChanlunPaperOrder: vi.fn(),
   getChanlunAnalysis: vi.fn(),
+  getChanlunBackfillJob: vi.fn(),
   getChanlunPaperAccount: vi.fn(),
   getChanlunWorkspace: vi.fn()
 }));
@@ -70,6 +72,18 @@ const SegmentedStub = defineComponent({
 const PlainStub = defineComponent({
   props: ['items', 'title'],
   template: '<section><slot /></section>'
+});
+
+const ButtonStub = defineComponent({
+  inheritAttrs: false,
+  props: ['disabled'],
+  template: '<button v-bind="$attrs" :disabled="disabled"><slot /></button>'
+});
+
+const CheckboxStub = defineComponent({
+  inheritAttrs: false,
+  props: ['checked', 'disabled'],
+  template: '<label v-bind="$attrs"><input type="checkbox" :checked="checked" :disabled="disabled" /><slot /></label>'
 });
 
 const FormControlStub = defineComponent({
@@ -145,8 +159,8 @@ function mountView() {
     global: {
       stubs: {
         AAlert: true,
-        AButton: true,
-        ACheckbox: true,
+        AButton: ButtonStub,
+        ACheckbox: CheckboxStub,
         ADescriptions: PlainStub,
         ADescriptionsItem: PlainStub,
         AEmpty: true,
@@ -164,6 +178,22 @@ function mountView() {
       }
     }
   });
+}
+
+function backfillJob(status: BackgroundJobState['status']): BackgroundJobState {
+  return {
+    job_id: 'chanlun-job-1',
+    type: 'chanlun_backfill:600000.SH',
+    status,
+    progress_current: 0,
+    progress_total: 3,
+    message: status === 'running' ? '缠论分钟历史补齐中' : '缠论分钟历史补齐完成',
+    started_at: null,
+    finished_at: null,
+    error: null,
+    result_path: null,
+    result: null
+  };
 }
 
 beforeEach(() => {
@@ -200,6 +230,40 @@ describe('ChanlunView request state', () => {
       symbol: '000001.SH',
       period: '30m'
     });
+    wrapper.unmount();
+  });
+
+  it('shows coverage backfill and disables unvalidated derived layers', async () => {
+    api.getChanlunWorkspace.mockResolvedValue(workspaceFixture('600000.SH'));
+    api.createChanlunBackfillJob.mockResolvedValue(backfillJob('running'));
+    const wrapper = mountView();
+    await flushPromises();
+
+    wrapper.get('[data-testid="chanlun-backfill"]');
+    expect(wrapper.get('[data-layer="segments"] input').attributes('disabled')).toBeDefined();
+    expect(wrapper.get('[data-layer="divergences"] input').attributes('disabled')).toBeDefined();
+    expect(wrapper.get('[data-layer="signals"] input').attributes('disabled')).toBeDefined();
+
+    await wrapper.get('[data-testid="chanlun-backfill"]').trigger('click');
+    await flushPromises();
+
+    expect(api.createChanlunBackfillJob).toHaveBeenCalledWith('600000.SH', {
+      periods: ['5m', '30m', '60m'],
+      lookback: 220
+    });
+    wrapper.unmount();
+  });
+
+  it('keeps stale price bars visible but removes the Chanlun overlay', async () => {
+    const staleWorkspace = workspaceFixture('600000.SH');
+    staleWorkspace.analysis = { ...staleWorkspace.analysis, availability: 'stale' };
+    api.getChanlunWorkspace.mockResolvedValue(staleWorkspace);
+    const wrapper = mountView();
+    await flushPromises();
+
+    const chart = wrapper.getComponent({ name: 'StockKlineChart' });
+    expect(chart.props('bars')).toHaveLength(1);
+    expect(chart.props('chanlun')).toBeNull();
     wrapper.unmount();
   });
 

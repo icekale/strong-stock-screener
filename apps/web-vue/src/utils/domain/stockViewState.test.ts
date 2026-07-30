@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import type { KlineBar, StockKlinePeriod } from '@/service/types';
+import type { ChanlunAnalysisResponse, KlineBar, StockKlinePeriod } from '@/service/types';
 import {
   buildStockKlineQuery,
   buildStockViewChartBars,
   buildStockViewDefaults,
   calculateCompleteMovingAverage,
+  hasCanonicalBarDates,
   isLatestStockRequest,
   nextStockRequestId,
   parseIndicatorState,
+  selectCanonicalStockBars,
   serializeIndicatorState
 } from './stockViewState';
 
@@ -37,6 +39,37 @@ describe('stock view state', () => {
       kline: { count: 220, period: '30m' satisfies StockKlinePeriod },
       chanlun: { period: '30m', lookback: 220, includeObserving: true }
     });
+  });
+
+  it('uses analysis bars as the supported-period chart coordinate source', () => {
+    const fallback = [{ date: '2026-07-30T15:00:00+08:00', close: 10 }] as KlineBar[];
+    const analysis = {
+      availability: 'ready',
+      bars: [{ date: '2026-07-30T15:00:00+08:00', close: 11 }]
+    } as ChanlunAnalysisResponse;
+
+    expect(selectCanonicalStockBars(fallback, analysis, '60m')[0]?.close).toBe(11);
+  });
+
+  it('keeps weekly charts on the stock K-line source', () => {
+    const fallback = [{ date: '2026-07-30T15:00:00+08:00', close: 10 }] as KlineBar[];
+    const analysis = {
+      availability: 'ready',
+      bars: [{ date: '2026-07-30T15:00:00+08:00', close: 11 }]
+    } as ChanlunAnalysisResponse;
+
+    expect(selectCanonicalStockBars(fallback, analysis, 'weekly')[0]?.close).toBe(10);
+  });
+
+  it('accepts overlay coordinates only when every date is canonical', () => {
+    const bars = [{ date: '2026-07-30T15:00:00+08:00' }] as KlineBar[];
+    const matching = { bars } as ChanlunAnalysisResponse;
+    const mismatching = {
+      bars: [{ date: '2026-07-30T14:00:00+08:00' }]
+    } as ChanlunAnalysisResponse;
+
+    expect(hasCanonicalBarDates(bars, matching)).toBe(true);
+    expect(hasCanonicalBarDates(bars, mismatching)).toBe(false);
   });
 
   it('round-trips indicator state and falls back for invalid JSON', () => {

@@ -1,16 +1,18 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useThemeStore } from '@/store/modules/theme';
 import {
   approveChanlunPaperOrder,
+  createChanlunBackfillJob,
   createChanlunPaperOrderDraft,
   fillChanlunPaperOrder,
   getChanlunAnalysis,
+  getChanlunBackfillJob,
   getChanlunPaperAccount,
   getChanlunWorkspace
 } from '@/service/product-api';
-import type { ChanlunAnalysisResponse, ChanlunLayerKey, ChanlunPaperAccount, ChanlunPaperOrder, ChanlunPeriod, ChanlunWorkspaceResponse } from '@/service/types';
+import type { BackgroundJobState, ChanlunAnalysisResponse, ChanlunLayerKey, ChanlunPaperAccount, ChanlunPaperOrder, ChanlunPeriod, ChanlunWorkspaceResponse } from '@/service/types';
 import StockKlineChart from '@/components/charts/StockKlineChart.vue';
 import { KLINE_SUB_INDICATOR_OPTIONS, type KlineMovingAverage, type KlineSubIndicator } from '@/utils/charts/klineIndicatorLayout';
 import type { WorkbenchMetric } from '@/components/common/workbench/workbench';
@@ -31,11 +33,16 @@ const order = ref<ChanlunPaperOrder | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const paperError = ref<string | null>(null);
-const layers = reactive<Partial<Record<ChanlunLayerKey, boolean>>>({ zones: true, strokes: true, segments: true, divergences: true, signals: true, fractals: false });
+const layers = reactive<Partial<Record<ChanlunLayerKey, boolean>>>({ zones: true, strokes: true, segments: false, divergences: false, signals: false, fractals: false });
 const showMovingAverages = ref(false);
 const movingAverages = ref<KlineMovingAverage[]>([]);
 const subIndicators = ref<KlineSubIndicator[]>(['volume']);
 const paperQuantity = ref(100);
+const backfillJob = ref<BackgroundJobState | null>(null);
+const backfillLoading = ref(false);
+const backfillError = ref<string | null>(null);
+const validatedLayerKeys = new Set<ChanlunLayerKey>(['fractals', 'strokes', 'zones']);
+let backfillPollTimer: ReturnType<typeof setTimeout> | null = null;
 let analysisRequestId = 0;
 
 const periods = [
@@ -50,7 +57,7 @@ const chartBars = computed(() => analysis.value?.bars ?? []);
 const availablePeriods = computed(() => workspace.value?.periods ?? []);
 const latestZone = computed(() => analysis.value?.zones.at(-1) ?? null);
 const latestDivergence = computed(() => analysis.value?.divergences.at(-1) ?? null);
-const latestSignal = computed(() => analysis.value?.signals.at(-1) ?? null);
+const coverage = computed(() => analysis.value?.coverage ?? null);
 const chanlunMetrics = computed<WorkbenchMetric[]>(() => [
   {
     key: 'availability',
@@ -68,15 +75,14 @@ const chanlunMetrics = computed<WorkbenchMetric[]>(() => [
   {
     key: 'divergences',
     label: '背驰',
-    value: analysis.value?.divergences.length ?? '--',
-    helper: latestDivergence.value ? divergenceLabel(latestDivergence.value.type) : '暂无背驰'
+    value: '未启用',
+    helper: '尚未通过黄金样本验证'
   },
   {
     key: 'signals',
     label: '最新信号',
-    value: latestSignal.value ? signalLabel(latestSignal.value.type) : '--',
-    tone: latestSignal.value ? statusTone(latestSignal.value.status) : 'neutral',
-    helper: latestSignal.value ? `${statusLabel(latestSignal.value.status)} · ${formatPrice(latestSignal.value.price)}` : '暂无买卖点'
+    value: '未启用',
+    helper: '尚未通过黄金样本验证'
   }
 ]);
 
@@ -206,6 +212,73 @@ async function fillOrder() {
   try { order.value = await fillChanlunPaperOrder(order.value.id); await loadAccount(); } catch (cause) { paperError.value = cause instanceof Error ? cause.message : '模拟成交失败'; }
 }
 
+async function startBackfill() {
+  if (backfillLoading.value) return;
+  stopBackfillPolling();
+  backfillError.value = null;
+  backfillLoading.value = true;
+  try {
+    const job = await createChanlunBackfillJob(symbol.value, {
+      periods: ['5m', '30m', '60m'],
+      lookback: 220
+    });
+    backfillJob.value = job;
+    if (isTerminalBackfillJob(job)) {
+      await finishBackfill(job);
+    } else {
+      scheduleBackfillPoll(job.job_id);
+    }
+  } catch (cause) {
+    backfillLoading.value = false;
+    backfillError.value = cause instanceof Error ? cause.message : '启动分钟历史补齐失败';
+  }
+}
+
+function scheduleBackfillPoll(jobId: string) {
+  backfillPollTimer = setTimeout(() => {
+    backfillPollTimer = null;
+    void pollBackfill(jobId);
+  }, 1000);
+}
+
+async function pollBackfill(jobId: string) {
+  if (backfillJob.value?.job_id !== jobId) return;
+  try {
+    const job = await getChanlunBackfillJob(symbol.value, jobId);
+    if (backfillJob.value?.job_id !== jobId) return;
+    backfillJob.value = job;
+    if (isTerminalBackfillJob(job)) {
+      await finishBackfill(job);
+    } else {
+      scheduleBackfillPoll(jobId);
+    }
+  } catch (cause) {
+    backfillLoading.value = false;
+    backfillError.value = cause instanceof Error ? cause.message : '读取分钟历史补齐任务失败';
+  }
+}
+
+async function finishBackfill(job: BackgroundJobState) {
+  stopBackfillPolling();
+  backfillLoading.value = false;
+  if (job.status === 'success') {
+    await loadWorkspace();
+    return;
+  }
+  backfillError.value = job.error || job.message || '分钟历史补齐未完成';
+}
+
+function isTerminalBackfillJob(job: BackgroundJobState) {
+  return job.status === 'success' || job.status === 'failed' || job.status === 'canceled';
+}
+
+function stopBackfillPolling() {
+  if (backfillPollTimer !== null) {
+    clearTimeout(backfillPollTimer);
+    backfillPollTimer = null;
+  }
+}
+
 function toggleAverage(value: KlineMovingAverage) {
   movingAverages.value = movingAverages.value.includes(value) ? movingAverages.value.filter(item => item !== value) : [...movingAverages.value, value];
 }
@@ -272,6 +345,7 @@ function paperOrderStatusTone(value: string) {
 }
 
 onMounted(() => { void loadWorkspace(); void loadAccount(); });
+onBeforeUnmount(stopBackfillPolling);
 watch(() => route.query.symbol, value => { if (value && value !== symbol.value) { symbol.value = String(value); symbolInput.value = symbol.value; void loadWorkspace(); } });
 </script>
 
@@ -295,7 +369,13 @@ watch(() => route.query.symbol, value => { if (value && value !== symbol.value) 
       <div class="chanlun-control-strip">
         <div class="chanlun-control-group chanlun-control-group--layers">
           <span class="chanlun-control-label">层级</span>
-          <a-checkbox v-for="key in Object.keys(layerLabels) as ChanlunLayerKey[]" :key="key" v-model:checked="layers[key]">{{ layerLabels[key] }}</a-checkbox>
+          <a-checkbox
+            v-for="key in Object.keys(layerLabels) as ChanlunLayerKey[]"
+            :key="key"
+            v-model:checked="layers[key]"
+            :data-layer="key"
+            :disabled="!validatedLayerKeys.has(key) || analysis?.availability !== 'ready'"
+          >{{ layerLabels[key] }}</a-checkbox>
         </div>
         <div class="chanlun-control-group">
           <span class="chanlun-control-label">均线</span>
@@ -307,15 +387,34 @@ watch(() => route.query.symbol, value => { if (value && value !== symbol.value) 
           <a-select v-model:value="subIndicators[0]" size="small" class="chanlun-indicator-select" :options="KLINE_SUB_INDICATOR_OPTIONS" />
         </div>
       </div>
+      <div v-if="coverage" class="chanlun-coverage-strip">
+        <div class="chanlun-coverage-strip__summary">
+          <strong>分钟覆盖</strong>
+          <span>{{ coverage.available_period_bars }} / {{ coverage.required_period_bars }} 根周期 K 线</span>
+          <span v-if="coverage.required_raw_minutes != null">{{ coverage.available_raw_minutes ?? 0 }} / {{ coverage.required_raw_minutes }} 根原始分钟</span>
+          <StatusTag :status="availabilityTagTone(coverage.status === 'complete' ? 'ready' : 'stale')" />
+        </div>
+        <div class="chanlun-coverage-strip__reason">{{ coverage.reason }}</div>
+        <a-button
+          v-if="coverage.backfill_required"
+          data-testid="chanlun-backfill"
+          size="small"
+          :loading="backfillLoading"
+          @click="startBackfill"
+        >补齐分钟历史</a-button>
+        <span v-if="backfillJob && backfillLoading" class="text-12px text-text-secondary">{{ backfillJob.message }}</span>
+      </div>
+      <a-alert v-if="backfillError" class="mt-8px" :title="backfillError" show-icon type="warning" />
       <div class="chanlun-chart-frame">
-        <StockKlineChart :bars="chartBars" :chanlun="analysis" :chanlun-layers="layers" :height="720" :loading="loading" :moving-averages="showMovingAverages ? movingAverages : []" :period="period" :sub-indicators="subIndicators" :symbol="symbol" />
+        <StockKlineChart :bars="chartBars" :chanlun="analysis?.availability === 'ready' ? analysis : null" :chanlun-layers="layers" :height="720" :loading="loading" :moving-averages="showMovingAverages ? movingAverages : []" :period="period" :sub-indicators="subIndicators" :symbol="symbol" />
       </div>
     </section>
 
     <div class="chanlun-analysis-grid">
       <section class="chanlun-panel border border-border rounded-6px bg-container p-12px">
         <SectionHeader title="信号列表" :source="analysis?.rule_version || '结构信号'" />
-        <a-list :data-source="[...(analysis?.signals ?? [])].reverse().slice(0, 8)" size="small">
+        <div v-if="!validatedLayerKeys.has('signals')" class="chanlun-disabled-layer">买卖点：尚未通过黄金样本验证，当前不参与预警、回测或模拟盘。</div>
+        <a-list v-else :data-source="[...(analysis?.signals ?? [])].reverse().slice(0, 8)" size="small">
           <template #renderItem="{ item }">
             <a-list-item>
               <div class="chanlun-signal-row">
@@ -335,7 +434,7 @@ watch(() => route.query.symbol, value => { if (value && value !== symbol.value) 
             </a-list-item>
           </template>
         </a-list>
-        <a-empty v-if="!analysis?.signals.length" description="暂无买卖点" />
+        <a-empty v-if="validatedLayerKeys.has('signals') && !analysis?.signals.length" description="暂无买卖点" />
       </section>
 
       <section class="chanlun-panel border border-border rounded-6px bg-container p-12px">
@@ -345,7 +444,7 @@ watch(() => route.query.symbol, value => { if (value && value !== symbol.value) 
             {{ latestZone ? `${formatPrice(latestZone.low)} - ${formatPrice(latestZone.high)} · ${statusLabel(latestZone.status)}` : '暂无中枢' }}
           </a-descriptions-item>
           <a-descriptions-item label="最新背驰">
-            {{ latestDivergence ? `${divergenceLabel(latestDivergence.type)} · ${statusLabel(latestDivergence.status)} · ${latestDivergence.occurred_at}` : '暂无背驰' }}
+            {{ !validatedLayerKeys.has('divergences') ? '未启用（尚未通过黄金样本验证）' : latestDivergence ? `${divergenceLabel(latestDivergence.type)} · ${statusLabel(latestDivergence.status)} · ${latestDivergence.occurred_at}` : '暂无背驰' }}
           </a-descriptions-item>
           <a-descriptions-item label="最新方向">{{ analysis?.strokes.at(-1)?.direction || '--' }}</a-descriptions-item>
           <a-descriptions-item label="最后闭合 K 线">{{ analysis?.last_closed_bar_at || '--' }}</a-descriptions-item>
@@ -403,7 +502,7 @@ watch(() => route.query.symbol, value => { if (value && value !== symbol.value) 
               <strong>{{ periodLabel(item.period) }}</strong>
               <div class="flex flex-wrap items-center gap-8px">
                 <StatusTag :status="availabilityTagTone(item.availability)" />
-                <span class="text-12px text-text-secondary">{{ availabilityLabel(item.availability) }} · {{ item.latest_signal_type ? signalLabel(item.latest_signal_type) : '无信号' }} · {{ item.latest_divergence_type ? divergenceLabel(item.latest_divergence_type) : '无背驰' }}</span>
+                <span class="text-12px text-text-secondary">{{ availabilityLabel(item.availability) }} · 买卖点未启用 · 背驰未启用</span>
               </div>
             </div>
           </a-list-item>
@@ -447,6 +546,43 @@ watch(() => route.query.symbol, value => { if (value && value !== symbol.value) 
   color: var(--wb-muted);
   font-size: 12px;
   white-space: nowrap;
+}
+
+.chanlun-coverage-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 10px 0;
+  padding: 8px 10px;
+  background: var(--wb-primary-soft);
+  border: 1px solid var(--wb-border);
+  border-radius: var(--wb-radius);
+  color: var(--wb-muted);
+  font-size: 12px;
+}
+
+.chanlun-coverage-strip__summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--wb-ink);
+}
+
+.chanlun-coverage-strip__reason {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.chanlun-disabled-layer {
+  padding: 12px;
+  color: var(--wb-muted);
+  background: var(--wb-primary-soft);
+  border: 1px dashed var(--wb-border);
+  border-radius: var(--wb-radius);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .chanlun-indicator-select {

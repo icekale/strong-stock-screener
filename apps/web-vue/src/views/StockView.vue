@@ -35,10 +35,12 @@ import {
   buildStockKlineQuery,
   buildStockViewChartBars,
   buildStockViewDefaults,
+  hasCanonicalBarDates,
   isLatestStockRequest,
   KLINE_INDICATOR_STORAGE_KEY,
   nextStockRequestId,
   parseIndicatorState,
+  selectCanonicalStockBars,
   serializeIndicatorState
 } from '@/utils/domain/stockViewState';
 import type { WorkbenchMetric } from '@/components/common/workbench/workbench';
@@ -114,33 +116,37 @@ const gsgfModelConditions = [
 ];
 const chanlunLayers: Partial<Record<ChanlunLayerKey, boolean>> = {
   fractals: false,
-  segments: true,
-  strokes: false,
+  segments: false,
+  strokes: true,
   zones: true,
-  divergences: true,
-  signals: true
+  divergences: false,
+  signals: false
 };
 
 const requestPeriod = computed<StockKlinePeriod>(() => (period.value === 'weekly' ? '1d' : period.value));
-const chartBars = computed(() => {
-  const sourceBars = kline.value?.bars ?? [];
-  return buildStockViewChartBars(sourceBars, period.value);
+const chanlunForPeriod = computed(() => {
+  if (period.value === 'weekly' || chanlun.value?.period !== requestPeriod.value) return null;
+  return chanlun.value;
 });
+const canonicalBars = computed(() => selectCanonicalStockBars(kline.value?.bars ?? [], chanlunForPeriod.value, period.value));
+const chartBars = computed(() => buildStockViewChartBars(canonicalBars.value, period.value));
 const latestBar = computed(() => chartBars.value.at(-1) ?? null);
 const currentCandidate = computed(() => screenItems.value.find(item => item.symbol === symbol.value) ?? null);
 const gsgfAnnotations = computed(() => kline.value?.gsgf_annotations ?? []);
 const gsgfSupported = computed(() => period.value === '1d' && gsgfAnnotations.value.length > 0);
 const chartGsgfAnnotations = computed(() => getVisibleGsgfAnnotations(requestPeriod.value, period.value === '1d' && showGsgf.value, gsgfAnnotations.value));
-const chanlunForPeriod = computed(() => {
-  if (period.value === 'weekly' || chanlun.value?.period !== requestPeriod.value) return null;
-  return chanlun.value;
+const canonicalChanlun = computed(() => {
+  const current = chanlunForPeriod.value;
+  if (!current || current.availability !== 'ready' || !hasCanonicalBarDates(canonicalBars.value, current)) return null;
+  return current;
 });
-const chanlunSupported = computed(() => chanlunForPeriod.value != null && chanlunForPeriod.value.availability !== 'unavailable');
-const chartChanlun = computed(() => (showChanlun.value ? chanlunForPeriod.value : null));
+const chanlunSupported = computed(() => canonicalChanlun.value != null);
+const chartChanlun = computed(() => (showChanlun.value ? canonicalChanlun.value : null));
 const chanlunStatus = computed(() => {
   if (chanlunLoading.value) return '读取中';
   if (chanlunError.value) return '暂不可用';
   if (chanlunSupported.value) return chanlunForPeriod.value?.availability || '可用';
+  if (chanlunForPeriod.value?.availability) return chanlunForPeriod.value.availability;
   return '结构待确认';
 });
 const quoteMetrics = computed<WorkbenchMetric[]>(() => [

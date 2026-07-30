@@ -2679,6 +2679,9 @@ def create_chanlun_backfill_job(
         job_type,
         lambda progress, should_cancel: _chanlun_analysis_service().backfill(
             normalized_symbol,
+            periods=tuple(request.periods),
+            lookback=request.lookback,
+            history_days=request.history_days,
             progress=progress,
             should_cancel=should_cancel,
         ),

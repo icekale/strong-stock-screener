@@ -1524,10 +1524,15 @@ export async function createChanlunBackfillJob(
   symbol: string,
   request: ChanlunBackfillRequest = {},
 ): Promise<BackgroundJobState> {
+  const payload: ChanlunBackfillRequest = {
+    periods: request.periods ?? ["5m", "30m", "60m"],
+    lookback: request.lookback ?? 220,
+    ...(request.history_days === undefined ? {} : { history_days: request.history_days }),
+  };
   const response = await apiFetch(`${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/backfill`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(request),
+    body: JSON.stringify(payload),
   });
   if (!response.ok) {
     throw new Error(`启动缠论历史补齐失败：${response.status} ${await response.text()}`);

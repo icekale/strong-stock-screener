@@ -477,7 +477,16 @@ class FakeChanlunService:
             "horizons": horizons,
         }
 
-    def backfill(self, symbol: str, *, progress, should_cancel) -> dict[str, object]:
+    def backfill(
+        self,
+        symbol: str,
+        *,
+        periods: tuple[str, ...] = ("5m", "30m", "60m"),
+        lookback: int = 220,
+        history_days: int | None = None,
+        progress,
+        should_cancel,
+    ) -> dict[str, object]:
         if should_cancel():
             raise RuntimeError("backfill canceled")
         progress(1, 1, "fake backfill complete")
@@ -529,11 +538,29 @@ class BlockingChanlunService(FakeChanlunService):
         super().__init__()
         self.started = Event()
         self.release = Event()
+        self.backfill_requests: list[tuple[str, tuple[str, ...], int, int | None]] = []
 
-    def backfill(self, symbol: str, *, progress, should_cancel) -> dict[str, object]:
+    def backfill(
+        self,
+        symbol: str,
+        *,
+        periods: tuple[str, ...] = ("5m", "30m", "60m"),
+        lookback: int = 220,
+        history_days: int | None = None,
+        progress,
+        should_cancel,
+    ) -> dict[str, object]:
+        self.backfill_requests.append((symbol, periods, lookback, history_days))
         self.started.set()
         assert self.release.wait(timeout=2) is True
-        return super().backfill(symbol, progress=progress, should_cancel=should_cancel)
+        return super().backfill(
+            symbol,
+            periods=periods,
+            lookback=lookback,
+            history_days=history_days,
+            progress=progress,
+            should_cancel=should_cancel,
+        )
 
 
 class FakeChanlunAlertService:
@@ -2512,14 +2539,21 @@ def test_chanlun_backfill_reuses_active_symbol_job_and_reports_status(tmp_path: 
     service = BlockingChanlunService()
     client = _client(tmp_path, chanlun_analysis_service=service)
 
-    first = client.post("/api/chanlun/stocks/600000.sh/backfill", json={"history_days": 60})
+    first = client.post(
+        "/api/chanlun/stocks/600000.sh/backfill",
+        json={"periods": ["60m"], "lookback": 220, "history_days": 90},
+    )
     assert service.started.wait(timeout=1) is True
-    second = client.post("/api/chanlun/stocks/600000.SH/backfill", json={"history_days": 60})
+    second = client.post(
+        "/api/chanlun/stocks/600000.SH/backfill",
+        json={"periods": ["60m"], "lookback": 220, "history_days": 90},
+    )
 
     assert first.status_code == 200
     assert second.status_code == 200
     assert first.json()["type"] == "chanlun_backfill:600000.SH"
     assert first.json()["job_id"] == second.json()["job_id"]
+    assert service.backfill_requests == [("600000.SH", ("60m",), 220, 90)]
     status = client.get(f"/api/chanlun/stocks/600000.SH/backfill/{first.json()['job_id']}")
     assert status.status_code == 200
     assert status.json()["status"] in {"pending", "running"}

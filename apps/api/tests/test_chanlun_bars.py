@@ -163,6 +163,17 @@ def test_normalize_removes_invalid_and_out_of_session_bars() -> None:
     assert normalize_intraday_bars([invalid, before_open, after_close, valid]) == [valid]
 
 
+def test_normalize_removes_non_minute_aligned_bars() -> None:
+    second_offset = minute_bar("2026-07-10 09:30:01")
+    millisecond_offset = minute_bar("2026-07-10 09:31")
+    millisecond_offset = millisecond_offset.model_copy(
+        update={"timestamp": millisecond_offset.timestamp + 1}
+    )
+    valid = minute_bar("2026-07-10 09:30")
+
+    assert normalize_intraday_bars([second_offset, millisecond_offset, valid]) == [valid]
+
+
 def test_aggregate_excludes_future_input() -> None:
     bars = minute_bars(
         "2026-07-10 09:30",

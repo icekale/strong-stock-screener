@@ -174,6 +174,41 @@ def test_missing_trade_date_reference_is_unverified() -> None:
     assert result.backfill_required is True
 
 
+def test_unverified_coverage_excludes_future_minutes() -> None:
+    current = full_session("2026-07-10")
+    future = shanghai("2026-07-11 09:30").isoformat()
+
+    result = audit_intraday_coverage(
+        [*current, future],
+        period="5m",
+        lookback=20,
+        now=shanghai("2026-07-10 15:05"),
+        expected_trade_dates=None,
+    )
+
+    assert result.status == "unverified"
+    assert result.available_raw_minutes == 240
+    assert result.earliest_at == "2026-07-10T09:30:00+08:00"
+    assert result.latest_at == "2026-07-10T14:59:00+08:00"
+
+
+def test_unrepresentable_timestamp_is_ignored() -> None:
+    result = audit_intraday_coverage(
+        [
+            shanghai("2026-07-10 09:30").isoformat(),
+            "9999-12-31T23:59:00+23:59",
+        ],
+        period="5m",
+        lookback=1,
+        now=shanghai("2026-07-10 15:05"),
+        expected_trade_dates=None,
+    )
+
+    assert result.available_raw_minutes == 1
+    assert result.earliest_at == "2026-07-10T09:30:00+08:00"
+    assert result.latest_at == "2026-07-10T09:30:00+08:00"
+
+
 def test_fetch_count_rounds_up_to_the_tdx_page_size() -> None:
     assert round_intraday_fetch_count(801) == 1600
 

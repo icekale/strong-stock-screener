@@ -23,7 +23,7 @@ def normalize_intraday_bars(bars: Iterable[TickFlowIntradayBar]) -> list[TickFlo
             timestamp = _from_timestamp(bar.timestamp)
         except (OverflowError, OSError, ValueError):
             continue
-        if is_a_share_trading_minute(timestamp):
+        if timestamp.second == 0 and timestamp.microsecond == 0 and is_a_share_trading_minute(timestamp):
             normalized[bar.timestamp] = bar
     return [normalized[timestamp] for timestamp in sorted(normalized)]
 

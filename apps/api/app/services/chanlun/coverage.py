@@ -57,14 +57,15 @@ def audit_intraday_coverage(
     required_raw_minutes = required_intraday_raw_minutes(period, lookback)
 
     if expected_trade_dates is None:
+        available_minutes = {timestamp for timestamp in normalized if timestamp <= cutoff}
         return ChanlunCoverage(
             status="unverified",
             required_period_bars=lookback,
             available_period_bars=0,
             required_raw_minutes=required_raw_minutes,
-            available_raw_minutes=len(normalized),
-            earliest_at=_iso_or_none(normalized, first=True),
-            latest_at=_iso_or_none(normalized, first=False),
+            available_raw_minutes=len(available_minutes),
+            earliest_at=_iso_or_none(available_minutes, first=True),
+            latest_at=_iso_or_none(available_minutes, first=False),
             reason="缺少标的交易日参考，无法验证跨日连续性",
             backfill_required=True,
         )
@@ -126,7 +127,7 @@ def _normalized_trading_minutes(timestamps: Iterable[str]) -> set[datetime]:
     for raw_timestamp in timestamps:
         try:
             timestamp = to_shanghai(datetime.fromisoformat(raw_timestamp.replace("Z", "+00:00")))
-        except ValueError:
+        except (OverflowError, OSError, ValueError):
             continue
         if timestamp.second == 0 and timestamp.microsecond == 0 and is_a_share_trading_minute(timestamp):
             normalized.add(timestamp)

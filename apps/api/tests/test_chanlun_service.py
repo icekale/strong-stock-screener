@@ -3,7 +3,7 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, time, timedelta
 from pathlib import Path
-from threading import Event
+from threading import Event, Lock
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -944,6 +944,28 @@ def test_insufficient_successful_daily_reference_is_unverified_and_skips_adapter
     )
 
 
+def test_successful_empty_daily_payload_is_insufficient(tmp_path: Path) -> None:
+    adapter = FakeAdapter()
+    result = ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider(),
+        history_provider=FakeHistoryProvider(),
+        adapter=adapter,
+        daily_provider=FakeDailyProvider([]),
+        cache=build_test_cache(),
+    ).analysis(
+        "600000.SH",
+        period="1d",
+        lookback=20,
+        include_observing=False,
+        now=shanghai("2026-07-10 15:05"),
+    )
+
+    assert result.availability == "insufficient_bars"
+    assert result.coverage.status == "incomplete"
+    assert adapter.calls == []
+
+
 def test_adapter_failure_is_not_cached_and_retry_can_recover(tmp_path: Path) -> None:
     class FailOnceAdapter:
         source_name = "Flaky CZSC"
@@ -1073,6 +1095,222 @@ def test_concurrent_same_key_analysis_single_flights_adapter(tmp_path: Path) -> 
     assert adapter.calls == 1
 
 
+def test_concurrent_same_key_adapter_failure_is_shared_then_retryable(tmp_path: Path) -> None:
+    class BlockingFailureAdapter:
+        source_name = "Blocking failure CZSC"
+
+        def __init__(self) -> None:
+            self.calls = 0
+            self.entered = Event()
+            self.release = Event()
+
+        def analyze(
+            self,
+            symbol: str,
+            *,
+            period: str,
+            bars: list[KlineBar],
+            include_observing: bool = False,
+        ) -> ChanlunAnalysisResponse:
+            self.calls += 1
+            self.entered.set()
+            if not self.release.wait(timeout=5):
+                raise RuntimeError("adapter release timed out")
+            raise RuntimeError("shared adapter failure")
+
+    adapter = BlockingFailureAdapter()
+    service = ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider(),
+        history_provider=FakeHistoryProvider(),
+        adapter=adapter,
+        daily_provider=FakeDailyProvider(daily_bars(20)),
+        cache=build_test_cache(),
+    )
+    kwargs = {
+        "period": "1d",
+        "lookback": 20,
+        "include_observing": False,
+        "now": shanghai("2026-06-20 16:00"),
+    }
+    second_started = Event()
+
+    def request_second() -> ChanlunAnalysisResponse:
+        second_started.set()
+        return service.analysis("600000.SH", **kwargs)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(service.analysis, "600000.SH", **kwargs)
+        assert adapter.entered.wait(timeout=5)
+        second = executor.submit(request_second)
+        assert second_started.wait(timeout=5)
+        adapter.release.set()
+
+        first_result = first.result(timeout=5)
+        second_result = second.result(timeout=5)
+
+    assert first_result.availability == "unavailable"
+    assert second_result.availability == "unavailable"
+    assert adapter.calls == 1
+
+    retry = service.analysis("600000.SH", **kwargs)
+
+    assert retry.availability == "unavailable"
+    assert adapter.calls == 2
+
+
+def test_different_analysis_keys_can_build_in_parallel(tmp_path: Path) -> None:
+    class ParallelAdapter:
+        source_name = "Parallel CZSC"
+
+        def __init__(self) -> None:
+            self.calls = 0
+            self._count_lock = Lock()
+            self.both_entered = Event()
+            self.release = Event()
+
+        def analyze(
+            self,
+            symbol: str,
+            *,
+            period: str,
+            bars: list[KlineBar],
+            include_observing: bool = False,
+        ) -> ChanlunAnalysisResponse:
+            with self._count_lock:
+                self.calls += 1
+                if self.calls == 2:
+                    self.both_entered.set()
+            if not self.release.wait(timeout=5):
+                raise RuntimeError("adapter release timed out")
+            return ChanlunAnalysisResponse(
+                symbol=symbol,
+                period=period,
+                availability="ready",
+                bars=list(bars),
+                source_status=[
+                    StrongStockSourceStatus(
+                        source=self.source_name,
+                        status="success",
+                        detail="parallel",
+                    )
+                ],
+                last_closed_bar_at=bars[-1].date,
+            )
+
+    adapter = ParallelAdapter()
+    service = ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider(),
+        history_provider=FakeHistoryProvider(),
+        adapter=adapter,
+        daily_provider=FakeDailyProvider(daily_bars(20)),
+        cache=build_test_cache(),
+    )
+    kwargs = {
+        "period": "1d",
+        "lookback": 20,
+        "include_observing": False,
+        "now": shanghai("2026-06-20 16:00"),
+    }
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(service.analysis, "600000.SH", **kwargs)
+        second = executor.submit(service.analysis, "600001.SH", **kwargs)
+        both_entered = adapter.both_entered.wait(timeout=2)
+        adapter.release.set()
+
+        first_result = first.result(timeout=5)
+        second_result = second.result(timeout=5)
+
+    assert both_entered is True
+    assert first_result.availability == "ready"
+    assert second_result.availability == "ready"
+    assert adapter.calls == 2
+
+
+def test_backfill_generation_does_not_reuse_inflight_analysis_cache(
+    tmp_path: Path,
+) -> None:
+    class GenerationAdapter:
+        source_name = "Generation CZSC"
+
+        def __init__(self) -> None:
+            self.calls = 0
+            self.entered = Event()
+            self.release = Event()
+
+        def analyze(
+            self,
+            symbol: str,
+            *,
+            period: str,
+            bars: list[KlineBar],
+            include_observing: bool = False,
+        ) -> ChanlunAnalysisResponse:
+            self.calls += 1
+            if self.calls == 1:
+                self.entered.set()
+                if not self.release.wait(timeout=5):
+                    raise RuntimeError("adapter release timed out")
+            return ChanlunAnalysisResponse(
+                symbol=symbol,
+                period=period,
+                availability="ready",
+                bars=list(bars),
+                source_status=[
+                    StrongStockSourceStatus(
+                        source=self.source_name,
+                        status="success",
+                        detail="generation",
+                    )
+                ],
+                last_closed_bar_at=bars[-1].date,
+            )
+
+    adapter = GenerationAdapter()
+    service = ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider(),
+        history_provider=FakeHistoryProvider(),
+        adapter=adapter,
+        daily_provider=FakeDailyProvider(daily_bars(20)),
+        cache=build_test_cache(),
+    )
+    kwargs = {
+        "period": "1d",
+        "lookback": 20,
+        "include_observing": False,
+        "now": shanghai("2026-06-20 16:00"),
+    }
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(service.analysis, "600000.SH", **kwargs)
+        assert adapter.entered.wait(timeout=5)
+        backfill = executor.submit(
+            service.backfill,
+            "600000.SH",
+            progress=lambda *_args: None,
+            should_cancel=lambda: False,
+        )
+        try:
+            backfill.result(timeout=2)
+        except TimeoutError as exc:
+            adapter.release.set()
+            first.result(timeout=5)
+            backfill.result(timeout=5)
+            raise AssertionError("backfill waited for an in-flight analysis build") from exc
+        finally:
+            adapter.release.set()
+        first_result = first.result(timeout=5)
+
+    assert first_result.availability == "ready"
+    second_result = service.analysis("600000.SH", **kwargs)
+
+    assert second_result.availability == "ready"
+    assert adapter.calls == 2
+
+
 def test_analysis_cache_invalidates_when_last_closed_bar_changes(tmp_path: Path) -> None:
     adapter = FakeAdapter()
     daily = FakeDailyProvider(daily_bars(20))
@@ -1190,7 +1428,9 @@ def test_empty_live_intraday_payload_is_stale_with_closed_sqlite_history(tmp_pat
         )
 
 
-def test_empty_live_intraday_payload_is_unavailable_without_sqlite_history(tmp_path: Path) -> None:
+def test_empty_live_intraday_payload_is_insufficient_without_sqlite_history(
+    tmp_path: Path,
+) -> None:
     result = ChanlunAnalysisService(
         store=store_at(tmp_path),
         intraday_provider=FakeQuoteProvider(payload={}),
@@ -1205,7 +1445,7 @@ def test_empty_live_intraday_payload_is_unavailable_without_sqlite_history(tmp_p
         now=shanghai("2026-07-10 10:02"),
     )
 
-    assert result.availability == "unavailable"
+    assert result.availability == "insufficient_bars"
     live_status = next(
         status for status in result.source_status if status.source == "Fake TickFlow"
     )

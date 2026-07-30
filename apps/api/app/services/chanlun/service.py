@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from concurrent.futures import Future
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from functools import lru_cache
@@ -67,6 +68,7 @@ class ClosedWorkspaceInputs:
     adjustment_by_period: dict[ChanlunPeriod, str] = field(default_factory=dict)
     unavailable_detail_by_period: dict[ChanlunPeriod, str] = field(default_factory=dict)
     coverage: dict[ChanlunPeriod, ChanlunCoverage] = field(default_factory=dict)
+    generation: int = 0
 
 
 @dataclass(frozen=True)
@@ -78,6 +80,7 @@ class _ClosedPeriodData:
     adjustment_mode: str
     unavailable_detail: str | None = None
     coverage: ChanlunCoverage = field(default_factory=ChanlunCoverage)
+    generation: int = 0
 
 
 class _IncompleteIntradayPayloadError(Exception):
@@ -172,16 +175,29 @@ class ChanlunAnalysisService:
             ttl_seconds=cache_seconds or settings.chanlun_cache_seconds,
             name="chanlun_closed_workspace_inputs",
         )
-        self._analysis_cache_lock = RLock()
+        self._analysis_cache_guard = RLock()
+        self._analysis_inflight: dict[str, Future[ChanlunAnalysisResponse]] = {}
+        self._cache_generation = 0
         self.minute_retention_days = minute_retention_days or settings.chanlun_minute_retention_days
         self.history_max_bars = history_max_bars or settings.chanlun_backfill_max_bars
 
-    def _get_analysis_cache_lock(self) -> RLock:
-        lock = getattr(self, "_analysis_cache_lock", None)
-        if lock is None:
-            lock = RLock()
-            self._analysis_cache_lock = lock
-        return lock
+    def _get_analysis_cache_guard(self) -> RLock:
+        guard = getattr(self, "_analysis_cache_guard", None)
+        if guard is None:
+            guard = RLock()
+            self._analysis_cache_guard = guard
+        return guard
+
+    def _get_analysis_inflight(self) -> dict[str, Future[ChanlunAnalysisResponse]]:
+        inflight = getattr(self, "_analysis_inflight", None)
+        if inflight is None:
+            inflight = {}
+            self._analysis_inflight = inflight
+        return inflight
+
+    def _cache_generation_snapshot(self) -> int:
+        with self._get_analysis_cache_guard():
+            return getattr(self, "_cache_generation", 0)
 
     def analysis(
         self,
@@ -194,12 +210,14 @@ class ChanlunAnalysisService:
     ) -> ChanlunAnalysisResponse:
         normalized_symbol = normalize_chanlun_symbol(symbol) or symbol.strip().upper()
         current = _to_shanghai(now or datetime.now(tz=SHANGHAI))
+        generation = self._cache_generation_snapshot()
         if period == "1d":
             return self._daily_analysis(
                 normalized_symbol,
                 lookback=lookback,
                 include_observing=include_observing,
                 now=current,
+                generation=generation,
             )
         return self._intraday_analysis(
             normalized_symbol,
@@ -207,6 +225,7 @@ class ChanlunAnalysisService:
             lookback=lookback,
             include_observing=include_observing,
             now=current,
+            generation=generation,
         )
 
     def workspace(
@@ -253,13 +272,18 @@ class ChanlunAnalysisService:
     ) -> ClosedWorkspaceInputs:
         normalized_symbol = normalize_chanlun_symbol(symbol) or symbol.strip().upper()
         current = _to_shanghai(now or datetime.now(tz=SHANGHAI))
-        cache_key = f"{normalized_symbol}:{lookback}:{_expected_close_fingerprint(current)}"
+        generation = self._cache_generation_snapshot()
+        cache_key = (
+            f"{normalized_symbol}:{lookback}:{_expected_close_fingerprint(current)}"
+            f":generation={generation}"
+        )
         return self.closed_input_cache.get_or_set(
             cache_key,
             lambda: self._build_closed_workspace_inputs(
                 normalized_symbol,
                 lookback=lookback,
                 now=current,
+                generation=generation,
             ),
         )
 
@@ -269,8 +293,14 @@ class ChanlunAnalysisService:
         *,
         lookback: int,
         now: datetime,
+        generation: int,
     ) -> ClosedWorkspaceInputs:
-        daily_period = self._load_closed_daily_period(symbol, lookback=lookback, now=now)
+        daily_period = self._load_closed_daily_period(
+            symbol,
+            lookback=lookback,
+            now=now,
+            generation=generation,
+        )
         period_data: dict[ChanlunPeriod, _ClosedPeriodData] = {
             "1d": daily_period,
             **self._load_closed_intraday_periods(
@@ -279,6 +309,7 @@ class ChanlunAnalysisService:
                 lookback=lookback,
                 now=now,
                 daily_reference=daily_period,
+                generation=generation,
             ),
         }
         adjustment_by_period = {
@@ -314,6 +345,7 @@ class ChanlunAnalysisService:
                 if period_data[period].unavailable_detail is not None
             },
             coverage={period: period_data[period].coverage for period in _WORKSPACE_PERIODS},
+            generation=generation,
         )
 
     def _load_closed_daily_period(
@@ -322,7 +354,11 @@ class ChanlunAnalysisService:
         *,
         lookback: int,
         now: datetime,
+        generation: int | None = None,
     ) -> _ClosedPeriodData:
+        generation = (
+            self._cache_generation_snapshot() if generation is None else generation
+        )
         provider = self.daily_provider
         source_name = getattr(provider, "source_name", "日K线")
         adjustment_mode = _daily_adjustment_mode(provider)
@@ -343,6 +379,7 @@ class ChanlunAnalysisService:
                     required_period_bars=lookback,
                     reason="日K线数据源未配置，覆盖未验证",
                 ),
+                generation=generation,
             )
         try:
             daily_bars = provider.get_klines(
@@ -366,6 +403,7 @@ class ChanlunAnalysisService:
                     required_period_bars=lookback,
                     reason="日K线读取失败，覆盖未验证",
                 ),
+                generation=generation,
             )
 
         bars = tuple(_completed_daily_bars(daily_bars, now)[-lookback:])
@@ -388,6 +426,7 @@ class ChanlunAnalysisService:
             ),
             adjustment_mode=adjustment_mode,
             coverage=_daily_coverage(lookback, bars),
+            generation=generation,
         )
 
     def _load_closed_intraday_periods(
@@ -398,15 +437,21 @@ class ChanlunAnalysisService:
         lookback: int,
         now: datetime,
         daily_reference: _ClosedPeriodData | None = None,
+        generation: int | None = None,
     ) -> dict[ChanlunPeriod, _ClosedPeriodData]:
         source_name = getattr(self.intraday_provider, "source_name", "TickFlow 分钟线")
+        generation = (
+            self._cache_generation_snapshot() if generation is None else generation
+        )
         daily_reference = daily_reference or self._load_closed_daily_period(
             symbol,
             lookback=lookback,
             now=now,
+            generation=generation,
         )
         expected_trade_dates = _expected_trade_dates(daily_reference)
         live_failed = False
+        live_source_failed = False
         live_status: StrongStockSourceStatus
         current_bars: list[TickFlowIntradayBar] = []
         try:
@@ -430,8 +475,16 @@ class ChanlunAnalysisService:
                 status="success",
                 detail=f"读取并写入 {len(current_bars)} 条当前1分钟线",
             )
+        except _IncompleteIntradayPayloadError as exc:
+            live_failed = True
+            live_status = StrongStockSourceStatus(
+                source=source_name,
+                status="failed",
+                detail=f"当前1分钟线读取失败: {_exception_detail(exc)}",
+            )
         except Exception as exc:
             live_failed = True
+            live_source_failed = True
             live_status = StrongStockSourceStatus(
                 source=source_name,
                 status="failed",
@@ -468,7 +521,9 @@ class ChanlunAnalysisService:
             )
             if coverage.status != "complete":
                 availability: ChanlunAvailability = (
-                    "insufficient_bars" if completed else "unavailable"
+                    "unavailable"
+                    if live_source_failed and not minute_bars
+                    else "insufficient_bars"
                 )
                 freshness: ClosedInputFreshness = "insufficient"
                 unavailable_detail = (
@@ -498,6 +553,7 @@ class ChanlunAnalysisService:
                 adjustment_mode=_RAW_ADJUSTMENT,
                 unavailable_detail=unavailable_detail,
                 coverage=coverage,
+                generation=generation,
             )
         return result
 
@@ -530,6 +586,7 @@ class ChanlunAnalysisService:
                         reason="工作区缺少覆盖审计证据",
                     ),
                 ),
+                generation=inputs.generation,
             ),
             lookback=lookback,
             include_observing=include_observing,
@@ -546,21 +603,21 @@ class ChanlunAnalysisService:
     ) -> ChanlunAnalysisResponse:
         bars = list(period_data.bars)
         source_status = list(period_data.source_status)
+        if period_data.availability == "unavailable":
+            return _unavailable_response(
+                symbol,
+                period,
+                bars,
+                source_status,
+                adjustment_mode=period_data.adjustment_mode,
+                coverage=period_data.coverage,
+                detail=period_data.unavailable_detail,
+            )
         if period_data.coverage.status != "complete":
             detail = period_data.unavailable_detail or (
                 f"{period}覆盖{period_data.coverage.status}: "
                 f"{period_data.coverage.reason}，未调用CZSC适配器"
             )
-            if not bars:
-                return _unavailable_response(
-                    symbol,
-                    period,
-                    bars,
-                    source_status,
-                    adjustment_mode=period_data.adjustment_mode,
-                    coverage=period_data.coverage,
-                    detail=detail,
-                )
             return ChanlunAnalysisResponse(
                 symbol=symbol,
                 period=period,
@@ -575,19 +632,9 @@ class ChanlunAnalysisService:
                     ),
                 ],
                 coverage=period_data.coverage,
-                last_closed_bar_at=bars[-1].date,
+                last_closed_bar_at=bars[-1].date if bars else None,
                 adjustment_mode=period_data.adjustment_mode,
                 rule_version=_RULE_VERSION,
-            )
-        if period_data.availability == "unavailable":
-            return _unavailable_response(
-                symbol,
-                period,
-                bars,
-                source_status,
-                adjustment_mode=period_data.adjustment_mode,
-                coverage=period_data.coverage,
-                detail=period_data.unavailable_detail,
             )
         result = self._analyze_completed(
             symbol,
@@ -598,6 +645,7 @@ class ChanlunAnalysisService:
             source_status=source_status,
             adjustment_mode=period_data.adjustment_mode,
             coverage=period_data.coverage,
+            generation=period_data.generation,
         )
         if period_data.freshness == "stale" and result.availability == "ready":
             return result.model_copy(
@@ -815,7 +863,8 @@ class ChanlunAnalysisService:
         progress(2, 3, f"已写入 {len(normalized_bars)} 条闭合分钟线")
         _raise_if_canceled(should_cancel)
         self.store.prune(keep_days=self.minute_retention_days)
-        with self._get_analysis_cache_lock():
+        with self._get_analysis_cache_guard():
+            self._cache_generation = getattr(self, "_cache_generation", 0) + 1
             self.cache.clear()
             self.closed_input_cache.clear()
         progress(3, 3, "分钟历史补齐完成")
@@ -865,11 +914,17 @@ class ChanlunAnalysisService:
         lookback: int,
         include_observing: bool,
         now: datetime,
+        generation: int,
     ) -> ChanlunAnalysisResponse:
         return self._analyze_closed_period_data(
             symbol,
             period="1d",
-            period_data=self._load_closed_daily_period(symbol, lookback=lookback, now=now),
+            period_data=self._load_closed_daily_period(
+                symbol,
+                lookback=lookback,
+                now=now,
+                generation=generation,
+            ),
             lookback=lookback,
             include_observing=include_observing,
         )
@@ -882,6 +937,7 @@ class ChanlunAnalysisService:
         lookback: int,
         include_observing: bool,
         now: datetime,
+        generation: int,
     ) -> ChanlunAnalysisResponse:
         return self._analyze_closed_period_data(
             symbol,
@@ -891,6 +947,7 @@ class ChanlunAnalysisService:
                 periods=(period,),
                 lookback=lookback,
                 now=now,
+                generation=generation,
             )[period],
             lookback=lookback,
             include_observing=include_observing,
@@ -920,6 +977,7 @@ class ChanlunAnalysisService:
         source_status: list[StrongStockSourceStatus],
         adjustment_mode: str,
         coverage: ChanlunCoverage,
+        generation: int,
     ) -> ChanlunAnalysisResponse:
         last_closed_bar_at = bars[-1].date if bars else None
         if len(bars) < _MIN_COMPLETED_BARS:
@@ -952,6 +1010,7 @@ class ChanlunAnalysisService:
             last_closed_bar_at=last_closed_bar_at,
             adjustment_mode=adjustment_mode,
             include_observing=include_observing,
+            generation=generation,
         )
 
         def build() -> ChanlunAnalysisResponse:
@@ -994,14 +1053,42 @@ class ChanlunAnalysisService:
                 },
             )
 
-        with self._get_analysis_cache_lock():
+        guard = self._get_analysis_cache_guard()
+        inflight = self._get_analysis_inflight()
+        with guard:
             cached = self.cache.get_if_fresh(cache_key)
-            if cached is None:
-                built = build()
-                if built.availability != "ready":
-                    return decorate(built)
-                cached = self.cache.get_or_set(cache_key, lambda: built)
-        return decorate(cached)
+            if cached is not None:
+                return decorate(cached)
+            future = inflight.get(cache_key)
+            if future is None:
+                future = Future()
+                inflight[cache_key] = future
+                is_owner = True
+            else:
+                is_owner = False
+
+        if not is_owner:
+            return decorate(future.result())
+
+        try:
+            built = build()
+            if built.availability == "ready":
+                with guard:
+                    if getattr(self, "_cache_generation", 0) == generation:
+                        cached = self.cache.get_or_set(cache_key, lambda: built)
+                    else:
+                        cached = built
+            else:
+                cached = built
+            future.set_result(cached)
+            return decorate(cached)
+        except BaseException as exc:
+            future.set_exception(exc)
+            raise
+        finally:
+            with guard:
+                if inflight.get(cache_key) is future:
+                    del inflight[cache_key]
 
 
 def _summary(analysis: ChanlunAnalysisResponse) -> ChanlunPeriodSummary:
@@ -1353,10 +1440,12 @@ def _cache_key(
     last_closed_bar_at: str | None,
     adjustment_mode: str,
     include_observing: bool,
+    generation: int,
 ) -> str:
     return (
         f"chanlun:{symbol}:{period}:{lookback}:{last_closed_bar_at or 'none'}:"
-        f"{adjustment_mode}:{_RULE_VERSION}:observing={int(include_observing)}"
+        f"{adjustment_mode}:{_RULE_VERSION}:generation={generation}:"
+        f"observing={int(include_observing)}"
     )
 
 

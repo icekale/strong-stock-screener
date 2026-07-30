@@ -75,6 +75,7 @@ def _closed_inputs(
     freshness: dict[ChanlunPeriod, str] | None = None,
     adjustment_mode: str = "raw_unadjusted",
     count: int = 20,
+    generation: int = 0,
 ) -> ClosedWorkspaceInputs:
     periods = {period: _bars(period, count) for period in APPROVED_PERIODS}
     return ClosedWorkspaceInputs(
@@ -111,6 +112,7 @@ def _closed_inputs(
             )
             for period in APPROVED_PERIODS
         },
+        generation=generation,
     )
 
 
@@ -764,12 +766,17 @@ def test_closed_workspace_cache_reuses_implicit_calls_across_a_minute(
 ) -> None:
     service = object.__new__(ChanlunAnalysisService)
     service.closed_input_cache = TtlCache(ttl_seconds=60, name="closed-input-test")
-    inputs = _closed_inputs()
     build_calls: list[datetime] = []
 
-    def build(symbol: str, *, lookback: int, now: datetime) -> ClosedWorkspaceInputs:
+    def build(
+        symbol: str,
+        *,
+        lookback: int,
+        now: datetime,
+        generation: int = 0,
+    ) -> ClosedWorkspaceInputs:
         build_calls.append(now)
-        return inputs
+        return _closed_inputs(generation=generation)
 
     service._build_closed_workspace_inputs = build  # type: ignore[method-assign]
 
@@ -818,9 +825,15 @@ def test_closed_workspace_cache_invalidates_at_expected_close_boundary(
     service.closed_input_cache = TtlCache(ttl_seconds=60, name="closed-input-test")
     build_calls: list[datetime] = []
 
-    def build(symbol: str, *, lookback: int, now: datetime) -> ClosedWorkspaceInputs:
+    def build(
+        symbol: str,
+        *,
+        lookback: int,
+        now: datetime,
+        generation: int = 0,
+    ) -> ClosedWorkspaceInputs:
         build_calls.append(now)
-        return _closed_inputs()
+        return _closed_inputs(generation=generation)
 
     service._build_closed_workspace_inputs = build  # type: ignore[method-assign]
 
@@ -850,9 +863,15 @@ def test_closed_workspace_cache_evicts_expired_fingerprint_keys(
     before = datetime(2026, 7, 10, 10, 4, 59, tzinfo=SHANGHAI)
     after = datetime(2026, 7, 10, 10, 5, 0, tzinfo=SHANGHAI)
 
-    def build(symbol: str, *, lookback: int, now: datetime) -> ClosedWorkspaceInputs:
+    def build(
+        symbol: str,
+        *,
+        lookback: int,
+        now: datetime,
+        generation: int = 0,
+    ) -> ClosedWorkspaceInputs:
         build_calls.append(now)
-        return _closed_inputs()
+        return _closed_inputs(generation=generation)
 
     service._build_closed_workspace_inputs = build  # type: ignore[method-assign]
 

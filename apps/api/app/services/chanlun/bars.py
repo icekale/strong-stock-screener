@@ -11,7 +11,7 @@ from app.providers.tickflow import TickFlowIntradayBar
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-_PERIOD_MINUTES = {"5m": 5, "30m": 30, "60m": 60}
+PERIOD_MINUTES = {"5m": 5, "30m": 30, "60m": 60}
 
 
 def normalize_intraday_bars(bars: Iterable[TickFlowIntradayBar]) -> list[TickFlowIntradayBar]:
@@ -29,7 +29,7 @@ def normalize_intraday_bars(bars: Iterable[TickFlowIntradayBar]) -> list[TickFlo
 
 
 def is_a_share_trading_minute(timestamp: datetime) -> bool:
-    local = _to_shanghai(timestamp)
+    local = to_shanghai(timestamp)
     current = local.time()
     return (
         (current.hour == 9 and current.minute >= 30)
@@ -46,17 +46,15 @@ def aggregate_closed_intraday_bars(
     period: Literal["5m", "30m", "60m"],
     now: datetime,
 ) -> list[KlineBar]:
-    period_minutes = _PERIOD_MINUTES[period]
-    cutoff = _to_shanghai(now)
+    period_minutes = PERIOD_MINUTES[period]
+    cutoff = to_shanghai(now)
     buckets: dict[datetime, list[tuple[datetime, TickFlowIntradayBar]]] = {}
 
     for bar in normalize_intraday_bars(bars):
         timestamp = _from_timestamp(bar.timestamp)
         if timestamp > cutoff:
             continue
-        session_start = _session_start(timestamp)
-        elapsed_minutes = int((timestamp - session_start).total_seconds() // 60)
-        bucket_start = session_start + timedelta(minutes=(elapsed_minutes // period_minutes) * period_minutes)
+        bucket_start = intraday_bucket_start(timestamp, period)
         buckets.setdefault(bucket_start, []).append((timestamp, bar))
 
     result: list[KlineBar] = []
@@ -80,7 +78,7 @@ def aggregate_closed_intraday_bars(
     return result
 
 
-def _to_shanghai(timestamp: datetime) -> datetime:
+def to_shanghai(timestamp: datetime) -> datetime:
     if timestamp.tzinfo is None:
         return timestamp.replace(tzinfo=SHANGHAI)
     return timestamp.astimezone(SHANGHAI)
@@ -101,10 +99,18 @@ def _is_valid_bar(bar: TickFlowIntradayBar) -> bool:
     return bar.low <= min(bar.open, bar.close) and bar.high >= max(bar.open, bar.close)
 
 
-def _session_start(timestamp: datetime) -> datetime:
+def session_start(timestamp: datetime) -> datetime:
     if timestamp.hour < 12:
         return timestamp.replace(hour=9, minute=30, second=0, microsecond=0)
     return timestamp.replace(hour=13, minute=0, second=0, microsecond=0)
+
+
+def intraday_bucket_start(timestamp: datetime, period: Literal["5m", "30m", "60m"]) -> datetime:
+    local = to_shanghai(timestamp)
+    start = session_start(local)
+    period_minutes = PERIOD_MINUTES[period]
+    elapsed_minutes = int((local - start).total_seconds() // 60)
+    return start + timedelta(minutes=(elapsed_minutes // period_minutes) * period_minutes)
 
 
 def _is_complete_bucket(

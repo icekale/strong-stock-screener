@@ -957,7 +957,7 @@ class ChanlunAnalysisService:
                     symbol,
                     period,
                     bars,
-                    source_status,
+                    [],
                     adjustment_mode=adjustment_mode,
                     coverage=coverage,
                     detail=f"CZSC适配器分析失败: {_exception_detail(exc)}",
@@ -975,14 +975,22 @@ class ChanlunAnalysisService:
                 },
             )
 
-        cached = self.cache.get_or_set(cache_key, build)
-        return cached.model_copy(
-            deep=True,
-            update={
-                "source_status": [*source_status, *cached.source_status],
-                "coverage": coverage,
-            },
-        )
+        def decorate(result: ChanlunAnalysisResponse) -> ChanlunAnalysisResponse:
+            return result.model_copy(
+                deep=True,
+                update={
+                    "source_status": [*source_status, *result.source_status],
+                    "coverage": coverage,
+                },
+            )
+
+        cached = self.cache.get_if_fresh(cache_key)
+        if cached is None:
+            built = build()
+            if built.availability != "ready":
+                return decorate(built)
+            cached = self.cache.get_or_set(cache_key, lambda: built)
+        return decorate(cached)
 
 
 def _summary(analysis: ChanlunAnalysisResponse) -> ChanlunPeriodSummary:
@@ -1056,8 +1064,10 @@ def _unverified_coverage(
 
 
 def _expected_trade_dates(period_data: _ClosedPeriodData | None) -> set[date] | None:
-    if period_data is None or not any(
-        status.status == "success" for status in period_data.source_status
+    if (
+        period_data is None
+        or period_data.availability != "ready"
+        or period_data.coverage.status != "complete"
     ):
         return None
     return {
@@ -1071,16 +1081,27 @@ def _expected_trade_dates(period_data: _ClosedPeriodData | None) -> set[date] | 
 def _continuity_reference_status(
     period_data: _ClosedPeriodData,
 ) -> StrongStockSourceStatus | None:
+    if period_data.availability == "ready" and period_data.coverage.status == "complete":
+        return None
     failed = next(
         (status for status in period_data.source_status if status.status == "failed"),
         None,
     )
-    if failed is None:
-        return None
+    source = failed.source if failed is not None else (
+        period_data.source_status[0].source if period_data.source_status else "日K线"
+    )
+    detail = (
+        f"{failed.detail}；分钟连续性无法验证"
+        if failed is not None
+        else (
+            f"{source}覆盖不足: {period_data.coverage.reason}；"
+            "分钟连续性参考不足，连续性无法验证"
+        )
+    )
     return StrongStockSourceStatus(
-        source=failed.source,
+        source=source,
         status="failed",
-        detail=f"{failed.detail}；分钟连续性无法验证",
+        detail=detail,
     )
 
 

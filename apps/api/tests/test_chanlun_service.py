@@ -836,7 +836,7 @@ def test_internal_gap_is_insufficient_even_when_twenty_5m_bars_aggregate(
         history_provider=FakeHistoryProvider(),
         adapter=adapter,
         daily_provider=FakeDailyProvider(
-            [daily_bar("2026-06-01", close=10), daily_bar("2026-06-03", close=11)]
+            daily_reference_bars("2026-06-03", 20)
         ),
         cache=build_test_cache(),
     )
@@ -864,9 +864,7 @@ def test_complete_but_old_intraday_window_is_stale_with_complete_coverage(
         intraday_provider=FakeQuoteProvider(history),
         history_provider=FakeHistoryProvider(),
         adapter=FakeAdapter(),
-        daily_provider=FakeDailyProvider(
-            [daily_bar("2026-07-06", close=10), daily_bar("2026-07-07", close=11)]
-        ),
+        daily_provider=FakeDailyProvider(daily_reference_bars("2026-07-07", 20)),
         cache=build_test_cache(),
     )
 
@@ -912,6 +910,93 @@ def test_daily_reference_failure_is_unverified_and_fails_closed(tmp_path: Path) 
     assert result.coverage.backfill_required is True
     assert adapter.calls == []
     assert any("连续性无法验证" in status.detail for status in result.source_status)
+
+
+def test_insufficient_successful_daily_reference_is_unverified_and_skips_adapter(
+    tmp_path: Path,
+) -> None:
+    adapter = FakeAdapter()
+    service = ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider(trading_day_minutes("2026-07-09")),
+        history_provider=FakeHistoryProvider(),
+        adapter=adapter,
+        daily_provider=FakeDailyProvider([daily_bar("2026-07-09", close=10)]),
+        cache=build_test_cache(),
+    )
+
+    result = service.analysis(
+        "600000.SH",
+        period="5m",
+        lookback=20,
+        include_observing=False,
+        now=shanghai("2026-07-10 15:05"),
+    )
+
+    assert result.availability == "insufficient_bars"
+    assert result.coverage.status == "unverified"
+    assert adapter.calls == []
+    assert any(
+        status.status == "failed" and "连续性参考不足" in status.detail
+        for status in result.source_status
+    )
+
+
+def test_adapter_failure_is_not_cached_and_retry_can_recover(tmp_path: Path) -> None:
+    class FailOnceAdapter:
+        source_name = "Flaky CZSC"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def analyze(
+            self,
+            symbol: str,
+            *,
+            period: str,
+            bars: list[KlineBar],
+            include_observing: bool = False,
+        ) -> ChanlunAnalysisResponse:
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("temporary adapter failure")
+            return ChanlunAnalysisResponse(
+                symbol=symbol,
+                period=period,
+                availability="ready",
+                bars=list(bars),
+                source_status=[
+                    StrongStockSourceStatus(
+                        source=self.source_name,
+                        status="success",
+                        detail="recovered",
+                    )
+                ],
+                last_closed_bar_at=bars[-1].date,
+            )
+
+    adapter = FailOnceAdapter()
+    service = ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider(),
+        history_provider=FakeHistoryProvider(),
+        adapter=adapter,
+        daily_provider=FakeDailyProvider(daily_bars(20)),
+        cache=build_test_cache(),
+    )
+    kwargs = {
+        "period": "1d",
+        "lookback": 20,
+        "include_observing": False,
+        "now": shanghai("2026-06-20 16:00"),
+    }
+
+    first = service.analysis("600000.SH", **kwargs)
+    second = service.analysis("600000.SH", **kwargs)
+
+    assert first.availability == "unavailable"
+    assert second.availability == "ready"
+    assert adapter.calls == 2
 
 
 def test_analysis_cache_invalidates_when_last_closed_bar_changes(tmp_path: Path) -> None:
@@ -963,7 +1048,7 @@ def test_live_failure_is_stale_only_when_closed_history_can_still_be_analyzed(
         intraday_provider=FakeQuoteProvider(fails=True),
         history_provider=FakeHistoryProvider(),
         adapter=adapter,
-        daily_provider=FakeDailyProvider([daily_bar("2026-07-09", close=10)]),
+        daily_provider=FakeDailyProvider(daily_reference_bars("2026-07-09", 20)),
         cache=build_test_cache(),
     )
 
@@ -1005,7 +1090,7 @@ def test_empty_live_intraday_payload_is_stale_with_closed_sqlite_history(tmp_pat
             intraday_provider=FakeQuoteProvider(payload=payload),
             history_provider=FakeHistoryProvider(),
             adapter=FakeAdapter(),
-            daily_provider=FakeDailyProvider([daily_bar("2026-07-09", close=10)]),
+            daily_provider=FakeDailyProvider(daily_reference_bars("2026-07-09", 20)),
             cache=build_test_cache(),
         )
 
@@ -1093,5 +1178,16 @@ def daily_bars(count: int) -> list[KlineBar]:
     start = datetime(2026, 6, 1, tzinfo=SHANGHAI)
     return [
         daily_bar((start + timedelta(days=index)).date().isoformat(), close=10 + index)
+        for index in range(count)
+    ]
+
+
+def daily_reference_bars(last_value: str, count: int) -> list[KlineBar]:
+    last_date = datetime.fromisoformat(last_value).date()
+    return [
+        daily_bar(
+            (last_date - timedelta(days=count - 1 - index)).isoformat(),
+            close=10 + index,
+        )
         for index in range(count)
     ]

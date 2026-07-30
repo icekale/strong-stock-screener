@@ -94,11 +94,64 @@ def native_stroke(
     return SimpleNamespace(direction=direction, fx_a=start, fx_b=end)
 
 
-def bottom_divergence_native() -> SimpleNamespace:
-    first_top = native_fractal(30, 20.0, "top")
-    first_bottom = native_fractal(34, 10.0, "bottom")
-    rebound_top = native_fractal(49, 15.0, "top")
-    second_bottom = native_fractal(64, 9.0, "bottom")
+def native_fractal_at_bar(
+    bars: list[KlineBar], *, id_value: int, dt_index: int, price: float, mark: str
+) -> SimpleNamespace:
+    source_bar = SimpleNamespace(id=id_value, dt=datetime.fromisoformat(bars[dt_index].date))
+    return SimpleNamespace(
+        id=id_value,
+        dt=datetime.fromisoformat(bars[dt_index].date),
+        elements=[source_bar, source_bar, source_bar],
+        fx=price,
+        mark=mark,
+    )
+
+
+def native_with_endpoint(id_value: int, dt: str) -> SimpleNamespace:
+    bars = fixture_bars()
+    start = native_fractal_at_bar(bars, id_value=0, dt_index=0, price=10, mark="bottom")
+    source_bar = SimpleNamespace(id=id_value, dt=datetime.fromisoformat(dt))
+    end = SimpleNamespace(
+        id=id_value,
+        dt=datetime.fromisoformat(dt),
+        elements=[source_bar, source_bar, source_bar],
+        fx=20,
+        mark="top",
+    )
+    return SimpleNamespace(
+        finished_bis=[native_stroke(start, end, "up")],
+        fx_list=[],
+        ubi=None,
+    )
+
+
+def native_three_strokes_for_bars(bars: list[KlineBar]) -> tuple[SimpleNamespace, list[SimpleNamespace]]:
+    fractals = [
+        native_fractal_at_bar(bars, id_value=index, dt_index=index, price=price, mark=mark)
+        for index, price, mark in (
+            (0, 10, "bottom"),
+            (1, 20, "top"),
+            (2, 12, "bottom"),
+            (3, 21, "top"),
+        )
+    ]
+    strokes = [
+        native_stroke(fractals[0], fractals[1], "up"),
+        native_stroke(fractals[1], fractals[2], "down"),
+        native_stroke(fractals[2], fractals[3], "up"),
+    ]
+    return SimpleNamespace(finished_bis=strokes, fx_list=[], ubi=None), strokes
+
+
+def bottom_divergence_native(bars: list[KlineBar]) -> SimpleNamespace:
+    first_top = native_fractal_at_bar(bars, id_value=30, dt_index=30, price=20.0, mark="top")
+    first_bottom = native_fractal_at_bar(
+        bars, id_value=34, dt_index=34, price=10.0, mark="bottom"
+    )
+    rebound_top = native_fractal_at_bar(bars, id_value=49, dt_index=49, price=15.0, mark="top")
+    second_bottom = native_fractal_at_bar(
+        bars, id_value=64, dt_index=64, price=9.0, mark="bottom"
+    )
     return SimpleNamespace(
         finished_bis=[
             native_stroke(first_top, first_bottom, "down"),
@@ -300,12 +353,112 @@ def test_adapter_maps_czsc_fractals_strokes_and_confirmed_zone() -> None:
     assert len({item.id for item in analysis.strokes}) == len(analysis.strokes)
 
 
-def test_adapter_does_not_publish_unvalidated_segments_or_trading_signals() -> None:
+def test_adapter_maps_inclusion_endpoint_by_native_dt_not_old_id() -> None:
+    bars = fixture_bars()
+    native = native_with_endpoint(id_value=3, dt=bars[5].date)
+
+    analysis = ChanlunAdapter()._map_native(
+        "600000.SH", "1d", bars, native, include_observing=False
+    )
+
+    assert analysis.strokes[0].end_at == bars[5].date
+
+
+def test_adapter_returns_unavailable_when_native_dt_is_not_a_chart_bar(monkeypatch) -> None:
+    bars = fixture_bars()
+    native = native_with_endpoint(id_value=3, dt="2026-12-31T00:00:00+08:00")
+    monkeypatch.setattr(adapter, "_to_raw_bars", lambda *_args: [object()])
+    monkeypatch.setattr(adapter, "_load_czsc", lambda: (object, object, lambda _raw_bars: native))
+
+    analysis = ChanlunAdapter().analyze("600000.SH", period="1d", bars=bars)
+
+    assert analysis.availability == "unavailable"
+    assert analysis.bars == bars
+    assert analysis.strokes == []
+    assert analysis.zones == []
+    assert analysis.source_status[0].source == "czsc"
+    assert analysis.source_status[0].status == "failed"
+
+
+def test_adapter_returns_unavailable_when_zone_references_unmapped_bi(monkeypatch) -> None:
+    import czsc.utils.sig as sig
+
+    bars = fixture_bars()
+    native, strokes = native_three_strokes_for_bars(bars)
+    unknown_bi = native_stroke(
+        native_fractal_at_bar(bars, id_value=4, dt_index=4, price=11, mark="bottom"),
+        native_fractal_at_bar(bars, id_value=5, dt_index=5, price=22, mark="top"),
+        "up",
+    )
+    zone = SimpleNamespace(
+        bis=[strokes[0], strokes[1], unknown_bi],
+        zg=20,
+        zd=12,
+        is_valid=True,
+    )
+    monkeypatch.setattr(sig, "get_zs_seq", lambda _bis: [zone])
+    monkeypatch.setattr(adapter, "_to_raw_bars", lambda *_args: [object()])
+    monkeypatch.setattr(adapter, "_load_czsc", lambda: (object, object, lambda _raw_bars: native))
+
+    analysis = ChanlunAdapter().analyze("600000.SH", period="1d", bars=bars)
+
+    assert analysis.availability == "unavailable"
+    assert analysis.bars == bars
+    assert analysis.zones == []
+    assert analysis.source_status[0].source == "czsc"
+    assert analysis.source_status[0].status == "failed"
+
+
+def test_adapter_returns_unavailable_when_zone_runtime_fails(monkeypatch) -> None:
+    import czsc.utils.sig as sig
+
+    bars = fixture_bars()
+    native, _strokes = native_three_strokes_for_bars(bars)
+
+    def fail_zones(_bis: list[object]) -> list[object]:
+        raise RuntimeError("zone build failed")
+
+    monkeypatch.setattr(sig, "get_zs_seq", fail_zones)
+    monkeypatch.setattr(adapter, "_to_raw_bars", lambda *_args: [object()])
+    monkeypatch.setattr(adapter, "_load_czsc", lambda: (object, object, lambda _raw_bars: native))
+
+    analysis = ChanlunAdapter().analyze("600000.SH", period="1d", bars=bars)
+
+    assert analysis.availability == "unavailable"
+    assert analysis.bars == bars
+    assert analysis.zones == []
+    assert analysis.source_status[0].source == "czsc"
+    assert analysis.source_status[0].status == "failed"
+
+
+def test_adapter_keeps_normal_empty_zone_sequence_ready(monkeypatch) -> None:
+    import czsc.utils.sig as sig
+
+    bars = fixture_bars()
+    native, _strokes = native_three_strokes_for_bars(bars)
+    monkeypatch.setattr(sig, "get_zs_seq", lambda _bis: [])
+    monkeypatch.setattr(adapter, "_to_raw_bars", lambda *_args: [object()])
+    monkeypatch.setattr(adapter, "_load_czsc", lambda: (object, object, lambda _raw_bars: native))
+
+    analysis = ChanlunAdapter().analyze("600000.SH", period="1d", bars=bars)
+
+    assert analysis.availability == "ready"
+    assert analysis.zones == []
+    assert analysis.source_status[0].source == "czsc"
+    assert analysis.source_status[0].status == "success"
+
+
+def test_adapter_does_not_publish_unvalidated_segments_or_trading_signals(monkeypatch) -> None:
+    import czsc.utils.sig as sig
+
+    bars = fixture_bottom_divergence_bars()
+    monkeypatch.setattr(sig, "get_zs_seq", lambda _bis: [])
+
     analysis = ChanlunAdapter()._map_native(
         "600000.SH",
         "1d",
-        fixture_bottom_divergence_bars(),
-        bottom_divergence_native(),
+        bars,
+        bottom_divergence_native(bars),
         include_observing=False,
     )
 
@@ -339,7 +492,9 @@ def test_adapter_maps_observing_stroke_to_ubi_extreme_before_retracing_tail() ->
     assert observing[0].end_price == 17.6
 
 
-def test_adapter_does_not_duplicate_a_confirmed_zone_as_provisional() -> None:
+def test_adapter_does_not_duplicate_a_confirmed_zone_as_provisional(monkeypatch) -> None:
+    import czsc.utils.sig as sig
+
     bars = fixture_bars()
 
     def fractal(index: int, price: float) -> SimpleNamespace:
@@ -355,6 +510,13 @@ def test_adapter_does_not_duplicate_a_confirmed_zone_as_provisional() -> None:
         zs_list=None,
         ubi=None,
     )
+    duplicate_zone = SimpleNamespace(
+        bis=native.finished_bis,
+        zg=20,
+        zd=10,
+        is_valid=True,
+    )
+    monkeypatch.setattr(sig, "get_zs_seq", lambda _bis: [duplicate_zone, duplicate_zone])
 
     analysis = ChanlunAdapter()._map_native(
         "600000.SH", "1d", bars, native, include_observing=False

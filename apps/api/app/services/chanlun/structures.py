@@ -8,6 +8,10 @@ from app.models import ChanlunStroke, ChanlunZone
 VISUAL_RULE_VERSION = "cl-v2-visual"
 
 
+class StructureMappingError(ValueError):
+    pass
+
+
 def map_confirmed_zones(
     completed_pairs: list[tuple[object, ChanlunStroke]],
 ) -> list[ChanlunZone]:
@@ -18,8 +22,8 @@ def map_confirmed_zones(
         from czsc.utils.sig import get_zs_seq
 
         native_zones = get_zs_seq([native_bi for native_bi, _ in completed_pairs])
-    except (AttributeError, ImportError, IndexError, RuntimeError, TypeError, ValueError):
-        return []
+    except (AttributeError, ImportError, IndexError, RuntimeError, TypeError, ValueError) as exc:
+        raise StructureMappingError(f"native zone sequence unavailable: {exc}") from exc
 
     strokes_by_native_id = {id(native_bi): stroke for native_bi, stroke in completed_pairs}
     zones: list[ChanlunZone] = []
@@ -27,18 +31,18 @@ def map_confirmed_zones(
     for native_zone in native_zones:
         native_bis = list(getattr(native_zone, "bis", []))
         if len(native_bis) < 3 or not _is_valid_zone(native_zone):
-            continue
+            raise StructureMappingError("native zone is invalid or incomplete")
         strokes = [strokes_by_native_id.get(id(native_bi)) for native_bi in native_bis]
         if any(stroke is None for stroke in strokes):
-            continue
+            raise StructureMappingError("native zone references an unmapped BI")
         mapped_strokes = [stroke for stroke in strokes if stroke is not None]
         try:
             high = float(getattr(native_zone, "zg"))
             low = float(getattr(native_zone, "zd"))
-        except (AttributeError, TypeError, ValueError):
-            continue
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise StructureMappingError(f"native zone bounds are invalid: {exc}") from exc
         if not isfinite(high) or not isfinite(low) or high < low:
-            continue
+            raise StructureMappingError("native zone bounds are not finite or ordered")
 
         key = (mapped_strokes[0].start_at, mapped_strokes[-1].end_at, high, low)
         if key in seen:
@@ -61,5 +65,5 @@ def _is_valid_zone(native_zone: object) -> bool:
     validity = getattr(native_zone, "is_valid", False)
     try:
         return bool(validity() if callable(validity) else validity)
-    except (AttributeError, IndexError, RuntimeError, TypeError, ValueError):
-        return False
+    except (AttributeError, IndexError, RuntimeError, TypeError, ValueError) as exc:
+        raise StructureMappingError(f"native zone validity check failed: {exc}") from exc

@@ -196,7 +196,7 @@ def test_unrepresentable_timestamp_is_ignored() -> None:
     result = audit_intraday_coverage(
         [
             shanghai("2026-07-10 09:30").isoformat(),
-            "9999-12-31T23:59:00+23:59",
+            "9999-12-31T23:59:00-14:00",
         ],
         period="5m",
         lookback=1,

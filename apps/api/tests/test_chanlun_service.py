@@ -89,7 +89,7 @@ def service_with_current_closed_bars(
     ]
     minutes = [
         bar
-        for offset in range(5, -1, -1)
+        for offset in range(8, -1, -1)
         for bar in trading_day_minutes((current_day.date() - timedelta(days=offset)).isoformat())
     ]
     return ChanlunAnalysisService(
@@ -110,7 +110,7 @@ def store_at(tmp_path: Path) -> ChanlunMinuteBarStore:
 def seed_closed_5m_history(store: ChanlunMinuteBarStore) -> None:
     store.upsert(
         "600000.SH",
-        minute_range("2026-07-09 09:30", 100),
+        trading_day_minutes("2026-07-09"),
         source="seed",
         closed=True,
     )
@@ -621,6 +621,7 @@ def test_successful_intraday_payload_is_stale_when_latest_session_bucket_is_miss
         intraday_provider=FakeQuoteProvider([*history, *current]),
         history_provider=FakeHistoryProvider(),
         adapter=FakeAdapter(),
+        daily_provider=FakeDailyProvider(daily_bars(43)),
         cache=build_test_cache(),
     )
 
@@ -768,9 +769,149 @@ def test_backfill_writes_history_once_and_reports_progress(tmp_path: Path) -> No
     )
 
     assert result["written_bars"] == 2
-    assert history.calls == [("600000.SH", 4800)]
+    assert result["requested_bars"] == 14400
+    assert history.calls == [("600000.SH", 14400)]
     assert len(store.read("600000.SH")) == 2
     assert progress[-1][0] == progress[-1][1]
+
+
+def test_backfill_uses_the_largest_requested_period_target(tmp_path: Path) -> None:
+    history = FakeHistoryProvider()
+    service = ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider(),
+        history_provider=history,
+        adapter=FakeAdapter(),
+        cache=build_test_cache(),
+    )
+
+    result = service.backfill(
+        "600000.SH",
+        periods=("5m", "30m", "60m"),
+        lookback=220,
+        history_days=None,
+        progress=lambda *_args: None,
+        should_cancel=lambda: False,
+    )
+
+    assert history.calls == [("600000.SH", 14400)]
+    assert result["requested_bars"] == 14400
+    assert set(result["coverage"]) == {"5m", "30m", "60m"}
+    assert all(isinstance(value, dict) for value in result["coverage"].values())
+
+
+def test_backfill_rejects_target_over_history_cap_before_provider_call(tmp_path: Path) -> None:
+    history = FakeHistoryProvider()
+    service = ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider(),
+        history_provider=history,
+        adapter=FakeAdapter(),
+        cache=build_test_cache(),
+        history_max_bars=14399,
+    )
+
+    with pytest.raises(RuntimeError, match="14400.*14399"):
+        service.backfill(
+            "600000.SH",
+            periods=("5m", "30m", "60m"),
+            lookback=220,
+            history_days=None,
+            progress=lambda *_args: None,
+            should_cancel=lambda: False,
+        )
+
+    assert history.calls == []
+
+
+def test_internal_gap_is_insufficient_even_when_twenty_5m_bars_aggregate(
+    tmp_path: Path,
+) -> None:
+    day_one = trading_day_minutes("2026-06-01")[:50]
+    day_three = trading_day_minutes("2026-06-03")[-50:]
+    adapter = FakeAdapter()
+    service = ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider([*day_one, *day_three]),
+        history_provider=FakeHistoryProvider(),
+        adapter=adapter,
+        daily_provider=FakeDailyProvider(
+            [daily_bar("2026-06-01", close=10), daily_bar("2026-06-03", close=11)]
+        ),
+        cache=build_test_cache(),
+    )
+
+    result = service.analysis(
+        "600000.SH",
+        period="5m",
+        lookback=20,
+        include_observing=False,
+        now=shanghai("2026-06-03 15:05"),
+    )
+
+    assert len(result.bars) == 20
+    assert result.availability == "insufficient_bars"
+    assert result.coverage.status == "incomplete"
+    assert adapter.calls == []
+
+
+def test_complete_but_old_intraday_window_is_stale_with_complete_coverage(
+    tmp_path: Path,
+) -> None:
+    history = [bar for day in ("2026-07-06", "2026-07-07") for bar in trading_day_minutes(day)]
+    service = ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider(history),
+        history_provider=FakeHistoryProvider(),
+        adapter=FakeAdapter(),
+        daily_provider=FakeDailyProvider(
+            [daily_bar("2026-07-06", close=10), daily_bar("2026-07-07", close=11)]
+        ),
+        cache=build_test_cache(),
+    )
+
+    result = service.analysis(
+        "600000.SH",
+        period="5m",
+        lookback=20,
+        include_observing=False,
+        now=shanghai("2026-07-08 15:05"),
+    )
+
+    assert result.availability == "stale"
+    assert result.coverage.status == "complete"
+
+
+def test_daily_reference_failure_is_unverified_and_fails_closed(tmp_path: Path) -> None:
+    class FailingDailyProvider:
+        source_name = "Fake daily K"
+
+        def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
+            raise RuntimeError("daily reference failed")
+
+    adapter = FakeAdapter()
+    service = ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider(trading_day_minutes("2026-07-09")),
+        history_provider=FakeHistoryProvider(),
+        adapter=adapter,
+        daily_provider=FailingDailyProvider(),
+        cache=build_test_cache(),
+    )
+
+    result = service.analysis(
+        "600000.SH",
+        period="5m",
+        lookback=20,
+        include_observing=False,
+        now=shanghai("2026-07-10 15:05"),
+    )
+
+    assert result.availability == "insufficient_bars"
+    assert result.coverage.status == "unverified"
+    assert result.coverage.backfill_required is True
+    assert adapter.calls == []
+    assert any("连续性无法验证" in status.detail for status in result.source_status)
 
 
 def test_analysis_cache_invalidates_when_last_closed_bar_changes(tmp_path: Path) -> None:
@@ -788,14 +929,14 @@ def test_analysis_cache_invalidates_when_last_closed_bar_changes(tmp_path: Path)
     service.analysis(
         "600000.SH",
         period="1d",
-        lookback=120,
+        lookback=20,
         include_observing=False,
         now=shanghai("2026-07-20 16:00"),
     )
     service.analysis(
         "600000.SH",
         period="1d",
-        lookback=120,
+        lookback=20,
         include_observing=False,
         now=shanghai("2026-07-20 16:00"),
     )
@@ -803,7 +944,7 @@ def test_analysis_cache_invalidates_when_last_closed_bar_changes(tmp_path: Path)
     service.analysis(
         "600000.SH",
         period="1d",
-        lookback=120,
+        lookback=20,
         include_observing=False,
         now=shanghai("2026-07-22 16:00"),
     )
@@ -822,13 +963,14 @@ def test_live_failure_is_stale_only_when_closed_history_can_still_be_analyzed(
         intraday_provider=FakeQuoteProvider(fails=True),
         history_provider=FakeHistoryProvider(),
         adapter=adapter,
+        daily_provider=FakeDailyProvider([daily_bar("2026-07-09", close=10)]),
         cache=build_test_cache(),
     )
 
     stale = service.analysis(
         "600000.SH",
         period="5m",
-        lookback=120,
+        lookback=20,
         include_observing=False,
         now=shanghai("2026-07-10 10:02"),
     )
@@ -837,11 +979,12 @@ def test_live_failure_is_stale_only_when_closed_history_can_still_be_analyzed(
         intraday_provider=FakeQuoteProvider(fails=True),
         history_provider=FakeHistoryProvider(),
         adapter=adapter,
+        daily_provider=FakeDailyProvider([daily_bar("2026-07-09", close=10)]),
         cache=build_test_cache(),
     ).analysis(
         "600000.SH",
         period="5m",
-        lookback=120,
+        lookback=20,
         include_observing=False,
         now=shanghai("2026-07-10 10:02"),
     )
@@ -862,13 +1005,14 @@ def test_empty_live_intraday_payload_is_stale_with_closed_sqlite_history(tmp_pat
             intraday_provider=FakeQuoteProvider(payload=payload),
             history_provider=FakeHistoryProvider(),
             adapter=FakeAdapter(),
+            daily_provider=FakeDailyProvider([daily_bar("2026-07-09", close=10)]),
             cache=build_test_cache(),
         )
 
         result = service.analysis(
             "600000.SH",
             period="5m",
-            lookback=120,
+            lookback=20,
             include_observing=False,
             now=shanghai("2026-07-10 10:02"),
         )

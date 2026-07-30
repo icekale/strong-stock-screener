@@ -15,6 +15,7 @@ from app.models import (
     CZSC_CATALOG_VERSION,
     CZSC_SCORE_RULE_VERSION,
     ChanlunAnalysisResponse,
+    ChanlunCoverage,
     ChanlunPeriod,
     CzscResearchSnapshot,
     KlineBar,
@@ -90,6 +91,23 @@ def _closed_inputs(
                     status="success",
                     detail="closed fixture bars",
                 ),
+            )
+            for period in APPROVED_PERIODS
+        },
+        coverage={
+            period: ChanlunCoverage(
+                status=(
+                    "complete"
+                    if (availability or {}).get(period, "ready") not in {"insufficient_bars", "unavailable"}
+                    else "incomplete"
+                ),
+                required_period_bars=count,
+                available_period_bars=count
+                if (availability or {}).get(period, "ready") != "unavailable"
+                else 0,
+                reason="explicit research fixture coverage",
+                backfill_required=(availability or {}).get(period, "ready")
+                in {"insufficient_bars", "unavailable"},
             )
             for period in APPROVED_PERIODS
         },
@@ -871,7 +889,7 @@ def test_backfill_clears_the_closed_workspace_cache() -> None:
 
     service = object.__new__(ChanlunAnalysisService)
     service.history_provider = EmptyHistoryProvider()
-    service.history_max_bars = 100
+    service.history_max_bars = 14400
     service.minute_retention_days = 30
     service.store = RecordingStore()
     service.cache = TtlCache(ttl_seconds=60, name="analysis-test")
@@ -945,7 +963,7 @@ class CountingIntradayProvider:
     ) -> dict[str, list[TickFlowIntradayBar]]:
         with self._lock:
             self.calls += 1
-        return {symbol: list(self.bars[-count:]) for symbol in symbols}
+        return {symbol: list(self.bars) for symbol in symbols}
 
 
 class ReadyAdapter:
@@ -988,14 +1006,14 @@ def test_formal_and_research_parallel_calls_share_closed_fetch_and_exclude_open_
     now = datetime.combine(current_day, time(14, 59), tzinfo=SHANGHAI)
     daily_bars = [
         KlineBar(
-            date=(current_day - timedelta(days=20 - index)).isoformat(),
+            date=(current_day - timedelta(days=24 - index)).isoformat(),
             open=10,
             close=10.1,
             high=10.2,
             low=9.9,
             volume=100,
         )
-        for index in range(20)
+        for index in range(24)
     ]
     daily_bars.append(
         KlineBar(
@@ -1009,7 +1027,7 @@ def test_formal_and_research_parallel_calls_share_closed_fetch_and_exclude_open_
     )
     minute_bars = [
         bar
-        for day_offset in (9, 8, 7, 6, 5, 0)
+        for day_offset in (0, 1, 2, 3, 4, 7, 8)
         for bar in _trading_minutes(current_day - timedelta(days=day_offset))
     ]
     daily_provider = CountingDailyProvider(daily_bars)
@@ -1052,11 +1070,13 @@ def test_formal_and_research_parallel_calls_share_closed_fetch_and_exclude_open_
     assert set(closed.periods) == set(APPROVED_PERIODS)
     assert set(closed.availability) == set(APPROVED_PERIODS)
     assert set(closed.freshness) == set(APPROVED_PERIODS)
+    assert set(closed.coverage) == set(APPROVED_PERIODS)
     assert set(closed.last_closed_by_period) == set(APPROVED_PERIODS)
     assert set(closed.source_status) == set(APPROVED_PERIODS)
     assert set(closed.adjustment_by_period) == set(APPROVED_PERIODS)
     assert set(closed.availability.values()) == {"ready"}
     assert set(closed.freshness.values()) == {"fresh"}
+    assert {item.status for item in closed.coverage.values()} == {"complete"}
     assert closed.adjustment_mode == "raw_unadjusted"
     assert closed.last_closed_by_period["1d"] == "2026-07-09T15:00:00+08:00"
     assert all(bar.date != current_day.isoformat() for bar in closed.periods["1d"])

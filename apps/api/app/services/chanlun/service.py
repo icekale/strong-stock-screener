@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from functools import lru_cache
 from statistics import mean, median
+from threading import RLock
 from typing import Literal
 from zoneinfo import ZoneInfo
 
@@ -171,8 +172,16 @@ class ChanlunAnalysisService:
             ttl_seconds=cache_seconds or settings.chanlun_cache_seconds,
             name="chanlun_closed_workspace_inputs",
         )
+        self._analysis_cache_lock = RLock()
         self.minute_retention_days = minute_retention_days or settings.chanlun_minute_retention_days
         self.history_max_bars = history_max_bars or settings.chanlun_backfill_max_bars
+
+    def _get_analysis_cache_lock(self) -> RLock:
+        lock = getattr(self, "_analysis_cache_lock", None)
+        if lock is None:
+            lock = RLock()
+            self._analysis_cache_lock = lock
+        return lock
 
     def analysis(
         self,
@@ -806,8 +815,9 @@ class ChanlunAnalysisService:
         progress(2, 3, f"已写入 {len(normalized_bars)} 条闭合分钟线")
         _raise_if_canceled(should_cancel)
         self.store.prune(keep_days=self.minute_retention_days)
-        self.cache.clear()
-        self.closed_input_cache.clear()
+        with self._get_analysis_cache_lock():
+            self.cache.clear()
+            self.closed_input_cache.clear()
         progress(3, 3, "分钟历史补齐完成")
         daily_reference = (
             self._load_closed_daily_period(
@@ -984,12 +994,13 @@ class ChanlunAnalysisService:
                 },
             )
 
-        cached = self.cache.get_if_fresh(cache_key)
-        if cached is None:
-            built = build()
-            if built.availability != "ready":
-                return decorate(built)
-            cached = self.cache.get_or_set(cache_key, lambda: built)
+        with self._get_analysis_cache_lock():
+            cached = self.cache.get_if_fresh(cache_key)
+            if cached is None:
+                built = build()
+                if built.availability != "ready":
+                    return decorate(built)
+                cached = self.cache.get_or_set(cache_key, lambda: built)
         return decorate(cached)
 
 

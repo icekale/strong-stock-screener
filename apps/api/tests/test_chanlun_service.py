@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, time, timedelta
 from pathlib import Path
+from threading import Event
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -997,6 +999,78 @@ def test_adapter_failure_is_not_cached_and_retry_can_recover(tmp_path: Path) -> 
     assert first.availability == "unavailable"
     assert second.availability == "ready"
     assert adapter.calls == 2
+
+
+def test_concurrent_same_key_analysis_single_flights_adapter(tmp_path: Path) -> None:
+    class BlockingAdapter:
+        source_name = "Blocking CZSC"
+
+        def __init__(self) -> None:
+            self.calls = 0
+            self.entered = Event()
+            self.release = Event()
+
+        def analyze(
+            self,
+            symbol: str,
+            *,
+            period: str,
+            bars: list[KlineBar],
+            include_observing: bool = False,
+        ) -> ChanlunAnalysisResponse:
+            self.calls += 1
+            self.entered.set()
+            if not self.release.wait(timeout=5):
+                raise RuntimeError("adapter release timed out")
+            return ChanlunAnalysisResponse(
+                symbol=symbol,
+                period=period,
+                availability="ready",
+                bars=list(bars),
+                source_status=[
+                    StrongStockSourceStatus(
+                        source=self.source_name,
+                        status="success",
+                        detail="released",
+                    )
+                ],
+                last_closed_bar_at=bars[-1].date,
+            )
+
+    adapter = BlockingAdapter()
+    service = ChanlunAnalysisService(
+        store=store_at(tmp_path),
+        intraday_provider=FakeQuoteProvider(),
+        history_provider=FakeHistoryProvider(),
+        adapter=adapter,
+        daily_provider=FakeDailyProvider(daily_bars(20)),
+        cache=build_test_cache(),
+    )
+    kwargs = {
+        "period": "1d",
+        "lookback": 20,
+        "include_observing": False,
+        "now": shanghai("2026-06-20 16:00"),
+    }
+    second_started = Event()
+
+    def request_second() -> ChanlunAnalysisResponse:
+        second_started.set()
+        return service.analysis("600000.SH", **kwargs)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(service.analysis, "600000.SH", **kwargs)
+        assert adapter.entered.wait(timeout=5)
+        second = executor.submit(request_second)
+        assert second_started.wait(timeout=5)
+        adapter.release.set()
+
+        first_result = first.result(timeout=5)
+        second_result = second.result(timeout=5)
+
+    assert first_result.availability == "ready"
+    assert second_result.availability == "ready"
+    assert adapter.calls == 1
 
 
 def test_analysis_cache_invalidates_when_last_closed_bar_changes(tmp_path: Path) -> None:

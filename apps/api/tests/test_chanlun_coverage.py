@@ -66,6 +66,24 @@ def test_missing_one_minute_does_not_cross_a_5m_bucket() -> None:
     assert result.missing_minutes == 1
 
 
+def test_current_open_bucket_does_not_count_as_missing_minutes() -> None:
+    start = shanghai("2026-07-10 09:30")
+    timestamps = [(start + timedelta(minutes=index)).isoformat() for index in range(32)]
+
+    result = audit_intraday_coverage(
+        timestamps,
+        period="5m",
+        lookback=6,
+        now=shanghai("2026-07-10 10:02"),
+        expected_trade_dates={date(2026, 7, 10)},
+    )
+
+    assert result.status == "complete"
+    assert result.available_period_bars == 6
+    assert result.missing_minutes == 0
+    assert result.incomplete_sessions == 0
+
+
 def test_complete_day_has_no_lunch_gap() -> None:
     result = audit_intraday_coverage(
         full_session("2026-07-10"),

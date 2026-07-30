@@ -70,7 +70,7 @@ def audit_intraday_coverage(
         )
 
     expected_by_date = {
-        session_date: _expected_session_minutes(session_date, cutoff)
+        session_date: _expected_session_minutes(session_date, period, cutoff)
         for session_date in expected_trade_dates
         if is_open_session(session_date) and session_date <= cutoff.date()
     }
@@ -124,7 +124,9 @@ def _normalized_trading_minutes(timestamps: Iterable[str]) -> set[datetime]:
     return normalized
 
 
-def _expected_session_minutes(session_date: date, cutoff: datetime) -> set[datetime]:
+def _expected_session_minutes(
+    session_date: date, period: IntradayPeriod, cutoff: datetime
+) -> set[datetime]:
     starts = (
         datetime.combine(session_date, datetime.min.time(), tzinfo=SHANGHAI).replace(hour=9, minute=30),
         datetime.combine(session_date, datetime.min.time(), tzinfo=SHANGHAI).replace(hour=13),
@@ -133,7 +135,9 @@ def _expected_session_minutes(session_date: date, cutoff: datetime) -> set[datet
         start + timedelta(minutes=offset)
         for start in starts
         for offset in range(120)
-        if start + timedelta(minutes=offset) <= cutoff
+        if intraday_bucket_start(start + timedelta(minutes=offset), period)
+        + timedelta(minutes=PERIOD_MINUTES[period])
+        <= cutoff
     }
 
 

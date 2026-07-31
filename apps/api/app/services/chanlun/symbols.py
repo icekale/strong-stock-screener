@@ -4,6 +4,8 @@ import json
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from threading import Lock, Thread
+from time import monotonic
 
 import httpx
 from pypinyin import Style, lazy_pinyin
@@ -15,7 +17,9 @@ from app.services.short_term_cache import TtlCache
 _SYMBOL_SOURCE = "A股证券代码主表"
 _EXCHANGES = {"SH", "SZ", "BJ"}
 _TDX_TIMEOUT_SECONDS = 5.0
+_SYMBOL_LOAD_BUDGET_SECONDS = 8.0
 _BSE_TIMEOUT_SECONDS = 5.0
+_BSE_MAX_PAGES = 100
 _BSE_URL = "https://www.bse.cn/nqxxController/nqxxCnzq.do"
 _BSE_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -129,28 +133,39 @@ def normalize_chanlun_symbol(value: str) -> str:
 
 
 def _load_tdx_symbols() -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    for market, exchange, prefixes in _TDX_MARKETS:
+        rows.extend(_load_tdx_market_symbols(market, exchange, prefixes))
+    return rows
+
+
+def _load_tdx_market_symbols(
+    market: int,
+    exchange: str,
+    prefixes: tuple[str, ...],
+) -> list[dict[str, str]]:
     from mootdx.quotes import Quotes
 
-    client = Quotes.factory(timeout=_TDX_TIMEOUT_SECONDS)
+    client = Quotes.factory(
+        timeout=_TDX_TIMEOUT_SECONDS,
+        auto_retry=False,
+        raise_exception=True,
+    )
     try:
-        market_rows = [
-            (exchange, prefixes, _rows_from_value(client.stocks(market)))
-            for market, exchange, prefixes in _TDX_MARKETS
-        ]
+        candidates = _rows_from_value(client.stocks(market))
     finally:
         close = getattr(client, "close", None)
         if callable(close):
             close()
 
     rows: list[dict[str, str]] = []
-    for exchange, prefixes, candidates in market_rows:
-        for candidate in candidates:
-            code = _clean_symbol_text(_row_value(candidate, "code", "symbol", "证券代码"))
-            if not re.fullmatch(r"\d{6}", code) or not code.startswith(prefixes):
-                continue
-            symbol = f"{code}.{exchange}"
-            name = _clean_symbol_text(_row_value(candidate, "name", "名称", "证券简称"))
-            rows.append({"symbol": symbol, "name": name or symbol})
+    for candidate in candidates:
+        code = _clean_symbol_text(_row_value(candidate, "code", "symbol", "证券代码"))
+        if not re.fullmatch(r"\d{6}", code) or not code.startswith(prefixes):
+            continue
+        symbol = f"{code}.{exchange}"
+        name = _clean_symbol_text(_row_value(candidate, "name", "名称", "证券简称"))
+        rows.append({"symbol": symbol, "name": name or symbol})
     return rows
 
 
@@ -172,7 +187,7 @@ def _load_bse_symbols() -> list[dict[str, str]]:
             response.raise_for_status()
             payload = _parse_bse_page(response.text)
             if page == 0:
-                total_pages = max(1, _bse_total_pages(payload))
+                total_pages = _bse_total_pages(payload)
             content = payload.get("content")
             if isinstance(content, list):
                 for candidate in content:
@@ -191,17 +206,65 @@ def _load_bse_symbols() -> list[dict[str, str]]:
 
 
 def _load_default_symbols() -> _SymbolLoaderResult:
-    rows: list[dict[str, str]] = []
-    failures: list[str] = []
-    for source, loader in (("TDX", _load_tdx_symbols), ("BSE", _load_bse_symbols)):
+    source_loaders: tuple[tuple[str, Callable[[], list[dict[str, str]]]], ...] = (
+        (
+            "TDX SZ",
+            lambda: _load_tdx_market_symbols(*_TDX_MARKETS[0]),
+        ),
+        (
+            "TDX SH",
+            lambda: _load_tdx_market_symbols(*_TDX_MARKETS[1]),
+        ),
+        ("BSE", _load_bse_symbols),
+    )
+    results: dict[str, list[dict[str, str]]] = {}
+    errors: dict[str, Exception] = {}
+    result_lock = Lock()
+
+    def load_source(source: str, loader: Callable[[], list[dict[str, str]]]) -> None:
         try:
             source_rows = loader()
             if not source_rows:
                 raise RuntimeError("未返回代码")
         except Exception as exc:
-            failures.append(f"{source}: {_exception_detail(exc)}")
+            with result_lock:
+                errors[source] = exc
         else:
-            rows.extend(source_rows)
+            with result_lock:
+                results[source] = source_rows
+
+    deadline = monotonic() + _SYMBOL_LOAD_BUDGET_SECONDS
+    threads = [
+        Thread(
+            target=load_source,
+            args=(source, loader),
+            daemon=True,
+            name=f"chanlun-symbols-{source.lower().replace(' ', '-')}",
+        )
+        for source, loader in source_loaders
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        remaining = deadline - monotonic()
+        if remaining <= 0:
+            break
+        thread.join(remaining)
+
+    rows: list[dict[str, str]] = []
+    failures: list[str] = []
+    with result_lock:
+        completed_rows = dict(results)
+        completed_errors = dict(errors)
+    for source, _loader in source_loaders:
+        if source in completed_rows:
+            rows.extend(completed_rows[source])
+        elif source in completed_errors:
+            failures.append(f"{source}: {_exception_detail(completed_errors[source])}")
+        else:
+            failures.append(
+                f"{source}: TimeoutError: 超过{_SYMBOL_LOAD_BUDGET_SECONDS:g}秒冷启动预算"
+            )
 
     if not rows:
         raise RuntimeError(f"A股代码源读取失败: {'; '.join(failures)}")
@@ -233,9 +296,12 @@ def _parse_bse_page(text: str) -> Mapping[str, object]:
 
 def _bse_total_pages(payload: Mapping[str, object]) -> int:
     try:
-        return int(payload["totalPages"])
+        total_pages = int(payload["totalPages"])
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError("BSE响应缺少总页数") from exc
+    if not 1 <= total_pages <= _BSE_MAX_PAGES:
+        raise ValueError(f"BSE总页数超出上限: {total_pages}")
+    return total_pages
 
 
 def _clean_symbol_text(value: str) -> str:

@@ -4,6 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, time, timedelta
 from pathlib import Path
 from threading import Barrier, Event, Lock
+from time import perf_counter
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -1533,38 +1534,47 @@ def test_symbol_loader_tdx_filters_by_market_cleans_names_and_closes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class FakeTdxClient:
-        def __init__(self) -> None:
+        def __init__(self, market: int, rows: list[dict[str, str]]) -> None:
+            self.market = market
+            self.rows = rows
             self.markets: list[int] = []
             self.closed = False
 
         def stocks(self, market: int) -> list[dict[str, str]]:
+            assert market == self.market
             self.markets.append(market)
-            return {
-                0: [
-                    {"code": "000001", "name": "平\x00安银行\x00 "},
-                    {"code": "300750", "name": "宁德时代"},
-                    {"code": "399001", "name": "深证成指"},
-                    {"code": "159915", "name": "创业板ETF"},
-                ],
-                1: [
-                    {"code": "600000", "name": "浦发银行\x00"},
-                    {"code": "688981", "name": "中\x00芯国际  "},
-                    {"code": "000001", "name": "上证指数"},
-                    {"code": "510300", "name": "沪深300ETF"},
-                ],
-            }[market]
+            return self.rows
 
         def close(self) -> None:
             self.closed = True
 
     from mootdx.quotes import Quotes
 
-    client = FakeTdxClient()
-    factory_kwargs: dict[str, float] = {}
+    clients = [
+        FakeTdxClient(
+            0,
+            [
+                {"code": "000001", "name": "平\x00安银行\x00 "},
+                {"code": "300750", "name": "宁德时代"},
+                {"code": "399001", "name": "深证成指"},
+                {"code": "159915", "name": "创业板ETF"},
+            ],
+        ),
+        FakeTdxClient(
+            1,
+            [
+                {"code": "600000", "name": "浦发银行\x00"},
+                {"code": "688981", "name": "中\x00芯国际  "},
+                {"code": "000001", "name": "上证指数"},
+                {"code": "510300", "name": "沪深300ETF"},
+            ],
+        ),
+    ]
+    factory_kwargs: list[dict[str, object]] = []
 
-    def fake_factory(**kwargs: float) -> FakeTdxClient:
-        factory_kwargs.update(kwargs)
-        return client
+    def fake_factory(**kwargs: object) -> FakeTdxClient:
+        factory_kwargs.append(kwargs)
+        return clients[len(factory_kwargs) - 1]
 
     monkeypatch.setattr(Quotes, "factory", fake_factory)
 
@@ -1576,9 +1586,12 @@ def test_symbol_loader_tdx_filters_by_market_cleans_names_and_closes(
         {"symbol": "600000.SH", "name": "浦发银行"},
         {"symbol": "688981.SH", "name": "中芯国际"},
     ]
-    assert client.markets == [0, 1]
-    assert 0 < factory_kwargs["timeout"] <= 5
-    assert client.closed is True
+    assert [client.markets for client in clients] == [[0], [1]]
+    assert factory_kwargs == [
+        {"timeout": 5.0, "auto_retry": False, "raise_exception": True},
+        {"timeout": 5.0, "auto_retry": False, "raise_exception": True},
+    ]
+    assert all(client.closed for client in clients)
 
 
 def test_symbol_loader_bse_fetches_all_pages_with_bounded_client_and_closes(
@@ -1663,54 +1676,252 @@ def test_symbol_loader_bse_fetches_all_pages_with_bounded_client_and_closes(
     assert client.closed is True
 
 
+def test_symbol_loader_bse_rejects_implausible_page_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    class FakeResponse:
+        text = 'null([{"totalPages":10000,"content":[]}])'
+
+        def raise_for_status(self) -> None:
+            pass
+
+    class FakeHttpClient:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.closed = False
+
+        def post(self, _url: str, *, data: dict[str, str]) -> FakeResponse:
+            self.calls += 1
+            assert data["page"] == "0"
+            if self.calls > 1:
+                raise AssertionError("unexpected page request")
+            return FakeResponse()
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = FakeHttpClient()
+    monkeypatch.setattr(httpx, "Client", lambda **_kwargs: client)
+
+    with pytest.raises(ValueError, match="总页数"):
+        chanlun_symbols_module._load_bse_symbols()
+
+    assert client.calls == 1
+    assert client.closed is True
+
+
 def test_symbol_loader_combines_successful_tdx_and_bse_rows(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    tdx_rows = [{"symbol": "600000.SH", "name": "浦发银行"}]
+    sz_rows = [{"symbol": "000001.SZ", "name": "平安银行"}]
+    sh_rows = [{"symbol": "600000.SH", "name": "浦发银行"}]
     bse_rows = [{"symbol": "430047.BJ", "name": "诺思兰德"}]
-    monkeypatch.setattr(chanlun_symbols_module, "_load_tdx_symbols", lambda: tdx_rows)
+
+    def fail_aggregate() -> list[dict[str, str]]:
+        raise AssertionError("default loader must split TDX markets")
+
+    def load_market(
+        _market: int,
+        exchange: str,
+        _prefixes: tuple[str, ...],
+    ) -> list[dict[str, str]]:
+        return {"SZ": sz_rows, "SH": sh_rows}[exchange]
+
+    monkeypatch.setattr(chanlun_symbols_module, "_load_tdx_symbols", fail_aggregate)
+    monkeypatch.setattr(
+        chanlun_symbols_module,
+        "_load_tdx_market_symbols",
+        load_market,
+        raising=False,
+    )
     monkeypatch.setattr(chanlun_symbols_module, "_load_bse_symbols", lambda: bse_rows)
 
     result = chanlun_symbols_module._load_default_symbols()
 
-    assert result.rows == [*tdx_rows, *bse_rows]
+    assert result.rows == [*sz_rows, *sh_rows, *bse_rows]
     assert result.status.source == "A股证券代码主表"
     assert result.status.status == "success"
 
 
-def test_symbol_loader_keeps_tdx_rows_when_bse_fails(
+@pytest.mark.parametrize(
+    ("failed_exchange", "failure_mode"),
+    [("SZ", "error"), ("SZ", "empty"), ("SH", "error"), ("SH", "empty")],
+)
+def test_symbol_loader_keeps_healthy_markets_and_bse_when_tdx_market_is_missing(
     monkeypatch: pytest.MonkeyPatch,
+    failed_exchange: str,
+    failure_mode: str,
 ) -> None:
-    tdx_rows = [{"symbol": "600000.SH", "name": "浦发银行"}]
+    market_rows = {
+        "SZ": [{"symbol": "000001.SZ", "name": "平安银行"}],
+        "SH": [{"symbol": "600000.SH", "name": "浦发银行"}],
+    }
+    bse_rows = [{"symbol": "430047.BJ", "name": "诺思兰德"}]
 
-    def fail_bse() -> list[dict[str, str]]:
-        raise TimeoutError("request timed out")
+    def load_market(
+        _market: int,
+        exchange: str,
+        _prefixes: tuple[str, ...],
+    ) -> list[dict[str, str]]:
+        if exchange == failed_exchange and failure_mode == "error":
+            raise RuntimeError(f"{exchange} unavailable")
+        if exchange == failed_exchange:
+            return []
+        return market_rows[exchange]
 
-    monkeypatch.setattr(chanlun_symbols_module, "_load_tdx_symbols", lambda: tdx_rows)
-    monkeypatch.setattr(chanlun_symbols_module, "_load_bse_symbols", fail_bse)
+    monkeypatch.setattr(chanlun_symbols_module, "_load_tdx_symbols", lambda: [*market_rows["SZ"], *market_rows["SH"]])
+    monkeypatch.setattr(
+        chanlun_symbols_module,
+        "_load_tdx_market_symbols",
+        load_market,
+        raising=False,
+    )
+    monkeypatch.setattr(chanlun_symbols_module, "_load_bse_symbols", lambda: bse_rows)
 
     result = chanlun_symbols_module._load_default_symbols()
 
-    assert result.rows == tdx_rows
+    expected_rows: list[dict[str, str]] = []
+    if failed_exchange != "SZ":
+        expected_rows.extend(market_rows["SZ"])
+    if failed_exchange != "SH":
+        expected_rows.extend(market_rows["SH"])
+    expected_rows.extend(bse_rows)
+    assert result.rows == expected_rows
     assert result.status.status == "stale"
-    assert "BSE" in result.status.detail
-    assert "TimeoutError" in result.status.detail
+    assert f"TDX {failed_exchange}" in result.status.detail
 
 
 def test_symbol_loader_raises_when_tdx_and_bse_fail(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    def fail_tdx() -> list[dict[str, str]]:
-        raise TimeoutError("TDX timed out")
+    def fail_tdx_market(
+        _market: int,
+        exchange: str,
+        _prefixes: tuple[str, ...],
+    ) -> list[dict[str, str]]:
+        raise TimeoutError(f"{exchange} timed out")
 
     def fail_bse() -> list[dict[str, str]]:
         raise RuntimeError("BSE unavailable")
 
-    monkeypatch.setattr(chanlun_symbols_module, "_load_tdx_symbols", fail_tdx)
+    monkeypatch.setattr(chanlun_symbols_module, "_load_tdx_symbols", lambda: [])
+    monkeypatch.setattr(
+        chanlun_symbols_module,
+        "_load_tdx_market_symbols",
+        fail_tdx_market,
+        raising=False,
+    )
     monkeypatch.setattr(chanlun_symbols_module, "_load_bse_symbols", fail_bse)
 
-    with pytest.raises(RuntimeError, match="TDX.*BSE"):
+    with pytest.raises(RuntimeError, match="TDX SZ.*TDX SH.*BSE"):
         chanlun_symbols_module._load_default_symbols()
+
+
+def test_symbol_loader_global_budget_keeps_completed_rows_when_bse_blocks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = Event()
+    finished = Event()
+    entered = Event()
+    sz_rows = [{"symbol": "000001.SZ", "name": "平安银行"}]
+    sh_rows = [{"symbol": "600000.SH", "name": "浦发银行"}]
+    bse_rows = [{"symbol": "430047.BJ", "name": "诺思兰德"}]
+
+    def load_market(
+        _market: int,
+        exchange: str,
+        _prefixes: tuple[str, ...],
+    ) -> list[dict[str, str]]:
+        return {"SZ": sz_rows, "SH": sh_rows}[exchange]
+
+    def blocking_bse() -> list[dict[str, str]]:
+        entered.set()
+        try:
+            release.wait(timeout=0.25)
+            return bse_rows
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(chanlun_symbols_module, "_SYMBOL_LOAD_BUDGET_SECONDS", 0.02, raising=False)
+    monkeypatch.setattr(chanlun_symbols_module, "_load_tdx_symbols", lambda: [*sz_rows, *sh_rows])
+    monkeypatch.setattr(
+        chanlun_symbols_module,
+        "_load_tdx_market_symbols",
+        load_market,
+        raising=False,
+    )
+    monkeypatch.setattr(chanlun_symbols_module, "_load_bse_symbols", blocking_bse)
+
+    try:
+        started = perf_counter()
+        result = chanlun_symbols_module._load_default_symbols()
+        elapsed = perf_counter() - started
+
+        assert elapsed < 0.15
+        assert result.rows == [*sz_rows, *sh_rows]
+        assert result.status.status == "stale"
+        assert "BSE" in result.status.detail
+        assert entered.is_set()
+    finally:
+        release.set()
+        assert finished.wait(timeout=1)
+
+
+def test_symbol_loader_global_budget_raises_when_all_sources_block(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    release = Event()
+    entered = {"TDX SZ": Event(), "TDX SH": Event(), "BSE": Event()}
+    finished = {"TDX SZ": Event(), "TDX SH": Event(), "BSE": Event()}
+
+    def blocking_market(
+        _market: int,
+        exchange: str,
+        _prefixes: tuple[str, ...],
+    ) -> list[dict[str, str]]:
+        source = f"TDX {exchange}"
+        entered[source].set()
+        try:
+            release.wait(timeout=0.25)
+            return [{"symbol": "000001.SZ", "name": "平安银行"}]
+        finally:
+            finished[source].set()
+
+    def blocking_bse() -> list[dict[str, str]]:
+        entered["BSE"].set()
+        try:
+            release.wait(timeout=0.25)
+            return [{"symbol": "430047.BJ", "name": "诺思兰德"}]
+        finally:
+            finished["BSE"].set()
+
+    def blocking_legacy_tdx() -> list[dict[str, str]]:
+        release.wait(timeout=0.25)
+        return [{"symbol": "000001.SZ", "name": "平安银行"}]
+
+    monkeypatch.setattr(chanlun_symbols_module, "_SYMBOL_LOAD_BUDGET_SECONDS", 0.02, raising=False)
+    monkeypatch.setattr(chanlun_symbols_module, "_load_tdx_symbols", blocking_legacy_tdx)
+    monkeypatch.setattr(
+        chanlun_symbols_module,
+        "_load_tdx_market_symbols",
+        blocking_market,
+        raising=False,
+    )
+    monkeypatch.setattr(chanlun_symbols_module, "_load_bse_symbols", blocking_bse)
+
+    try:
+        started = perf_counter()
+        with pytest.raises(RuntimeError, match="TDX SZ.*TDX SH.*BSE"):
+            chanlun_symbols_module._load_default_symbols()
+        elapsed = perf_counter() - started
+        assert elapsed < 0.15
+    finally:
+        release.set()
+        for source in entered:
+            if entered[source].is_set():
+                assert finished[source].wait(timeout=1)
 
 
 def test_symbol_search_matches_code_name_full_pinyin_and_initials() -> None:

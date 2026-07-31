@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.services.chanlun import service as chanlun_service_module
+from app.services.chanlun import symbols as chanlun_symbols_module
 from app.config import Settings
 from app.main import _chanlun_analysis_service, _kline_provider, app, update_runtime_settings
 from app.models import (
@@ -1528,6 +1529,189 @@ def test_empty_live_intraday_payload_is_insufficient_without_sqlite_history(
     )
 
 
+def test_symbol_loader_tdx_filters_by_market_cleans_names_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeTdxClient:
+        def __init__(self) -> None:
+            self.markets: list[int] = []
+            self.closed = False
+
+        def stocks(self, market: int) -> list[dict[str, str]]:
+            self.markets.append(market)
+            return {
+                0: [
+                    {"code": "000001", "name": "平\x00安银行\x00 "},
+                    {"code": "300750", "name": "宁德时代"},
+                    {"code": "399001", "name": "深证成指"},
+                    {"code": "159915", "name": "创业板ETF"},
+                ],
+                1: [
+                    {"code": "600000", "name": "浦发银行\x00"},
+                    {"code": "688981", "name": "中\x00芯国际  "},
+                    {"code": "000001", "name": "上证指数"},
+                    {"code": "510300", "name": "沪深300ETF"},
+                ],
+            }[market]
+
+        def close(self) -> None:
+            self.closed = True
+
+    from mootdx.quotes import Quotes
+
+    client = FakeTdxClient()
+    factory_kwargs: dict[str, float] = {}
+
+    def fake_factory(**kwargs: float) -> FakeTdxClient:
+        factory_kwargs.update(kwargs)
+        return client
+
+    monkeypatch.setattr(Quotes, "factory", fake_factory)
+
+    rows = chanlun_symbols_module._load_tdx_symbols()
+
+    assert rows == [
+        {"symbol": "000001.SZ", "name": "平安银行"},
+        {"symbol": "300750.SZ", "name": "宁德时代"},
+        {"symbol": "600000.SH", "name": "浦发银行"},
+        {"symbol": "688981.SH", "name": "中芯国际"},
+    ]
+    assert client.markets == [0, 1]
+    assert 0 < factory_kwargs["timeout"] <= 5
+    assert client.closed is True
+
+
+def test_symbol_loader_bse_fetches_all_pages_with_bounded_client_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    class FakeResponse:
+        def __init__(self, text: str) -> None:
+            self.text = text
+            self.checked = False
+
+        def raise_for_status(self) -> None:
+            self.checked = True
+
+    responses = [
+        FakeResponse(
+            'null([{"totalPages":2,"content":'
+            '[{"xxzqdm":"430047","xxzqjc":"诺思兰德"}]}])'
+        ),
+        FakeResponse(
+            'null([{"totalPages":2,"content":'
+            '[{"xxzqdm":"920002","xxzqjc":"万达轴承"}]}])'
+        ),
+    ]
+
+    class FakeHttpClient:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, str]]] = []
+            self.closed = False
+
+        def post(self, url: str, *, data: dict[str, str]) -> FakeResponse:
+            self.calls.append((url, dict(data)))
+            return responses[len(self.calls) - 1]
+
+        def close(self) -> None:
+            self.closed = True
+
+    client = FakeHttpClient()
+    client_kwargs: dict[str, object] = {}
+
+    def fake_client(**kwargs: object) -> FakeHttpClient:
+        client_kwargs.update(kwargs)
+        return client
+
+    monkeypatch.setattr(httpx, "Client", fake_client)
+
+    rows = chanlun_symbols_module._load_bse_symbols()
+
+    assert rows == [
+        {"symbol": "430047.BJ", "name": "诺思兰德"},
+        {"symbol": "920002.BJ", "name": "万达轴承"},
+    ]
+    assert client.calls == [
+        (
+            "https://www.bse.cn/nqxxController/nqxxCnzq.do",
+            {
+                "page": "0",
+                "typejb": "T",
+                "xxfcbj[]": "2",
+                "xxzqdm": "",
+                "sortfield": "xxzqdm",
+                "sorttype": "asc",
+            },
+        ),
+        (
+            "https://www.bse.cn/nqxxController/nqxxCnzq.do",
+            {
+                "page": "1",
+                "typejb": "T",
+                "xxfcbj[]": "2",
+                "xxzqdm": "",
+                "sortfield": "xxzqdm",
+                "sorttype": "asc",
+            },
+        ),
+    ]
+    assert 0 < client_kwargs["timeout"] <= 10  # type: ignore[operator]
+    assert str(client_kwargs["headers"]["User-Agent"]).startswith("Mozilla/5.0")  # type: ignore[index]
+    assert all(response.checked for response in responses)
+    assert client.closed is True
+
+
+def test_symbol_loader_combines_successful_tdx_and_bse_rows(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tdx_rows = [{"symbol": "600000.SH", "name": "浦发银行"}]
+    bse_rows = [{"symbol": "430047.BJ", "name": "诺思兰德"}]
+    monkeypatch.setattr(chanlun_symbols_module, "_load_tdx_symbols", lambda: tdx_rows)
+    monkeypatch.setattr(chanlun_symbols_module, "_load_bse_symbols", lambda: bse_rows)
+
+    result = chanlun_symbols_module._load_default_symbols()
+
+    assert result.rows == [*tdx_rows, *bse_rows]
+    assert result.status.source == "A股证券代码主表"
+    assert result.status.status == "success"
+
+
+def test_symbol_loader_keeps_tdx_rows_when_bse_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tdx_rows = [{"symbol": "600000.SH", "name": "浦发银行"}]
+
+    def fail_bse() -> list[dict[str, str]]:
+        raise TimeoutError("request timed out")
+
+    monkeypatch.setattr(chanlun_symbols_module, "_load_tdx_symbols", lambda: tdx_rows)
+    monkeypatch.setattr(chanlun_symbols_module, "_load_bse_symbols", fail_bse)
+
+    result = chanlun_symbols_module._load_default_symbols()
+
+    assert result.rows == tdx_rows
+    assert result.status.status == "stale"
+    assert "BSE" in result.status.detail
+    assert "TimeoutError" in result.status.detail
+
+
+def test_symbol_loader_raises_when_tdx_and_bse_fail(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_tdx() -> list[dict[str, str]]:
+        raise TimeoutError("TDX timed out")
+
+    def fail_bse() -> list[dict[str, str]]:
+        raise RuntimeError("BSE unavailable")
+
+    monkeypatch.setattr(chanlun_symbols_module, "_load_tdx_symbols", fail_tdx)
+    monkeypatch.setattr(chanlun_symbols_module, "_load_bse_symbols", fail_bse)
+
+    with pytest.raises(RuntimeError, match="TDX.*BSE"):
+        chanlun_symbols_module._load_default_symbols()
+
+
 def test_symbol_search_matches_code_name_full_pinyin_and_initials() -> None:
     service = ChanlunSymbolSearchService(
         loader=lambda: [
@@ -1577,7 +1761,7 @@ def test_symbol_search_keeps_best_ranked_duplicate() -> None:
 
 def test_symbol_search_normalizes_local_results_and_fails_safely() -> None:
     def failing_loader() -> object:
-        raise RuntimeError("akshare unavailable")
+        raise RuntimeError("symbol master unavailable")
 
     service = ChanlunSymbolSearchService(
         loader=failing_loader,
@@ -1588,7 +1772,7 @@ def test_symbol_search_normalizes_local_results_and_fails_safely() -> None:
     matches, source_status = service.search("", limit=10)
 
     assert [item.symbol for item in matches] == ["600000.SH", "430047.BJ"]
-    assert source_status[0].source == "Akshare 股票代码表"
+    assert source_status[0].source == "A股证券代码主表"
     assert source_status[0].status == "failed"
 
     pinyin_matches, pinyin_source_status = service.search("PFYH")

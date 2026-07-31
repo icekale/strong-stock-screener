@@ -1992,6 +1992,27 @@ def test_symbol_search_normalizes_local_results_and_fails_safely() -> None:
     assert pinyin_source_status[0].status == "failed"
 
 
+def test_symbol_search_default_loader_failure_uses_local_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def failing_default_loader() -> object:
+        raise RuntimeError("all symbol sources unavailable")
+
+    monkeypatch.setattr(
+        chanlun_symbols_module,
+        "_load_default_symbols",
+        failing_default_loader,
+    )
+    service = ChanlunSymbolSearchService(
+        watchlist_loader=lambda: [{"symbol": "600000", "name": "浦发银行"}],
+    )
+
+    matches, source_status = service.search("PFYH")
+
+    assert matches == [ChanlunSymbolMatch(symbol="600000.SH", name="浦发银行")]
+    assert source_status[0].status == "failed"
+
+
 def daily_bar(value: str, *, close: float) -> KlineBar:
     return KlineBar(
         date=f"{value}T15:00:00+08:00",

@@ -27,6 +27,7 @@ const content = ref('');
 const symbolInput = ref('');
 const symbolOptions = ref<SymbolOption[]>([]);
 const selectedSymbol = ref<ChanlunSymbolMatch | null>(null);
+const symbolDropdownOpen = ref(false);
 const symbolSearchLoading = ref(false);
 const symbolSearchError = ref<string | null>(null);
 const loading = ref(false);
@@ -95,6 +96,7 @@ function queueSymbolSearch(query: string) {
   const trimmedQuery = query.trim();
   symbolOptions.value = [];
   if (!trimmedQuery) {
+    symbolDropdownOpen.value = false;
     symbolSearchLoading.value = false;
     return;
   }
@@ -112,10 +114,15 @@ function selectSymbol(value: unknown) {
   if (!option) return;
   selectedSymbol.value = { symbol: option.symbol, name: option.name };
   symbolInput.value = option.symbol;
+  symbolDropdownOpen.value = false;
+}
+
+function handleSymbolDropdownVisibleChange(open: boolean) {
+  symbolDropdownOpen.value = open;
 }
 
 function handleSymbolEnter(event: KeyboardEvent) {
-  if (selectedSymbol.value === null) return;
+  if (selectedSymbol.value === null || symbolDropdownOpen.value) return;
   event.preventDefault();
   event.stopPropagation();
   addSymbol();
@@ -201,6 +208,7 @@ onBeforeUnmount(() => {
             :filter-option="false"
             :options="symbolOptions"
             placeholder="输入代码、名称或拼音"
+            @dropdown-visible-change="handleSymbolDropdownVisibleChange"
             @keydown.enter.capture="handleSymbolEnter"
             @search="queueSymbolSearch"
             @select="selectSymbol"
@@ -212,7 +220,7 @@ onBeforeUnmount(() => {
               </div>
             </template>
             <template #notFoundContent>
-              <span v-if="symbolInput.trim()">{{ symbolSearchLoading ? '搜索中…' : '未找到匹配股票' }}</span>
+              <span v-if="symbolInput.trim() && !symbolSearchError">{{ symbolSearchLoading ? '搜索中…' : '未找到匹配股票' }}</span>
             </template>
           </a-auto-complete>
           <a-button data-testid="add-symbol" :disabled="!selectedSymbol" :loading="adding" type="primary" @click="addSymbol">加入自选</a-button>

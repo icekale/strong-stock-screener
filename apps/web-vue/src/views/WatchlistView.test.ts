@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { defineComponent } from 'vue';
+import { defineComponent, ref } from 'vue';
 import { type VueWrapper, flushPromises, mount } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
@@ -36,20 +36,50 @@ const AutoCompleteStub = defineComponent({
   name: 'AAutoComplete',
   inheritAttrs: false,
   props: ['loading', 'options', 'value'],
-  emits: ['search', 'select', 'update:value'],
+  emits: ['dropdown-visible-change', 'search', 'select', 'update:value'],
+  setup(props, { emit }) {
+    const activeOptionIndex = ref(0);
+
+    function setInput(value: string) {
+      activeOptionIndex.value = 0;
+      emit('update:value', value);
+      emit('search', value);
+      emit('dropdown-visible-change', Boolean(value));
+    }
+
+    function selectOption(option: { value: string }) {
+      emit('update:value', option.value);
+      emit('select', option.value, option);
+      emit('dropdown-visible-change', false);
+    }
+
+    function selectActiveOption() {
+      const option = props.options[activeOptionIndex.value];
+      if (option) selectOption(option);
+    }
+
+    function reopenDropdown() {
+      activeOptionIndex.value = props.options.length > 1 ? 1 : 0;
+      emit('dropdown-visible-change', true);
+    }
+
+    return { activeOptionIndex, reopenDropdown, selectActiveOption, selectOption, setInput };
+  },
   template: `
     <div v-bind="$attrs">
       <input
         :value="value"
-        @input="$emit('update:value', $event.target.value); $emit('search', $event.target.value)"
-        @keydown.enter="options[0] && $emit('update:value', options[0].value); options[0] && $emit('select', options[0].value, options[0])"
+        @focus="reopenDropdown"
+        @input="setInput($event.target.value)"
+        @keydown.enter="selectActiveOption"
       />
       <button
-        v-for="option in options"
+        v-for="(option, index) in options"
         :key="option.value"
         data-testid="symbol-option"
+        :data-active="index === activeOptionIndex"
         type="button"
-        @click="$emit('update:value', option.value); $emit('select', option.value, option)"
+        @click="selectOption(option)"
       >
         <slot name="option" v-bind="option">{{ option.label }}</slot>
       </button>
@@ -243,6 +273,7 @@ describe('WatchlistView symbol search', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('远程搜索不可用');
+    expect(wrapper.text()).not.toContain('未找到匹配股票');
   });
 
   it.each([
@@ -293,6 +324,37 @@ describe('WatchlistView symbol search', () => {
     expect(api.addWatchlistPoolItem).toHaveBeenCalledWith({
       symbol: '600000.SH',
       name: '浦发银行',
+      group: '人工关注',
+      tags: []
+    });
+  });
+
+  it('selects a reopened dropdown option before Enter can add', async () => {
+    api.searchStockSymbols.mockResolvedValueOnce(searchFixture([PUFA, PINGAN]));
+    const wrapper = await mountView();
+    const input = symbolSearchInput(wrapper);
+    await input.setValue('PFYH');
+    await vi.advanceTimersByTimeAsync(250);
+    await flushPromises();
+
+    await wrapper.findAll('[data-testid="symbol-option"]')[0].trigger('click');
+    expect((input.element as HTMLInputElement).value).toBe('600000.SH');
+
+    await input.trigger('focus');
+    expect(wrapper.get('[data-active="true"]').text()).toContain('平安银行');
+
+    await input.trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+
+    expect(api.addWatchlistPoolItem).not.toHaveBeenCalled();
+    expect((input.element as HTMLInputElement).value).toBe('000001.SZ');
+
+    await input.trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+
+    expect(api.addWatchlistPoolItem).toHaveBeenCalledWith({
+      symbol: '000001.SZ',
+      name: '平安银行',
       group: '人工关注',
       tags: []
     });

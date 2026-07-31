@@ -1657,6 +1657,7 @@ def test_symbol_loader_bse_fetches_all_pages_with_bounded_client_and_closes(
         ),
     ]
     assert 0 < client_kwargs["timeout"] <= 10  # type: ignore[operator]
+    assert client_kwargs["follow_redirects"] is True
     assert str(client_kwargs["headers"]["User-Agent"]).startswith("Mozilla/5.0")  # type: ignore[index]
     assert all(response.checked for response in responses)
     assert client.closed is True

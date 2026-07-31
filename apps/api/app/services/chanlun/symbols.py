@@ -157,6 +157,7 @@ def _load_tdx_symbols() -> list[dict[str, str]]:
 def _load_bse_symbols() -> list[dict[str, str]]:
     client = httpx.Client(
         timeout=_BSE_TIMEOUT_SECONDS,
+        follow_redirects=True,
         headers={"User-Agent": _BSE_USER_AGENT},
     )
     rows: list[dict[str, str]] = []

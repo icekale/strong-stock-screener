@@ -38,11 +38,11 @@ const AutoCompleteStub = defineComponent({
   props: ['loading', 'options', 'value'],
   emits: ['search', 'select', 'update:value'],
   template: `
-    <div>
+    <div v-bind="$attrs">
       <input
-        v-bind="$attrs"
         :value="value"
         @input="$emit('update:value', $event.target.value); $emit('search', $event.target.value)"
+        @keydown.enter="options[0] && $emit('update:value', options[0].value); options[0] && $emit('select', options[0].value, options[0])"
       />
       <button
         v-for="option in options"
@@ -127,9 +127,13 @@ async function mountView() {
   return wrapper;
 }
 
+function symbolSearchInput(wrapper: VueWrapper) {
+  return wrapper.get('[data-testid="symbol-search-input"]').get('input');
+}
+
 async function renderPufaCandidate(wrapper: VueWrapper) {
   api.searchStockSymbols.mockResolvedValueOnce(searchFixture([PUFA]));
-  await wrapper.get('[data-testid="symbol-search-input"]').setValue('PFYH');
+  await symbolSearchInput(wrapper).setValue('PFYH');
   await vi.advanceTimersByTimeAsync(250);
   await flushPromises();
 }
@@ -159,7 +163,7 @@ describe('WatchlistView symbol search', () => {
     api.searchStockSymbols.mockResolvedValueOnce(searchFixture([PUFA]));
     const wrapper = await mountView();
 
-    await wrapper.get('[data-testid="symbol-search-input"]').setValue('PFYH');
+    await symbolSearchInput(wrapper).setValue('PFYH');
     expect(api.searchStockSymbols).not.toHaveBeenCalled();
 
     await vi.advanceTimersByTimeAsync(249);
@@ -191,7 +195,7 @@ describe('WatchlistView symbol search', () => {
   it('keeps add disabled for unmatched input and shows the empty result', async () => {
     api.searchStockSymbols.mockResolvedValueOnce(searchFixture());
     const wrapper = await mountView();
-    const input = wrapper.get('[data-testid="symbol-search-input"]');
+    const input = symbolSearchInput(wrapper);
 
     await input.setValue('不存在股票');
     expect(wrapper.text()).toContain('搜索中…');
@@ -212,7 +216,7 @@ describe('WatchlistView symbol search', () => {
       .mockReturnValueOnce(firstRequest.promise)
       .mockResolvedValueOnce(searchFixture([PINGAN]));
     const wrapper = await mountView();
-    const input = wrapper.get('[data-testid="symbol-search-input"]');
+    const input = symbolSearchInput(wrapper);
 
     await input.setValue('PFYH');
     await vi.advanceTimersByTimeAsync(250);
@@ -234,7 +238,7 @@ describe('WatchlistView symbol search', () => {
     api.searchStockSymbols.mockRejectedValueOnce(new Error('远程搜索不可用'));
     const wrapper = await mountView();
 
-    await wrapper.get('[data-testid="symbol-search-input"]').setValue('PFYH');
+    await symbolSearchInput(wrapper).setValue('PFYH');
     await vi.advanceTimersByTimeAsync(250);
     await flushPromises();
 
@@ -249,7 +253,7 @@ describe('WatchlistView symbol search', () => {
     await selectPufaCandidate(wrapper);
     expect(wrapper.get('[data-testid="add-symbol"]').attributes('disabled')).toBeUndefined();
 
-    await wrapper.get('[data-testid="symbol-search-input"]').setValue(nextInput);
+    await symbolSearchInput(wrapper).setValue(nextInput);
 
     expect(wrapper.get('[data-testid="add-symbol"]').attributes('disabled')).toBeDefined();
     await wrapper.get('[data-testid="add-symbol"]').trigger('click');
@@ -260,7 +264,30 @@ describe('WatchlistView symbol search', () => {
     const wrapper = await mountView();
     await selectPufaCandidate(wrapper);
 
-    await wrapper.get('[data-testid="symbol-search-input"]').trigger('keydown', { key: 'Enter' });
+    await symbolSearchInput(wrapper).trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+
+    expect(api.addWatchlistPoolItem).toHaveBeenCalledWith({
+      symbol: '600000.SH',
+      name: '浦发银行',
+      group: '人工关注',
+      tags: []
+    });
+  });
+
+  it('requires one Enter to select before a later Enter can add', async () => {
+    const wrapper = await mountView();
+    await renderPufaCandidate(wrapper);
+    const input = symbolSearchInput(wrapper);
+
+    await input.trigger('keydown', { key: 'Enter' });
+    await flushPromises();
+
+    expect(api.addWatchlistPoolItem).not.toHaveBeenCalled();
+    expect(wrapper.get('[data-testid="add-symbol"]').attributes('disabled')).toBeUndefined();
+    expect((input.element as HTMLInputElement).value).toBe('600000.SH');
+
+    await input.trigger('keydown', { key: 'Enter' });
     await flushPromises();
 
     expect(api.addWatchlistPoolItem).toHaveBeenCalledWith({
@@ -273,7 +300,7 @@ describe('WatchlistView symbol search', () => {
 
   it('cancels a queued search when the view unmounts', async () => {
     const wrapper = await mountView();
-    await wrapper.get('[data-testid="symbol-search-input"]').setValue('PFYH');
+    await symbolSearchInput(wrapper).setValue('PFYH');
 
     wrapper.unmount();
     await vi.advanceTimersByTimeAsync(250);

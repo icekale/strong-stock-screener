@@ -114,6 +114,13 @@ function selectSymbol(value: unknown) {
   symbolInput.value = option.symbol;
 }
 
+function handleSymbolEnter(event: KeyboardEvent) {
+  if (selectedSymbol.value === null) return;
+  event.preventDefault();
+  event.stopPropagation();
+  addSymbol();
+}
+
 async function addSymbol() {
   const symbol = selectedSymbol.value;
   if (!symbol || adding.value) return;
@@ -194,7 +201,7 @@ onBeforeUnmount(() => {
             :filter-option="false"
             :options="symbolOptions"
             placeholder="输入代码、名称或拼音"
-            @keydown.enter="addSymbol"
+            @keydown.enter.capture="handleSymbolEnter"
             @search="queueSymbolSearch"
             @select="selectSymbol"
           >

@@ -16,7 +16,8 @@ import {
   getSectorReplicaRadar,
   getStockKline,
   markAllEtfAlertsRead,
-  markEtfAlertRead
+  markEtfAlertRead,
+  searchStockSymbols
 } from './product-api';
 import type { ApiRequestError } from './product-request';
 import { apiRequest } from './product-request';
@@ -95,6 +96,21 @@ describe('apiRequest', () => {
     await getStockKline('600000.SH', 120);
 
     expect(String(fetchMock.mock.calls[0]?.[0])).toContain('/api/stocks/600000.SH/kline?count=120');
+  });
+
+  it('encodes generic stock symbol search queries', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ items: [], source_status: [] }), { status: 200 })
+    );
+
+    await searchStockSymbols('浦发 PFYH', { limit: 8 });
+
+    const requestUrl = new URL(String(fetchMock.mock.calls[0]?.[0]));
+    expect(requestUrl.pathname).toBe('/api/chanlun/symbols/search');
+    expect(Array.from(requestUrl.searchParams.entries())).toEqual([
+      ['query', '浦发 PFYH'],
+      ['limit', '8']
+    ]);
   });
 
   it('requests the selected stock kline period after count', async () => {

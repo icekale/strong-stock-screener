@@ -1505,7 +1505,7 @@ export async function getChanlunPaperAccount(): Promise<ChanlunPaperAccount> {
   return response.json() as Promise<ChanlunPaperAccount>;
 }
 
-export async function searchChanlunSymbols(
+export async function searchStockSymbols(
   query: string,
   options: { limit?: number } = {},
 ): Promise<ChanlunSymbolSearchResponse> {
@@ -1515,10 +1515,12 @@ export async function searchChanlunSymbols(
   });
   const response = await apiFetch(`${API_BASE_URL}/api/chanlun/symbols/search?${params.toString()}`);
   if (!response.ok) {
-    throw new Error(`搜索缠论股票失败：${response.status} ${await response.text()}`);
+    throw new Error(`搜索股票失败：${response.status} ${await response.text()}`);
   }
   return response.json() as Promise<ChanlunSymbolSearchResponse>;
 }
+
+export const searchChanlunSymbols = searchStockSymbols;
 
 export async function createChanlunBackfillJob(
   symbol: string,

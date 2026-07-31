@@ -99,7 +99,7 @@ from app.models import (
 from app.gsgf_rules import analyze_gsgf, build_gsgf_chart_annotations
 from app.providers.ifind import IfindMcpProvider
 from app.providers.capital_signals import OfficialCapitalDataProvider, SinaEtfHolderProvider
-from app.providers.market_overview import EastmoneyMarketOverviewProvider
+from app.providers.market_overview import TICKFLOW_A_SHARE_UNIVERSE, EastmoneyMarketOverviewProvider
 from app.providers.concept_blocks import EastmoneyConceptBlockProvider
 from app.providers.heatmap import HeatmapProvider
 from app.providers.news_risk import EastmoneyNewsRiskProvider
@@ -127,6 +127,7 @@ from app.services.etf_excess_flow import EtfExcessFlowService
 from app.services.huijin_etf_activity import CORE_ETFS
 from app.services.background_jobs import BackgroundJobStore, CancelCheck, ProgressCallback
 from app.services.cache_registry import CacheRegistry
+from app.services.chanlun import symbols as chanlun_symbols
 from app.services.chanlun.adapter import ChanlunAdapter
 from app.services.chanlun.alert_service import ChanlunAlertService
 from app.services.chanlun.alerts import ChanlunAlertStore
@@ -4336,7 +4337,16 @@ def _chanlun_symbol_search_service() -> ChanlunSymbolSearchService:
     injected = getattr(app.state, "chanlun_symbol_search_service", None)
     if injected is not None:
         return injected
+
+    def load_symbols() -> object:
+        try:
+            rows = _quote_provider().get_quotes_by_universe(TICKFLOW_A_SHARE_UNIVERSE)
+        except Exception:
+            return chanlun_symbols._load_default_symbols()
+        return rows or chanlun_symbols._load_default_symbols()
+
     service = ChanlunSymbolSearchService(
+        loader=load_symbols,
         watchlist_loader=lambda: _watchlist_snapshot().items if _watchlist_snapshot() else [],
         latest_screen_loader=lambda: (
             _run_store().load_latest().items if _run_store().load_latest() is not None else []

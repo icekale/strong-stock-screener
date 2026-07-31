@@ -2535,6 +2535,32 @@ def test_chanlun_workspace_and_symbol_search_return_service_payloads(tmp_path: P
     assert symbol_search_service.calls == [("浦发", 5)]
 
 
+def test_default_symbol_search_uses_tickflow_a_share_universe(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class UniverseQuoteProvider(FakeQuoteProvider):
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+
+        def get_quotes_by_universe(self, universe: str) -> list[TickFlowQuote]:
+            self.calls.append(universe)
+            return [TickFlowQuote(symbol="600000.SH", name="浦发银行")]
+
+    monkeypatch.setattr(
+        "app.services.chanlun.symbols._load_default_symbols",
+        lambda: [],
+    )
+    quote_provider = UniverseQuoteProvider()
+    client = _client(tmp_path, quote_provider=quote_provider)
+
+    response = client.get("/api/chanlun/symbols/search?query=PFYH&limit=5")
+
+    assert response.status_code == 200
+    assert response.json()["items"] == [{"symbol": "600000.SH", "name": "浦发银行"}]
+    assert quote_provider.calls == ["CN_Equity_A"]
+
+
 def test_chanlun_backfill_reuses_active_symbol_job_and_reports_status(tmp_path: Path) -> None:
     service = BlockingChanlunService()
     client = _client(tmp_path, chanlun_analysis_service=service)

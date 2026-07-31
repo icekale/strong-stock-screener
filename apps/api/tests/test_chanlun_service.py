@@ -1558,6 +1558,23 @@ def test_symbol_search_ranks_and_deduplicates_matches() -> None:
     assert [item.symbol for item in prefix] == ["600000.SH", "600001.SH"]
 
 
+def test_symbol_search_keeps_best_ranked_duplicate() -> None:
+    service = ChanlunSymbolSearchService(
+        loader=lambda: [
+            {"code": "600000", "name": "浦发银行"},
+            {"code": "000001", "name": "浦发银行控股"},
+        ],
+        watchlist_loader=lambda: [{"symbol": "600000", "name": "浦发银行股份"}],
+    )
+
+    matches, _ = service.search("浦发银行", limit=10)
+
+    assert matches == [
+        ChanlunSymbolMatch(symbol="600000.SH", name="浦发银行"),
+        ChanlunSymbolMatch(symbol="000001.SZ", name="浦发银行控股"),
+    ]
+
+
 def test_symbol_search_normalizes_local_results_and_fails_safely() -> None:
     def failing_loader() -> object:
         raise RuntimeError("akshare unavailable")

@@ -143,15 +143,19 @@ def _filter_matches(entries: list[_SymbolSearchEntry], query: str) -> list[Chanl
             output.append(entry.match)
         return output
 
-    ranked: list[tuple[int, str, ChanlunSymbolMatch]] = []
-    seen: set[str] = set()
+    best_by_symbol: dict[str, tuple[int, ChanlunSymbolMatch]] = {}
     for entry in entries:
         rank = _match_rank(entry, needle)
         symbol = entry.match.symbol
-        if rank is None or symbol in seen:
+        if rank is None:
             continue
-        seen.add(symbol)
-        ranked.append((rank, symbol, entry.match))
+        current = best_by_symbol.get(symbol)
+        if current is None or rank < current[0]:
+            best_by_symbol[symbol] = (rank, entry.match)
+    ranked = [
+        (rank, symbol, match)
+        for symbol, (rank, match) in best_by_symbol.items()
+    ]
     ranked.sort(key=lambda item: (item[0], item[1]))
     return [item[2] for item in ranked]
 

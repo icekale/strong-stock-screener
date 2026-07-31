@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+
+from pypinyin import Style, lazy_pinyin
 
 from app.models import ChanlunSymbolMatch, StrongStockSourceStatus
 from app.services.short_term_cache import TtlCache
@@ -11,6 +14,22 @@ _SYMBOL_SOURCE = "Akshare 股票代码表"
 _EXCHANGES = {"SH", "SZ", "BJ"}
 
 
+@dataclass(frozen=True)
+class _SymbolSearchEntry:
+    match: ChanlunSymbolMatch
+    full_pinyin: str
+    initials: str
+
+
+def _index_match(match: ChanlunSymbolMatch) -> _SymbolSearchEntry:
+    name = match.name.casefold()
+    return _SymbolSearchEntry(
+        match=match,
+        full_pinyin="".join(lazy_pinyin(name, style=Style.NORMAL)).casefold(),
+        initials="".join(lazy_pinyin(name, style=Style.FIRST_LETTER)).casefold(),
+    )
+
+
 class ChanlunSymbolSearchService:
     def __init__(
         self,
@@ -18,7 +37,7 @@ class ChanlunSymbolSearchService:
         loader: Callable[[], object] | None = None,
         watchlist_loader: Callable[[], object] | None = None,
         latest_screen_loader: Callable[[], object] | None = None,
-        cache: TtlCache[tuple[list[ChanlunSymbolMatch], StrongStockSourceStatus]] | None = None,
+        cache: TtlCache[tuple[list[_SymbolSearchEntry], StrongStockSourceStatus]] | None = None,
     ) -> None:
         self.loader = loader or _load_akshare_symbols
         self.watchlist_loader = watchlist_loader or (lambda: [])
@@ -31,27 +50,29 @@ class ChanlunSymbolSearchService:
         *,
         limit: int = 20,
     ) -> tuple[list[ChanlunSymbolMatch], list[StrongStockSourceStatus]]:
-        remote_matches, status = self.cache.get_or_set("a-share-symbols", self._load_remote_matches)
+        remote_entries, status = self.cache.get_or_set("a-share-symbols", self._load_remote_matches)
         local_matches = [
             *_matches_from_rows(_safe_rows(self.watchlist_loader)),
             *_matches_from_rows(_safe_rows(self.latest_screen_loader)),
         ]
-        matched = _filter_matches([*local_matches, *remote_matches], query)
+        local_entries = [_index_match(match) for match in local_matches]
+        matched = _filter_matches([*local_entries, *remote_entries], query)
         return matched[: max(1, min(limit, 100))], [status]
 
-    def _load_remote_matches(self) -> tuple[list[ChanlunSymbolMatch], StrongStockSourceStatus]:
+    def _load_remote_matches(self) -> tuple[list[_SymbolSearchEntry], StrongStockSourceStatus]:
         try:
             matches = _matches_from_rows(_rows_from_loader(self.loader))
+            entries = [_index_match(match) for match in matches]
         except Exception as exc:
             return [], StrongStockSourceStatus(
                 source=_SYMBOL_SOURCE,
                 status="failed",
                 detail=f"股票代码表读取失败: {_exception_detail(exc)}",
             )
-        return matches, StrongStockSourceStatus(
+        return entries, StrongStockSourceStatus(
             source=_SYMBOL_SOURCE,
             status="success",
-            detail=f"已缓存 {len(matches)} 只A股代码",
+            detail=f"已缓存 {len(entries)} 只A股代码",
         )
 
 
@@ -110,18 +131,50 @@ def _matches_from_rows(rows: list[object]) -> list[ChanlunSymbolMatch]:
     return matches
 
 
-def _filter_matches(matches: list[ChanlunSymbolMatch], query: str) -> list[ChanlunSymbolMatch]:
+def _filter_matches(entries: list[_SymbolSearchEntry], query: str) -> list[ChanlunSymbolMatch]:
     needle = query.strip().casefold()
-    output: list[ChanlunSymbolMatch] = []
+    if not needle:
+        output: list[ChanlunSymbolMatch] = []
+        seen: set[str] = set()
+        for entry in entries:
+            if entry.match.symbol in seen:
+                continue
+            seen.add(entry.match.symbol)
+            output.append(entry.match)
+        return output
+
+    ranked: list[tuple[int, str, ChanlunSymbolMatch]] = []
     seen: set[str] = set()
-    for match in matches:
-        if match.symbol in seen:
+    for entry in entries:
+        rank = _match_rank(entry, needle)
+        symbol = entry.match.symbol
+        if rank is None or symbol in seen:
             continue
-        if needle and needle not in match.symbol.casefold() and needle not in match.name.casefold():
-            continue
-        seen.add(match.symbol)
-        output.append(match)
-    return output
+        seen.add(symbol)
+        ranked.append((rank, symbol, entry.match))
+    ranked.sort(key=lambda item: (item[0], item[1]))
+    return [item[2] for item in ranked]
+
+
+def _match_rank(entry: _SymbolSearchEntry, needle: str) -> int | None:
+    symbol = entry.match.symbol.casefold()
+    code = symbol.partition(".")[0]
+    name = entry.match.name.casefold()
+    if needle == symbol or needle == code:
+        return 0
+    if symbol.startswith(needle) or code.startswith(needle):
+        return 1
+    if needle == name:
+        return 2
+    if name.startswith(needle):
+        return 3
+    if entry.initials.startswith(needle):
+        return 4
+    if entry.full_pinyin.startswith(needle):
+        return 5
+    if any(needle in value for value in (symbol, name, entry.initials, entry.full_pinyin)):
+        return 6
+    return None
 
 
 def _row_value(row: object, *names: str) -> str:

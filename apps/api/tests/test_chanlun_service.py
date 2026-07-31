@@ -15,6 +15,7 @@ from app.models import (
     ChanlunAnalysisResponse,
     ChanlunSignal,
     ChanlunStroke,
+    ChanlunSymbolMatch,
     ChanlunZone,
     KlineBar,
     StrongStockDataUnavailable,
@@ -1527,6 +1528,36 @@ def test_empty_live_intraday_payload_is_insufficient_without_sqlite_history(
     )
 
 
+def test_symbol_search_matches_code_name_full_pinyin_and_initials() -> None:
+    service = ChanlunSymbolSearchService(
+        loader=lambda: [
+            {"code": "600000", "name": "浦发银行"},
+            {"code": "600001", "name": "浦发控股"},
+            {"code": "000001", "name": "平安银行"},
+        ]
+    )
+
+    for query in ("600000", "600000.SH", "浦发银行", "pufayinhang", "PFYH"):
+        matches, _ = service.search(query, limit=5)
+        assert matches[0] == ChanlunSymbolMatch(symbol="600000.SH", name="浦发银行")
+
+
+def test_symbol_search_ranks_and_deduplicates_matches() -> None:
+    service = ChanlunSymbolSearchService(
+        loader=lambda: [
+            {"code": "600001", "name": "浦发控股"},
+            {"code": "600000", "name": "浦发银行"},
+        ],
+        watchlist_loader=lambda: [{"symbol": "600000.SH", "name": "浦发银行"}],
+    )
+
+    exact, _ = service.search("PFYH", limit=10)
+    prefix, _ = service.search("PF", limit=10)
+
+    assert [item.symbol for item in exact] == ["600000.SH"]
+    assert [item.symbol for item in prefix] == ["600000.SH", "600001.SH"]
+
+
 def test_symbol_search_normalizes_local_results_and_fails_safely() -> None:
     def failing_loader() -> object:
         raise RuntimeError("akshare unavailable")
@@ -1542,6 +1573,10 @@ def test_symbol_search_normalizes_local_results_and_fails_safely() -> None:
     assert [item.symbol for item in matches] == ["600000.SH", "430047.BJ"]
     assert source_status[0].source == "Akshare 股票代码表"
     assert source_status[0].status == "failed"
+
+    pinyin_matches, pinyin_source_status = service.search("PFYH")
+    assert pinyin_matches == [ChanlunSymbolMatch(symbol="600000.SH", name="浦发银行")]
+    assert pinyin_source_status[0].status == "failed"
 
 
 def daily_bar(value: str, *, close: float) -> KlineBar:

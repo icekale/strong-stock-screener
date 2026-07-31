@@ -1,19 +1,40 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { addWatchlistPoolItem, getWatchlistGsgfStatus, getWatchlistPool, saveWatchlistPool } from '@/service/product-api';
-import type { GsgfAction, WatchlistGsgfStatusResponse, WatchlistPoolItem, WatchlistPoolResponse } from '@/service/types';
+import {
+  addWatchlistPoolItem,
+  getWatchlistGsgfStatus,
+  getWatchlistPool,
+  saveWatchlistPool,
+  searchStockSymbols
+} from '@/service/product-api';
+import type {
+  ChanlunSymbolMatch,
+  GsgfAction,
+  WatchlistGsgfStatusResponse,
+  WatchlistPoolItem,
+  WatchlistPoolResponse
+} from '@/service/types';
 
 defineOptions({ name: 'WatchlistView' });
+
+type SymbolOption = ChanlunSymbolMatch & { label: string; value: string };
 
 const router = useRouter();
 const pool = ref<WatchlistPoolResponse | null>(null);
 const gsgf = ref<WatchlistGsgfStatusResponse | null>(null);
 const content = ref('');
 const symbolInput = ref('');
+const symbolOptions = ref<SymbolOption[]>([]);
+const selectedSymbol = ref<ChanlunSymbolMatch | null>(null);
+const symbolSearchLoading = ref(false);
+const symbolSearchError = ref<string | null>(null);
 const loading = ref(false);
 const saving = ref(false);
+const adding = ref(false);
 const error = ref<string | null>(null);
+let symbolSearchTimer: ReturnType<typeof setTimeout> | null = null;
+let symbolSearchRequestId = 0;
 
 const poolItems = computed(() => pool.value?.items ?? []);
 const gsgfItems = computed(() => gsgf.value?.items ?? []);
@@ -43,15 +64,74 @@ async function save() {
   }
 }
 
-async function addSymbol() {
-  const symbol = symbolInput.value.trim().toUpperCase();
-  if (!symbol) return;
+async function runSymbolSearch(query: string, requestId: number) {
   try {
-    pool.value = await addWatchlistPoolItem({ symbol, group: '人工关注', tags: [] });
+    const response = await searchStockSymbols(query, { limit: 20 });
+    if (requestId !== symbolSearchRequestId) return;
+    symbolOptions.value = response.items.map(item => ({
+      ...item,
+      label: `${item.name} ${item.symbol}`,
+      value: item.symbol
+    }));
+  } catch (cause) {
+    if (requestId !== symbolSearchRequestId) return;
+    symbolOptions.value = [];
+    symbolSearchError.value = cause instanceof Error ? cause.message : '搜索股票失败';
+  } finally {
+    if (requestId === symbolSearchRequestId) symbolSearchLoading.value = false;
+  }
+}
+
+function queueSymbolSearch(query: string) {
+  selectedSymbol.value = null;
+  symbolSearchError.value = null;
+  if (symbolSearchTimer !== null) {
+    clearTimeout(symbolSearchTimer);
+    symbolSearchTimer = null;
+  }
+
+  const requestId = symbolSearchRequestId + 1;
+  symbolSearchRequestId = requestId;
+  const trimmedQuery = query.trim();
+  symbolOptions.value = [];
+  if (!trimmedQuery) {
+    symbolSearchLoading.value = false;
+    return;
+  }
+
+  symbolSearchLoading.value = true;
+  symbolSearchTimer = setTimeout(() => {
+    symbolSearchTimer = null;
+    runSymbolSearch(trimmedQuery, requestId);
+  }, 250);
+}
+
+function selectSymbol(value: unknown) {
+  if (typeof value !== 'string') return;
+  const option = symbolOptions.value.find(item => item.value === value);
+  if (!option) return;
+  selectedSymbol.value = { symbol: option.symbol, name: option.name };
+  symbolInput.value = option.symbol;
+}
+
+async function addSymbol() {
+  const symbol = selectedSymbol.value;
+  if (!symbol || adding.value) return;
+  adding.value = true;
+  try {
+    pool.value = await addWatchlistPoolItem({
+      symbol: symbol.symbol,
+      name: symbol.name,
+      group: '人工关注',
+      tags: []
+    });
     symbolInput.value = '';
+    queueSymbolSearch('');
     await load();
   } catch (cause) {
     error.value = cause instanceof Error ? cause.message : '加入自选失败';
+  } finally {
+    adding.value = false;
   }
 }
 
@@ -83,6 +163,13 @@ function gsgfTone(action: GsgfAction) {
 }
 
 onMounted(() => void load());
+onBeforeUnmount(() => {
+  symbolSearchRequestId += 1;
+  if (symbolSearchTimer !== null) {
+    clearTimeout(symbolSearchTimer);
+    symbolSearchTimer = null;
+  }
+});
 </script>
 
 <template>
@@ -100,11 +187,32 @@ onMounted(() => void load());
       </SectionHeader>
       <div class="watchlist-toolbar">
         <a-space-compact class="watchlist-toolbar__input">
-          <a-input v-model:value="symbolInput" placeholder="输入代码，如 600000.SH" @press-enter="addSymbol" />
-          <a-button type="primary" @click="addSymbol">加入自选</a-button>
+          <a-auto-complete
+            v-model:value="symbolInput"
+            class="watchlist-symbol-search"
+            data-testid="symbol-search-input"
+            :filter-option="false"
+            :options="symbolOptions"
+            placeholder="输入代码、名称或拼音"
+            @keydown.enter="addSymbol"
+            @search="queueSymbolSearch"
+            @select="selectSymbol"
+          >
+            <template #option="option">
+              <div class="watchlist-symbol-option">
+                <span class="watchlist-symbol-option__name">{{ option.name }}</span>
+                <span class="watchlist-symbol-option__symbol">{{ option.symbol }}</span>
+              </div>
+            </template>
+            <template #notFoundContent>
+              <span v-if="symbolInput.trim()">{{ symbolSearchLoading ? '搜索中…' : '未找到匹配股票' }}</span>
+            </template>
+          </a-auto-complete>
+          <a-button data-testid="add-symbol" :disabled="!selectedSymbol" :loading="adding" type="primary" @click="addSymbol">加入自选</a-button>
         </a-space-compact>
         <a-button :loading="saving" type="primary" @click="save">保存股票池</a-button>
       </div>
+      <a-alert v-if="symbolSearchError" :title="symbolSearchError" show-icon type="warning" />
       <a-textarea v-model:value="content" :auto-size="{ minRows: 6, maxRows: 14 }" placeholder="每行输入一个代码" />
       <div class="mt-8px text-12px text-text-secondary">支持直接维护代码列表，也可以通过上方输入框追加人工关注标的。</div>
     </section>
@@ -177,6 +285,34 @@ onMounted(() => void load());
 .watchlist-toolbar__input {
   flex: 1;
   min-width: 0;
+}
+
+.watchlist-symbol-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.watchlist-symbol-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.watchlist-symbol-option__name {
+  overflow: hidden;
+  color: var(--wb-ink);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watchlist-symbol-option__symbol {
+  flex: 0 0 auto;
+  color: var(--wb-muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .watchlist-row {

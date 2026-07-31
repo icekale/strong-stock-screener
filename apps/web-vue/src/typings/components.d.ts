@@ -13,6 +13,7 @@ export {}
 declare module 'vue' {
   export interface GlobalComponents {
     AAlert: typeof import('ant-design-vue/es')['Alert']
+    AAutoComplete: typeof import('ant-design-vue/es')['AutoComplete']
     ABadge: typeof import('ant-design-vue/es')['Badge']
     ABreadcrumb: typeof import('ant-design-vue/es')['Breadcrumb']
     ABreadcrumbItem: typeof import('ant-design-vue/es')['BreadcrumbItem']
@@ -99,6 +100,7 @@ declare module 'vue' {
 // For TSX support
 declare global {
   const AAlert: typeof import('ant-design-vue/es')['Alert']
+  const AAutoComplete: typeof import('ant-design-vue/es')['AutoComplete']
   const ABadge: typeof import('ant-design-vue/es')['Badge']
   const ABreadcrumb: typeof import('ant-design-vue/es')['Breadcrumb']
   const ABreadcrumbItem: typeof import('ant-design-vue/es')['BreadcrumbItem']

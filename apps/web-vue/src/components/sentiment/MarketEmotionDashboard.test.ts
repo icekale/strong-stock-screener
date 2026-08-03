@@ -79,6 +79,9 @@ describe('MarketEmotionDashboard', () => {
     expect(wrapper.text()).toContain('良好');
     expect(wrapper.text()).toContain('火爆');
     expect(wrapper.text()).toContain('0 冰点 · 100 火爆');
+    expect(wrapper.find('[data-testid="market-emotion-current-dot"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="market-emotion-current-label"]').text()).toContain('78');
+    expect(wrapper.find('[data-testid="market-emotion-current-label"]').text()).toContain('良好');
     expect(wrapper.find('[data-testid="emotion-chart"]').exists()).toBe(true);
   });
 });

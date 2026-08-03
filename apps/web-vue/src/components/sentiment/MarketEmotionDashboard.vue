@@ -85,15 +85,29 @@ function levelTone(level: MarketEmotionSnapshotResponse['metrics']['emotion_leve
         </div>
       </dl>
 
-      <div class="market-emotion-dashboard__bands" role="img" aria-label="市场情绪冷热区间">
-        <div v-for="band in bands" :key="band.label" class="market-emotion-dashboard__band" :class="band.className">
-          <span :class="band.textClass">{{ band.label }}</span>
+      <div class="market-emotion-dashboard__bands-wrap">
+        <div class="market-emotion-dashboard__bands" role="img" aria-label="市场情绪冷热区间">
+          <div v-for="band in bands" :key="band.label" class="market-emotion-dashboard__band" :class="band.className">
+            <span :class="band.textClass">{{ band.label }}</span>
+          </div>
+          <span
+            class="market-emotion-dashboard__marker"
+            :style="{ left: markerLeft }"
+            :aria-label="`情绪分 ${score.toFixed(1)}`"
+          />
         </div>
         <span
-          class="market-emotion-dashboard__marker"
+          data-testid="market-emotion-current-dot"
+          class="market-emotion-dashboard__current-dot"
           :style="{ left: markerLeft }"
-          :aria-label="`情绪分 ${score.toFixed(1)}`"
         />
+        <span
+          data-testid="market-emotion-current-label"
+          class="market-emotion-dashboard__current-label"
+          :style="{ left: markerLeft }"
+        >
+          {{ score.toFixed(0) }} · {{ snapshot.metrics.emotion_level }}
+        </span>
       </div>
 
       <div class="market-emotion-dashboard__chart">
@@ -209,6 +223,42 @@ function levelTone(level: MarketEmotionSnapshotResponse['metrics']['emotion_leve
   overflow: hidden;
   border: 1px solid var(--wb-border, #d9e2ea);
   border-radius: 6px;
+}
+
+.market-emotion-dashboard__bands-wrap {
+  position: relative;
+  margin-top: 26px;
+}
+
+.market-emotion-dashboard__current-dot {
+  position: absolute;
+  top: -5px;
+  left: 0;
+  z-index: 2;
+  width: 10px;
+  height: 10px;
+  background: var(--wb-ink, #182336);
+  border: 2px solid var(--wb-surface, #fff);
+  border-radius: 50%;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.market-emotion-dashboard__current-label {
+  position: absolute;
+  top: -31px;
+  left: 0;
+  z-index: 2;
+  padding: 2px 8px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+  background: var(--wb-ink, #182336);
+  border-radius: 999px;
+  pointer-events: none;
+  transform: translateX(-50%);
 }
 
 .market-emotion-dashboard__band {

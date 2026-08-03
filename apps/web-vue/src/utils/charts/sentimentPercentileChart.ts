@@ -75,11 +75,24 @@ export function buildSentimentPercentileChartOption(
             point.trade_date === latestTradeDate || point.trade_date === selectedTradeDate || isExtreme(point.level)
               ? 6
               : 0,
-          itemStyle: { color: levelColor(point.level) }
+          itemStyle: { color: levelColor(point.level) },
+          ...(isExtreme(point.level)
+            ? {
+                label: {
+                  show: true,
+                  formatter: point.level,
+                  position: point.level === '冰点' ? 'bottom' : 'top',
+                  color: levelColor(point.level),
+                  fontSize: 11,
+                  fontWeight: 600,
+                  hideOverlap: true
+                }
+              }
+            : {})
         })),
         markArea: {
           silent: true,
-          label: { color: COLORS.muted, fontSize: 11 },
+          label: { show: true, color: COLORS.muted, fontSize: 11 },
           data: [
             [
               {

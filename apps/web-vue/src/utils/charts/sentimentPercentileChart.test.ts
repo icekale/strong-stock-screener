@@ -61,7 +61,7 @@ describe('buildSentimentPercentileChartOption', () => {
     const option = buildSentimentPercentileChartOption(historyFixture(), '2026-07-22', false);
     const series = option.series as Array<{
       data: Array<{ symbolSize: number }>;
-      markArea: { data: Array<Array<Record<string, unknown>>> };
+      markArea: { data: Array<Array<Record<string, unknown>>>; label: Record<string, unknown> };
       markLine: { data: Array<Record<string, unknown>> };
     }>;
 
@@ -83,17 +83,28 @@ describe('buildSentimentPercentileChartOption', () => {
     );
     expect(JSON.stringify(option)).toContain('冰点区');
     expect(JSON.stringify(option)).toContain('过热区');
+    expect(series[0]?.markArea.label).toMatchObject({ show: true });
   });
 
   it('marks extreme points independently of the latest point', () => {
     const option = buildSentimentPercentileChartOption(historyFixture(), '2026-07-22', false);
     const series = option.series as Array<{
-      data: Array<{ symbolSize: number; itemStyle: { color: string } }>;
+      data: Array<{
+        symbolSize: number;
+        itemStyle: { color: string };
+        label?: { show: boolean; formatter: string; position: string };
+      }>;
     }>;
 
     expect(series[0]?.data[0]).toMatchObject({ symbolSize: 6, itemStyle: { color: '#16805c' } });
     expect(series[0]?.data[1]).toMatchObject({ symbolSize: 6, itemStyle: { color: '#c9363e' } });
     expect(series[0]?.data[2]).toMatchObject({ symbolSize: 0 });
+    expect(series[0]?.data[0]).toMatchObject({
+      label: { show: true, formatter: '冰点', position: 'bottom' }
+    });
+    expect(series[0]?.data[1]).toMatchObject({
+      label: { show: true, formatter: '过热', position: 'top' }
+    });
   });
 
   it('marks a non-extreme latest point with its actual level color', () => {

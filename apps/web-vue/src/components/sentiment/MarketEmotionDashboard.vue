@@ -27,7 +27,7 @@ const bands = [
     textClass: 'market-emotion-dashboard__band-text--warm'
   },
   {
-    label: '火爆',
+    label: '热点',
     className: 'market-emotion-dashboard__band--hot',
     textClass: 'market-emotion-dashboard__band-text--hot'
   }
@@ -61,7 +61,7 @@ function levelTone(level: MarketEmotionSnapshotResponse['metrics']['emotion_leve
         <span class="market-emotion-dashboard__score-label">情绪指标</span>
         <strong class="wb-tabular-nums">{{ score.toFixed(1) }}</strong>
         <span class="market-emotion-dashboard__level">{{ snapshot.metrics.emotion_level }}</span>
-        <span class="market-emotion-dashboard__scale">0 冰点 · 100 火爆</span>
+        <span class="market-emotion-dashboard__scale">0 冰点 · 100 热点</span>
       </div>
 
       <dl class="market-emotion-dashboard__metrics">
@@ -86,6 +86,28 @@ function levelTone(level: MarketEmotionSnapshotResponse['metrics']['emotion_leve
       </dl>
 
       <div class="market-emotion-dashboard__bands-wrap">
+        <div class="market-emotion-dashboard__bands-legend">
+          <span
+            data-testid="ice-point"
+            class="market-emotion-dashboard__extreme market-emotion-dashboard__extreme--ice"
+          >
+            <span class="market-emotion-dashboard__extreme-dot" />
+            冰点
+          </span>
+          <span
+            data-testid="market-emotion-current-label"
+            class="market-emotion-dashboard__current-label"
+          >
+            {{ score.toFixed(0) }} · {{ snapshot.metrics.emotion_level }}
+          </span>
+          <span
+            data-testid="hot-point"
+            class="market-emotion-dashboard__extreme market-emotion-dashboard__extreme--hot"
+          >
+            热点
+            <span class="market-emotion-dashboard__extreme-dot" />
+          </span>
+        </div>
         <div class="market-emotion-dashboard__bands" role="img" aria-label="市场情绪冷热区间">
           <div v-for="band in bands" :key="band.label" class="market-emotion-dashboard__band" :class="band.className">
             <span :class="band.textClass">{{ band.label }}</span>
@@ -101,13 +123,6 @@ function levelTone(level: MarketEmotionSnapshotResponse['metrics']['emotion_leve
           class="market-emotion-dashboard__current-dot"
           :style="{ left: markerLeft }"
         />
-        <span
-          data-testid="market-emotion-current-label"
-          class="market-emotion-dashboard__current-label"
-          :style="{ left: markerLeft }"
-        >
-          {{ score.toFixed(0) }} · {{ snapshot.metrics.emotion_level }}
-        </span>
       </div>
 
       <div class="market-emotion-dashboard__chart">
@@ -227,7 +242,43 @@ function levelTone(level: MarketEmotionSnapshotResponse['metrics']['emotion_leve
 
 .market-emotion-dashboard__bands-wrap {
   position: relative;
-  margin-top: 26px;
+}
+
+.market-emotion-dashboard__bands-legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.market-emotion-dashboard__extreme {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 56px;
+  color: var(--wb-muted, #697991);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.market-emotion-dashboard__extreme--hot {
+  justify-content: flex-end;
+}
+
+.market-emotion-dashboard__extreme-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.market-emotion-dashboard__extreme--ice .market-emotion-dashboard__extreme-dot {
+  background: #1d4ed8;
+}
+
+.market-emotion-dashboard__extreme--hot .market-emotion-dashboard__extreme-dot {
+  background: #b91c1c;
 }
 
 .market-emotion-dashboard__current-dot {
@@ -245,10 +296,6 @@ function levelTone(level: MarketEmotionSnapshotResponse['metrics']['emotion_leve
 }
 
 .market-emotion-dashboard__current-label {
-  position: absolute;
-  top: -31px;
-  left: 0;
-  z-index: 2;
   padding: 2px 8px;
   color: #fff;
   font-size: 12px;
@@ -258,7 +305,6 @@ function levelTone(level: MarketEmotionSnapshotResponse['metrics']['emotion_leve
   background: var(--wb-ink, #182336);
   border-radius: 999px;
   pointer-events: none;
-  transform: translateX(-50%);
 }
 
 .market-emotion-dashboard__band {

@@ -119,6 +119,7 @@ describe('SentimentView percentile integration', () => {
     expect(wrapper.text()).toContain('市场情绪百分位更新失败');
     expect(wrapper.text()).toContain('市场情绪仪表盘');
     expect(wrapper.text()).toContain('冰点');
+    expect(wrapper.text()).toContain('热点');
     expect(wrapper.text()).toContain('火爆');
     expect(wrapper.text()).toContain('涨停家数 68');
     expect(wrapper.text()).toContain('轻仓试错');

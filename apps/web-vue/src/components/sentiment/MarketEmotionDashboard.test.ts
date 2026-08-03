@@ -77,8 +77,10 @@ describe('MarketEmotionDashboard', () => {
     expect(wrapper.text()).toContain('冰点');
     expect(wrapper.text()).toContain('一般');
     expect(wrapper.text()).toContain('良好');
-    expect(wrapper.text()).toContain('火爆');
-    expect(wrapper.text()).toContain('0 冰点 · 100 火爆');
+    expect(wrapper.text()).toContain('热点');
+    expect(wrapper.text()).toContain('0 冰点 · 100 热点');
+    expect(wrapper.find('[data-testid="ice-point"]').exists()).toBe(true);
+    expect(wrapper.find('[data-testid="hot-point"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="market-emotion-current-dot"]').exists()).toBe(true);
     expect(wrapper.find('[data-testid="market-emotion-current-label"]').text()).toContain('78');
     expect(wrapper.find('[data-testid="market-emotion-current-label"]').text()).toContain('良好');

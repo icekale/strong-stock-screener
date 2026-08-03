@@ -86,25 +86,48 @@ describe('buildSentimentPercentileChartOption', () => {
     expect(series[0]?.markArea.label).toMatchObject({ show: true });
   });
 
-  it('marks extreme points independently of the latest point', () => {
+  it('renders ice and overheat points as dedicated green and red scatter dots', () => {
     const option = buildSentimentPercentileChartOption(historyFixture(), '2026-07-22', false);
     const series = option.series as Array<{
-      data: Array<{
-        symbolSize: number;
-        itemStyle: { color: string };
-        label?: { show: boolean; formatter: string; position: string };
-      }>;
+      name?: string;
+      type?: string;
+      data: unknown[];
+      symbolSize?: number;
+      itemStyle?: { color: string };
+    }>;
+    const iceSeries = series.find(item => item.name === '冰点' && item.type === 'scatter');
+    const hotSeries = series.find(item => item.name === '过热' && item.type === 'scatter');
+
+    expect(iceSeries?.data).toEqual([['2026-07-18', 16]]);
+    expect(hotSeries?.data).toEqual([['2026-07-19', 88]]);
+    expect(iceSeries?.itemStyle).toMatchObject({ color: '#16805c' });
+    expect(hotSeries?.itemStyle).toMatchObject({ color: '#c9363e' });
+    expect(iceSeries?.symbolSize).toBeGreaterThan(0);
+    expect(hotSeries?.symbolSize).toBeGreaterThan(0);
+  });
+
+  it('keeps every historical ice and overheat point in the scatter layers', () => {
+    const history = [
+      createPoint({ trade_date: '2026-07-18', score: 16, level: '冰点', volumeRawValue: 1 }),
+      createPoint({ trade_date: '2026-07-19', score: 88, level: '过热', volumeRawValue: 2 }),
+      createPoint({ trade_date: '2026-07-20', score: 14, level: '冰点', volumeRawValue: 3 }),
+      createPoint({ trade_date: '2026-07-21', score: 91, level: '过热', volumeRawValue: 4 })
+    ];
+    const option = buildSentimentPercentileChartOption(history, '2026-07-21', false);
+    const series = option.series as Array<{
+      name?: string;
+      type?: string;
+      data: Array<Array<string | number>>;
     }>;
 
-    expect(series[0]?.data[0]).toMatchObject({ symbolSize: 6, itemStyle: { color: '#16805c' } });
-    expect(series[0]?.data[1]).toMatchObject({ symbolSize: 6, itemStyle: { color: '#c9363e' } });
-    expect(series[0]?.data[2]).toMatchObject({ symbolSize: 0 });
-    expect(series[0]?.data[0]).toMatchObject({
-      label: { show: true, formatter: '冰点', position: 'bottom' }
-    });
-    expect(series[0]?.data[1]).toMatchObject({
-      label: { show: true, formatter: '过热', position: 'top' }
-    });
+    expect(series.find(item => item.name === '冰点')?.data).toEqual([
+      ['2026-07-18', 16],
+      ['2026-07-20', 14]
+    ]);
+    expect(series.find(item => item.name === '过热')?.data).toEqual([
+      ['2026-07-19', 88],
+      ['2026-07-21', 91]
+    ]);
   });
 
   it('marks a non-extreme latest point with its actual level color', () => {

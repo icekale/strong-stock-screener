@@ -1,4 +1,4 @@
-import type { SentimentPercentileFactor, SentimentPercentileLevel, SentimentPercentilePoint } from '@/service/types';
+import type { SentimentPercentileFactor, SentimentPercentilePoint } from '@/service/types';
 
 const COLORS = {
   primary: '#245b8a',
@@ -72,23 +72,10 @@ export function buildSentimentPercentileChartOption(
         data: history.map(point => ({
           value: point.score,
           symbolSize:
-            point.trade_date === latestTradeDate || point.trade_date === selectedTradeDate || isExtreme(point.level)
+            point.trade_date === latestTradeDate || point.trade_date === selectedTradeDate
               ? 6
               : 0,
-          itemStyle: { color: levelColor(point.level) },
-          ...(isExtreme(point.level)
-            ? {
-                label: {
-                  show: true,
-                  formatter: point.level,
-                  position: point.level === '冰点' ? 'bottom' : 'top',
-                  color: levelColor(point.level),
-                  fontSize: 11,
-                  fontWeight: 600,
-                  hideOverlap: true
-                }
-              }
-            : {})
+          itemStyle: { color: levelColor(point.level) }
         })),
         markArea: {
           silent: true,
@@ -119,16 +106,34 @@ export function buildSentimentPercentileChartOption(
           lineStyle: { color: COLORS.muted, type: 'dashed' },
           data: [{ yAxis: 20 }, { yAxis: 80 }]
         }
+      },
+      {
+        name: '冰点',
+        type: 'scatter',
+        data: history.filter(point => point.level === '冰点').map(point => [point.trade_date, point.score]),
+        symbol: 'circle',
+        symbolSize: 8,
+        itemStyle: { color: COLORS.negative },
+        silent: true,
+        tooltip: { show: false },
+        z: 5
+      },
+      {
+        name: '过热',
+        type: 'scatter',
+        data: history.filter(point => point.level === '过热').map(point => [point.trade_date, point.score]),
+        symbol: 'circle',
+        symbolSize: 8,
+        itemStyle: { color: COLORS.positive },
+        silent: true,
+        tooltip: { show: false },
+        z: 5
       }
     ]
   };
 }
 
-function isExtreme(level: SentimentPercentileLevel): boolean {
-  return level === '冰点' || level === '过热';
-}
-
-function levelColor(level: SentimentPercentileLevel): string {
+function levelColor(level: SentimentPercentilePoint['level']): string {
   if (level === '冰点') return COLORS.negative;
   if (level === '偏冷') return COLORS.primary;
   if (level === '偏热') return COLORS.warning;

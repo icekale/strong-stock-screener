@@ -1,10 +1,22 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import dayjs from 'dayjs';
-import { getSentimentDecision, getSentimentSummary, getShortTermIntradaySentiment } from '@/service/product-api';
-import type { SentimentDecisionResponse, SentimentSummaryResponse, ShortTermIntradaySentimentItem, ShortTermIntradaySentimentResponse } from '@/service/types';
+import {
+  getMarketEmotionSnapshot,
+  getSentimentDecision,
+  getSentimentSummary,
+  getShortTermIntradaySentiment
+} from '@/service/product-api';
+import type {
+  MarketEmotionSnapshotResponse,
+  SentimentDecisionResponse,
+  SentimentSummaryResponse,
+  ShortTermIntradaySentimentItem,
+  ShortTermIntradaySentimentResponse
+} from '@/service/types';
 import { formatWorkbenchNumber } from '@/components/common/workbench/workbench';
 import type { WorkbenchMetric } from '@/components/common/workbench/workbench';
+import MarketEmotionDashboard from '@/components/sentiment/MarketEmotionDashboard.vue';
 import SentimentPercentilePanel from '@/components/sentiment/SentimentPercentilePanel.vue';
 import { useTradeDate } from '@/composables/useTradeDate';
 
@@ -14,6 +26,7 @@ const { tradeDate, setTradeDate } = useTradeDate();
 const summary = ref<SentimentSummaryResponse | null>(null);
 const decision = ref<SentimentDecisionResponse | null>(null);
 const intraday = ref<ShortTermIntradaySentimentResponse | null>(null);
+const marketEmotion = ref<MarketEmotionSnapshotResponse | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const percentileRefreshToken = ref(0);
@@ -31,10 +44,16 @@ const sentimentMetrics = computed<WorkbenchMetric[]>(() => {
 async function load() {
   loading.value = true;
   error.value = null;
-  const results = await Promise.allSettled([getSentimentSummary(tradeDate.value), getSentimentDecision(tradeDate.value), getShortTermIntradaySentiment(tradeDate.value)]);
+  const results = await Promise.allSettled([
+    getSentimentSummary(tradeDate.value),
+    getSentimentDecision(tradeDate.value),
+    getShortTermIntradaySentiment(tradeDate.value),
+    getMarketEmotionSnapshot(tradeDate.value)
+  ]);
   if (results[0].status === 'fulfilled') summary.value = results[0].value;
   if (results[1].status === 'fulfilled') decision.value = results[1].value;
   if (results[2].status === 'fulfilled') intraday.value = results[2].value;
+  if (results[3].status === 'fulfilled') marketEmotion.value = results[3].value;
   if (results.every(result => result.status === 'rejected')) error.value = '情绪数据暂时不可用';
   loading.value = false;
 }
@@ -112,6 +131,7 @@ onMounted(() => void load());
 
     <a-alert v-if="error" :title="error" show-icon type="warning" />
     <SentimentPercentilePanel :as-of="tradeDate" :refresh-token="percentileRefreshToken" />
+    <MarketEmotionDashboard v-if="marketEmotion" :snapshot="marketEmotion" />
     <div data-testid="sentiment-metrics">
       <MetricStrip :items="sentimentMetrics" />
     </div>

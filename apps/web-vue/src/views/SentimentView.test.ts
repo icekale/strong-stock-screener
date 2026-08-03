@@ -7,6 +7,7 @@ import SentimentView from './SentimentView.vue';
 
 const api = vi.hoisted(() => ({
   generateMarketSentimentAnalysis: vi.fn(),
+  getMarketEmotionSnapshot: vi.fn(),
   getMarketSentimentAnalysis: vi.fn(),
   getMarketSentimentPercentile: vi.fn(),
   getSentimentDecision: vi.fn(),
@@ -55,6 +56,32 @@ beforeEach(() => {
   );
   api.getMarketSentimentPercentile.mockRejectedValue(new Error('percentile unavailable'));
   api.getMarketSentimentAnalysis.mockResolvedValue({ status: 'not_generated' });
+  api.getMarketEmotionSnapshot.mockResolvedValue({
+    trade_date: '2026-07-22',
+    metrics: {
+      emotion_score: 82,
+      emotion_level: '火爆',
+      limit_up_count: 88,
+      break_board_count: 9,
+      limit_down_count: 2,
+      losing_effect_score: null,
+      max_consecutive_boards: 6,
+      advance_count: 4000,
+      decline_count: 1200,
+      seal_rate_pct: 86,
+      turnover_cny: 2_000_000_000_000,
+      turnover_change_cny: null,
+      turnover_change_pct: null,
+      main_flow_cny: null,
+      yesterday_limit_up_performance_pct: null,
+      yesterday_ladder_performance_pct: null
+    },
+    buckets: [],
+    samples: [],
+    source_status: [],
+    notes: [],
+    generated_at: '2026-07-22T15:20:00+08:00'
+  });
   api.getSentimentSummary.mockResolvedValue({
     metrics: {
       emotion_score: 72,
@@ -90,6 +117,9 @@ describe('SentimentView percentile integration', () => {
     await flushPromises();
 
     expect(wrapper.text()).toContain('市场情绪百分位更新失败');
+    expect(wrapper.text()).toContain('市场情绪仪表盘');
+    expect(wrapper.text()).toContain('冰点');
+    expect(wrapper.text()).toContain('火爆');
     expect(wrapper.text()).toContain('涨停家数 68');
     expect(wrapper.text()).toContain('轻仓试错');
     expect(wrapper.text()).toContain('主线信号');
@@ -97,6 +127,7 @@ describe('SentimentView percentile integration', () => {
     expect(api.getSentimentSummary).toHaveBeenCalledOnce();
     expect(api.getSentimentDecision).toHaveBeenCalledOnce();
     expect(api.getShortTermIntradaySentiment).toHaveBeenCalledOnce();
+    expect(api.getMarketEmotionSnapshot).toHaveBeenCalledOnce();
   });
 
   it('places the percentile panel before metrics and refreshes it only from the explicit action', async () => {
@@ -105,7 +136,9 @@ describe('SentimentView percentile integration', () => {
 
     const percentile = wrapper.get('[data-testid="sentiment-percentile-panel"]');
     const metrics = wrapper.get('[data-testid="sentiment-metrics"]');
-    expect(percentile.element.nextElementSibling).toBe(metrics.element);
+    const emotion = wrapper.get('[data-testid="market-emotion-dashboard"]');
+    expect(percentile.element.nextElementSibling).toBe(emotion.element);
+    expect(emotion.element.nextElementSibling).toBe(metrics.element);
     expect(api.getMarketSentimentPercentile).toHaveBeenCalledWith(expect.any(String), false);
 
     await wrapper.get('[data-testid="sentiment-refresh"]').trigger('click');

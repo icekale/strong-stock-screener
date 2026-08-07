@@ -143,7 +143,7 @@ def _signal_index(trade_date: str, bars: list[KlineBar]) -> int | None:
     for index, bar in enumerate(bars):
         if bar.date == trade_date:
             return index
-    return 0 if bars else None
+    return None
 
 
 def _buckets(items: list[GsgfReviewItem], windows: list[int]) -> list[GsgfReviewBucket]:

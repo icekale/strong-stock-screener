@@ -222,6 +222,9 @@ class ResearchDatasetBuilder:
         adjustment_mode = str(getattr(self.source, "adjustment_mode", "unknown"))
         digest = hashlib.sha256()
         digest.update(f"{start}\0{end}".encode("utf-8"))
+        # 所有 chunk 哈希按 label 排序后统一进入 digest，使全量构建与断点续传
+        # 的结果不依赖 daily_rows_by_year 的迭代顺序。
+        digest_parts: dict[str, str] = {}
         invalid_count = 0
         duplicate_count = 0
         adjustment_mismatch_count = 0
@@ -251,8 +254,7 @@ class ResearchDatasetBuilder:
                 for key, value in progress.get("rolling_rows", {}).items()
             }
             broken_codes = {str(value) for value in progress.get("broken_codes", [])}
-            for chunk in completed_chunks:
-                digest.update(chunk_hashes[chunk].encode("ascii"))
+            digest_parts.update(chunk_hashes)
 
         try:
             chunk_method = self.source.daily_rows_by_year
@@ -284,7 +286,7 @@ class ResearchDatasetBuilder:
                     ).encode("utf-8")
                 ).hexdigest()
                 chunk_hashes[chunk_label] = chunk_hash
-                digest.update(chunk_hash.encode("ascii"))
+                digest_parts[chunk_label] = chunk_hash
                 if chunk_label not in completed_chunks:
                     completed_chunks.append(chunk_label)
                 if daily_rows:
@@ -352,6 +354,8 @@ class ResearchDatasetBuilder:
                     adjustment_mismatch_count=adjustment_mismatch_count,
                 )
 
+            for chunk_label in sorted(digest_parts):
+                digest.update(digest_parts[chunk_label].encode("ascii"))
             digest_value = digest.hexdigest()
             root = output / f"dataset-{digest_value[:16]}"
             if root.exists():

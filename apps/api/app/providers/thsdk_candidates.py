@@ -83,6 +83,8 @@ def normalize_symbol(value: str) -> str:
     code = re.sub(r"\D", "", code)
     if len(code) != 6:
         return ""
+    if code.startswith("92"):
+        return f"{code}.BJ"
     if code.startswith(("6", "9")):
         return f"{code}.SH"
     if code.startswith(("8", "4")):

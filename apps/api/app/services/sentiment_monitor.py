@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.services.common import sample_from_snapshot as _sample_from_snapshot
 
 from datetime import datetime, time, timedelta
 from threading import Event, RLock, Thread
@@ -382,26 +383,6 @@ def _format_alert_message(
     lines.append("")
     lines.append("仅供复盘与盯盘提醒，不构成投资建议。")
     return "\n".join(lines)
-
-
-def _sample_from_snapshot(snapshot: MarketEmotionSnapshotResponse) -> MarketEmotionSample:
-    metrics = snapshot.metrics
-    return MarketEmotionSample(
-        trade_date=snapshot.trade_date,
-        sampled_at=snapshot.generated_at,
-        emotion_score=metrics.emotion_score,
-        emotion_level=metrics.emotion_level,
-        limit_up_count=metrics.limit_up_count,
-        break_board_count=metrics.break_board_count,
-        limit_down_count=metrics.limit_down_count,
-        losing_effect_score=metrics.losing_effect_score,
-        max_consecutive_boards=metrics.max_consecutive_boards,
-        advance_count=metrics.advance_count,
-        decline_count=metrics.decline_count,
-        seal_rate_pct=metrics.seal_rate_pct,
-        turnover_cny=metrics.turnover_cny,
-        turnover_change_pct=metrics.turnover_change_pct,
-    )
 
 
 def _sample_at_or_before(

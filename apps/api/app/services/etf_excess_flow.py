@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.services.common import latest_trade_date as _latest_weekday
 
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -17,7 +18,6 @@ from app.models import (
 )
 from app.services.capital_signal_store import CapitalSignalStore
 from app.services.huijin_etf_activity import ALL_ETFS
-from app.services.trading_calendar import is_open_session, previous_open_session
 
 
 BASELINE_DAYS = 20
@@ -237,13 +237,6 @@ def _direction(delta: float | None) -> str:
 def _signed_excess_shares(delta: float, baseline: float) -> float:
     excess = max(abs(delta) - baseline, 0)
     return excess if delta > 0 else -excess if delta < 0 else 0.0
-
-
-def _latest_weekday(now: datetime) -> str:
-    current = now.date()
-    if not is_open_session(current):
-        current = previous_open_session(current)
-    return current.isoformat()
 
 
 def _is_adjacent_observed_date(

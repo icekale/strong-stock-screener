@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.services.common import dedupe_symbols as _dedupe_symbols
 
 from statistics import mean
 from typing import Protocol
@@ -276,12 +277,3 @@ def _pct_diff(value: float | None, base: float | None) -> float | None:
     return round((value - base) / base * 100, 4)
 
 
-def _dedupe_symbols(symbols: list[str]) -> list[str]:
-    output: list[str] = []
-    seen: set[str] = set()
-    for symbol in symbols:
-        normalized = symbol.strip().upper()
-        if normalized and normalized not in seen:
-            seen.add(normalized)
-            output.append(normalized)
-    return output

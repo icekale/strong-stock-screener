@@ -198,13 +198,13 @@ class IfindMcpProvider:
         response.sector = _coerce_mapping(sector)
         return response
 
-    def get_stock_industries(self, symbols: list[str], batch_size: int = 5) -> dict[str, str]:
+    def get_stock_industries(self, symbols: list[str], batch_size: int = 20) -> dict[str, str]:
         if not self.api_key:
             return {}
         normalized_symbols = _dedupe_symbols(symbols)
         if not normalized_symbols:
             return {}
-        bounded_batch_size = max(1, min(batch_size, 5))
+        bounded_batch_size = max(1, min(batch_size, 20))
         output: dict[str, str] = {}
         for start in range(0, len(normalized_symbols), bounded_batch_size):
             batch = normalized_symbols[start : start + bounded_batch_size]

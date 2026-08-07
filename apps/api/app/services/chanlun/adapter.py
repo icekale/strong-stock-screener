@@ -13,6 +13,7 @@ from app.models import (
     KlineBar,
     StrongStockSourceStatus,
 )
+from app.services.chanlun.signals import derive_confirmed_events
 from app.services.chanlun.structures import (
     VISUAL_RULE_VERSION,
     StructureMappingError,
@@ -180,6 +181,21 @@ class ChanlunAdapter:
             if observing:
                 strokes.append(observing)
 
+        # 背驰与买卖点信号：strokes 的 start_at/end_at 已是 _chart_datetime 归一化格式，
+        # 因此喂给信号推导的 bars 也必须用相同日期键，否则日K/分钟线都无法匹配。
+        signal_bars = [
+            bar.model_copy(update={"date": _chart_datetime(bar.date)}) for bar in bars
+        ]
+        try:
+            divergences, signals = derive_confirmed_events(
+                signal_bars,
+                completed_strokes,
+                zones,
+                rule_version=VISUAL_RULE_VERSION,
+            )
+        except (IndexError, KeyError, ValueError):
+            divergences, signals = [], []
+
         return ChanlunAnalysisResponse(
             symbol=symbol,
             period=period,
@@ -189,8 +205,8 @@ class ChanlunAdapter:
             strokes=strokes,
             segments=[],
             zones=zones,
-            divergences=[],
-            signals=[],
+            divergences=divergences,
+            signals=signals,
             source_status=[
                 StrongStockSourceStatus(
                     source=self.source_name,
@@ -199,8 +215,8 @@ class ChanlunAdapter:
                 ),
                 StrongStockSourceStatus(
                     source="Chanlun衍生结构",
-                    status="disabled",
-                    detail="线段、背驰和买卖点等待黄金样本验证，当前不参与预警、回测或模拟盘",
+                    status="success",
+                    detail=f"已产出 {len(divergences)} 个背驰、{len(signals)} 个买卖点信号",
                 ),
             ],
             last_closed_bar_at=last_closed_bar_at,

@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app.models import GsgfAnalysis, KlineBar, StrongStockScreeningItem, StrongStockScreeningResult
-from app.services.gsgf_review import GsgfReviewStore
+from app.services.gsgf_review import GsgfReviewStore, _signal_index
 
 
 def test_gsgf_review_store_persists_snapshot_and_rechecks_windows(tmp_path: Path) -> None:
@@ -89,3 +89,10 @@ def _bars(closes: list[float]) -> list[KlineBar]:
         )
         for index, close in enumerate(closes)
     ]
+
+
+def test_gsgf_review_signal_index_matches_iso_daily_bars_and_returns_none_when_missing() -> None:
+    bars = _bars([10, 10.4, 10.7])
+
+    assert _signal_index("2026-06-12", bars) == 1
+    assert _signal_index("2026-06-30", bars) is None

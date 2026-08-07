@@ -66,7 +66,7 @@ def parse_baidu_kline_payload(payload: dict[str, Any]) -> list[KlineBar]:
             continue
         item = dict(zip(keys, values, strict=False))
         bar = KlineBar(
-            date=str(item.get("time") or ""),
+            date=_normalize_bar_date(item.get("time")),
             open=_float(item.get("open")) or 0.0,
             close=_float(item.get("close")) or 0.0,
             high=_float(item.get("high")) or 0.0,
@@ -87,3 +87,11 @@ def _float(value: object) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _normalize_bar_date(value: object) -> str:
+    """百度日K日期是紧凑 YYYYMMDD，统一为与业务侧一致的 YYYY-MM-DD。"""
+    text = str(value or "").strip()
+    if len(text) == 8 and text.isdigit():
+        return f"{text[0:4]}-{text[4:6]}-{text[6:8]}"
+    return text

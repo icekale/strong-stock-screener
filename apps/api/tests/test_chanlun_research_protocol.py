@@ -392,3 +392,20 @@ def test_ready_response_requires_all_diagnostics_and_sanitized_error_text() -> N
     unsafe_error.update(status="error", diagnostics={}, error="Traceback:\nsecret")
     with pytest.raises(ValidationError, match="sanitized"):
         CzscRc8Response.model_validate(unsafe_error)
+
+
+def test_compact_daily_dates_are_normalized_to_closing_boundary() -> None:
+    """YYYYMMDD 紧凑日K（部分 provider 输出）必须按 15:00 收盘边界归一化。"""
+    bars = _period_bars()
+    bars["1d"] = [_bar("20260709"), _bar("20260710")]
+
+    request = build_research_request(
+        "600000.SH",
+        bars,
+        request_id="compact-daily",
+        adjustment_mode="qfq",
+        decision_at="2026-07-10T15:00:00+08:00",
+    )
+
+    assert request.last_closed_by_period["1d"] == "2026-07-10T15:00:00+08:00"
+    assert request.periods["1d"][-1].date == "2026-07-10T15:00:00+08:00"

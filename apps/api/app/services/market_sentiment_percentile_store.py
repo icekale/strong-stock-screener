@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from threading import RLock
 
 from app.models import SentimentPercentileResponse
 from app.services.market_sentiment_percentile import MODEL_VERSION
+
+logger = logging.getLogger(__name__)
 
 
 class MarketSentimentPercentileStore:
@@ -22,6 +25,7 @@ class MarketSentimentPercentileStore:
                     self.latest_path.read_text(encoding="utf-8")
                 )
             except Exception:
+                logger.warning("sentiment percentile 持久化损坏，忽略: %s", self.latest_path)
                 return None
             return value if value.model_version == MODEL_VERSION else None
 

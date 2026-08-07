@@ -15,6 +15,9 @@ type EtfAlertNotificationDependencies = {
 
 const POLLING_INTERVAL_MS = 30_000;
 const POPUP_ALERT_TYPES = new Set<EtfAlertType>(['single_high', 'single_upgrade', 'market_high']);
+// 已弹窗告警的滑动窗口上限：只阻止近期重复弹窗，避免 Set 随 SPA 生命周期无限增长
+// 导致长时间运行后真实新告警被漏掉。
+const SHOWN_ALERT_MAX_IDS = 200;
 
 const alerts = ref<EtfActivityAlert[]>([]);
 const unreadCount = ref(0);
@@ -62,6 +65,10 @@ function showNewAlertPopups(nextAlerts: EtfActivityAlert[]) {
     if (alert.read || !POPUP_ALERT_TYPES.has(alert.alert_type) || shownAlertIds.has(alert.alert_id)) return;
 
     shownAlertIds.add(alert.alert_id);
+    if (shownAlertIds.size > SHOWN_ALERT_MAX_IDS) {
+      const oldest = shownAlertIds.values().next().value;
+      if (oldest !== undefined) shownAlertIds.delete(oldest);
+    }
     dependencies.notify(alert);
   });
 }

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import dayjs from 'dayjs';
+import { as } from '@/utils/common';
 import {
   getMarketEmotionSnapshot,
   getSentimentDecision,
@@ -30,6 +31,8 @@ const marketEmotion = ref<MarketEmotionSnapshotResponse | null>(null);
 const loading = ref(false);
 const error = ref<string | null>(null);
 const percentileRefreshToken = ref(0);
+// 请求代际保护：切换交易日时旧请求的慢响应不能覆盖新日期数据。
+let requestGeneration = 0;
 
 const sentimentMetrics = computed<WorkbenchMetric[]>(() => {
   const metrics = summary.value?.metrics;
@@ -42,6 +45,7 @@ const sentimentMetrics = computed<WorkbenchMetric[]>(() => {
 });
 
 async function load() {
+  const generation = ++requestGeneration;
   loading.value = true;
   error.value = null;
   const results = await Promise.allSettled([
@@ -50,6 +54,7 @@ async function load() {
     getShortTermIntradaySentiment(tradeDate.value),
     getMarketEmotionSnapshot(tradeDate.value)
   ]);
+  if (generation !== requestGeneration) return; // 已有更新的请求，丢弃本次结果
   if (results[0].status === 'fulfilled') summary.value = results[0].value;
   if (results[1].status === 'fulfilled') decision.value = results[1].value;
   if (results[2].status === 'fulfilled') intraday.value = results[2].value;
@@ -111,11 +116,12 @@ function intradayActionTone(value: ShortTermIntradaySentimentItem['action']) {
 }
 
 function asMainSector(value: unknown) {
-  return value as SentimentDecisionResponse['main_sectors'][number];
+  return as<SentimentDecisionResponse['main_sectors'][number]>(value);
 }
 
+
 function asIntradayItem(value: unknown) {
-  return value as ShortTermIntradaySentimentItem;
+  return as<ShortTermIntradaySentimentItem>(value);
 }
 
 onMounted(() => void load());

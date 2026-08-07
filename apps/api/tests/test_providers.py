@@ -2088,8 +2088,8 @@ def test_tickflow_daily_kline_provider_maps_1d_payload() -> None:
     bars = provider.get_klines("000636.SZ", count=220)
 
     assert bars == [
-        KlineBar(date="20260610", open=10.0, high=11.5, low=9.8, close=11.0, volume=1000.0, amount=11000.0),
-        KlineBar(date="20260611", open=11.0, high=12.5, low=10.8, close=12.0, volume=1500.0, amount=18000.0),
+        KlineBar(date="2026-06-10", open=10.0, high=11.5, low=9.8, close=11.0, volume=1000.0, amount=11000.0),
+        KlineBar(date="2026-06-11", open=11.0, high=12.5, low=10.8, close=12.0, volume=1500.0, amount=18000.0),
     ]
     assert bars[0].amount == 11000.0
     assert bars[1].amount == 18000.0
@@ -2136,7 +2136,7 @@ class WorkingKlineProvider:
 
     def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
         return [
-            KlineBar(date="20260610", open=10.0, high=11.5, low=9.8, close=11.0, volume=1000.0),
+            KlineBar(date="2026-06-10", open=10.0, high=11.5, low=9.8, close=11.0, volume=1000.0),
         ]
 
 
@@ -2145,7 +2145,7 @@ def test_fallback_kline_provider_uses_secondary_when_tickflow_fails() -> None:
 
     bars = provider.get_klines("000636.SZ", count=220)
 
-    assert bars[0].date == "20260610"
+    assert bars[0].date == "2026-06-10"
     assert provider.source_name == "TickFlow 日K，百度股市通K线 fallback"
 
 
@@ -2223,7 +2223,7 @@ def test_parse_baidu_kline_payload_maps_market_rows() -> None:
     bars = parse_baidu_kline_payload(payload)
 
     assert len(bars) == 2
-    assert bars[-1].date == "20260611"
+    assert bars[-1].date == "2026-06-11"
     assert bars[-1].close == 12
     assert bars[-1].ma5 == 11.2
 

@@ -1,8 +1,12 @@
 from __future__ import annotations
+from app.services.common import dedupe_symbols as _dedupe_symbols
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime
 from pathlib import Path
+from threading import RLock
+from time import monotonic
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -42,6 +46,9 @@ DISPLAY_INDEX_NAMES = {
 A_SHARE_STOCK_LIST_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
 THS_INDUSTRIES_URL = "https://files.688798.xyz/ths/industries.json"
 TURNOVER_CACHE_RECORD_LIMIT = 80
+# 全 A 实时行情缓存有效期：比上游 8s 级刷新要求宽松，但保证盘中涨跌统计不会
+# 冻结在当日首次拉取时刻（此前该缓存一经设置永不过期）。
+_REALTIME_ROWS_TTL_SECONDS = 120
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36"
@@ -71,7 +78,8 @@ class EastmoneyMarketOverviewProvider:
         self.sentiment_snapshot_dir = sentiment_snapshot_dir
         self._owns_client = http_client is None
         self.http_client = http_client or httpx.Client()
-        self._a_share_realtime_rows_cache: list[dict[str, Any]] | None = None
+        self._a_share_realtime_rows_cache: tuple[float, list[dict[str, Any]]] | None = None
+        self._realtime_rows_lock = RLock()
         self._stock_industry_cache: dict[str, str] = {}
         self._ths_industry_map_cache: dict[str, str] | None = None
         self._heatmap_baseline_industry_map_cache: dict[str, str] | None = None
@@ -930,11 +938,13 @@ class EastmoneyMarketOverviewProvider:
         }
 
     def _fetch_eastmoney_f10_industries_by_symbols(self, symbols: list[str]) -> dict[str, str]:
+        unique_symbols = _dedupe_symbols(symbols)
         output: dict[str, str] = {}
-        for symbol in _dedupe_symbols(symbols):
+
+        def fetch_one(symbol: str) -> tuple[str, str] | None:
             code = _eastmoney_f10_code(symbol)
             if not code:
-                continue
+                return None
             response = self.http_client.get(
                 "https://emweb.securities.eastmoney.com/PC_HSF10/CompanySurvey/PageAjax",
                 params={"code": code},
@@ -943,8 +953,22 @@ class EastmoneyMarketOverviewProvider:
             )
             response.raise_for_status()
             industry = _eastmoney_f10_industry(response.json())
-            if industry:
-                output[symbol] = industry
+            return (symbol, industry) if industry else None
+
+        if len(unique_symbols) <= 1:
+            for symbol in unique_symbols:
+                result = fetch_one(symbol)
+                if result:
+                    output[result[0]] = result[1]
+            return output
+
+        with ThreadPoolExecutor(
+            max_workers=min(8, len(unique_symbols)),
+            thread_name_prefix="f10-industry",
+        ) as executor:
+            for result in executor.map(fetch_one, unique_symbols):
+                if result is not None:
+                    output[result[0]] = result[1]
         return output
 
     def _fetch_direct_limit_down_count(self, date: str) -> int:
@@ -1389,30 +1413,41 @@ class EastmoneyMarketOverviewProvider:
         )
 
     def _fetch_a_share_realtime_rows(self) -> list[dict[str, Any]]:
-        if self._a_share_realtime_rows_cache is not None:
-            return self._a_share_realtime_rows_cache
+        with self._realtime_rows_lock:
+            cached = self._a_share_realtime_rows_cache
+            if cached is not None and monotonic() - cached[0] < _REALTIME_ROWS_TTL_SECONDS:
+                return cached[1]
         rows: list[dict[str, Any]] = []
         total: int | None = None
         page_size = 100
+        consecutive_failures = 0
         for page in range(1, 61):
-            response = self.http_client.get(
-                "https://push2.eastmoney.com/api/qt/clist/get",
-                params={
-                    "pn": str(page),
-                    "pz": str(page_size),
-                    "po": "1",
-                    "fid": "f3",
-                    "np": "1",
-                    "fltt": "2",
-                    "invt": "2",
-                    "fs": A_SHARE_STOCK_LIST_FS,
-                    "fields": "f3,f12,f14,f100",
-                },
-                headers={"User-Agent": USER_AGENT},
-                timeout=self.timeout_seconds,
-            )
-            response.raise_for_status()
-            payload = response.json()
+            try:
+                response = self.http_client.get(
+                    "https://push2.eastmoney.com/api/qt/clist/get",
+                    params={
+                        "pn": str(page),
+                        "pz": str(page_size),
+                        "po": "1",
+                        "fid": "f3",
+                        "np": "1",
+                        "fltt": "2",
+                        "invt": "2",
+                        "fs": A_SHARE_STOCK_LIST_FS,
+                        "fields": "f3,f12,f14,f100",
+                    },
+                    headers={"User-Agent": USER_AGENT},
+                    timeout=self.timeout_seconds,
+                )
+                response.raise_for_status()
+                payload = response.json()
+            except Exception:
+                # 单页失败重试一次，仍失败则跳过该页，避免一页抖动导致整体数据丢失。
+                consecutive_failures += 1
+                if consecutive_failures >= 3:
+                    break
+                continue
+            consecutive_failures = 0
             if total is None:
                 total = _extract_total(payload)
             page_rows = _extract_diff(payload)
@@ -1423,7 +1458,8 @@ class EastmoneyMarketOverviewProvider:
                 break
         if not rows:
             raise ValueError("empty a-share realtime rows")
-        self._a_share_realtime_rows_cache = rows
+        with self._realtime_rows_lock:
+            self._a_share_realtime_rows_cache = (monotonic(), rows)
         return rows
 
     def _a_share_industry_by_symbol(self) -> dict[str, str]:
@@ -1888,18 +1924,6 @@ def _patch_rank_industries(
             item.industry = industry
             patched_symbols.add(item.symbol)
     return len(patched_symbols)
-
-
-def _dedupe_symbols(symbols: object) -> list[str]:
-    output: list[str] = []
-    seen: set[str] = set()
-    for symbol in symbols:
-        text = str(symbol or "").strip().upper()
-        if not text or text in seen:
-            continue
-        seen.add(text)
-        output.append(text)
-    return output
 
 
 def _ranking_item_from_quote(quote: object) -> MarketRankingItem:

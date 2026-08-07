@@ -74,6 +74,15 @@ def test_market_emotion_history_store_prunes_days_and_samples(tmp_path: Path) ->
 
     remaining_files = sorted(path.name for path in (tmp_path / "market_emotion").glob("*.jsonl"))
     assert remaining_files == ["2026-06-11.jsonl", "2026-06-12.jsonl"]
+    # 裁剪节流：超过保留上限的 1.5 倍时才整写裁剪（避免每次 append 全文件重写），
+    # 因此 3 条仍保留，继续追加越过阈值后回到上限。
+    assert len(store.load("2026-06-12", limit=10)) == 3
+    store.append(
+        MarketEmotionSnapshotResponse(
+            trade_date="2026-06-12",
+            generated_at="2026-06-12T09:25:00+08:00",
+        )
+    )
     assert len(store.load("2026-06-12", limit=10)) == 2
 
 

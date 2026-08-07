@@ -22,6 +22,7 @@ PERIODS = ("1d", "60m", "30m", "5m")
 _PERIOD_SET = frozenset(PERIODS)
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _DATE_ONLY = re.compile(r"\d{4}-\d{2}-\d{2}")
+_COMPACT_DATE = re.compile(r"\d{8}")
 _BAR_KEYS = frozenset(
     {
         "date",
@@ -593,6 +594,13 @@ def _bar_available_at(period: str, value: str) -> datetime:
         if period != "1d":
             raise ValueError(f"{period} requires an actual closed timestamp")
         return datetime.combine(date.fromisoformat(value), time(15), tzinfo=_SHANGHAI)
+    if period == "1d" and _COMPACT_DATE.fullmatch(value):
+        # 兼容 YYYYMMDD 紧凑日K，按 15:00 收盘边界归一化。
+        return datetime.combine(
+            datetime.strptime(value, "%Y%m%d").date(),
+            time(15),
+            tzinfo=_SHANGHAI,
+        )
     return _parse_timestamp(value, f"{period} timestamp")
 
 

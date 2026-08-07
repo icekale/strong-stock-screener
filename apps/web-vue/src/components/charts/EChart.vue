@@ -49,6 +49,11 @@ function restore() {
   if (chart) runEChartLifecycle(chart, { type: 'restore' });
 }
 
+function setDataZoom(start: number, end: number) {
+  // 只更新数据缩放窗口，不触发整份 option 重建（避免拖动缩放时全量重算副图指标）。
+  chart?.dispatchAction({ type: 'dataZoom', start, end });
+}
+
 function normalizeDataZoomRange(params: unknown): { start: number; end: number } | null {
   if (!params || typeof params !== 'object') return null;
   const payload = params as Record<string, unknown>;
@@ -63,7 +68,7 @@ function normalizeDataZoomRange(params: unknown): { start: number; end: number }
   };
 }
 
-defineExpose({ resize, restore });
+defineExpose({ resize, restore, setDataZoom });
 
 onMounted(async () => {
   await nextTick();

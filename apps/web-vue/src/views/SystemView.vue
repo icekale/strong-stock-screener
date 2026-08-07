@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
 import dayjs from 'dayjs';
+import { as } from '@/utils/common';
 import {
   clearSystemCache,
   generateModelMaintenancePacket,
@@ -188,18 +189,6 @@ function reportStatusTone(value: ModelMaintenanceReport['health_status']) {
   return 'error';
 }
 
-function asSource(value: unknown) {
-  return value as DataSourceStatusResponse['items'][number];
-}
-
-function asJob(value: unknown) {
-  return value as SystemJobStatus;
-}
-
-function asCacheItem(value: unknown) {
-  return value as SystemCacheItem;
-}
-
 type AiAnalysisDraft = AiAnalysisSettingsUpdate & { api_key: string };
 
 function defaultAiDraft(): AiAnalysisDraft {
@@ -255,6 +244,20 @@ function buildRuntimeSettingsPayload(current: RuntimeSettingsResponse, draft: Ai
       run_after_weekly_calibration: draft.run_after_weekly_calibration
     }
   };
+}
+
+function asSource(value: unknown) {
+  return as<DataSourceStatusResponse['items'][number]>(value);
+}
+
+
+function asJob(value: unknown) {
+  return as<SystemJobStatus>(value);
+}
+
+
+function asCacheItem(value: unknown) {
+  return as<SystemCacheItem>(value);
 }
 
 onMounted(() => void load());

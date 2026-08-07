@@ -73,22 +73,39 @@ def test_unclosed_bucket_is_excluded_from_confirmed_bars() -> None:
     ("period", "bar_count", "cutoff"),
     [("30m", 29, "10:00"), ("60m", 59, "10:30")],
 )
-def test_aggregate_excludes_incomplete_long_period_bucket(
+def test_aggregate_emits_prefix_continuous_partial_long_period_bucket(
     period: str,
     bar_count: int,
     cutoff: str,
 ) -> None:
+    """前缀连续但尾部缺分钟的部分桶仍会聚合（缺失由 coverage 审计计入，而非静默丢整桶）。"""
     start = shanghai("2026-07-10 09:30")
     bars = [
         minute_bar((start + timedelta(minutes=index)).isoformat())
         for index in range(bar_count)
     ]
 
-    assert aggregate_closed_intraday_bars(
+    result = aggregate_closed_intraday_bars(
         bars,
         period=period,  # type: ignore[arg-type]
         now=shanghai(f"2026-07-10 {cutoff}"),
-    ) == []
+    )
+
+    assert len(result) == 1
+    assert result[0].open == bars[0].open
+    assert result[0].close == bars[-1].close
+
+
+def test_aggregate_excludes_bucket_with_interior_gap() -> None:
+    """桶内存在中间空洞（分钟不连续）时仍整体排除，防止用错位数据合成 K 线。"""
+    start = shanghai("2026-07-10 09:30")
+    bars = [
+        minute_bar((start + timedelta(minutes=index)).isoformat())
+        for index in range(5)
+        if index != 2
+    ]
+
+    assert aggregate_closed_intraday_bars(bars, period="5m", now=shanghai("2026-07-10 09:37")) == []
 
 
 def test_complete_bucket_uses_last_close_and_close_label() -> None:

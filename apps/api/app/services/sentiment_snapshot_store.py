@@ -1,6 +1,8 @@
 from __future__ import annotations
+from app.services.common import dedupe_source_status as _dedupe_source_status
 
 import json
+import logging
 from pathlib import Path
 from shutil import rmtree
 from threading import RLock
@@ -10,12 +12,12 @@ from app.models import (
     SENTIMENT_SNAPSHOT_VERSION,
     SentimentSummaryResponse,
     ShortTermSentimentResponse,
-    StrongStockSourceStatus,
 )
 from app.services.short_term_sentiment import build_sentiment_summary
 
 
 _SNAPSHOT_IO_LOCK = RLock()
+logger = logging.getLogger(__name__)
 
 
 class SentimentSnapshotStore:
@@ -87,6 +89,7 @@ class SentimentSnapshotStore:
                 return None
             return model_cls.model_validate(payload)
         except Exception:
+            logger.warning("sentiment snapshot 损坏，忽略: %s", path)
             return None
 
     def _prune_trade_dates(self) -> None:
@@ -96,18 +99,6 @@ class SentimentSnapshotStore:
         date_dirs = sorted(path for path in self.root_dir.iterdir() if path.is_dir())
         for path in date_dirs[:-keep_days]:
             rmtree(path, ignore_errors=True)
-
-
-def _dedupe_source_status(items: list[StrongStockSourceStatus]) -> list[StrongStockSourceStatus]:
-    output: list[StrongStockSourceStatus] = []
-    seen: set[tuple[str, str, str]] = set()
-    for item in items:
-        key = (item.source, item.status, item.detail)
-        if key in seen:
-            continue
-        seen.add(key)
-        output.append(item)
-    return output
 
 
 def _write_model(path: Path, model: object) -> None:

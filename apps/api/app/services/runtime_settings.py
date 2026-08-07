@@ -3,8 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.config import Settings
 from app.services.gsgf_auto_review import GsgfAutoReviewConfig
@@ -36,6 +37,11 @@ class AiAnalysisSettings(BaseModel):
     api_key: str | None = None
     run_after_daily_review: bool = False
     run_after_weekly_calibration: bool = False
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(cls, value: str) -> str:
+        return validate_provider_base_url(value)
 
 
 class EffectiveAiAnalysisSettings(BaseModel):
@@ -95,6 +101,34 @@ class SettingsUpdate(BaseModel):
     gsgf_auto_review: GsgfAutoReviewConfig = Field(default_factory=GsgfAutoReviewConfig)
     ai_analysis: AiAnalysisSettings = Field(default_factory=AiAnalysisSettings)
     auction_top3_training: AuctionTop3TrainingSettings = Field(default_factory=AuctionTop3TrainingSettings)
+
+    @field_validator("tickflow_base_url", "ifind_base_url", "tdx_base_url")
+    @classmethod
+    def _validate_provider_base_urls(cls, value: str) -> str:
+        return validate_provider_base_url(value)
+
+
+def validate_provider_base_url(value: str) -> str:
+    """校验 provider base_url，防止被改为 file:// 等危险 scheme 或注入用户信息。
+
+    允许任意 http/https 主机（含内网部署），但拒绝：非 http(s) scheme、
+    含用户名/密码的用户信息部分、明显为路径穿越的 URL。
+    """
+    text = (value or "").strip()
+    if not text:
+        raise ValueError("base_url 不能为空")
+    parsed = urlsplit(text)
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("base_url 仅允许 http/https 协议")
+    if not parsed.netloc:
+        raise ValueError("base_url 缺少主机")
+    if "@" in parsed.netloc:
+        raise ValueError("base_url 不允许包含用户信息")
+    if not parsed.hostname:
+        raise ValueError("base_url 主机名无效")
+    if ".." in text.split("?", 1)[0]:
+        raise ValueError("base_url 不允许包含路径穿越")
+    return text
 
 
 class EffectiveRuntimeSettings(BaseModel):
@@ -156,10 +190,12 @@ def save_runtime_settings(path: Path, update: SettingsUpdate) -> RuntimeSettings
     if update.tdx_api_key is not None:
         next_settings = next_settings.model_copy(update={"tdx_api_key": update.tdx_api_key.strip()})
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+    tmp_path.write_text(
         next_settings.model_dump_json(indent=2, exclude_none=True),
         encoding="utf-8",
     )
+    tmp_path.replace(path)
     return next_settings
 
 

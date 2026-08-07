@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.services.common import dedupe_strings as _dedupe
 
 from statistics import mean
 
@@ -223,11 +224,3 @@ def _intraday_notes(status_or_action: str) -> list[str]:
     return ["趋势或买点不明确，等待回踩承接确认"]
 
 
-def _dedupe(values: list[str]) -> list[str]:
-    output: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        if value and value not in seen:
-            seen.add(value)
-            output.append(value)
-    return output

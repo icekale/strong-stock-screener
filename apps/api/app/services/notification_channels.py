@@ -122,8 +122,12 @@ def send_notification_message(
     http = http_client or httpx.Client(timeout=20)
     smtp = smtp_client or DefaultSmtpClient()
     results: list[NotificationSendResultItem] = []
-    for channel in selected:
-        results.append(_send_one(channel, title, message_text, http, smtp))
+    try:
+        for channel in selected:
+            results.append(_send_one(channel, title, message_text, http, smtp))
+    finally:
+        if http_client is None and hasattr(http, "close"):
+            http.close()
     if channel_ids:
         found_ids = {channel.id for channel in selected}
         for channel_id in channel_ids:

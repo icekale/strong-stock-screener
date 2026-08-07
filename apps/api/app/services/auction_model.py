@@ -307,12 +307,14 @@ def build_live_prediction_rows(
     max_calendar_backtrack: int = 14,
     max_kline_workers: int = 1,
 ) -> tuple[list[dict[str, object]], str]:
+    # 先以 trade_date 为终点 prefetch 窗口，再回退查找特征日期：FreeStockDb 源的
+    # candidate_universe 随即将全部命中内存，避免逐日一次全市场网络请求。
+    source.prefetch_daily_window(feature_end_date=trade_date, lookback=lookback)
     feature_end_date = _previous_feature_date(
         source,
         trade_date=trade_date,
         max_calendar_backtrack=max_calendar_backtrack,
     )
-    source.prefetch_daily_window(feature_end_date=feature_end_date, lookback=lookback)
     candidates = source.candidate_universe(feature_end_date)
 
     rows: list[dict[str, object]] = []

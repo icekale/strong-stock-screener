@@ -129,7 +129,7 @@ def score_auction_record(record: AuctionReviewRecord) -> AuctionReviewScore:
     next_day_score = _score_window(
         record.next_day_result.peak_pct,
         record.next_day_result.close_pct,
-        record.day_result.drawdown_pct,
+        record.next_day_result.drawdown_pct,
     )
     available = [score for score in [intraday_score, day_score, next_day_score] if score is not None]
     return AuctionReviewScore(

@@ -39,7 +39,7 @@ const staleDataTitle = '刷新失败，当前显示上次数据';
 
 const breadth = computed(() => overviewData.value?.advance_decline);
 const turnover = computed(() => overviewData.value?.turnover);
-const indices = computed(() => overviewData.value?.indices.slice(0, 4) ?? []);
+const indices = computed(() => (overviewData.value?.indices ?? []).slice(0, 4));
 
 const displayTradeDate = computed(() =>
   [overviewData.value?.trade_date, sectorFlowData.value?.trade_date, capitalData.value?.trade_date]

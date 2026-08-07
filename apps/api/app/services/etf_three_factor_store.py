@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 from threading import RLock
+from zoneinfo import ZoneInfo
 
 from pydantic import TypeAdapter
 
@@ -12,6 +13,7 @@ from app.models import EtfActivityAlert, EtfThreeFactorHistoryPoint, EtfThreeFac
 _STORE_LOCK = RLock()
 _HISTORY_LIST = TypeAdapter(list[EtfThreeFactorHistoryPoint])
 _ALERT_LIST = TypeAdapter(list[EtfActivityAlert])
+_SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 class EtfThreeFactorStore:
@@ -105,7 +107,7 @@ class EtfThreeFactorStore:
 
     @staticmethod
     def _retained_alerts(alerts: list[EtfActivityAlert]) -> list[EtfActivityAlert]:
-        cutoff = (date.today() - timedelta(days=30)).isoformat()
+        cutoff = (datetime.now(_SHANGHAI).date() - timedelta(days=30)).isoformat()
         return [alert for alert in alerts if alert.trade_date >= cutoff]
 
     @staticmethod

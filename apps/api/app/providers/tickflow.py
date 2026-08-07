@@ -1,6 +1,8 @@
 from __future__ import annotations
+from app.services.common import dedupe_symbols as _dedupe_symbols
 
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from time import sleep
 from typing import Any
 
@@ -445,7 +447,7 @@ def _intraday_bar_from_row(row: dict[str, Any]) -> TickFlowIntradayBar:
 
 
 def _date_from_timestamp_ms(value: int) -> str:
-    return datetime.fromtimestamp(value / 1000).strftime("%Y%m%d")
+    return datetime.fromtimestamp(value / 1000, tz=ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d")
 
 
 def _first_present(*values: object) -> object | None:
@@ -453,17 +455,6 @@ def _first_present(*values: object) -> object | None:
         if value is not None:
             return value
     return None
-
-
-def _dedupe_symbols(symbols: list[str]) -> list[str]:
-    output: list[str] = []
-    seen: set[str] = set()
-    for symbol in symbols:
-        normalized = symbol.strip().upper()
-        if normalized and normalized not in seen:
-            seen.add(normalized)
-            output.append(normalized)
-    return output
 
 
 def _payload_code(response: object) -> str:

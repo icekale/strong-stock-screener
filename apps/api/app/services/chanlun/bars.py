@@ -61,7 +61,7 @@ def aggregate_closed_intraday_bars(
     for bucket_start in sorted(buckets):
         bucket_close = bucket_start + timedelta(minutes=period_minutes)
         bucket = buckets[bucket_start]
-        if bucket_close > cutoff or not _is_complete_bucket(bucket, bucket_start, period_minutes):
+        if bucket_close > cutoff or not _bucket_is_usable(bucket, bucket_start, period_minutes):
             continue
         ordered_bars = [bar for _, bar in bucket]
         result.append(
@@ -113,14 +113,21 @@ def intraday_bucket_start(timestamp: datetime, period: Literal["5m", "30m", "60m
     return start + timedelta(minutes=(elapsed_minutes // period_minutes) * period_minutes)
 
 
-def _is_complete_bucket(
+def _bucket_is_usable(
     bucket: list[tuple[datetime, TickFlowIntradayBar]],
     bucket_start: datetime,
     period_minutes: int,
 ) -> bool:
-    if len(bucket) != period_minutes:
+    """桶内分钟必须是自 bucket_start 起连续的前缀（允许尾部缺分钟，不允许中间空洞）。
+
+    缺失的分钟仍会由 coverage 审计计入 missing_minutes，从而阻止基于该数据的
+    分析被判定为 complete；此处只在展示 K 线时避免因单分钟缺失丢掉整个桶造成空洞。
+    """
+    if not bucket or len(bucket) > period_minutes:
         return False
-    return all(
-        timestamp == bucket_start + timedelta(minutes=index)
-        for index, (timestamp, _) in enumerate(bucket)
-    )
+    expected = bucket_start
+    for timestamp, _ in bucket:
+        if timestamp != expected:
+            return False
+        expected += timedelta(minutes=1)
+    return True

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.services.common import dedupe_strings as _dedupe
 
 from dataclasses import dataclass
 from typing import Callable, Literal
@@ -122,11 +123,3 @@ def _text_value(row: dict[str, object], *names: str) -> str:
     return ""
 
 
-def _dedupe(values: list[str]) -> list[str]:
-    output: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        if value and value not in seen:
-            seen.add(value)
-            output.append(value)
-    return output

@@ -11,17 +11,22 @@ interface Props {
   emptyDescription?: string;
   error?: string | null;
   itemKey?: WorkbenchItemKeyResolver;
+  /** 单个列表的最大渲染条数，防止超大接口（如 limit=2000）直接拖垮渲染。 */
+  maxRender?: number;
 }
 
 const props = withDefaults(defineProps<Props>(), {
   items: () => [],
   loading: false,
   emptyDescription: '暂无数据',
-  error: null
+  error: null,
+  maxRender: 300
 });
 
 const resolveItemKeys = createWorkbenchItemKeyResolver();
-const itemKeys = computed(() => resolveItemKeys(props.items, props.itemKey));
+const visibleItems = computed(() => props.items.slice(0, props.maxRender));
+const itemKeys = computed(() => resolveItemKeys(visibleItems.value, props.itemKey));
+const truncatedCount = computed(() => Math.max(0, props.items.length - props.maxRender));
 </script>
 
 <template>
@@ -32,10 +37,13 @@ const itemKeys = computed(() => resolveItemKeys(props.items, props.itemKey));
     <div v-else-if="props.loading && !props.items.length" class="wb-data-list__state" aria-live="polite">加载中...</div>
     <div v-else-if="!props.items.length" class="wb-data-list__state">{{ props.emptyDescription }}</div>
 
-    <template v-if="props.items.length">
+    <template v-if="visibleItems.length">
       <div v-if="props.loading && !props.error" class="wb-data-list__loading" aria-live="polite">读取中...</div>
+      <div v-if="truncatedCount" class="wb-data-list__truncated text-12px text-secondary">
+        仅展示前 {{ visibleItems.length }} 条，另有 {{ truncatedCount }} 条未渲染
+      </div>
       <ul class="wb-data-list__items">
-        <li v-for="(item, index) in props.items" :key="itemKeys[index]" class="wb-data-list__item">
+        <li v-for="(item, index) in visibleItems" :key="itemKeys[index]" class="wb-data-list__item">
           <slot name="list-item" :item="item" :index="index">
             <span>{{ item }}</span>
           </slot>

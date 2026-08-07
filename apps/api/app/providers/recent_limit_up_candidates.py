@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 from app.models import StrongStockCandidate, StrongStockDataUnavailable, StrongStockSourceStatus
 from app.providers.thsdk_candidates import normalize_symbol
+from app.services.trading_calendar import is_open_session
 
 PoolFetcher = Callable[[str], list[dict[str, object]]]
 
@@ -148,6 +149,7 @@ def _recent_calendar_dates(trade_date: str, calendar_days: int) -> list[str]:
     return [
         (parsed_date - timedelta(days=offset)).strftime("%Y%m%d")
         for offset in range(calendar_days)
+        if is_open_session((parsed_date - timedelta(days=offset)).date())
     ]
 
 

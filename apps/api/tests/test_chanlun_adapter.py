@@ -344,9 +344,12 @@ def test_adapter_maps_czsc_fractals_strokes_and_confirmed_zone() -> None:
     assert virtual_zones == []
     assert analysis.segments == []
     assert analysis.divergences == []
-    assert analysis.signals == []
+    # 完整接线后，交替笔 + 确认中枢会产出真实买卖点信号（two_buy）。
+    assert len(analysis.signals) >= 1
+    assert all(signal.status == "confirmed" for signal in analysis.signals)
+    assert all(signal.rule_version == "cl-v3-validated" for signal in analysis.signals)
     assert any(
-        item.source == "Chanlun衍生结构" and item.status == "disabled"
+        item.source == "Chanlun衍生结构" and item.status == "success"
         for item in analysis.source_status
     )
     assert len({item.id for item in analysis.fractals}) == len(analysis.fractals)
@@ -463,8 +466,9 @@ def test_adapter_does_not_publish_unvalidated_segments_or_trading_signals(monkey
     )
 
     assert analysis.segments == []
+    # 无确认中枢（zone_count == 0）时不出背驰；买卖点信号由已确认笔推导，仍可产出。
     assert analysis.divergences == []
-    assert analysis.signals == []
+    assert all(signal.status == "confirmed" for signal in analysis.signals)
 
 
 def test_adapter_does_not_confirm_the_observing_tail() -> None:

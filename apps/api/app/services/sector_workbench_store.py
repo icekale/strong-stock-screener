@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import date, timedelta
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 from app.models import (
@@ -73,52 +74,56 @@ class SectorThemeRowsStore:
 
     def _write(self, path: Path, payload: dict[str, Any]) -> None:
         self.base_dir.mkdir(parents=True, exist_ok=True)
-        path.write_text(
+        tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+        tmp_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
             encoding="utf-8",
         )
+        tmp_path.replace(path)
 
 
 class SectorWorkbenchSampleStore:
     def __init__(self, base_dir: Path) -> None:
         self.base_dir = base_dir
+        self._lock = RLock()
 
     def append(self, response: SectorWorkbenchResponse, *, sample_source: str = "snapshot") -> None:
         if not response.trade_date:
             return
-        path = self._path(response.trade_date)
-        payload = self._read(path)
-        samples = payload.setdefault("samples", [])
-        by_key = {
-            self._sample_key(sample): sample
-            for sample in samples
-            if isinstance(sample, dict)
-        }
-        for series in response.series:
-            for point in series.points:
-                sample = {
-                    "trade_date": response.trade_date,
-                    "schema_version": SECTOR_WORKBENCH_SAMPLE_SCHEMA_VERSION,
-                    "mode": response.mode,
-                    "scope": response.scope,
-                    "name": series.name,
-                    "metric": series.metric,
-                    "sample_source": sample_source,
-                    "time": point.time,
-                    "value": point.value,
-                    "sampled_at": point.sampled_at,
-                }
-                by_key[self._sample_key(sample)] = sample
-        payload["samples"] = sorted(
-            by_key.values(),
-            key=lambda sample: (
-                str(sample.get("mode") or ""),
-                str(sample.get("scope") or ""),
-                str(sample.get("name") or ""),
-                str(sample.get("sampled_at") or ""),
-            ),
-        )
-        self._write(path, payload)
+        with self._lock:
+            path = self._path(response.trade_date)
+            payload = self._read(path)
+            samples = payload.setdefault("samples", [])
+            by_key = {
+                self._sample_key(sample): sample
+                for sample in samples
+                if isinstance(sample, dict)
+            }
+            for series in response.series:
+                for point in series.points:
+                    sample = {
+                        "trade_date": response.trade_date,
+                        "schema_version": SECTOR_WORKBENCH_SAMPLE_SCHEMA_VERSION,
+                        "mode": response.mode,
+                        "scope": response.scope,
+                        "name": series.name,
+                        "metric": series.metric,
+                        "sample_source": sample_source,
+                        "time": point.time,
+                        "value": point.value,
+                        "sampled_at": point.sampled_at,
+                    }
+                    by_key[self._sample_key(sample)] = sample
+            payload["samples"] = sorted(
+                by_key.values(),
+                key=lambda sample: (
+                    str(sample.get("mode") or ""),
+                    str(sample.get("scope") or ""),
+                    str(sample.get("name") or ""),
+                    str(sample.get("sampled_at") or ""),
+                ),
+            )
+            self._write(path, payload)
 
     def series_for(
         self,
@@ -290,7 +295,9 @@ class SectorWorkbenchSampleStore:
 
     def _write(self, path: Path, payload: dict[str, Any]) -> None:
         self.base_dir.mkdir(parents=True, exist_ok=True)
-        path.write_text(
+        tmp_path = path.with_suffix(f"{path.suffix}.tmp")
+        tmp_path.write_text(
             json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True),
             encoding="utf-8",
         )
+        tmp_path.replace(path)

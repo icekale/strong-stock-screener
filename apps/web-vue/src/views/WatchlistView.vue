@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
+import { as } from '@/utils/common';
 import {
   addWatchlistPoolItem,
   getWatchlistGsgfStatus,
@@ -162,11 +163,12 @@ function openGsgfItem(item: WatchlistGsgfStatusResponse['items'][number]) {
 }
 
 function asGsgfItem(value: unknown) {
-  return value as WatchlistGsgfStatusResponse['items'][number];
+  return as<WatchlistGsgfStatusResponse['items'][number]>(value);
 }
 
+
 function asPoolItem(value: unknown) {
-  return value as WatchlistPoolItem;
+  return as<WatchlistPoolItem>(value);
 }
 
 function gsgfTone(action: GsgfAction) {

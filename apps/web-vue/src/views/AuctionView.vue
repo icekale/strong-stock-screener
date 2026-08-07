@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import dayjs from 'dayjs';
 import { useRouter } from 'vue-router';
+import { as } from '@/utils/common';
 import {
   addWatchlistPoolItem,
   createAuctionModelTop3Job,
@@ -139,11 +140,12 @@ function formatGeneratedAt(value: string | undefined) {
 }
 
 function asModelItem(value: unknown) {
-  return value as AuctionModelPredictionItem;
+  return as<AuctionModelPredictionItem>(value);
 }
 
+
 function asAuctionItem(value: unknown) {
-  return value as AuctionSnapshotItem;
+  return as<AuctionSnapshotItem>(value);
 }
 
 onMounted(async () => {

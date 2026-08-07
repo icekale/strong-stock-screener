@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from threading import RLock
 
@@ -17,6 +18,7 @@ from app.models import (
 _STORE_LOCK = RLock()
 _MARGIN_LIST = TypeAdapter(list[MarginMarketPoint])
 _SHARE_LIST = TypeAdapter(list[EtfSharePoint])
+logger = logging.getLogger(__name__)
 _HOLDER_LIST = TypeAdapter(list[EtfHolderPosition])
 _HUIJIN_BASELINE_LIST = TypeAdapter(list[HuijinEtfBaseline])
 
@@ -80,6 +82,7 @@ class CapitalSignalStore:
                     self.snapshot_path.read_text(encoding="utf-8")
                 )
             except Exception:
+                logger.warning("capital signal 快照损坏，忽略: %s", self.snapshot_path)
                 return None
 
     def save_snapshot(self, snapshot: EtfRadarOverviewResponse) -> None:
@@ -96,6 +99,7 @@ class CapitalSignalStore:
         try:
             return adapter.validate_json(path.read_bytes())
         except Exception:
+            logger.warning("capital signal 历史损坏，忽略: %s", path)
             return []
 
     @staticmethod

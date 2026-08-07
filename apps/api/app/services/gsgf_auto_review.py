@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, time
 from threading import Event, RLock, Thread
 from typing import Callable
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class GsgfAutoReviewConfig(BaseModel):
@@ -86,8 +89,10 @@ class GsgfAutoReviewService:
         with self._lock:
             if self._last_daily_review_key == key:
                 return
-            self._last_daily_review_key = key
+        # 先执行再记录完成标记：失败时当天会重试，而不是永久跳过。
         self._review_runner()
+        with self._lock:
+            self._last_daily_review_key = key
 
     def _run_weekly_calibration_once(self, now: datetime, config: GsgfAutoReviewConfig) -> None:
         year, week, _weekday = now.isocalendar()
@@ -95,7 +100,6 @@ class GsgfAutoReviewService:
         with self._lock:
             if self._last_weekly_calibration_key == key:
                 return
-            self._last_weekly_calibration_key = key
         trade_dates = self._recent_trade_dates(config.weekly_calibration_trade_days)
         if trade_dates:
             self._calibration_runner(
@@ -104,10 +108,16 @@ class GsgfAutoReviewService:
                 config.weekly_calibration_scan_limit,
                 config.kline_count,
             )
+        with self._lock:
+            self._last_weekly_calibration_key = key
 
     def _loop(self) -> None:
         while not self._stop_event.is_set():
-            self.run_once()
+            try:
+                self.run_once()
+            except Exception:
+                # 后台循环兜底：单次失败不能导致线程退出，从而让后续复盘/校准永久停摆。
+                logger.exception("gsgf_auto_review run_once 失败")
             self._stop_event.wait(30)
 
 

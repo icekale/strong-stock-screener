@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.services.common import dedupe_symbols as _dedupe_symbols
 
 import json
 import logging
@@ -387,6 +388,11 @@ app.add_middleware(
 SHORT_TERM_SENTIMENT_CACHE: TtlCache[ShortTermSentimentResponse] = TtlCache(
     ttl_seconds=90, name="short_term_sentiment"
 )
+WATCHLIST_GSGF_CACHE: TtlCache[dict[str, object]] = TtlCache(
+    ttl_seconds=300, name="watchlist_gsgf_status"
+)
+# 自选池单次 gsgf 状态扫描上限，防止超大池把请求阻塞到分钟级。
+_WATCHLIST_GSGF_MAX_SYMBOLS = 60
 MARKET_EMOTION_CACHE: TtlCache[MarketEmotionSnapshotResponse] = TtlCache(
     ttl_seconds=45, name="market_emotion"
 )
@@ -1200,7 +1206,7 @@ def generate_auction_top3_training_samples(trade_date: str | None = None) -> dic
     provider = _kline_provider()
     for symbol in _dedupe_symbols([sample.symbol for sample in signals]):
         try:
-            bars_by_symbol[symbol] = provider.get_klines(symbol, count=8)
+            bars_by_symbol[symbol] = provider.get_klines(symbol, count=260)
         except Exception:
             bars_by_symbol[symbol] = []
     trades = generate_simulated_trade_samples(
@@ -1597,14 +1603,23 @@ def finalize_auction_review(trade_date: str) -> dict[str, object]:
         raise HTTPException(status_code=404, detail="no auction review records")
     provider = _kline_provider()
     symbol_bars: dict[str, list[KlineBar]] = {}
+    symbol_intraday_bars: dict[str, list[KlineBar]] = {}
     kline_errors: dict[str, str] = {}
     for symbol in sorted({record.symbol for record in records}):
         try:
             symbol_bars[symbol] = provider.get_klines(symbol, count=260)
+            get_minutes = getattr(provider, "get_intraday_bars", None)
+            if callable(get_minutes):
+                intraday = get_minutes([symbol], period="1m", count=120).get(symbol, [])
+                symbol_intraday_bars[symbol] = _auction_review_minute_bars(intraday, trade_date)
         except StrongStockDataUnavailable as exc:
             symbol_bars[symbol] = []
             kline_errors[symbol] = str(exc)
-    summary = finalize_auction_records(records, symbol_bars=symbol_bars)
+    summary = finalize_auction_records(
+        records,
+        symbol_bars=symbol_bars,
+        symbol_intraday_bars=symbol_intraday_bars,
+    )
     reviewed_records = summary.records
     if kline_errors:
         reviewed_records = [
@@ -1628,6 +1643,8 @@ def backfill_auction_review(
     end_date: str,
     max_days: int = 20,
 ) -> dict[str, object]:
+    # 该端点当前为占位实现：不消费 start_date/end_date/max_days，统一返回
+    # data_unavailable，避免调用方误以为参数已生效。
     _ = (start_date, end_date, max_days)
     return AuctionBackfillResponse().model_dump(mode="json")
 
@@ -2798,10 +2815,23 @@ def add_watchlist_pool_item(request: WatchlistPoolItemRequest) -> dict[str, obje
 @app.get("/api/watchlist/gsgf-status")
 def get_watchlist_gsgf_status() -> dict[str, object]:
     items = parse_watchlist_text(_read_watchlist_pool())
+    # 逐只拉日K + 分析是重操作：结果按自选池内容做短 TTL 缓存，避免页面轮询打爆数据源；
+    # 同时限制单次扫描条数，防止超大自选池把请求阻塞到分钟级。
+    pool_key = "|".join(sorted(item.symbol for item in items))
+    cache_key = f"watchlist-gsgf:{pool_key}"
+    return WATCHLIST_GSGF_CACHE.get_or_set(
+        cache_key,
+        lambda: _build_watchlist_gsgf_status(items),
+    )
+
+
+def _build_watchlist_gsgf_status(items: list) -> dict[str, object]:
+    bounded_items = items[: _WATCHLIST_GSGF_MAX_SYMBOLS]
     output: list[dict[str, object]] = []
-    for item in items:
+    provider = _kline_provider()
+    for item in bounded_items:
         try:
-            bars = _kline_provider().get_klines(item.symbol, count=220)
+            bars = provider.get_klines(item.symbol, count=220)
             gsgf = analyze_gsgf(bars)
         except Exception as exc:
             gsgf = GsgfAnalysis(
@@ -2809,6 +2839,17 @@ def get_watchlist_gsgf_status() -> dict[str, object]:
                 explanation=["自选股结构触发暂不可计算"],
             )
         output.append({**item.model_dump(mode="json"), "gsgf": gsgf.model_dump(mode="json")})
+    if len(items) > len(bounded_items):
+        output.append(
+            {
+                "symbol": "",
+                "name": f"自选池过大，仅展示前 {len(bounded_items)} 只",
+                "gsgf": GsgfAnalysis(
+                    risk_flags=["truncated"],
+                    explanation=["单次扫描条数受限，请分批"],
+                ).model_dump(mode="json"),
+            }
+        )
     return {"items": output}
 
 
@@ -3028,7 +3069,7 @@ def _run_auction_snapshot_refresh_job(
 
 
 def _auction_now() -> datetime:
-    return getattr(app.state, "auction_now", None) or datetime.now().astimezone()
+    return getattr(app.state, "auction_now", None) or datetime.now(ZoneInfo("Asia/Shanghai"))
 
 
 def _sector_now() -> datetime:
@@ -3423,6 +3464,7 @@ def _close_default_data_source_providers() -> None:
         "default_quote_provider",
         "default_ifind_provider",
         "default_tdx_provider",
+        "default_valuation_quote_provider",
     ):
         provider = getattr(app.state, attribute, None)
         if provider is not None:
@@ -4105,7 +4147,11 @@ def _valuation_quote_provider() -> object:
     if injected is not None:
         return injected
     settings = _effective_settings()
-    return TencentQuoteProvider(timeout_seconds=settings.provider_timeout_seconds)
+    return _cached_default_provider(
+        attribute="default_valuation_quote_provider",
+        key=(settings.provider_timeout_seconds,),
+        factory=lambda: TencentQuoteProvider(timeout_seconds=settings.provider_timeout_seconds),
+    )
 
 
 def _news_risk_provider() -> object:
@@ -4524,7 +4570,7 @@ def _sector_theme_rows_store() -> SectorThemeRowsStore:
 
 
 def _sector_theme_rows() -> tuple[list[dict[str, object]], StrongStockSourceStatus | None]:
-    trade_date = datetime.now().astimezone().date().isoformat()
+    trade_date = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
     rows, status = _sector_theme_rows_store().load(trade_date)
     if rows:
         return rows, status or StrongStockSourceStatus(
@@ -4564,7 +4610,7 @@ def _schedule_sector_theme_rows_refresh(trade_date: str) -> None:
 def _refresh_sector_theme_rows(
     trade_date: str | None = None,
 ) -> tuple[list[dict[str, object]], StrongStockSourceStatus | None]:
-    current_trade_date = trade_date or datetime.now().astimezone().date().isoformat()
+    current_trade_date = trade_date or datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
     candidate_provider = _candidate_provider()
     concept_provider = _concept_provider()
     cache_key = (
@@ -4678,6 +4724,36 @@ def _auction_review_summary(records: list, *, trade_date: str | None) -> Auction
         records=records,
         buckets=build_auction_rule_buckets(records),
     )
+
+
+def _auction_review_minute_bars(
+    intraday_bars: list[object],
+    trade_date: str,
+) -> list[KlineBar]:
+    """把 1 分钟原始线转换为竞价复盘可消费的 KlineBar（date 为 "YYYY-MM-DD HH:MM"）。"""
+    output: list[KlineBar] = []
+    for bar in intraday_bars:
+        timestamp = getattr(bar, "timestamp", None)
+        if not isinstance(timestamp, int):
+            continue
+        try:
+            moment = datetime.fromtimestamp(timestamp / 1000, tz=SHANGHAI)
+        except (OverflowError, OSError, ValueError):
+            continue
+        if moment.date().isoformat() != trade_date:
+            continue
+        output.append(
+            KlineBar(
+                date=moment.strftime("%Y-%m-%d %H:%M"),
+                open=float(getattr(bar, "open", 0)),
+                high=float(getattr(bar, "high", 0)),
+                low=float(getattr(bar, "low", 0)),
+                close=float(getattr(bar, "close", 0)),
+                volume=float(getattr(bar, "volume", 0) or 0),
+                amount=float(getattr(bar, "amount", 0) or 0),
+            )
+        )
+    return output
 
 
 def _fill_auction_review_close_from_quotes(
@@ -4887,7 +4963,12 @@ def _model_maintenance_store() -> ModelMaintenanceStore:
 
 
 def _request_base_url(request: Request) -> str:
-    return str(request.base_url).rstrip("/")
+    # 仅记录请求来源（用于数据包溯源）。Host 头是客户端可控输入：
+    # 解析失败时返回占位符，不把任意 Host 头原文反射进落盘数据。
+    try:
+        return str(request.base_url).rstrip("/")
+    except Exception:
+        return "unknown-origin"
 
 
 def _auction_top3_training_store() -> AuctionTop3TrainingStore:
@@ -5164,17 +5245,6 @@ def _read_watchlist_pool() -> str:
     return path.read_text(encoding="utf-8").strip()
 
 
-def _dedupe_symbols(symbols: list[str]) -> list[str]:
-    output: list[str] = []
-    seen: set[str] = set()
-    for symbol in symbols:
-        normalized = symbol.strip().upper()
-        if normalized and normalized not in seen:
-            seen.add(normalized)
-            output.append(normalized)
-    return output
-
-
 def _probe(name: str, action) -> HealthProbe:
     started = perf_counter()
     try:
@@ -5199,5 +5269,5 @@ def _probe(name: str, action) -> HealthProbe:
             name=name,
             status="failed",
             latency_ms=round((perf_counter() - started) * 1000),
-            detail=str(exc),
+            detail=_sanitized_health_error(exc),
         )

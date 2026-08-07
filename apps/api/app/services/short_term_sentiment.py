@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.services.common import dedupe_source_status as _dedupe_source_status
 
 import re
 from collections import defaultdict
@@ -265,18 +266,6 @@ def build_missing_sentiment_summary(trade_date: str) -> SentimentSummaryResponse
         ],
         notes=["暂无本交易日缓存快照。点击刷新情绪后会调用真实数据源生成。"],
     )
-
-
-def _dedupe_source_status(items: list[StrongStockSourceStatus]) -> list[StrongStockSourceStatus]:
-    output: list[StrongStockSourceStatus] = []
-    seen: set[tuple[str, str, str]] = set()
-    for item in items:
-        key = (item.source, item.status, item.detail)
-        if key in seen:
-            continue
-        seen.add(key)
-        output.append(item)
-    return output
 
 
 def build_short_term_intraday_sentiment(

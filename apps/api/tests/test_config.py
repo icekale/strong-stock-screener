@@ -120,3 +120,41 @@ def test_research_settings_have_safe_defaults() -> None:
 def test_research_settings_reject_values_outside_bounds(field: str, value: float) -> None:
     with pytest.raises(ValidationError):
         Settings(_env_file=None, **{field: value})
+
+
+def test_runtime_settings_rejects_dangerous_provider_base_url() -> None:
+    from app.services.runtime_settings import SettingsUpdate, validate_provider_base_url
+
+    assert validate_provider_base_url("https://api.tickflow.org") == "https://api.tickflow.org"
+    assert validate_provider_base_url("http://192.168.5.221:7899") == "http://192.168.5.221:7899"
+
+    with pytest.raises(ValueError):
+        validate_provider_base_url("file:///etc/passwd")
+    with pytest.raises(ValueError):
+        validate_provider_base_url("gopher://x")
+    with pytest.raises(ValueError):
+        validate_provider_base_url("https://user:pass@evil.com")
+
+    with pytest.raises(ValueError):
+        SettingsUpdate(
+            candidate_provider="recent_limit_up",
+            kline_provider="tickflow",
+            quote_provider="tickflow",
+            tickflow_base_url="file:///etc/passwd",
+            ifind_base_url="https://api-mcp.51ifind.com:8643",
+            tdx_base_url="https://mcp.tdx.com.cn:3001/mcp",
+            provider_timeout_seconds=12,
+        )
+
+
+def test_background_job_type_validation(tmp_path: Path) -> None:
+    from app.services.background_jobs import BackgroundJobStore
+
+    store = BackgroundJobStore(tmp_path)
+    with pytest.raises(ValueError, match="后台任务类型"):
+        store.create_transient_job(
+            "chanlun_backfill:../../etc",
+            lambda progress, should_cancel: None,
+            running_message="x",
+            success_message="y",
+        )

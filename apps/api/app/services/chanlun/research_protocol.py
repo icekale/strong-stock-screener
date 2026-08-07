@@ -28,6 +28,7 @@ CZSC_RC8_ENGINE_VERSION = "1.0.0rc8"
 APPROVED_PERIODS: tuple[ChanlunPeriod, ...] = ("1d", "60m", "30m", "5m")
 _APPROVED_PERIOD_SET = frozenset(APPROVED_PERIODS)
 _DATE_ONLY = re.compile(r"\d{4}-\d{2}-\d{2}")
+_COMPACT_DATE = re.compile(r"\d{8}")
 _SHANGHAI = ZoneInfo("Asia/Shanghai")
 _BAR_FIELD_SET = frozenset(
     {
@@ -359,6 +360,14 @@ def _bar_timestamp(period: ChanlunPeriod, value: str) -> datetime:
         if period != "1d":
             raise ValueError(f"{period} bars require an actual closed timestamp")
         return datetime.combine(date.fromisoformat(value), time(15), tzinfo=_SHANGHAI)
+    if period == "1d" and _COMPACT_DATE.fullmatch(value):
+        # 兼容 YYYYMMDD 紧凑日K（部分 provider 输出该格式）：按 15:00 收盘边界归一化，
+        # 与 _closed_bar_boundary 的语义保持一致。
+        return datetime.combine(
+            datetime.strptime(value, "%Y%m%d").date(),
+            time(15),
+            tzinfo=_SHANGHAI,
+        )
     return _parse_timestamp(value, field_name=f"{period} bar timestamp")
 
 

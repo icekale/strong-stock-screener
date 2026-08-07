@@ -154,7 +154,10 @@ def _sample_from_bars(
     analyzer: Analyzer,
 ) -> _CalibrationSample | None:
     normalized_date = _normalize_date(trade_date)
-    signal_index = next((index for index, bar in enumerate(bars) if bar.date == normalized_date), None)
+    signal_index = next(
+        (index for index, bar in enumerate(bars) if _normalize_date(bar.date) == normalized_date),
+        None,
+    )
     if signal_index is None or signal_index < 59:
         return None
 

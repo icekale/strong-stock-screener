@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue';
+import dayjs from 'dayjs';
 import { Icon } from '@iconify/vue';
 import { Empty } from 'ant-design-vue';
 import { useRouter } from 'vue-router';
@@ -22,7 +23,9 @@ const alertTypeLabels: Record<EtfActivityAlert['alert_type'], string> = {
 };
 
 function formatTime(value: string) {
-  return value.replace('T', ' ').replace(/([+-]\d{2}:\d{2}|Z)$/, '');
+  // dayjs 会把带时区的 ISO 时间戳自动转换为本地时区；直接删掉时区后缀会
+  // 把 UTC 时刻原样展示（比北京时间少 8 小时）。
+  return dayjs(value).format('HH:mm');
 }
 
 function evidenceText(alert: EtfActivityAlert) {

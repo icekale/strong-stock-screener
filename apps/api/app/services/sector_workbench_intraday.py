@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.services.common import dedupe_symbols as _dedupe_symbols
 
 from collections import defaultdict
 from datetime import datetime
@@ -230,13 +231,3 @@ def _time_text(timestamp: int) -> str:
     return datetime.fromtimestamp(seconds, tz=ZoneInfo("Asia/Shanghai")).strftime("%H:%M")
 
 
-def _dedupe_symbols(symbols: list[str]) -> list[str]:
-    output: list[str] = []
-    seen: set[str] = set()
-    for symbol in symbols:
-        normalized = symbol.strip().upper()
-        if not normalized or normalized in seen:
-            continue
-        seen.add(normalized)
-        output.append(normalized)
-    return output

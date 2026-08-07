@@ -74,7 +74,7 @@ def test_auction_sampler_generates_top3_once_per_trade_date_after_lock_time() ->
     assert calls == ["2026-07-01", "2026-07-02"]
 
 
-def test_auction_sampler_does_not_generate_top3_on_weekends() -> None:
+def test_auction_sampler_skips_sampling_and_top3_on_weekends() -> None:
     calls: list[str] = []
 
     sampler = AuctionSnapshotSampler(
@@ -83,7 +83,8 @@ def test_auction_sampler_does_not_generate_top3_on_weekends() -> None:
         clock=lambda: datetime(2026, 7, 5, 9, 25, 3),
     )
 
-    assert sampler.sample_once() is True
+    # 非交易日既不采样（避免空转网络请求）也不生成 top3。
+    assert sampler.sample_once() is False
     assert calls == []
 
 

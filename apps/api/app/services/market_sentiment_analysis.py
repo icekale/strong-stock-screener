@@ -5,7 +5,7 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal
-from threading import RLock
+from threading import RLock, Event
 from typing import Any, Literal, Mapping, Sequence
 
 import httpx
@@ -584,6 +584,9 @@ class MarketSentimentAnalysisService:
         self.store = store
         self.http_client = http_client
         self._lock = RLock()
+        # 同 (trade_date, input_hash) 的进行中生成：owner 线程锁外执行网络调用，
+        # 等待方在锁内发现 in-flight 后阻塞到结果落盘再读取。
+        self._inflight: dict[tuple[str, str], Event] = {}
 
     def generate(
         self,
@@ -606,12 +609,19 @@ class MarketSentimentAnalysisService:
                 input_hash=input_hash,
             )
 
+        inflight_key = (trade_date, input_hash)
         with self._lock:
             existing = self.store.load(trade_date)
             if not force and _is_matching_ready(existing, trade_date, input_hash, config):
                 return existing
             if not force and _is_matching_cooling_failure(existing, trade_date, input_hash, config):
                 return existing
+
+            wait_event = self._inflight.get(inflight_key)
+            if wait_event is not None:
+                # 已有线程在生成同一输入：等它落盘后读回结果，避免重复 AI 调用。
+                wait_event.wait()
+                return self.store.load(trade_date)
 
             requested_at = _now()
             pending = SentimentPercentileAnalysisResponse(
@@ -625,7 +635,16 @@ class MarketSentimentAnalysisService:
                 requested_at=requested_at,
             )
             self.store.save(pending)
+            owner_event = Event()
+            self._inflight[inflight_key] = owner_event
+        try:
+            # 网络 AI 生成在锁外执行，避免持有全局锁跨最长 3×180s 的网络调用，
+            # 串行化其它交易日的 generate()。
             return self._generate_after_pending(pending, canonical_input, analysis_input, config)
+        finally:
+            with self._lock:
+                self._inflight.pop(inflight_key, None)
+            owner_event.set()
 
     def _generate_after_pending(
         self,
@@ -810,71 +829,6 @@ def _post_chat_payload(
     if not isinstance(payload, dict):
         raise ValueError("AI response JSON must be an object")
     return payload
-
-
-def _streaming_chat_payload(
-    client: Any,
-    url: str,
-    *,
-    headers: Mapping[str, str],
-    request_json: Mapping[str, object],
-) -> dict[str, Any]:
-    content = ""
-    reasoning_content = ""
-    with client.stream("POST", url, headers=dict(headers), json=dict(request_json)) as response:
-        response.raise_for_status()
-        for line in response.iter_lines():
-            if not line:
-                continue
-            if isinstance(line, bytes):
-                line = line.decode("utf-8", errors="replace")
-            if not isinstance(line, str):
-                continue
-            if line.startswith("data:"):
-                line = line[5:].strip()
-            if line == "[DONE]":
-                break
-            try:
-                chunk = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(chunk, dict):
-                continue
-            choices = chunk.get("choices")
-            if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
-                continue
-            choice = choices[0]
-            delta = choice.get("delta")
-            message = choice.get("message")
-            source = delta if isinstance(delta, Mapping) else message if isinstance(message, Mapping) else None
-            if source is None:
-                continue
-            content_piece = _stream_text(source.get("content"))
-            reasoning_piece = _stream_text(source.get("reasoning_content"))
-            content += content_piece
-            reasoning_content += reasoning_piece
-            if content:
-                try:
-                    extract_json_object(content)
-                except (TypeError, ValueError):
-                    continue
-                return {"choices": [{"message": {"content": content}}]}
-    selected_content = content or reasoning_content
-    if selected_content:
-        return {"choices": [{"message": {"content": selected_content}}]}
-    raise ValueError("AI streaming response missing content")
-
-
-def _stream_text(value: Any) -> str:
-    if isinstance(value, str):
-        return value
-    if isinstance(value, list):
-        return "".join(
-            item.get("text", "")
-            for item in value
-            if isinstance(item, Mapping) and isinstance(item.get("text"), str)
-        )
-    return ""
 
 
 def _normalize_sentiment_result_payload(payload: dict[str, Any]) -> dict[str, Any]:

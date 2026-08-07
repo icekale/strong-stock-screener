@@ -1105,10 +1105,13 @@ export async function generateModelMaintenancePacket(): Promise<ModelMaintenance
 
 export async function getLatestModelMaintenancePacket(): Promise<ModelMaintenancePacket | null> {
   const response = await apiFetch(`${API_BASE_URL}/api/model-maintenance/packets/latest`);
+  if (response.status === 404) {
+    return null;
+  }
   if (!response.ok) {
     throw new Error(`读取模型维护数据包失败：${response.status} ${await response.text()}`);
   }
-  return response.json() as Promise<ModelMaintenancePacket | null>;
+  return response.json() as Promise<ModelMaintenancePacket>;
 }
 
 export async function getModelMaintenancePacket(packetId: string): Promise<ModelMaintenancePacket> {
@@ -1121,10 +1124,13 @@ export async function getModelMaintenancePacket(packetId: string): Promise<Model
 
 export async function getLatestModelMaintenanceReport(): Promise<ModelMaintenanceReport | null> {
   const response = await apiFetch(`${API_BASE_URL}/api/model-maintenance/reports/latest`);
+  if (response.status === 404) {
+    return null;
+  }
   if (!response.ok) {
     throw new Error(`读取模型维护报告失败：${response.status} ${await response.text()}`);
   }
-  return response.json() as Promise<ModelMaintenanceReport | null>;
+  return response.json() as Promise<ModelMaintenanceReport>;
 }
 
 export async function getAuctionTop3TrainingSummary(): Promise<AuctionTop3TrainingSummary> {

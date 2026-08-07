@@ -56,3 +56,11 @@ export function toggleHtmlClass(className: string) {
     remove
   };
 }
+
+
+/**
+ * 类型收窄辅助：把 DataList 槽位的 unknown 条目断言为具体类型。
+ */
+export function as<T>(value: unknown): T {
+  return value as T;
+}

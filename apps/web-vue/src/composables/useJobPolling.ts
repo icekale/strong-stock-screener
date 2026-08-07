@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue';
+import { computed, onUnmounted, ref } from 'vue';
 import type { BackgroundJobState } from '@/service/types';
 
 type PollingOptions = {
@@ -18,6 +18,12 @@ export function useJobPolling<T>(
   const error = ref<Error>();
   const cancelled = ref(false);
   const intervalMs = options.intervalMs ?? 1000;
+
+  // 组件卸载时自动停止轮询，避免 setTimeout 链在卸载后继续向后端发请求。
+  onUnmounted(() => {
+    cancelled.value = true;
+    polling.value = false;
+  });
 
   const progress = computed(() => {
     const current = job.value?.progress_current ?? 0;

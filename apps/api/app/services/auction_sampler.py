@@ -25,6 +25,8 @@ def is_trading_day(now: datetime | None = None) -> bool:
 
 def is_auction_sample_window(now: datetime | None = None) -> bool:
     current = _local_now(now)
+    if not is_trading_day(current):
+        return False
     seconds = _seconds_since_midnight(current)
     return (9 * 3600 + 14 * 60 + 30) <= seconds <= (9 * 3600 + 25 * 60 + 30)
 

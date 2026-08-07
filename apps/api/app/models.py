@@ -1012,7 +1012,7 @@ class AuctionReviewSummary(BaseModel):
 class AuctionBackfillResponse(BaseModel):
     status: str = "data_unavailable"
     saved_count: int = 0
-    message: str = "历史集合竞价数据源尚未验证，未生成回填样本。"
+    message: str = "竞价复盘回填尚未实现，请使用 /api/auction/snapshot/jobs 采集后再执行复盘。"
 
 
 class StockQuoteResponse(BaseModel):
@@ -2025,25 +2025,6 @@ class SentimentDecisionResponse(BaseModel):
     generated_at: str = Field(
         default_factory=lambda: datetime.now().astimezone().isoformat(timespec="seconds")
     )
-
-
-class SentimentDecisionOutcome(BaseModel):
-    trade_date: str
-    next_day_index_pct: float | None = None
-    next_day_limit_up_count: int | None = None
-    next_day_limit_down_count: int | None = None
-    hit: bool = False
-    score: float = 0
-    reason: str = ""
-
-
-class SentimentReviewSummary(BaseModel):
-    trade_date: str
-    sample_count: int = 0
-    hit_count: int = 0
-    hit_rate_pct: float = 0
-    avg_score: float = 0
-    outcomes: list[SentimentDecisionOutcome] = Field(default_factory=list)
 
 
 class SentimentWatchlistAlert(BaseModel):

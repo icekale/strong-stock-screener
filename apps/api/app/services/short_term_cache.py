@@ -8,6 +8,9 @@ T = TypeVar("T")
 _MISSING = object()
 _STALE_RETENTION_MULTIPLIER = 10
 _MAX_STALE_RETENTION_SECONDS = 3600
+# 等待并发填充的等待方，超过该总时长仍未完成则放弃，避免 owner 线程卡死时全部等待方挂死。
+_FILL_WAIT_TIMEOUT_SECONDS = 60
+_FILL_WAIT_INTERVAL_SECONDS = 5
 
 
 class TtlCache(Generic[T]):
@@ -133,6 +136,7 @@ class TtlCache(Generic[T]):
         *,
         stale_while_revalidate: bool = False,
     ) -> T:
+        wait_deadline: float | None = None
         while True:
             with self._lock:
                 now = monotonic()
@@ -158,7 +162,16 @@ class TtlCache(Generic[T]):
                     is_owner = False
 
             if not is_owner:
-                fill_event.wait()
+                if wait_deadline is None:
+                    wait_deadline = monotonic() + _FILL_WAIT_TIMEOUT_SECONDS
+                if not fill_event.wait(timeout=_FILL_WAIT_INTERVAL_SECONDS):
+                    with self._lock:
+                        owner_gone = self._filling.get(key) is not fill_event
+                    if not owner_gone and monotonic() >= wait_deadline:
+                        raise RuntimeError(
+                            f"cache '{self.name}' key '{key}' 等待并发填充超时"
+                            f"（>{_FILL_WAIT_TIMEOUT_SECONDS}s）"
+                        )
                 continue
 
             try:

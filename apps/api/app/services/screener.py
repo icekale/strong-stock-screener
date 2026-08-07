@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.services.common import dedupe_strings as _dedupe
 
 from collections import Counter
 from typing import Protocol
@@ -544,16 +545,6 @@ def _kline_failure_detail(failures: int, failed_candidates: list[str]) -> str:
     hidden = failures - len(failed_candidates[:10])
     suffix = f"，另 {hidden} 只" if hidden > 0 else ""
     return f"{failures} 只股票K线获取失败：{shown}{suffix}"
-
-
-def _dedupe(values: list[str]) -> list[str]:
-    output: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        if value and value not in seen:
-            seen.add(value)
-            output.append(value)
-    return output
 
 
 def _count_gsgf_signal(funnel: GsgfFunnelDiagnostics, item: StrongStockScreeningItem) -> None:

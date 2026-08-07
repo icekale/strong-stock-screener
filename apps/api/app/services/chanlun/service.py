@@ -502,9 +502,10 @@ class ChanlunAnalysisService:
         continuity_status = _continuity_reference_status(daily_reference)
         result: dict[ChanlunPeriod, _ClosedPeriodData] = {}
         for period in periods:
-            completed = tuple(
-                aggregate_closed_intraday_bars(minute_bars, period=period, now=now)[-lookback:]
-            )
+            # 每个周期只聚合一次分钟数据，同时供 completed 与 bucket 判定复用，
+            # 避免同一批分钟数据被重复遍历。
+            aggregated = aggregate_closed_intraday_bars(minute_bars, period=period, now=now)
+            completed = tuple(aggregated[-lookback:])
             archive_status = StrongStockSourceStatus(
                 source="Chanlun SQLite分钟线",
                 status="stale" if live_failed else "success",
@@ -514,7 +515,7 @@ class ChanlunAnalysisService:
             )
             period_expected_trade_dates = expected_trade_dates
             if expected_trade_dates is not None and _has_current_latest_bucket(
-                current_bars,
+                aggregated,
                 period=period,
                 now=now,
             ):
@@ -684,11 +685,21 @@ class ChanlunAnalysisService:
                 rule_version=base.rule_version,
             )
 
+        # replay 需要对每个 bar 前缀重建 CZSC 结构，总体 O(n²)；为控制耗时，
+        # 只在原始 bars 数量较大时按前缀步进抽样，同时保持前缀边界与信号语义一致。
+        min_prefix = _MIN_COMPLETED_BARS
+        total_bars = len(base.bars)
+        step = 1
+        if total_bars > _REPLAY_STEP_THRESHOLD:
+            step = max(1, total_bars // _REPLAY_STEP_THRESHOLD)
+
         seen_divergence_ids: set[str] = set()
         seen_signal_ids: set[str] = set()
         frames: list[ChanlunReplayFrame] = []
-        for prefix_size in range(_MIN_COMPLETED_BARS, len(base.bars) + 1):
+        for prefix_size in range(min_prefix, total_bars + 1):
             prefix = base.bars[:prefix_size]
+            if prefix_size < total_bars and (prefix_size - min_prefix) % step != 0:
+                continue
             snapshot = self.adapter.analyze(
                 base.symbol,
                 period=period,
@@ -1018,6 +1029,7 @@ class ChanlunAnalysisService:
             adjustment_mode=adjustment_mode,
             include_observing=include_observing,
             generation=generation,
+            bars_fingerprint=_bars_fingerprint(bars),
         )
 
         def build() -> ChanlunAnalysisResponse:
@@ -1408,17 +1420,18 @@ def _minute_trade_date(bar: TickFlowIntradayBar) -> date:
 
 
 def _has_current_latest_bucket(
-    bars: list[TickFlowIntradayBar],
+    bars: list[KlineBar],
     *,
     period: Literal["5m", "30m", "60m"],
     now: datetime,
 ) -> bool:
+    """判断当前交易日的最后一个闭合桶是否已产出（bars 为已聚合结果，避免重复聚合）。"""
     latest_close = _expected_latest_close(period, now)
     if latest_close.date() != now.date():
         return False
     return any(
         bar.date == latest_close.isoformat(timespec="seconds")
-        for bar in aggregate_closed_intraday_bars(bars, period=period, now=now)
+        for bar in bars
     )
 
 
@@ -1449,12 +1462,28 @@ def _cache_key(
     adjustment_mode: str,
     include_observing: bool,
     generation: int,
+    bars_fingerprint: str = "",
 ) -> str:
+    # bars_fingerprint 覆盖「末根 bar 日期未变但历史 bar 被修正」的缓存失效场景。
     return (
         f"chanlun:{symbol}:{period}:{lookback}:{last_closed_bar_at or 'none'}:"
         f"{adjustment_mode}:{_RULE_VERSION}:generation={generation}:"
-        f"observing={int(include_observing)}"
+        f"observing={int(include_observing)}:bars={bars_fingerprint}"
     )
+
+
+def _bars_fingerprint(bars: list[KlineBar]) -> str:
+    """对 bars 内容做轻量指纹：末根 bar 的 OHLCV 与首根日期即可区分绝大多数修正场景。"""
+    if not bars:
+        return "empty"
+    last = bars[-1]
+    return (
+        f"{bars[0].date}|{last.date}:{last.open}:{last.high}:{last.low}:{last.close}:{last.volume}"
+    )
+
+
+# replay 对每个 bar 前缀重建 CZSC 为 O(n²) 操作，超过该阈值时按前缀步进抽样控制耗时。
+_REPLAY_STEP_THRESHOLD = 240
 
 
 def _raise_if_canceled(should_cancel: CancelCheck) -> None:

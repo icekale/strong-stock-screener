@@ -1,8 +1,8 @@
 from __future__ import annotations
+from app.services.common import latest_trade_date as _latest_weekday
 
 import hashlib
 import json
-import statistics
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
 from math import isclose
@@ -21,9 +21,7 @@ from app.models import (
     EtfRadarMethodologyResponse,
     EtfRadarOverviewResponse,
     EtfRadarSummary,
-    EtfShareChange,
     EtfSharePoint,
-    EtfSynchronization,
     HuijinEtfActivityItem,
     HuijinEtfActivitySummary,
     HuijinEtfBaseline,
@@ -352,6 +350,7 @@ class CapitalSignalService:
                 if symbol.endswith(".SH") and symbol not in previous_by_symbol
             ]
             previous_status: list[StrongStockSourceStatus] = []
+            history_before_merge = history
             if missing_sse:
                 previous_result = self.provider.get_etf_share_rows(previous_date, missing_sse)
                 fetched_previous_rows = [
@@ -396,7 +395,8 @@ class CapitalSignalService:
             activity = _activity_summary(core_items, validation_groups)
             items = [_legacy_radar_item(item) for item in core_items]
 
-            self.store.save_share_history(history)
+            if history != history_before_merge:
+                self.store.save_share_history(history)
             generated_at = now.isoformat(timespec="seconds")
             snapshot = EtfRadarOverviewResponse(
                 generated_at=generated_at,
@@ -899,6 +899,7 @@ class CapitalSignalService:
         self, trade_date: str
     ) -> tuple[MarginSummary, list[StrongStockSourceStatus]]:
         history = self.store.load_margin_history()
+        history_before_merge = history
         current_rows = [row for row in history if row.trade_date == trade_date]
         statuses: list[StrongStockSourceStatus] = []
         if not current_rows:
@@ -914,7 +915,8 @@ class CapitalSignalService:
             previous_rows = previous_result.rows
             history = _merge_margin_history(history, previous_rows)
             statuses.extend(previous_result.source_status)
-        self.store.save_margin_history(history)
+        if history != history_before_merge:
+            self.store.save_margin_history(history)
 
         current_balance = _sum_optional(row.margin_balance_cny for row in current_rows)
         comparable_markets = {row.market for row in current_rows} & {
@@ -953,21 +955,6 @@ class CapitalSignalService:
             statuses,
         )
 
-    def _quote_closes(self, symbols: list[str]) -> dict[str, float]:
-        if self.quote_provider is None:
-            return {}
-        try:
-            quotes = self.quote_provider.get_quotes(symbols)
-        except Exception:
-            return {}
-        output: dict[str, float] = {}
-        for quote in quotes:
-            symbol = getattr(quote, "symbol", None)
-            price = getattr(quote, "last_price", None)
-            if isinstance(symbol, str) and isinstance(price, (int, float)) and price > 0:
-                output[symbol] = float(price)
-        return output
-
     @staticmethod
     def _empty_overview(
         now: datetime,
@@ -1002,48 +989,6 @@ class CapitalSignalService:
             validation_items=validation_items,
             validation_groups=validation_groups,
         )
-
-
-def build_share_change(
-    *,
-    current_shares: float,
-    previous_shares: float | None,
-    close: float | None,
-) -> EtfShareChange:
-    if previous_shares is None:
-        return EtfShareChange()
-    share_change = current_shares - previous_shares
-    return EtfShareChange(
-        share_change=share_change,
-        estimated_subscription_cny=(share_change * close if close is not None else None),
-    )
-
-
-def robust_z_score(value: float | None, history: list[float]) -> float | None:
-    if value is None or len(history) < 3:
-        return None
-    median = statistics.median(history)
-    mad = statistics.median(abs(item - median) for item in history)
-    if mad == 0:
-        return None
-    return (value - median) / (1.4826 * mad)
-
-
-def synchronization_ratio(values: Iterable[bool | None]) -> EtfSynchronization:
-    valid_values = [value for value in values if value is not None]
-    positive_count = sum(value is True for value in valid_values)
-    return EtfSynchronization(
-        positive_count=positive_count,
-        valid_count=len(valid_values),
-        ratio=(positive_count / len(valid_values) if valid_values else None),
-    )
-
-
-def _latest_weekday(now: datetime) -> str:
-    value = now.date()
-    if not is_open_session(value):
-        value = previous_open_session(value)
-    return value.isoformat()
 
 
 def _latest_disclosed_trade_date(now: datetime) -> str:

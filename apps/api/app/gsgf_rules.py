@@ -1,4 +1,5 @@
 from __future__ import annotations
+from app.services.common import dedupe_strings as _dedupe
 
 from statistics import mean
 
@@ -531,16 +532,6 @@ def _diagnostics(
             "flags": [confirm_type] if confirm_type else [],
         },
     }
-
-
-def _dedupe(values: list[str]) -> list[str]:
-    output: list[str] = []
-    seen: set[str] = set()
-    for value in values:
-        if value and value not in seen:
-            seen.add(value)
-            output.append(value)
-    return output
 
 
 def _with_trade_plan(analysis: GsgfAnalysis) -> GsgfAnalysis:

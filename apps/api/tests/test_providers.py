@@ -2639,13 +2639,45 @@ def test_eastmoney_kline_provider_unadjusted_for_chanlun() -> None:
 def test_eastmoney_kline_provider_raises_on_empty() -> None:
     from app.models import StrongStockDataUnavailable
 
-    provider = EastmoneyKlineProvider(http_client=FakeHttpClient({"rc": 0, "data": None}))
+    class FakeFailingFallback:
+        def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
+            raise StrongStockDataUnavailable(f"腾讯日K为空: {symbol}")
+
+    provider = EastmoneyKlineProvider(
+        http_client=FakeHttpClient({"rc": 0, "data": None}),
+        fallback_provider=FakeFailingFallback(),
+    )
     try:
         provider.get_klines("600000.SH", count=220)
     except StrongStockDataUnavailable as exc:
-        assert "东方财富日K为空" in str(exc)
+        assert "腾讯日K为空" in str(exc)
     else:
         raise AssertionError("expected empty payload to fail")
+
+
+def test_eastmoney_kline_provider_falls_back_to_tencent_on_request_failure() -> None:
+    class FakeFailingHttpClient:
+        def get(self, url: str, **kwargs: object) -> object:
+            raise ConnectionError("eastmoney blocked")
+
+    class FakeFallback:
+        def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
+            assert symbol == "600000.SH"
+            return [
+                KlineBar(date="2026-08-05", open=9.49, close=9.26, high=9.49, low=9.23, volume=79549900.0, amount=None),
+                KlineBar(date="2026-08-06", open=9.28, close=9.29, high=9.35, low=9.16, volume=67232900.0, amount=None),
+            ]
+
+    provider = EastmoneyKlineProvider(
+        http_client=FakeFailingHttpClient(),
+        fallback_provider=FakeFallback(),
+    )
+
+    bars = provider.get_klines("600000.SH", count=220)
+
+    assert len(bars) == 2
+    assert bars[0].date == "2026-08-05"
+    assert bars[0].volume == 79549900.0
 
 
 def test_eastmoney_to_secid_mapping() -> None:
@@ -2957,3 +2989,55 @@ def test_eastmoney_minute_history_provider_raises_on_empty() -> None:
         assert "东财分钟历史未返回" in str(exc)
     else:
         raise AssertionError("expected empty minute history to fail")
+
+
+def test_tencent_daily_kline_provider_maps_forward_adjusted_payload() -> None:
+    from app.providers.tencent_kline import TencentDailyKlineProvider
+
+    payload = {
+        "data": {
+            "sh600000": {
+                "qfqday": [
+                    ["2026-08-05", "9.490", "9.260", "9.490", "9.230", "795499.000"],
+                    ["2026-08-06", "9.280", "9.290", "9.350", "9.160", "672329.000"],
+                ]
+            }
+        }
+    }
+    provider = TencentDailyKlineProvider(http_client=FakeHttpClient(payload))
+
+    bars = provider.get_klines("600000.SH", count=220)
+
+    assert len(bars) == 2
+    assert bars[0].date == "2026-08-05"
+    # 腾讯成交量单位为手 → ×100 对齐 tickflow 的股单位
+    assert bars[0].volume == 795499.000 * 100
+    assert bars[0].open == 9.49
+    assert bars[0].close == 9.26
+    assert bars[0].high == 9.49
+    assert bars[0].low == 9.23
+    assert "fqkline" in provider.http_client.last_request["url"]
+    assert provider.http_client.last_request["params"]["param"] == "sh600000,day,,,220,qfq"
+
+
+def test_tencent_daily_kline_provider_unadjusted_uses_kline_endpoint() -> None:
+    from app.providers.tencent_kline import TencentDailyKlineProvider
+
+    payload = {"data": {"sh600000": {"day": [["2026-08-05", "9.490", "9.260", "9.490", "9.230", "795499.000"]]}}}
+    provider = TencentDailyKlineProvider(adjust="none", http_client=FakeHttpClient(payload))
+
+    bars = provider.get_klines("600000.SH", count=220)
+
+    assert len(bars) == 1
+    assert "appstock/app/kline/kline" in provider.http_client.last_request["url"]
+
+
+def test_tencent_daily_kline_symbol_mapping() -> None:
+    from app.providers.tencent_kline import _tencent_kline_symbol
+
+    assert _tencent_kline_symbol("600000.SH") == "sh600000"
+    assert _tencent_kline_symbol("000001.SZ") == "sz000001"
+    assert _tencent_kline_symbol("920001.BJ") == "bj920001"
+    assert _tencent_kline_symbol("600000") == "sh600000"
+    assert _tencent_kline_symbol("000001") == "sz000001"
+    assert _tencent_kline_symbol("invalid") == ""

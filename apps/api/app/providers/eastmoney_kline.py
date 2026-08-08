@@ -21,6 +21,7 @@ from datetime import date, timedelta
 from curl_cffi import requests as cffi_requests
 
 from app.models import KlineBar, StrongStockDataUnavailable, StrongStockSourceStatus
+from app.providers.tencent_kline import TencentDailyKlineProvider
 
 logger = logging.getLogger(__name__)
 
@@ -37,22 +38,32 @@ _MAX_BACKFILL_DAYS = 2200  # 足够覆盖情绪分位的 1020 根日K
 
 
 class EastmoneyKlineProvider:
-    source_name = "东方财富日K"
+    source_name = "东方财富日K，腾讯日K fallback"
 
     def __init__(
         self,
         timeout_seconds: float = 12,
         adjust: str = "forward",
         http_client: object | None = None,
+        fallback_provider: object | None = None,
     ) -> None:
         self.timeout_seconds = timeout_seconds
         self.adjust = adjust
         self._owns_client = http_client is None
         self.http_client = http_client or cffi_requests.Session(impersonate="chrome")
+        # 东财日K被 IP 级 TLS 封锁时（unraid 实测必断）自动切腾讯日K，
+        # 同契约返回（date/volume×100），amount 缺失时置 None。
+        self.fallback_provider = fallback_provider or TencentDailyKlineProvider(
+            timeout_seconds=timeout_seconds,
+            adjust=adjust,
+        )
 
     def close(self) -> None:
         if self._owns_client:
             self.http_client.close()
+        fallback_close = getattr(self.fallback_provider, "close", None)
+        if callable(fallback_close):
+            fallback_close()
 
     def get_klines(self, symbol: str, count: int = 220) -> list[KlineBar]:
         if count <= 0:
@@ -60,21 +71,25 @@ class EastmoneyKlineProvider:
         secid = _to_secid(symbol)
         if secid is None:
             raise StrongStockDataUnavailable(f"无法解析证券代码: {symbol}")
+        try:
+            bars = self._fetch_eastmoney(secid, count)
+        except StrongStockDataUnavailable:
+            raise
+        except Exception as exc:
+            logger.warning("东方财富日K请求失败，fallback 到腾讯日K: %s (%s)", symbol, exc.__class__.__name__)
+            bars = self.fallback_provider.get_klines(symbol, count=count)
+        if bars:
+            return bars[-count:]
+        logger.warning("东方财富日K为空，fallback 到腾讯日K: %s", symbol)
+        return self.fallback_provider.get_klines(symbol, count=count)[-count:]
+
+    def _fetch_eastmoney(self, secid: str, count: int) -> list[KlineBar]:
         start_date = (
             date.today() - timedelta(days=min(count * _CALENDAR_DAY_FACTOR, _MAX_BACKFILL_DAYS))
         ).strftime("%Y%m%d")
         end_date = date.today().strftime("%Y%m%d")
-
-        try:
-            response = self._fetch_with_retry(secid, start_date, end_date)
-            payload = response.json()
-        except Exception as exc:
-            raise StrongStockDataUnavailable(f"东方财富日K获取失败: {exc.__class__.__name__}") from exc
-
-        bars = _parse_kline_payload(payload)
-        if not bars:
-            raise StrongStockDataUnavailable(f"东方财富日K为空: {symbol}")
-        return bars[-count:]
+        response = self._fetch_with_retry(secid, start_date, end_date)
+        return _parse_kline_payload(response.json())
 
     def _fetch_with_retry(self, secid: str, start_date: str, end_date: str, attempts: int = 2):
         """东财接口偶发 TLS 指纹断连（curl_cffi 首连可能被重置），重试一次。"""

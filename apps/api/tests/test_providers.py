@@ -2901,3 +2901,59 @@ def test_market_overview_overview_uses_quote_source_name_labels() -> None:
         for status in overview.source_status
     )
     assert not any(status.source.startswith("TickFlow") for status in overview.source_status)
+
+
+def test_eastmoney_minute_history_provider_fetches_via_quote_provider() -> None:
+    from app.providers.eastmoney_minute_history import EastmoneyMinuteHistoryProvider
+
+    class FakeQuoteProvider:
+        def get_intraday_bars(
+            self, symbols: list[str], period: str, count: int
+        ) -> dict[str, list[TickFlowIntradayBar]]:
+            assert symbols == ["600000.SH"]
+            assert period == "1m"
+            assert count == 1600
+            return {
+                "600000.SH": [
+                    TickFlowIntradayBar(
+                        timestamp=1786066260000, open=9.22, high=9.29, low=9.25, close=9.28,
+                        volume=1027600.0, amount=9531870.0,
+                    )
+                ]
+            }
+
+        def close(self) -> None:
+            return None
+
+    provider = EastmoneyMinuteHistoryProvider(
+        enabled=True,
+        timeout_seconds=12,
+        quote_provider=FakeQuoteProvider(),
+    )
+
+    bars = provider.get_minute_bars("600000.SH", max_bars=1600)
+
+    assert len(bars) == 1
+    assert bars[0].close == 9.28
+
+
+def test_eastmoney_minute_history_provider_raises_on_empty() -> None:
+    from app.providers.eastmoney_minute_history import EastmoneyMinuteHistoryProvider
+
+    class FakeEmptyQuoteProvider:
+        def get_intraday_bars(
+            self, symbols: list[str], period: str, count: int
+        ) -> dict[str, list[TickFlowIntradayBar]]:
+            return {}
+
+    provider = EastmoneyMinuteHistoryProvider(
+        enabled=True,
+        timeout_seconds=12,
+        quote_provider=FakeEmptyQuoteProvider(),
+    )
+    try:
+        provider.get_minute_bars("600000.SH", max_bars=1600)
+    except StrongStockDataUnavailable as exc:
+        assert "东财分钟历史未返回" in str(exc)
+    else:
+        raise AssertionError("expected empty minute history to fail")

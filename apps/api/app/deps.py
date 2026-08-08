@@ -40,10 +40,10 @@ from app.providers.market_overview import TICKFLOW_A_SHARE_UNIVERSE, EastmoneyMa
 from app.providers.news_risk import EastmoneyNewsRiskProvider
 from app.providers.recent_limit_up_candidates import RecentLimitUpCandidateProvider
 from app.providers.tdx_mcp import TdxMcpProvider
-from app.providers.tdx_minute_history import TdxMinuteHistoryProvider
 from app.providers.tencent_quote import TencentQuoteProvider
 from app.providers.thsdk_candidates import ThsdkCandidateProvider
 from app.providers.eastmoney_kline import EastmoneyKlineProvider
+from app.providers.eastmoney_minute_history import EastmoneyMinuteHistoryProvider
 from app.providers.eastmoney_quote import EastmoneyQuoteProvider
 from app.providers.tickflow import TickFlowDailyKlineProvider, TickFlowQuoteProvider
 from app.services.auction_model import (
@@ -747,15 +747,19 @@ def _chanlun_minute_store() -> ChanlunMinuteBarStore:
 
 
 
-def _chanlun_history_provider() -> TdxMinuteHistoryProvider:
+def _chanlun_history_provider() -> EastmoneyMinuteHistoryProvider:
     injected = getattr(app_state().state, "chanlun_history_provider", None)
     if injected is not None:
         return injected
     settings = get_settings()
-    return TdxMinuteHistoryProvider(
+    provider = EastmoneyMinuteHistoryProvider(
         enabled=settings.chanlun_tdx_enabled,
-        timeout_seconds=settings.chanlun_tdx_timeout_seconds,
+        timeout_seconds=max(
+            settings.chanlun_tdx_timeout_seconds, settings.provider_timeout_seconds
+        ),
     )
+    app_state().state.chanlun_history_provider = provider
+    return provider
 
 
 

@@ -33,19 +33,12 @@ from app.models import (
     StrongStockSourceStatus,
 )
 from app.providers.capital_signals import OfficialCapitalDataProvider, SinaEtfHolderProvider
-from app.providers.concept_blocks import EastmoneyConceptBlockProvider
 from app.providers.heatmap import HeatmapProvider
 from app.providers.ifind import IfindMcpProvider
-from app.providers.market_overview import TICKFLOW_A_SHARE_UNIVERSE, EastmoneyMarketOverviewProvider
-from app.providers.news_risk import EastmoneyNewsRiskProvider
-from app.providers.recent_limit_up_candidates import RecentLimitUpCandidateProvider
+from app.providers.market_overview import TICKFLOW_A_SHARE_UNIVERSE
 from app.providers.tdx_mcp import TdxMcpProvider
-from app.providers.tencent_quote import TencentQuoteProvider
-from app.providers.thsdk_candidates import ThsdkCandidateProvider
-from app.providers.eastmoney_kline import EastmoneyKlineProvider
+from app.providers import registry as _registry
 from app.providers.eastmoney_minute_history import EastmoneyMinuteHistoryProvider
-from app.providers.eastmoney_quote import EastmoneyQuoteProvider
-from app.providers.tickflow import TickFlowDailyKlineProvider, TickFlowQuoteProvider
 from app.services.auction_model import (
     AuctionModelResultStore,
     AuctionModelService,
@@ -94,13 +87,11 @@ from app.services.notification_channels import (
     NotificationSettings,
     public_notification_settings,
 )
-from app.services.plate_rotation_reference import PlateRotationReferenceProvider
 from app.services.runs import RunStore
 from app.services.runtime_settings import (
     effective_runtime_settings,
     load_runtime_settings,
 )
-from app.services.sector_replica_live import SectorReplicaLiveProvider
 from app.services.sector_workbench_store import SectorThemeRowsStore, SectorWorkbenchSampleStore
 from app.services.sentiment_monitor import SentimentMonitor
 from app.services.sentiment_review_store import SentimentReviewStore
@@ -525,78 +516,22 @@ def _auction_snapshot_store() -> AuctionSnapshotStore:
 
 
 def _sector_replica_live_provider() -> object:
-    injected = getattr(app_state().state, "sector_replica_live_provider", None)
-    if injected is not None:
-        return injected
-    settings = _effective_settings()
-    provider = SectorReplicaLiveProvider(timeout_seconds=settings.provider_timeout_seconds)
-    app_state().state.sector_replica_live_provider = provider
-    return provider
+    return _registry._sector_replica_live_provider()
 
 
 
 def _plate_rotation_reference_provider() -> object:
-    injected = getattr(app_state().state, "plate_rotation_reference_provider", None)
-    if injected is not None:
-        return injected
-    settings = _effective_settings()
-    provider = PlateRotationReferenceProvider(timeout_seconds=settings.provider_timeout_seconds)
-    app_state().state.plate_rotation_reference_provider = provider
-    return provider
+    return _registry._plate_rotation_reference_provider()
 
 
 
 def _market_overview_provider() -> object:
-    injected = getattr(app_state().state, "market_overview_provider", None)
-    if injected is not None:
-        return injected
-    settings = _effective_settings()
-    base_settings = get_settings()
-    quote_provider = _quote_provider()
-    ifind_provider = _ifind_provider()
-    kline_provider = _kline_provider()
-    return _cached_default_provider(
-        attribute="default_market_overview_provider",
-        key=(
-            settings.provider_timeout_seconds,
-            id(quote_provider),
-            id(ifind_provider),
-            id(kline_provider),
-            str(base_settings.data_dir),
-        ),
-        factory=lambda: EastmoneyMarketOverviewProvider(
-            timeout_seconds=settings.provider_timeout_seconds,
-            realtime_quote_provider=quote_provider,
-            ifind_index_provider=ifind_provider,
-            ifind_stock_provider=ifind_provider,
-            daily_kline_provider=kline_provider,
-            turnover_cache_path=base_settings.data_dir / "market-overview" / "turnover-history.json",
-            sentiment_snapshot_dir=base_settings.data_dir / "sentiment_snapshots",
-        ),
-    )
+    return _registry._market_overview_provider()
 
 
 
 def _ifind_provider() -> IfindMcpProvider:
-    injected = getattr(app_state().state, "ifind_provider", None)
-    if injected is not None:
-        return injected
-    settings = _effective_settings()
-    return _cached_default_provider(
-        attribute="default_ifind_provider",
-        key=(
-            settings.ifind_api_key,
-            settings.ifind_base_url,
-            settings.provider_timeout_seconds,
-            settings.ifind_service_id,
-        ),
-        factory=lambda: IfindMcpProvider(
-            api_key=settings.ifind_api_key,
-            base_url=settings.ifind_base_url,
-            timeout_seconds=settings.provider_timeout_seconds,
-            http_client=getattr(app_state().state, "ifind_http_client", None),
-        ),
-    )
+    return _registry._ifind_provider()
 
 
 
@@ -748,82 +683,32 @@ def _chanlun_minute_store() -> ChanlunMinuteBarStore:
 
 
 def _chanlun_history_provider() -> EastmoneyMinuteHistoryProvider:
-    injected = getattr(app_state().state, "chanlun_history_provider", None)
-    if injected is not None:
-        return injected
-    settings = get_settings()
-    provider = EastmoneyMinuteHistoryProvider(
-        enabled=settings.chanlun_tdx_enabled,
-        timeout_seconds=max(
-            settings.chanlun_tdx_timeout_seconds, settings.provider_timeout_seconds
-        ),
-    )
-    app_state().state.chanlun_history_provider = provider
-    return provider
+    return _registry._chanlun_history_provider()
 
 
 
 def _tdx_provider() -> TdxMcpProvider:
-    injected = getattr(app_state().state, "tdx_provider", None)
-    if injected is not None:
-        return injected
-    settings = _effective_settings()
-    return _cached_default_provider(
-        attribute="default_tdx_provider",
-        key=(settings.tdx_api_key, settings.tdx_base_url, settings.provider_timeout_seconds),
-        factory=lambda: TdxMcpProvider(
-            api_key=settings.tdx_api_key,
-            base_url=settings.tdx_base_url,
-            timeout_seconds=settings.provider_timeout_seconds,
-            http_client=getattr(app_state().state, "tdx_http_client", None),
-        ),
-    )
+    return _registry._tdx_provider()
 
 
 
 def _heatmap_provider() -> HeatmapProvider:
-    provider = getattr(app_state().state, "heatmap_provider", None)
-    if provider is None:
-        settings = get_settings()
-        provider = HeatmapProvider(
-            turnover_cache_path=settings.data_dir / "heatmap" / "turnover-history.json"
-        )
-        app_state().state.heatmap_provider = provider
-    return provider
+    return _registry._heatmap_provider()
 
 
 
 def _concept_provider() -> object:
-    injected = getattr(app_state().state, "concept_provider", None)
-    if injected is not None:
-        return injected
-    cached = getattr(app_state().state, "default_concept_provider", None)
-    if cached is None:
-        settings = _effective_settings()
-        cached = EastmoneyConceptBlockProvider(timeout_seconds=settings.provider_timeout_seconds)
-        app_state().state.default_concept_provider = cached
-    return cached
+    return _registry._concept_provider()
 
 
 
 def _news_risk_provider() -> object:
-    injected = getattr(app_state().state, "news_risk_provider", None)
-    if injected is not None:
-        return injected
-    return EastmoneyNewsRiskProvider.from_akshare()
+    return _registry._news_risk_provider()
 
 
 
 def _valuation_quote_provider() -> object:
-    injected = getattr(app_state().state, "valuation_quote_provider", None)
-    if injected is not None:
-        return injected
-    settings = _effective_settings()
-    return _cached_default_provider(
-        attribute="default_valuation_quote_provider",
-        key=(settings.provider_timeout_seconds,),
-        factory=lambda: TencentQuoteProvider(timeout_seconds=settings.provider_timeout_seconds),
-    )
+    return _registry._valuation_quote_provider()
 
 
 
@@ -893,54 +778,12 @@ def _capital_signal_service() -> CapitalSignalService:
 
 
 def _quote_provider() -> object:
-    injected = getattr(app_state().state, "quote_provider", None)
-    if injected is not None:
-        return injected
-    settings = _effective_settings()
-    if getattr(settings, "quote_provider", "eastmoney") == "eastmoney":
-        return _cached_default_provider(
-            attribute="default_quote_provider",
-            key=("eastmoney", settings.provider_timeout_seconds),
-            factory=lambda: EastmoneyQuoteProvider(
-                timeout_seconds=settings.provider_timeout_seconds,
-            ),
-        )
-    return _cached_default_provider(
-        attribute="default_quote_provider",
-        key=(settings.tickflow_api_key, settings.tickflow_base_url, settings.provider_timeout_seconds),
-        factory=lambda: TickFlowQuoteProvider(
-            api_key=settings.tickflow_api_key,
-            base_url=settings.tickflow_base_url,
-            timeout_seconds=settings.provider_timeout_seconds,
-        ),
-    )
+    return _registry._quote_provider()
 
 
 
 def _chanlun_daily_provider() -> object:
-    injected = getattr(app_state().state, "kline_provider", None)
-    if injected is not None:
-        return injected
-    settings = _effective_settings()
-    if getattr(settings, "kline_provider", "eastmoney") == "eastmoney":
-        return _cached_default_provider(
-            attribute="default_chanlun_daily_provider",
-            key=("eastmoney", settings.provider_timeout_seconds),
-            factory=lambda: EastmoneyKlineProvider(
-                timeout_seconds=settings.provider_timeout_seconds,
-                adjust="none",
-            ),
-        )
-    return _cached_default_provider(
-        attribute="default_chanlun_daily_provider",
-        key=(settings.tickflow_api_key, settings.tickflow_base_url, settings.provider_timeout_seconds),
-        factory=lambda: TickFlowDailyKlineProvider(
-            api_key=settings.tickflow_api_key,
-            base_url=settings.tickflow_base_url,
-            timeout_seconds=settings.provider_timeout_seconds,
-            adjust="none",
-        ),
-    )
+    return _registry._chanlun_daily_provider()
 
 
 
@@ -1007,45 +850,17 @@ def _market_sentiment_percentile_store() -> MarketSentimentPercentileStore:
 
 
 def _daily_kline_provider() -> object:
-    return _kline_provider()
+    return _registry._daily_kline_provider()
 
 
 
 def _kline_provider() -> object:
-    injected = getattr(app_state().state, "kline_provider", None)
-    if injected is not None:
-        return injected
-    settings = _effective_settings()
-    provider_name = getattr(settings, "kline_provider", "eastmoney")
-    if provider_name == "eastmoney":
-        return _cached_default_provider(
-            attribute="default_kline_provider",
-            key=("eastmoney", settings.provider_timeout_seconds),
-            factory=lambda: EastmoneyKlineProvider(
-                timeout_seconds=settings.provider_timeout_seconds,
-                adjust="forward",
-            ),
-        )
-    return _cached_default_provider(
-        attribute="default_kline_provider",
-        key=(settings.tickflow_api_key, settings.tickflow_base_url, settings.provider_timeout_seconds),
-        factory=lambda: TickFlowDailyKlineProvider(
-            api_key=settings.tickflow_api_key,
-            base_url=settings.tickflow_base_url,
-            timeout_seconds=settings.provider_timeout_seconds,
-        ),
-    )
+    return _registry._kline_provider()
 
 
 
 def _candidate_provider() -> object:
-    injected = getattr(app_state().state, "candidate_provider", None)
-    if injected is not None:
-        return injected
-    settings = _effective_settings()
-    if settings.candidate_provider == "thsdk":
-        return ThsdkCandidateProvider.from_installed_package()
-    return RecentLimitUpCandidateProvider.from_akshare()
+    return _registry._candidate_provider()
 
 
 

@@ -8,6 +8,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main
+import app.helpers as helpers
+import app.deps as deps
 from app.main import app
 from app.models import (
     SentimentAnalysisResult,
@@ -25,7 +27,7 @@ from app.services.market_sentiment_analysis import (
 )
 
 
-ORIGINAL_EFFECTIVE_SETTINGS = main._effective_settings
+ORIGINAL_EFFECTIVE_SETTINGS = deps._effective_settings
 
 
 def percentile_response_fixture() -> SentimentPercentileResponse:
@@ -249,8 +251,8 @@ def test_analysis_get_returns_persisted_lifecycle_states(
     monkeypatch.setattr(app.state, "market_sentiment_percentile_store", percentile_store, raising=False)
     monkeypatch.setattr(app.state, "market_sentiment_analysis_store", store, raising=False)
     monkeypatch.setattr(app.state, "runs_dir", tmp_path, raising=False)
-    monkeypatch.setattr(main, "_optional_sentiment_analysis_context", lambda *_args, **_kwargs: (None, None))
-    monkeypatch.setattr(main, "_effective_settings", configured_settings)
+    monkeypatch.setattr(deps, "_optional_sentiment_analysis_context", lambda *_args, **_kwargs: (None, None))
+    monkeypatch.setattr(deps, "_effective_settings", configured_settings)
 
     with TestClient(app) as client:
         response = client.get("/api/short-term/sentiment/percentile/analysis?trade_date=2026-07-22")
@@ -277,8 +279,8 @@ def test_analysis_get_reclaims_stale_pending_record(
     monkeypatch.setattr(app.state, "market_sentiment_percentile_service", FakePercentileService(fixture), raising=False)
     monkeypatch.setattr(app.state, "market_sentiment_percentile_store", FakePercentileStore(fixture), raising=False)
     monkeypatch.setattr(app.state, "market_sentiment_analysis_store", store, raising=False)
-    monkeypatch.setattr(main, "_optional_sentiment_analysis_context", lambda *_args, **_kwargs: (None, None))
-    monkeypatch.setattr(main, "_effective_settings", configured_settings)
+    monkeypatch.setattr(deps, "_optional_sentiment_analysis_context", lambda *_args, **_kwargs: (None, None))
+    monkeypatch.setattr(deps, "_effective_settings", configured_settings)
 
     with TestClient(app) as client:
         response = client.get("/api/short-term/sentiment/percentile/analysis?trade_date=2026-07-22")
@@ -322,8 +324,8 @@ def test_analysis_get_ignores_records_with_stale_identity(
         raising=False,
     )
     monkeypatch.setattr(app.state, "runs_dir", tmp_path, raising=False)
-    monkeypatch.setattr(main, "_optional_sentiment_analysis_context", lambda *_args, **_kwargs: (None, None))
-    monkeypatch.setattr(main, "_effective_settings", configured_settings)
+    monkeypatch.setattr(deps, "_optional_sentiment_analysis_context", lambda *_args, **_kwargs: (None, None))
+    monkeypatch.setattr(deps, "_effective_settings", configured_settings)
 
     with TestClient(app) as client:
         response = client.get("/api/short-term/sentiment/percentile/analysis?trade_date=2026-07-22")
@@ -344,7 +346,7 @@ def test_analysis_get_reports_not_generated_and_unconfigured(
         raising=False,
     )
     monkeypatch.setattr(app.state, "market_sentiment_analysis_store", FakeAnalysisStore(), raising=False)
-    monkeypatch.setattr(main, "_effective_settings", configured_settings)
+    monkeypatch.setattr(deps, "_effective_settings", configured_settings)
 
     with TestClient(app) as client:
         response = client.get("/api/short-term/sentiment/percentile/analysis?trade_date=2026-07-22")
@@ -352,7 +354,7 @@ def test_analysis_get_reports_not_generated_and_unconfigured(
     assert response.status_code == 200
     assert response.json()["status"] == "not_generated"
 
-    monkeypatch.setattr(main, "_effective_settings", lambda: configured_settings(enabled=False, api_key=""))
+    monkeypatch.setattr(deps, "_effective_settings", lambda: configured_settings(enabled=False, api_key=""))
     with TestClient(app) as client:
         response = client.get("/api/short-term/sentiment/percentile/analysis?trade_date=2026-07-22")
 
@@ -387,9 +389,9 @@ def test_generate_analysis_builds_context_and_forwards_force(
     monkeypatch.setattr(app.state, "market_sentiment_percentile_service", percentile_service, raising=False)
     monkeypatch.setattr(app.state, "market_sentiment_analysis_service", analysis_service, raising=False)
     monkeypatch.setattr(app.state, "runs_dir", tmp_path, raising=False)
-    monkeypatch.setattr(main, "_effective_settings", configured_settings)
+    monkeypatch.setattr(deps, "_effective_settings", configured_settings)
     monkeypatch.setattr(
-        main,
+        deps,
         "_build_and_persist_sentiment_snapshots",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(RuntimeError("provider unavailable")),
     )
@@ -459,9 +461,9 @@ def test_percentile_get_schedules_analysis_without_waiting_for_llm(
     monkeypatch.setattr(app.state, "market_sentiment_percentile_service", percentile_service, raising=False)
     monkeypatch.setattr(app.state, "market_sentiment_analysis_store", FakeAnalysisStore(), raising=False)
     monkeypatch.setattr(app.state, "market_sentiment_analysis_sampler", sampler, raising=False)
-    monkeypatch.setattr(main, "_market_sentiment_analysis_now", lambda: datetime.fromisoformat("2026-07-22T15:16:00+08:00"))
-    monkeypatch.setattr(main, "_generate_market_sentiment_analysis", generate_target)
-    monkeypatch.setattr(main, "_effective_settings", configured_settings)
+    monkeypatch.setattr(helpers, "_market_sentiment_analysis_now", lambda: datetime.fromisoformat("2026-07-22T15:16:00+08:00"))
+    monkeypatch.setattr(deps, "_generate_market_sentiment_analysis", generate_target)
+    monkeypatch.setattr(deps, "_effective_settings", configured_settings)
     main._MARKET_SENTIMENT_ANALYSIS_CATCHUP_DATES.discard("2026-07-22")
 
     with TestClient(app) as client:
@@ -509,9 +511,9 @@ def test_percentile_get_retries_catchup_after_transient_thread_failure(
         "_market_sentiment_analysis_now",
         lambda: datetime.fromisoformat("2026-07-22T15:16:00+08:00"),
     )
-    monkeypatch.setattr(main, "_generate_market_sentiment_analysis", generate_target)
-    monkeypatch.setattr(main, "_effective_settings", configured_settings)
-    monkeypatch.setattr(main, "Thread", InlineThread)
+    monkeypatch.setattr(deps, "_generate_market_sentiment_analysis", generate_target)
+    monkeypatch.setattr(deps, "_effective_settings", configured_settings)
+    monkeypatch.setattr(helpers, "Thread", InlineThread)
     main._MARKET_SENTIMENT_ANALYSIS_CATCHUP_DATES.discard("2026-07-22")
 
     try:

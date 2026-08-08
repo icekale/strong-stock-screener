@@ -2466,3 +2466,87 @@ class EtfRadarMethodologyResponse(CapitalSignalMetadata):
     thresholds: dict[str, float] = Field(default_factory=dict)
     factors: list[EtfRadarFactorDefinition] = Field(default_factory=list)
     limitations: list[str] = Field(default_factory=list)
+
+
+class ScreenFiltersRequest(BaseModel):
+    min_market_cap_billion: float | None = Field(default=None, ge=0)
+    max_market_cap_billion: float | None = Field(default=None, ge=0)
+    kdj_j_max: float | None = None
+    industries: list[str] = Field(default_factory=list, max_length=20)
+    market_types: list[str] = Field(default_factory=list, max_length=4)
+    chanlun_min_confluence_score: int | None = Field(default=None, ge=0, le=100)
+    chanlun_require_confirmed_buy: bool = False
+
+
+class ScreenRunRequest(BaseModel):
+    trade_date: str
+    limit: int = Field(default=30, ge=1, le=100)
+    scan_limit: int = Field(default=160, ge=1, le=300)
+    filters: ScreenFiltersRequest = Field(default_factory=ScreenFiltersRequest)
+    strategy: ScreenStrategy = "strong_stock"
+    include_gsgf: bool = True
+    exclude_gsgf_hard_risk: bool = False
+
+
+class GsgfBacktestRequest(BaseModel):
+    symbols: list[str] = Field(default_factory=list, min_length=1, max_length=50)
+    windows: list[int] = Field(default_factory=lambda: [1, 3, 5, 10], max_length=8)
+    min_history: int = Field(default=60, ge=60, le=220)
+    count: int = Field(default=180, ge=70, le=260)
+
+
+class ChanlunPaperOrderDraftRequest(BaseModel):
+    quantity: int = Field(default=100, ge=100, le=100000, multiple_of=100)
+
+
+class GsgfCalibrationRequest(BaseModel):
+    trade_dates: list[str] = Field(default_factory=list, min_length=1, max_length=20)
+    windows: list[int] = Field(default_factory=lambda: [1, 3, 5, 10], max_length=8)
+    scan_limit: int = Field(default=80, ge=1, le=300)
+    count: int = Field(default=260, ge=70, le=260)
+
+
+class GsgfTradePlanRequest(BaseModel):
+    analysis: GsgfAnalysis
+
+
+class GsgfReviewRecheckRequest(BaseModel):
+    windows: list[int] = Field(default_factory=lambda: [1, 3, 5, 10], max_length=8)
+    count: int = Field(default=180, ge=20, le=260)
+
+
+class IntradaySnapshotRequest(BaseModel):
+    symbols: list[str] = Field(default_factory=list, max_length=100)
+    watchlist_text: str = ""
+    use_watchlist_pool: bool = False
+    gsgf_context: dict[str, dict[str, object]] = Field(default_factory=dict)
+    limit: int = Field(default=30, ge=1, le=100)
+    period: str = Field(default="1m", pattern=r"^(1m|5m|10m|15m|30m|60m)$")
+    count: int = Field(default=120, ge=1, le=240)
+
+
+class WatchlistPoolRequest(BaseModel):
+    content: str = ""
+
+
+class WatchlistPoolItemRequest(BaseModel):
+    symbol: str
+    name: str | None = None
+    industry: str | None = None
+    group: str = "自选"
+    tags: list[str] = Field(default_factory=list, max_length=20)
+    note: str | None = None
+
+
+class HealthProbe(BaseModel):
+    name: str
+    status: str
+    latency_ms: int
+    detail: str
+
+
+class NotificationSendRequest(BaseModel):
+    title: str
+    message_text: str
+    channel_ids: list[str] = Field(default_factory=list, max_length=20)
+

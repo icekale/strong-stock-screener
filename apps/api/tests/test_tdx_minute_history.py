@@ -133,7 +133,7 @@ def test_disabled_provider_never_constructs_a_client() -> None:
 def test_chanlun_history_provider_uses_enabled_default_from_base_settings(monkeypatch) -> None:
     monkeypatch.delenv("STRONG_STOCK_CHANLUN_TDX_ENABLED", raising=False)
     monkeypatch.delattr(app.state, "chanlun_history_provider", raising=False)
-    monkeypatch.setattr("app.main.get_settings", lambda: Settings(_env_file=None))
+    monkeypatch.setattr("app.deps.get_settings", lambda: Settings(_env_file=None))
 
     provider = _chanlun_history_provider()
 
@@ -143,7 +143,7 @@ def test_chanlun_history_provider_uses_enabled_default_from_base_settings(monkey
 def test_chanlun_history_provider_reads_disabled_environment_setting(monkeypatch) -> None:
     monkeypatch.setenv("STRONG_STOCK_CHANLUN_TDX_ENABLED", "false")
     monkeypatch.delattr(app.state, "chanlun_history_provider", raising=False)
-    monkeypatch.setattr("app.main.get_settings", lambda: Settings(_env_file=None))
+    monkeypatch.setattr("app.deps.get_settings", lambda: Settings(_env_file=None))
 
     provider = _chanlun_history_provider()
 

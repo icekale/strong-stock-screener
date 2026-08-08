@@ -212,7 +212,7 @@ def test_default_auction_model_service_uses_provider_source_not_free_stockdb(
     app.state.candidate_provider = FakeCandidateProvider()
     app.state.kline_provider = FakeKlineProvider()
     monkeypatch.setattr(
-        "app.main.get_settings",
+        "app.deps.get_settings",
         lambda: FakeAuctionModelSettings(model_path, metadata_path, performance_path),
     )
     monkeypatch.setattr(

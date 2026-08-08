@@ -473,7 +473,7 @@ def test_settings_update_evicts_chanlun_service_and_rebuilds_tickflow_providers(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr("app.main.get_settings", lambda: Settings(data_dir=tmp_path))
+    monkeypatch.setattr("app.deps.get_settings", lambda: Settings(data_dir=tmp_path))
     monkeypatch.setattr(
         app.state, "runtime_config_path", tmp_path / "runtime_config.json", raising=False
     )
@@ -525,7 +525,7 @@ def test_default_chanlun_daily_provider_is_raw_without_changing_general_kline_pr
     tmp_path: Path,
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr("app.main.get_settings", lambda: Settings(data_dir=tmp_path))
+    monkeypatch.setattr("app.deps.get_settings", lambda: Settings(data_dir=tmp_path))
     for attribute in (
         "chanlun_analysis_service",
         "chanlun_minute_store",

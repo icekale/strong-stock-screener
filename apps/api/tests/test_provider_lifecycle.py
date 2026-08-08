@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import app.main as main
+import app.deps as deps
 
 
 @pytest.fixture(autouse=True)
@@ -47,7 +48,7 @@ def _settings(suffix: str = "") -> SimpleNamespace:
 def test_default_http_providers_are_reused_for_same_configuration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(main, "_effective_settings", lambda: _settings())
+    monkeypatch.setattr(deps, "_effective_settings", lambda: _settings())
 
     assert main._kline_provider() is main._kline_provider()
     assert main._quote_provider() is main._quote_provider()
@@ -59,7 +60,7 @@ def test_configuration_change_closes_and_replaces_default_http_clients(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     current = {"value": _settings()}
-    monkeypatch.setattr(main, "_effective_settings", lambda: current["value"])
+    monkeypatch.setattr(deps, "_effective_settings", lambda: current["value"])
 
     old_kline = main._kline_provider()
     old_quote = main._quote_provider()
@@ -86,7 +87,7 @@ def test_configuration_change_closes_and_replaces_default_http_clients(
 def test_clear_data_source_caches_closes_default_http_clients(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(main, "_effective_settings", lambda: _settings())
+    monkeypatch.setattr(deps, "_effective_settings", lambda: _settings())
 
     kline = main._kline_provider()
     quote = main._quote_provider()

@@ -11,6 +11,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 import app.main as main_module
+import app.lifespan as lifespan_module
+import app.deps as deps_module
 from app.config import Settings
 from app.main import (
     AUCTION_SNAPSHOT_CACHE,
@@ -1930,12 +1932,12 @@ def test_concurrent_chanlun_research_factory_retains_one_client_and_service(
             self.client = client
             services.append(self)
 
-    monkeypatch.setattr(main_module, "get_settings", lambda: settings)
-    monkeypatch.setattr(main_module, "Rc8WorkerClient", RecordingClient)
-    monkeypatch.setattr(main_module, "CzscResearchService", RecordingService)
-    monkeypatch.setattr(main_module, "_chanlun_research_store", lambda: object())
-    monkeypatch.setattr(main_module, "_chanlun_analysis_service", lambda: object())
-    monkeypatch.setattr(main_module, "_chanlun_research_catalog", lambda: object())
+    monkeypatch.setattr(deps_module, "get_settings", lambda: settings)
+    monkeypatch.setattr(deps_module, "Rc8WorkerClient", RecordingClient)
+    monkeypatch.setattr(deps_module, "CzscResearchService", RecordingService)
+    monkeypatch.setattr(deps_module, "_chanlun_research_store", lambda: object())
+    monkeypatch.setattr(deps_module, "_chanlun_analysis_service", lambda: object())
+    monkeypatch.setattr(deps_module, "_chanlun_research_catalog", lambda: object())
 
     def second_call() -> object:
         second_call_started.set()
@@ -3336,47 +3338,47 @@ def test_lifespan_unwinds_started_jobs_when_injected_capital_start_fails(
             calls.append("stop_capital")
 
     monkeypatch.setattr(
-        main_module,
+        lifespan_module,
         "startup_sentiment_monitor",
         lambda: calls.append("start_sentiment"),
     )
     monkeypatch.setattr(
-        main_module,
+        lifespan_module,
         "startup_gsgf_auto_review",
         lambda: calls.append("start_gsgf"),
     )
     monkeypatch.setattr(
-        main_module,
+        lifespan_module,
         "startup_auction_sampler",
         lambda: calls.append("start_auction"),
     )
     monkeypatch.setattr(
-        main_module,
+        lifespan_module,
         "startup_sector_workbench_sampler",
         lambda: calls.append("start_sector"),
     )
     monkeypatch.setattr(
-        main_module,
+        lifespan_module,
         "shutdown_chanlun_research",
         lambda: calls.append("stop_chanlun"),
     )
     monkeypatch.setattr(
-        main_module,
+        lifespan_module,
         "shutdown_sector_workbench_sampler",
         lambda: calls.append("stop_sector"),
     )
     monkeypatch.setattr(
-        main_module,
+        lifespan_module,
         "shutdown_auction_sampler",
         lambda: calls.append("stop_auction"),
     )
     monkeypatch.setattr(
-        main_module,
+        lifespan_module,
         "shutdown_gsgf_auto_review",
         lambda: calls.append("stop_gsgf"),
     )
     monkeypatch.setattr(
-        main_module,
+        lifespan_module,
         "shutdown_sentiment_monitor",
         lambda: calls.append("stop_sentiment"),
     )
@@ -3384,7 +3386,7 @@ def test_lifespan_unwinds_started_jobs_when_injected_capital_start_fails(
     app.state.capital_signal_sampler_disabled = False
 
     async def enter_lifespan() -> None:
-        async with main_module.lifespan(app):
+        async with lifespan_module.lifespan(app):
             pass
 
     try:
@@ -3420,7 +3422,7 @@ def test_startup_capital_signal_sampler_respects_disabled_state(
     def fail_if_constructed(**_kwargs):
         raise AssertionError("disabled sampler must not be constructed")
 
-    monkeypatch.setattr(main_module, "CapitalSignalSampler", fail_if_constructed)
+    monkeypatch.setattr(lifespan_module, "CapitalSignalSampler", fail_if_constructed)
 
     startup_capital_signal_sampler()
 
@@ -3438,7 +3440,7 @@ def test_startup_etf_three_factor_sampler_respects_disabled_state(
     def fail_if_constructed(**_kwargs):
         raise AssertionError("disabled sampler must not be constructed")
 
-    monkeypatch.setattr(main_module, "EtfThreeFactorSampler", fail_if_constructed)
+    monkeypatch.setattr(lifespan_module, "EtfThreeFactorSampler", fail_if_constructed)
 
     startup_etf_three_factor_sampler()
 

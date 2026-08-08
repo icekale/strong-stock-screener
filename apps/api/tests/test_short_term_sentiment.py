@@ -577,7 +577,9 @@ def test_market_emotion_api_throttles_samples_to_three_minutes(
         def now(cls, tz=None):
             return cls.current.astimezone(tz) if tz is not None else cls.current.replace(tzinfo=None)
 
-    monkeypatch.setattr("app.main.datetime", FrozenDateTime)
+    monkeypatch.setattr("app.deps.datetime", FrozenDateTime)
+    monkeypatch.setattr("app.helpers.datetime", FrozenDateTime)
+    monkeypatch.setattr("app.routers.sentiment.datetime", FrozenDateTime)
     candidate_provider = FakeSentimentCandidateProvider()
     market_provider = FakeEmotionMarketOverviewProvider()
     app.state.candidate_provider = candidate_provider

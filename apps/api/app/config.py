@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     data_dir: Path = Path("./data")
     candidate_provider: str = "recent_limit_up"
     kline_provider: str = "eastmoney"
-    quote_provider: str = "tickflow"
+    quote_provider: str = "eastmoney"
     tickflow_api_key: str = Field(
         default="",
         validation_alias=AliasChoices("STRONG_STOCK_TICKFLOW_API_KEY", "TICKFLOW_API_KEY"),

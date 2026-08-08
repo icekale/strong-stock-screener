@@ -35,6 +35,7 @@ def clear_provider_state(monkeypatch: pytest.MonkeyPatch):
 def _settings(suffix: str = "") -> SimpleNamespace:
     return SimpleNamespace(
         kline_provider="tickflow",
+        quote_provider="tickflow",
         tickflow_api_key="tickflow-key",
         tickflow_base_url=f"https://tickflow{suffix}.test",
         provider_timeout_seconds=5,

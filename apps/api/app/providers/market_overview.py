@@ -44,6 +44,8 @@ DISPLAY_INDEX_NAMES = {
     "000688.SH": "科创50",
 }
 A_SHARE_STOCK_LIST_FS = "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
+# 东财对 push2 clist 存在间歇性封锁，延迟源 push2delay 返回同样全A列表，作为兜底。
+_CLIST_HOSTS = ("https://push2.eastmoney.com", "https://push2delay.eastmoney.com")
 THS_INDUSTRIES_URL = "https://files.688798.xyz/ths/industries.json"
 TURNOVER_CACHE_RECORD_LIMIT = 80
 # 全 A 实时行情缓存有效期：比上游 8s 级刷新要求宽松，但保证盘中涨跌统计不会
@@ -90,6 +92,7 @@ class EastmoneyMarketOverviewProvider:
 
     def get_overview(self) -> MarketOverviewResponse:
         source_status: list[StrongStockSourceStatus] = []
+        quote_source_name = getattr(self.realtime_quote_provider, "source_name", "TickFlow")
         trade_date = datetime.now(ZoneInfo("Asia/Shanghai")).date().isoformat()
         eastmoney_trade_date = trade_date.replace("-", "")
         turnover = MarketTurnoverSummary()
@@ -137,7 +140,7 @@ class EastmoneyMarketOverviewProvider:
         elif self.realtime_quote_provider is None:
             source_status.append(
                 StrongStockSourceStatus(
-                    source="TickFlow 实时指数",
+                    source=f"{quote_source_name} 实时指数",
                     status="disabled",
                     detail="未配置实时行情源，今日成交额使用 fallback",
                 )
@@ -150,7 +153,7 @@ class EastmoneyMarketOverviewProvider:
                     trade_date = str(tickflow["trade_date"])
                 source_status.append(
                     StrongStockSourceStatus(
-                        source="TickFlow 实时指数",
+                        source=f"{quote_source_name} 实时指数",
                         status="success",
                         detail=f"沪深北指数实时成交额，返回 {tickflow['quote_count']} 个指数",
                     )
@@ -158,7 +161,7 @@ class EastmoneyMarketOverviewProvider:
             except Exception as exc:
                 source_status.append(
                     StrongStockSourceStatus(
-                        source="TickFlow 实时指数",
+                        source=f"{quote_source_name} 实时指数",
                         status="failed",
                         detail=f"实时成交额获取失败: {exc.__class__.__name__}; fallback 到东方财富",
                     )
@@ -201,9 +204,9 @@ class EastmoneyMarketOverviewProvider:
         if self.realtime_quote_provider is None:
             source_status.append(
                 StrongStockSourceStatus(
-                    source="TickFlow 全A市场广度",
+                    source=f"{quote_source_name} 全A市场广度",
                     status="disabled",
-                    detail="未配置 TickFlow 实时行情源，保留指数口径涨跌家数",
+                    detail="未配置实时行情源，保留指数口径涨跌家数",
                 )
             )
         else:
@@ -214,7 +217,7 @@ class EastmoneyMarketOverviewProvider:
                 advance_decline.unchanged_count = tickflow_breadth["unchanged_count"]
                 source_status.append(
                     StrongStockSourceStatus(
-                        source="TickFlow 全A市场广度",
+                        source=f"{quote_source_name} 全A市场广度",
                         status="success",
                         detail=(
                             f"CN_Equity_A 返回 {tickflow_breadth['stock_count']} 只股票，"
@@ -227,7 +230,7 @@ class EastmoneyMarketOverviewProvider:
             except Exception as exc:
                 source_status.append(
                     StrongStockSourceStatus(
-                        source="TickFlow 全A市场广度",
+                        source=f"{quote_source_name} 全A市场广度",
                         status="failed",
                         detail=f"全A实时涨跌统计失败: {exc.__class__.__name__}; 检查备用全市场口径",
                     )
@@ -265,7 +268,7 @@ class EastmoneyMarketOverviewProvider:
                     indices = self._fetch_tickflow_display_indices()
                     source_status.append(
                         StrongStockSourceStatus(
-                            source="TickFlow 指数展示",
+                            source=f"{quote_source_name} 指数展示",
                             status="success",
                             detail=f"返回 {len(indices)} 个顶部指数展示项",
                         )
@@ -273,7 +276,7 @@ class EastmoneyMarketOverviewProvider:
                 except Exception as tickflow_exc:
                     source_status.append(
                         StrongStockSourceStatus(
-                            source="TickFlow 指数展示",
+                            source=f"{quote_source_name} 指数展示",
                             status="failed" if self.realtime_quote_provider is not None else "disabled",
                             detail=f"顶部指数展示获取失败: {tickflow_exc.__class__.__name__}; fallback 到东方财富",
                         )
@@ -517,12 +520,15 @@ class EastmoneyMarketOverviewProvider:
             )
 
     def get_pct_change_distribution(self) -> tuple[list[MarketEmotionBucket], StrongStockSourceStatus]:
+        source_name = getattr(self.realtime_quote_provider, "source_name", "实时行情")
         tickflow_error: str | None = None
-        if self.realtime_quote_provider is not None:
+        if self.realtime_quote_provider is not None and hasattr(
+            self.realtime_quote_provider, "get_quotes_by_universe"
+        ):
             try:
                 rankings = self.get_market_rankings(limit=1)
                 return rankings.buckets, StrongStockSourceStatus(
-                    source="TickFlow 全A实时涨跌幅",
+                    source=f"{source_name} 全A实时涨跌幅",
                     status="success",
                     detail=f"全A实时行情返回 {sum(bucket.count or 0 for bucket in rankings.buckets)} 只股票",
                 )
@@ -531,7 +537,7 @@ class EastmoneyMarketOverviewProvider:
         try:
             rows = self._fetch_a_share_realtime_rows()
             buckets = _pct_change_buckets([_number(row.get("f3")) for row in rows])
-            fallback_prefix = f"TickFlow失败: {tickflow_error}; fallback 到" if tickflow_error else ""
+            fallback_prefix = f"{source_name}失败: {tickflow_error}; fallback 到" if tickflow_error else ""
             return buckets, StrongStockSourceStatus(
                 source="东方财富全A实时涨跌幅",
                 status="success",
@@ -545,18 +551,26 @@ class EastmoneyMarketOverviewProvider:
             )
 
     def get_market_rankings(self, limit: int = 50, batch_size: int = 200) -> MarketRankingsResponse:
+        bounded_limit = max(1, min(limit, 100))
         if self.realtime_quote_provider is None:
             return MarketRankingsResponse(
                 source_status=[
                     StrongStockSourceStatus(
-                        source="TickFlow 全A实时行情",
+                        source="实时行情源",
                         status="disabled",
-                        detail="未配置 TickFlow 实时行情源，无法生成全A排行榜",
+                        detail="未配置实时行情源，无法生成全A排行榜",
                     )
                 ]
             )
+        if not hasattr(self.realtime_quote_provider, "get_quotes_by_universe"):
+            return self._eastmoney_rows_rankings(bounded_limit)
+        return self._rankings_from_quotes(bounded_limit, batch_size=batch_size)
 
-        bounded_limit = max(1, min(limit, 100))
+    def _rankings_from_quotes(
+        self,
+        bounded_limit: int,
+        batch_size: int = 200,
+    ) -> MarketRankingsResponse:
         bounded_batch_size = max(1, min(batch_size, 500))
         source_status: list[StrongStockSourceStatus] = []
         quotes: list[object] = []
@@ -612,8 +626,9 @@ class EastmoneyMarketOverviewProvider:
             if tickflow_universe_error is not None:
                 raise ValueError(f"empty tickflow full-a quotes after universe fallback: {tickflow_universe_error}")
             raise ValueError("empty tickflow full-a quotes")
+        source_name = getattr(self.realtime_quote_provider, "source_name", "TickFlow")
         pct_values = [item.pct_change for item in items]
-        buckets = _pct_change_buckets(pct_values, source="TickFlow 全A实时行情")
+        buckets = _pct_change_buckets(pct_values, source=f"{source_name} 全A实时行情")
         trade_dates = [
             date
             for date in (_date_from_quote_time(item.quote_time) for item in items)
@@ -621,7 +636,7 @@ class EastmoneyMarketOverviewProvider:
         ]
         source_status.append(
             StrongStockSourceStatus(
-                source="TickFlow 全A实时行情",
+                source=f"{source_name} 全A实时行情",
                 status="success",
                 detail=_tickflow_rankings_status_detail(
                     item_count=len(items),
@@ -630,6 +645,46 @@ class EastmoneyMarketOverviewProvider:
                 ),
             )
         )
+        pct_change_rank = sorted(
+            [item for item in items if item.pct_change is not None],
+            key=lambda item: (item.pct_change or -999, item.turnover_cny or 0, item.symbol),
+            reverse=True,
+        )[:bounded_limit]
+        turnover_rank = sorted(
+            [item for item in items if item.turnover_cny is not None],
+            key=lambda item: (item.turnover_cny or 0, item.pct_change or -999, item.symbol),
+            reverse=True,
+        )[:bounded_limit]
+        source_status.extend(self._supplement_rank_industries(pct_change_rank, turnover_rank))
+        return MarketRankingsResponse(
+            trade_date=max(trade_dates) if trade_dates else None,
+            pct_change_rank=pct_change_rank,
+            turnover_rank=turnover_rank,
+            buckets=buckets,
+            source_status=source_status,
+        )
+
+    def _eastmoney_rows_rankings(self, bounded_limit: int) -> MarketRankingsResponse:
+        rows = self._fetch_a_share_realtime_rows()
+        items = [_ranking_item_from_row(row) for row in rows if _eastmoney_stock_symbol(row.get("f12"))]
+        items = [item for item in items if item.symbol]
+        if not items:
+            raise ValueError("empty eastmoney full-a ranking rows")
+        source_name = getattr(self.realtime_quote_provider, "source_name", "东方财富")
+        pct_values = [item.pct_change for item in items]
+        buckets = _pct_change_buckets(pct_values, source="东方财富全A实时行情")
+        trade_dates = [
+            date
+            for date in (_date_from_quote_time(item.quote_time) for item in items)
+            if date
+        ]
+        source_status = [
+            StrongStockSourceStatus(
+                source=f"{source_name} 全A实时行情",
+                status="success",
+                detail=f"全A实时列表返回 {len(items)} 只股票",
+            )
+        ]
         pct_change_rank = sorted(
             [item for item in items if item.pct_change is not None],
             key=lambda item: (item.pct_change or -999, item.turnover_cny or 0, item.symbol),
@@ -1419,30 +1474,12 @@ class EastmoneyMarketOverviewProvider:
                 return cached[1]
         rows: list[dict[str, Any]] = []
         total: int | None = None
-        page_size = 100
         consecutive_failures = 0
         for page in range(1, 61):
             try:
-                response = self.http_client.get(
-                    "https://push2.eastmoney.com/api/qt/clist/get",
-                    params={
-                        "pn": str(page),
-                        "pz": str(page_size),
-                        "po": "1",
-                        "fid": "f3",
-                        "np": "1",
-                        "fltt": "2",
-                        "invt": "2",
-                        "fs": A_SHARE_STOCK_LIST_FS,
-                        "fields": "f3,f12,f14,f100",
-                    },
-                    headers={"User-Agent": USER_AGENT},
-                    timeout=self.timeout_seconds,
-                )
-                response.raise_for_status()
-                payload = response.json()
+                response = self._get_clist_page(page)
+                payload = response
             except Exception:
-                # 单页失败重试一次，仍失败则跳过该页，避免一页抖动导致整体数据丢失。
                 consecutive_failures += 1
                 if consecutive_failures >= 3:
                     break
@@ -1461,6 +1498,32 @@ class EastmoneyMarketOverviewProvider:
         with self._realtime_rows_lock:
             self._a_share_realtime_rows_cache = (monotonic(), rows)
         return rows
+
+    def _get_clist_page(self, page: int) -> object:
+        last_error: Exception | None = None
+        for host in _CLIST_HOSTS:
+            try:
+                response = self.http_client.get(
+                    f"{host}/api/qt/clist/get",
+                    params={
+                        "pn": str(page),
+                        "pz": "100",
+                        "po": "1",
+                        "fid": "f3",
+                        "np": "1",
+                        "fltt": "2",
+                        "invt": "2",
+                        "fs": A_SHARE_STOCK_LIST_FS,
+                        "fields": "f2,f3,f5,f6,f8,f12,f14,f15,f16,f17,f18,f100",
+                    },
+                    headers={"User-Agent": USER_AGENT},
+                    timeout=self.timeout_seconds,
+                )
+                response.raise_for_status()
+                return response.json()
+            except Exception as exc:
+                last_error = exc
+        raise ValueError(f"东方财富全A列表第 {page} 页失败: {last_error.__class__.__name__}") from last_error
 
     def _a_share_industry_by_symbol(self) -> dict[str, str]:
         try:
@@ -1941,4 +2004,23 @@ def _ranking_item_from_quote(quote: object) -> MarketRankingItem:
         turnover_cny=_number(getattr(quote, "turnover_cny", None)),
         volume=_number(getattr(quote, "volume", None)),
         quote_time=_text(getattr(quote, "quote_time", None)),
+    )
+
+
+def _ranking_item_from_row(row: dict[str, Any]) -> MarketRankingItem:
+    symbol = _eastmoney_stock_symbol(row.get("f12"))
+    pct_change = _number(row.get("f3"))
+    return MarketRankingItem(
+        symbol=symbol,
+        name=_text(row.get("f14")),
+        industry=_text(row.get("f100")),
+        last_price=_number(row.get("f2")),
+        pct_change=pct_change,
+        current_pct_change=pct_change,
+        open_price=_number(row.get("f17")),
+        prev_close=_number(row.get("f18")),
+        turnover_rate=_number(row.get("f8")),
+        turnover_cny=_number(row.get("f6")),
+        volume=_number(row.get("f5")),
+        quote_time=datetime.now(ZoneInfo("Asia/Shanghai")).isoformat(timespec="seconds"),
     )

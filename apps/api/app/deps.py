@@ -44,6 +44,7 @@ from app.providers.tdx_minute_history import TdxMinuteHistoryProvider
 from app.providers.tencent_quote import TencentQuoteProvider
 from app.providers.thsdk_candidates import ThsdkCandidateProvider
 from app.providers.eastmoney_kline import EastmoneyKlineProvider
+from app.providers.eastmoney_quote import EastmoneyQuoteProvider
 from app.providers.tickflow import TickFlowDailyKlineProvider, TickFlowQuoteProvider
 from app.services.auction_model import (
     AuctionModelResultStore,
@@ -892,6 +893,14 @@ def _quote_provider() -> object:
     if injected is not None:
         return injected
     settings = _effective_settings()
+    if getattr(settings, "quote_provider", "eastmoney") == "eastmoney":
+        return _cached_default_provider(
+            attribute="default_quote_provider",
+            key=("eastmoney", settings.provider_timeout_seconds),
+            factory=lambda: EastmoneyQuoteProvider(
+                timeout_seconds=settings.provider_timeout_seconds,
+            ),
+        )
     return _cached_default_provider(
         attribute="default_quote_provider",
         key=(settings.tickflow_api_key, settings.tickflow_base_url, settings.provider_timeout_seconds),

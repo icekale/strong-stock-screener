@@ -1,9 +1,17 @@
 import json
+from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 from app.models import KlineBar, StrongStockDataUnavailable
 from app.providers.baidu_kline import parse_baidu_kline_payload
 from app.providers.eastmoney_kline import EastmoneyKlineProvider, _parse_kline_payload, _to_secid
+from app.providers.eastmoney_quote import (
+    EastmoneyQuoteProvider,
+    parse_eastmoney_quote_rows,
+    parse_eastmoney_trends,
+)
 from app.providers.concept_blocks import _concept_tags_from_payload
 from app.providers.kline_fallback import FallbackKlineProvider
 from app.providers.ifind import IfindMcpProvider
@@ -2549,3 +2557,238 @@ def test_eastmoney_parse_kline_payload_skips_bad_rows() -> None:
 
 def client_last_params(provider: EastmoneyKlineProvider) -> dict[str, object]:
     return provider.http_client.last_request["params"]
+
+
+def test_eastmoney_quote_provider_maps_ulist_payload() -> None:
+    payload = {
+        "rc": 0,
+        "data": {
+            "total": 2,
+            "diff": [
+                {"f2": 9.21, "f3": -0.86, "f5": 565457, "f6": 520694700.0, "f8": 0.17, "f12": "600000", "f14": "浦发银行", "f15": 9.29, "f16": 9.14, "f17": 9.26, "f18": 9.29},
+                {"f2": 11.19, "f3": -0.71, "f5": 882977, "f6": 986373743.26, "f8": 0.46, "f12": "000001", "f14": "平安银行", "f15": 11.26, "f16": 11.1, "f17": 11.23, "f18": 11.27},
+            ],
+        },
+    }
+    provider = EastmoneyQuoteProvider(http_client=FakeHttpClient(payload))
+
+    quotes = provider.get_quotes(["600000.SH", "000001.SZ"])
+
+    assert [quote.symbol for quote in quotes] == ["600000.SH", "000001.SZ"]
+    assert quotes[0].name == "浦发银行"
+    assert quotes[0].last_price == 9.21
+    assert quotes[0].pct_change == -0.86
+    assert quotes[0].turnover_rate == 0.17
+    assert quotes[0].turnover_cny == 520694700.0
+    assert quotes[0].volume == 565457
+    assert quotes[0].quote_time is not None
+    assert provider.http_client.last_request["params"]["secids"] == "1.600000,0.000001"
+
+
+def test_eastmoney_quote_provider_maps_symbols_to_secids() -> None:
+    client = FakeHttpClient({"rc": 0, "data": {"diff": []}})
+    provider = EastmoneyQuoteProvider(http_client=client)
+
+    provider.get_quotes(["920001.BJ", "600000.SH", "000001.SZ"])
+
+    assert client.last_request["params"]["secids"] == "0.920001,1.600000,0.000001"
+
+
+def test_eastmoney_quote_provider_skips_empty_symbols_without_request() -> None:
+    client = FakeHttpClient({"rc": 0, "data": {"diff": []}})
+    provider = EastmoneyQuoteProvider(http_client=client)
+
+    assert provider.get_quotes([]) == []
+    assert provider.get_quotes(["bad-symbol"]) == []
+    assert client.requests == []
+
+
+def test_eastmoney_quote_provider_queries_all_a_universe_and_caches_rows() -> None:
+    payload = {
+        "rc": 0,
+        "data": {
+            "total": 3,
+            "diff": [
+                {"f2": 9.21, "f3": 1.2, "f12": "600000", "f14": "浦发银行"},
+                {"f2": 11.19, "f3": -0.7, "f12": "000001", "f14": "平安银行"},
+                {"f2": 12.5, "f3": 3.1, "f12": "920001", "f14": "北交示例"},
+            ],
+        },
+    }
+    client = FakeHttpClient(payload)
+    provider = EastmoneyQuoteProvider(http_client=client)
+
+    first = provider.get_quotes_by_universe("CN_Equity_A")
+    second = provider.get_quotes_by_universe("CN_Equity_A")
+
+    assert len(first) == 3
+    assert [quote.symbol for quote in second] == ["600000.SH", "000001.SZ", "920001.BJ"]
+    # 首次拉取 = 分页请求 + total 探测；第二次命中全A列表缓存，不再重复请求
+    assert len(client.requests) == 2
+    assert client.requests[0]["params"]["fs"] == "m:0+t:6,m:0+t:80,m:1+t:2,m:1+t:23"
+
+
+def test_eastmoney_quote_provider_rejects_unknown_universe() -> None:
+    provider = EastmoneyQuoteProvider(http_client=FakeHttpClient({}))
+    try:
+        provider.get_quotes_by_universe("US_Equity")
+    except StrongStockDataUnavailable as exc:
+        assert "不支持标的池" in str(exc)
+    else:
+        raise AssertionError("expected unknown universe to fail")
+
+
+def test_eastmoney_quote_provider_intraday_bars_from_trends() -> None:
+    payload = {
+        "rc": 0,
+        "data": {
+            "trends": [
+                "2026-08-07 09:30,0.00,9.28,9.28,9.28,3716,3448448.00,9.280",
+                "2026-08-07 09:31,9.22,9.28,9.29,9.25,10276,9531870.00,9.277",
+            ]
+        },
+    }
+    provider = EastmoneyQuoteProvider(http_client=FakeHttpClient(payload))
+
+    bars = provider.get_intraday_bars(["600000.SH"], count=10)["600000.SH"]
+
+    assert len(bars) == 2
+    assert bars[0].timestamp < bars[1].timestamp
+    assert bars[1].close == 9.28
+    # 东财分钟线 volume 单位为手 → ×100 对齐 tickflow 的股单位
+    assert bars[1].volume == 10276 * 100
+    assert bars[1].amount == 9531870.00
+    assert provider.http_client.last_request["params"]["ndays"] == "1"
+
+
+def test_eastmoney_quote_provider_merges_tdx_fallback_bars() -> None:
+    trends_payload = {
+        "rc": 0,
+        "data": {
+            "trends": ["2026-08-07 09:31,9.22,9.28,9.29,9.25,10276,9531870.00,9.277"]
+        },
+    }
+    tdx_rows = [
+        {"datetime": datetime(2026, 8, 7, 9, 30, tzinfo=ZoneInfo("Asia/Shanghai")), "open": 9.2, "high": 9.3, "low": 9.1, "close": 9.25, "vol": 5000, "amount": 460000.0},
+        {"datetime": datetime(2026, 8, 7, 9, 32, tzinfo=ZoneInfo("Asia/Shanghai")), "open": 9.25, "high": 9.35, "low": 9.2, "close": 9.3, "vol": 6000, "amount": 558000.0},
+    ]
+
+    class FakeTdxFrame:
+        def to_dict(self, orient: str = "records") -> list[dict[str, object]]:
+            return tdx_rows
+
+    class FakeTdxClient:
+        def bars(self, **kwargs: object) -> FakeTdxFrame:
+            return FakeTdxFrame()
+
+        def close(self) -> None:
+            return None
+
+    provider = EastmoneyQuoteProvider(
+        http_client=FakeHttpClient(trends_payload),
+        tdx_client_factory=lambda: FakeTdxClient(),
+    )
+
+    bars = provider.get_intraday_bars(["600000.SH"], count=10)["600000.SH"]
+
+    # trends 09:31 与 TDX 09:30/09:32 按时间戳合并去重（TDX 行减一分钟，09:30→09:29、09:32→09:31 与 trends 重合）
+    assert len(bars) == 2
+    assert [bar.volume for bar in bars] == [5000.0, 10276.0 * 100]
+
+
+def test_eastmoney_quote_provider_retries_transient_failure() -> None:
+    class FakeFlakyHttpClient:
+        def __init__(self) -> None:
+            self.failures = 0
+            self.requests: list[dict[str, object]] = []
+
+        def get(self, url: str, **kwargs: object) -> FakeResponse:
+            self.requests.append({"url": url, **kwargs})
+            if self.failures < 1:
+                self.failures += 1
+                raise ConnectionError("connection reset")
+            return FakeResponse({"rc": 0, "data": {"diff": [{"f2": 9.21, "f12": "600000", "f14": "浦发银行"}]}})
+
+    provider = EastmoneyQuoteProvider(http_client=FakeFlakyHttpClient())
+
+    quotes = provider.get_quotes(["600000.SH"])
+
+    assert len(quotes) == 1
+    assert provider.http_client.requests and len(provider.http_client.requests) == 2
+
+
+def test_eastmoney_quote_provider_raises_after_retries_exhausted() -> None:
+    class FakeAlwaysFailClient:
+        def get(self, url: str, **kwargs: object) -> FakeResponse:
+            raise ConnectionError("boom")
+
+    provider = EastmoneyQuoteProvider(http_client=FakeAlwaysFailClient())
+    try:
+        provider.get_quotes(["600000.SH"])
+    except StrongStockDataUnavailable as exc:
+        assert "东方财富请求失败" in str(exc)
+    else:
+        raise AssertionError("expected failure after retries exhausted")
+
+
+def test_eastmoney_parse_quote_rows_skips_unknown_codes() -> None:
+    rows = [
+        {"f2": 9.21, "f3": 1.2, "f12": "600000", "f14": "浦发银行"},
+        {"f2": 10.0, "f3": 2.0, "f12": "123456", "f14": "未知代码"},
+    ]
+
+    quotes = parse_eastmoney_quote_rows(rows)
+
+    assert [quote.symbol for quote in quotes] == ["600000.SH"]
+
+
+def test_eastmoney_parse_trends_skips_bad_rows() -> None:
+    trends = [
+        "bad-row",
+        "2026-08-07 09:30,0.00,9.28,9.28,9.28,3716,3448448.00,9.280",
+        "2026-08-07 09:31,9.22,9.28,9.29,9.25,10276,9531870.00,9.277",
+    ]
+
+    bars = parse_eastmoney_trends(trends)
+
+    assert len(bars) == 2
+    assert bars[0].timestamp < bars[1].timestamp
+
+
+def test_market_overview_rankings_without_universe_uses_eastmoney_rows() -> None:
+    realtime_provider = SimpleNamespace(source_name="东方财富实时行情", get_quotes=None)
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FakeMarketOverviewHttpClient(),
+        realtime_quote_provider=realtime_provider,
+    )
+
+    rankings = provider.get_market_rankings(limit=3)
+
+    assert [item.symbol for item in rankings.pct_change_rank] == [
+        "300001.SZ",
+        "300002.SZ",
+        "600003.SH",
+    ]
+    assert [item.industry for item in rankings.pct_change_rank] == ["机器人", "机器人", "电池"]
+    assert [item.name for item in rankings.pct_change_rank] == ["超强科技", "强势股份", "上涨股份"]
+    assert rankings.buckets[0].source == "东方财富全A实时行情"
+    assert sum(bucket.count or 0 for bucket in rankings.buckets) == 10
+    assert rankings.source_status[0].source == "东方财富实时行情 全A实时行情"
+    assert rankings.source_status[0].status == "success"
+
+
+def test_market_overview_overview_uses_quote_source_name_labels() -> None:
+    realtime_provider = FakeTickFlowRankingQuoteProvider()
+    realtime_provider.source_name = "东方财富实时行情"
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FakeMarketOverviewHttpClient(),
+        realtime_quote_provider=realtime_provider,
+    )
+
+    overview = provider.get_overview()
+
+    assert any(
+        status.source == "东方财富实时行情 全A市场广度" and status.status == "success"
+        for status in overview.source_status
+    )
+    assert not any(status.source.startswith("TickFlow") for status in overview.source_status)

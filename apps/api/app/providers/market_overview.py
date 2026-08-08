@@ -1445,24 +1445,33 @@ class EastmoneyMarketOverviewProvider:
         }
 
     def _fetch_sector_strength(self, limit: int) -> list[MarketSectorStrengthItem]:
-        response = self.http_client.get(
-            "https://push2.eastmoney.com/api/qt/clist/get",
-            params={
-                "pn": "1",
-                "pz": str(max(1, min(limit, 50))),
-                "po": "1",
-                "fid": "f3",
-                "np": "1",
-                "fltt": "2",
-                "invt": "2",
-                "fs": "m:90+t:2",
-                "fields": "f3,f6,f12,f14,f104,f105,f136,f140",
-            },
-            headers={"User-Agent": USER_AGENT},
-            timeout=self.timeout_seconds,
-        )
-        response.raise_for_status()
-        rows = _extract_diff(response.json())
+        rows: list[dict[str, Any]] = []
+        for host in _CLIST_HOSTS:
+            try:
+                response = self.http_client.get(
+                    f"{host}/api/qt/clist/get",
+                    params={
+                        "pn": "1",
+                        "pz": str(max(1, min(limit, 50))),
+                        "po": "1",
+                        "fid": "f3",
+                        "np": "1",
+                        "fltt": "2",
+                        "invt": "2",
+                        "fs": "m:90+t:2",
+                        "fields": "f3,f6,f12,f14,f104,f105,f136,f140",
+                    },
+                    headers={"User-Agent": USER_AGENT},
+                    timeout=self.timeout_seconds,
+                )
+                response.raise_for_status()
+                rows = _extract_diff(response.json())
+                if rows:
+                    break
+            except Exception:
+                continue
+        if not rows:
+            raise ValueError("empty sector strength rows")
         sectors = [
             MarketSectorStrengthItem(
                 name=str(row.get("f14") or ""),

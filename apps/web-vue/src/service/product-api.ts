@@ -836,8 +836,8 @@ export async function getRuntimeSettings(): Promise<RuntimeSettingsResponse> {
 
 export async function saveRuntimeSettings(payload: {
   candidate_provider: "recent_limit_up" | "thsdk";
-  kline_provider: "tickflow";
-  quote_provider: "tickflow";
+  kline_provider: "tickflow" | "eastmoney";
+  quote_provider: "tickflow" | "eastmoney";
   tickflow_api_key?: string | null;
   tickflow_base_url: string;
   ifind_api_key?: string | null;

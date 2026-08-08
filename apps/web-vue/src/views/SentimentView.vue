@@ -187,7 +187,7 @@ onMounted(() => void load());
       </section>
 
       <section class="sentiment-panel">
-        <SectionHeader title="盘中提醒" source="TickFlow 观察池" :updated-at="formatGeneratedAt(intraday?.generated_at)" />
+        <SectionHeader title="盘中提醒" source="实时观察池" :updated-at="formatGeneratedAt(intraday?.generated_at)" />
         <DataList :items="intraday?.items ?? []" empty-description="暂无盘中提醒">
           <template #list-item="{ item }">
             <div class="sentiment-list-row sentiment-list-row--intraday">

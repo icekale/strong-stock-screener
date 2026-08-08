@@ -1366,8 +1366,8 @@ export type GsgfAutoReviewConfig = {
 
 export type RuntimeSettingsConfig = {
   candidate_provider: "recent_limit_up" | "thsdk";
-  kline_provider: "tickflow";
-  quote_provider: "tickflow";
+  kline_provider: "tickflow" | "eastmoney";
+  quote_provider: "tickflow" | "eastmoney";
   tickflow_api_key_configured: boolean;
   tickflow_api_key_preview: string;
   tickflow_api_key_source: "runtime" | "env" | "none";
@@ -1443,8 +1443,8 @@ export type RuntimeSettingsResponse = {
   config: RuntimeSettingsConfig;
   saved: {
     candidate_provider?: "recent_limit_up" | "thsdk";
-    kline_provider?: "tickflow";
-    quote_provider?: "tickflow";
+    kline_provider?: "tickflow" | "eastmoney";
+    quote_provider?: "tickflow" | "eastmoney";
     tickflow_base_url?: string | null;
     ifind_base_url?: string | null;
     ifind_service_id?: "hexin-ifind-ds-stock-mcp" | "hexin-ifind-ds-news-mcp" | "hexin-ifind-ds-index-mcp" | null;

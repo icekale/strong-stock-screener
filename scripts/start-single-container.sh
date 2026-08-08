@@ -46,7 +46,7 @@ cd /app/web
 export PORT="${PORT:-3110}"
 export HOSTNAME="${HOSTNAME:-0.0.0.0}"
 export API_INTERNAL_URL="${API_INTERNAL_URL:-http://127.0.0.1:8010}"
-node server.mjs &
+/opt/strong-stock-api-venv/bin/python static_server.py &
 web_pid="$!"
 
 shutdown() {

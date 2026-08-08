@@ -99,13 +99,12 @@ RUN apt-get update \
     && echo "$TZ" > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=node:22-slim /usr/local/bin/node /usr/local/bin/node
 COPY --from=api-builder /opt/strong-stock-api-venv /opt/strong-stock-api-venv
 COPY --from=rc8-builder /opt/czsc-rc8-venv /opt/czsc-rc8-venv
 COPY apps/api/app ./api/app
 COPY apps/api/artifacts ./api/artifacts
 COPY --from=web-builder /build/web/dist ./web/dist
-COPY --from=web-builder /build/web/server.mjs ./web/server.mjs
+COPY apps/web-vue/static_server.py ./web/static_server.py
 COPY scripts/start-single-container.sh ./start-single-container.sh
 
 RUN test -f /app/api/app/services/chanlun/rc8_worker.py \
@@ -113,7 +112,7 @@ RUN test -f /app/api/app/services/chanlun/rc8_worker.py \
     && /opt/strong-stock-api-venv/bin/python -c "import importlib.metadata; assert importlib.metadata.version('czsc') == '0.10.12'" \
     && /opt/czsc-rc8-venv/bin/python -c "import czsc; import importlib.metadata; assert importlib.metadata.version('czsc') == '1.0.0rc8'" \
     && test -f /app/web/dist/index.html \
-    && test -f /app/web/server.mjs \
+    && test -f /app/web/static_server.py \
     && chmod +x ./start-single-container.sh \
     && mkdir -p /app/data
 

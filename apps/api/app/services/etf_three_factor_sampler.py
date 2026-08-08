@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-import logging
 from datetime import datetime
-from threading import Event, Lock, Thread
+from threading import Event, Lock
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+from app.services.background_sampler import BackgroundLoopSampler
 from app.services.trading_calendar import is_open_session, local_date
 
 
 SHANGHAI = ZoneInfo("Asia/Shanghai")
-logger = logging.getLogger(__name__)
 LATE_SHARE_START_MINUTE = 19 * 60 + 35
 LATE_SHARE_END_MINUTE = 23 * 60 + 31
 LATE_SHARE_BUCKET_MINUTES = 15
@@ -59,7 +58,7 @@ def _has_complete_share_snapshot(snapshot: object, trade_date: str) -> bool:
     )
 
 
-class EtfThreeFactorSampler:
+class EtfThreeFactorSampler(BackgroundLoopSampler):
     def __init__(
         self,
         *,
@@ -68,64 +67,18 @@ class EtfThreeFactorSampler:
         retry_seconds: float = 60,
         idle_seconds: float = 300,
     ) -> None:
+        super().__init__(
+            thread_name="etf-three-factor-sampler",
+            clock=clock,
+            retry_seconds=retry_seconds,
+            idle_seconds=idle_seconds,
+            event_factory=Event,
+        )
         self._scan = scan
-        self._clock = clock or (lambda: datetime.now(SHANGHAI))
-        self._retry_seconds = retry_seconds
-        self._idle_seconds = idle_seconds
         self._completed_intraday_minutes: set[str] = set()
         self._completed_refreshes: set[str] = set()
         self._completed_share_dates: set[str] = set()
-        self._stop_event = Event()
-        self._thread: Thread | None = None
-        self._lifecycle_lock = Lock()
         self._sample_lock = Lock()
-
-    def start(self) -> None:
-        while True:
-            with self._lifecycle_lock:
-                thread = self._thread
-                stop_event = self._stop_event
-                if thread is not None and thread.is_alive():
-                    if not stop_event.is_set():
-                        return
-                    stopped_thread = thread
-                else:
-                    stop_event = Event()
-                    thread = Thread(
-                        target=self._run,
-                        args=(stop_event,),
-                        name="etf-three-factor-sampler",
-                        daemon=True,
-                    )
-                    self._stop_event = stop_event
-                    self._thread = thread
-                    thread.start()
-                    return
-
-            stopped_thread.join()
-
-    def stop(self, *, timeout_seconds: float = 2) -> bool:
-        with self._lifecycle_lock:
-            thread = self._thread
-            stop_event = self._stop_event
-        stop_event.set()
-        if thread is None or not thread.is_alive():
-            return True
-        thread.join(timeout=max(0, timeout_seconds))
-        return not thread.is_alive()
-
-    def stop_and_wait(self) -> None:
-        with self._lifecycle_lock:
-            thread = self._thread
-            stop_event = self._stop_event
-        stop_event.set()
-        if thread is not None and thread.is_alive():
-            thread.join()
-
-    @property
-    def running(self) -> bool:
-        with self._lifecycle_lock:
-            return self._thread is not None and self._thread.is_alive()
 
     def sample_once(self) -> bool:
         current = _local_now(self._clock())
@@ -162,14 +115,5 @@ class EtfThreeFactorSampler:
                 self._completed_share_dates.add(trade_date)
             return True
 
-    def _run(self, stop_event: Event | None = None) -> None:
-        active_stop_event = stop_event or self._stop_event
-        while not active_stop_event.is_set():
-            try:
-                sampled = self.sample_once()
-            except Exception:
-                logger.exception("ETF three-factor scan failed")
-                wait_seconds = self._retry_seconds
-            else:
-                wait_seconds = self._retry_seconds if sampled else min(self._idle_seconds, 60)
-            active_stop_event.wait(wait_seconds)
+    def _wait_seconds(self, sampled: bool) -> float:
+        return self._retry_seconds if sampled else min(self._idle_seconds, 60)

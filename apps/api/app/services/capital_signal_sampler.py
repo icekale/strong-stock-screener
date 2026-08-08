@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from threading import Event, Lock, Thread
+from threading import Event, Lock
 from typing import Callable
 from zoneinfo import ZoneInfo
 
+from app.services.background_sampler import BackgroundLoopSampler
 from app.services.trading_calendar import is_open_session, local_date
 
 
@@ -28,7 +29,7 @@ def is_capital_signal_refresh_window(now: datetime | None = None) -> bool:
     return (19 * 3600 + 5 * 60) <= seconds < (23 * 3600 + 31 * 60)
 
 
-class CapitalSignalSampler:
+class CapitalSignalSampler(BackgroundLoopSampler):
     def __init__(
         self,
         *,
@@ -37,62 +38,18 @@ class CapitalSignalSampler:
         retry_seconds: float = 900,
         idle_seconds: float = 1800,
     ) -> None:
+        super().__init__(
+            thread_name="capital-signal-sampler",
+            clock=clock,
+            retry_seconds=retry_seconds,
+            idle_seconds=idle_seconds,
+            event_factory=Event,
+            error_logger=logger,
+            error_message="capital signal refresh failed",
+        )
         self._refresh = refresh
-        self._clock = clock or (lambda: datetime.now(SHANGHAI))
-        self._retry_seconds = retry_seconds
-        self._idle_seconds = idle_seconds
         self._completed_date: str | None = None
-        self._stop_event = Event()
-        self._thread: Thread | None = None
-        self._lifecycle_lock = Lock()
         self._sample_lock = Lock()
-
-    def start(self) -> None:
-        while True:
-            with self._lifecycle_lock:
-                thread = self._thread
-                stop_event = self._stop_event
-                if thread is not None and thread.is_alive():
-                    if not stop_event.is_set():
-                        return
-                    stopped_thread = thread
-                else:
-                    stop_event = Event()
-                    thread = Thread(
-                        target=self._run,
-                        args=(stop_event,),
-                        name="capital-signal-sampler",
-                        daemon=True,
-                    )
-                    self._stop_event = stop_event
-                    self._thread = thread
-                    thread.start()
-                    return
-
-            stopped_thread.join()
-
-    def stop(self, *, timeout_seconds: float = 2) -> bool:
-        with self._lifecycle_lock:
-            thread = self._thread
-            stop_event = self._stop_event
-        stop_event.set()
-        if thread is None or not thread.is_alive():
-            return True
-        thread.join(timeout=max(0, timeout_seconds))
-        return not thread.is_alive()
-
-    def stop_and_wait(self) -> None:
-        with self._lifecycle_lock:
-            thread = self._thread
-            stop_event = self._stop_event
-        stop_event.set()
-        if thread is not None and thread.is_alive():
-            thread.join()
-
-    @property
-    def running(self) -> bool:
-        with self._lifecycle_lock:
-            return self._thread is not None and self._thread.is_alive()
 
     def sample_once(self) -> bool:
         current = _local_now(self._clock())
@@ -109,17 +66,9 @@ class CapitalSignalSampler:
             self._completed_date = trade_date
             return True
 
-    def _run(self, stop_event: Event | None = None) -> None:
-        active_stop_event = stop_event or self._stop_event
-        while not active_stop_event.is_set():
-            try:
-                complete = self.sample_once()
-                idle = complete or self._current_date_completed()
-            except Exception:
-                logger.exception("capital signal refresh failed")
-                idle = False
-            wait_seconds = self._idle_seconds if idle else self._retry_seconds
-            active_stop_event.wait(wait_seconds)
+    def _wait_seconds(self, sampled: bool) -> float:
+        complete = sampled or self._current_date_completed()
+        return self._idle_seconds if complete else self._retry_seconds
 
     def _current_date_completed(self) -> bool:
         trade_date = _local_now(self._clock()).date().isoformat()

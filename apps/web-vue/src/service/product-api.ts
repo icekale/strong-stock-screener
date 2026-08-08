@@ -97,6 +97,22 @@ import type {
 } from "./types";
 import { apiFetch } from "./product-request";
 
+async function apiGet<T>(path: string, errorMessage: string): Promise<T> {
+  const response = await apiFetch(path);
+  if (!response.ok) {
+    throw new Error(`${errorMessage}：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<T>;
+}
+
+async function apiSend<T>(path: string, errorMessage: string, init?: RequestInit): Promise<T> {
+  const response = await apiFetch(path, init);
+  if (!response.ok) {
+    throw new Error(`${errorMessage}：${response.status} ${await response.text()}`);
+  }
+  return response.json() as Promise<T>;
+}
+
 function defaultApiBaseUrl(): string {
   if (import.meta.env.MODE === "prod") {
     return "";
@@ -122,28 +138,13 @@ export function isAuctionModelTop3CacheMiss(error: unknown): error is AuctionMod
 }
 
 export async function getDataSourceStatus(): Promise<DataSourceStatusResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/data-sources/status`);
-  if (!response.ok) {
-    throw new Error(`读取数据源状态失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<DataSourceStatusResponse>;
-}
+  return apiGet<DataSourceStatusResponse>(`${API_BASE_URL}/api/data-sources/status`, "读取数据源状态失败");}
 
 export async function getSystemStatus(): Promise<SystemStatusResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/system/status`);
-  if (!response.ok) {
-    throw new Error(`读取系统状态失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SystemStatusResponse>;
-}
+  return apiGet<SystemStatusResponse>(`${API_BASE_URL}/api/system/status`, "读取系统状态失败");}
 
 export async function getSystemCache(): Promise<SystemCacheSummary> {
-  const response = await apiFetch(`${API_BASE_URL}/api/system/cache`);
-  if (!response.ok) {
-    throw new Error(`读取缓存状态失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SystemCacheSummary>;
-}
+  return apiGet<SystemCacheSummary>(`${API_BASE_URL}/api/system/cache`, "读取缓存状态失败");}
 
 export async function clearSystemCache(group: string): Promise<SystemCacheClearResponse> {
   const trimmedGroup = group.trim();
@@ -151,215 +152,96 @@ export async function clearSystemCache(group: string): Promise<SystemCacheClearR
     throw new Error("缓存分组不能为空");
   }
   const params = new URLSearchParams({ group: trimmedGroup });
-  const response = await apiFetch(`${API_BASE_URL}/api/system/cache/clear?${params.toString()}`, {
+  return apiSend<SystemCacheClearResponse>(`${API_BASE_URL}/api/system/cache/clear?${params.toString()}`, "清理缓存失败", {
     method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(`清理缓存失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SystemCacheClearResponse>;
-}
+  });}
 
 export async function getMarketOverview(): Promise<MarketOverviewResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/market/overview`);
-  if (!response.ok) {
-    throw new Error(`读取全A市场概览失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<MarketOverviewResponse>;
-}
+  return apiGet<MarketOverviewResponse>(`${API_BASE_URL}/api/market/overview`, "读取全A市场概览失败");}
 
 export async function getCapitalSummary(): Promise<CapitalSummaryResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/market/capital-summary`);
-  if (!response.ok) {
-    throw new Error(`读取资金信号摘要失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<CapitalSummaryResponse>;
-}
+  return apiGet<CapitalSummaryResponse>(`${API_BASE_URL}/api/market/capital-summary`, "读取资金信号摘要失败");}
 
 export async function getEtfRadarOverview(): Promise<EtfRadarOverviewResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/etf-radar/overview`);
-  if (!response.ok) {
-    throw new Error(`读取ETF资金雷达失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<EtfRadarOverviewResponse>;
-}
+  return apiGet<EtfRadarOverviewResponse>(`${API_BASE_URL}/api/etf-radar/overview`, "读取ETF资金雷达失败");}
 
 export async function getEtfRadarHistory(days = 120): Promise<EtfRadarHistoryResponse> {
   const params = new URLSearchParams({ days: String(days) });
-  const response = await apiFetch(`${API_BASE_URL}/api/etf-radar/history?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取ETF份额历史失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<EtfRadarHistoryResponse>;
-}
+  return apiGet<EtfRadarHistoryResponse>(`${API_BASE_URL}/api/etf-radar/history?${params.toString()}`, "读取ETF份额历史失败");}
 
 export async function getEtfPriceHistory(symbol: string, days = 120): Promise<EtfPriceHistoryResponse> {
   const params = new URLSearchParams({ days: String(days) });
-  const response = await apiFetch(
-    `${API_BASE_URL}/api/etf-radar/price-history/${encodeURIComponent(symbol)}?${params.toString()}`
-  );
-  if (!response.ok) {
-    throw new Error(`读取ETF收盘价历史失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<EtfPriceHistoryResponse>;
-}
+  return apiGet<EtfPriceHistoryResponse>(`${API_BASE_URL}/api/etf-radar/price-history/${encodeURIComponent(symbol)}?${params.toString()}`, "读取ETF收盘价历史失败");}
 
 export async function getEtfExcessFlow(days = 60): Promise<EtfExcessFlowResponse> {
   const params = new URLSearchParams({ days: String(days) });
-  const response = await apiFetch(`${API_BASE_URL}/api/etf-radar/excess-flow?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取ETF超量资金趋势失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<EtfExcessFlowResponse>;
-}
+  return apiGet<EtfExcessFlowResponse>(`${API_BASE_URL}/api/etf-radar/excess-flow?${params.toString()}`, "读取ETF超量资金趋势失败");}
 
 export async function getEtfRadarHolders(): Promise<EtfRadarHoldersResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/etf-radar/holders`);
-  if (!response.ok) {
-    throw new Error(`读取ETF持有人披露失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<EtfRadarHoldersResponse>;
-}
+  return apiGet<EtfRadarHoldersResponse>(`${API_BASE_URL}/api/etf-radar/holders`, "读取ETF持有人披露失败");}
 
 export async function getEtfRadarMethodology(): Promise<EtfRadarMethodologyResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/etf-radar/methodology`);
-  if (!response.ok) {
-    throw new Error(`读取ETF资金雷达方法失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<EtfRadarMethodologyResponse>;
-}
+  return apiGet<EtfRadarMethodologyResponse>(`${API_BASE_URL}/api/etf-radar/methodology`, "读取ETF资金雷达方法失败");}
 
 export async function getEtfThreeFactor(): Promise<EtfThreeFactorResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/etf-radar/three-factor`);
-  if (!response.ok) {
-    throw new Error(`读取ETF三因子信号失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<EtfThreeFactorResponse>;
-}
+  return apiGet<EtfThreeFactorResponse>(`${API_BASE_URL}/api/etf-radar/three-factor`, "读取ETF三因子信号失败");}
 
 export async function getEtfThreeFactorHistory(
   symbol: string,
   days = 40,
 ): Promise<EtfThreeFactorHistoryResponse> {
   const params = new URLSearchParams({ days: String(days) });
-  const response = await apiFetch(
-    `${API_BASE_URL}/api/etf-radar/three-factor/${encodeURIComponent(symbol)}/history?${params.toString()}`,
-  );
-  if (!response.ok) {
-    throw new Error(`读取ETF三因子历史失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<EtfThreeFactorHistoryResponse>;
-}
+  return apiSend<EtfThreeFactorHistoryResponse>(`${API_BASE_URL}/api/etf-radar/three-factor/${encodeURIComponent(symbol)}/history?${params.toString()}`, "读取ETF三因子历史失败");}
 
 export async function getEtfActivityAlerts(unreadOnly = false): Promise<EtfActivityAlertResponse> {
   const params = new URLSearchParams({ unread_only: String(unreadOnly) });
-  const response = await apiFetch(`${API_BASE_URL}/api/etf-radar/alerts?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取ETF活动提醒失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<EtfActivityAlertResponse>;
-}
+  return apiGet<EtfActivityAlertResponse>(`${API_BASE_URL}/api/etf-radar/alerts?${params.toString()}`, "读取ETF活动提醒失败");}
 
 export async function markEtfAlertRead(alertId: string): Promise<EtfAlertReadResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/etf-radar/alerts/${encodeURIComponent(alertId)}/read`, {
+  return apiSend<EtfAlertReadResponse>(`${API_BASE_URL}/api/etf-radar/alerts/${encodeURIComponent(alertId)}/read`, "标记ETF活动提醒已读失败", {
     method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(`标记ETF活动提醒已读失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<EtfAlertReadResponse>;
-}
+  });}
 
 export async function markAllEtfAlertsRead(): Promise<EtfAlertReadResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/etf-radar/alerts/read-all`, { method: "POST" });
-  if (!response.ok) {
-    throw new Error(`标记全部ETF活动提醒已读失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<EtfAlertReadResponse>;
-}
+  return apiSend<EtfAlertReadResponse>(`${API_BASE_URL}/api/etf-radar/alerts/read-all`, "标记全部ETF活动提醒已读失败", { method: "POST" });}
 
 export async function getMarketRankings(limit = 30): Promise<MarketRankingsResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/market/rankings?limit=${encodeURIComponent(limit)}`);
-  if (!response.ok) {
-    throw new Error(`读取全A实时排行榜失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<MarketRankingsResponse>;
-}
+  return apiGet<MarketRankingsResponse>(`${API_BASE_URL}/api/market/rankings?limit=${encodeURIComponent(limit)}`, "读取全A实时排行榜失败");}
 
 export async function getHeatmapTreemap(query: URLSearchParams): Promise<HeatmapTreemapResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/heatmap/treemap?${query.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取市场热图失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<HeatmapTreemapResponse>;
-}
+  return apiGet<HeatmapTreemapResponse>(`${API_BASE_URL}/api/heatmap/treemap?${query.toString()}`, "读取市场热图失败");}
 
 export async function getHeatmapQuotes(
   market: HeatmapMarketKey,
   period: HeatmapPeriodKey,
 ): Promise<HeatmapQuotesResponse> {
   const params = new URLSearchParams({ market, period });
-  const response = await apiFetch(`${API_BASE_URL}/api/heatmap/quotes?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取热图行情失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<HeatmapQuotesResponse>;
-}
+  return apiGet<HeatmapQuotesResponse>(`${API_BASE_URL}/api/heatmap/quotes?${params.toString()}`, "读取热图行情失败");}
 
 export async function getHeatmapOverview(period: HeatmapPeriodKey): Promise<HeatmapOverviewResponse> {
   const params = new URLSearchParams({ period });
-  const response = await apiFetch(`${API_BASE_URL}/api/heatmap/overview?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取热图概览失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<HeatmapOverviewResponse>;
-}
+  return apiGet<HeatmapOverviewResponse>(`${API_BASE_URL}/api/heatmap/overview?${params.toString()}`, "读取热图概览失败");}
 
 export async function getAuctionLatest(limit = 100): Promise<AuctionSnapshotResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/auction/latest?limit=${encodeURIComponent(limit)}`);
-  if (!response.ok) {
-    throw new Error(`读取竞价雷达快照失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<AuctionSnapshotResponse>;
-}
+  return apiGet<AuctionSnapshotResponse>(`${API_BASE_URL}/api/auction/latest?limit=${encodeURIComponent(limit)}`, "读取竞价雷达快照失败");}
 
 export async function getAuctionSnapshot(limit = 100, refresh = false): Promise<AuctionSnapshotResponse> {
   const params = new URLSearchParams({
     limit: String(limit),
     refresh: String(refresh),
   });
-  const response = await apiFetch(`${API_BASE_URL}/api/auction/snapshot?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取竞价雷达失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<AuctionSnapshotResponse>;
-}
+  return apiGet<AuctionSnapshotResponse>(`${API_BASE_URL}/api/auction/snapshot?${params.toString()}`, "读取竞价雷达失败");}
 
 export async function createAuctionSnapshotJob(limit = 100): Promise<BackgroundJobState> {
-  const response = await apiFetch(`${API_BASE_URL}/api/auction/snapshot/jobs?limit=${encodeURIComponent(limit)}`, {
+  return apiSend<BackgroundJobState>(`${API_BASE_URL}/api/auction/snapshot/jobs?limit=${encodeURIComponent(limit)}`, "启动竞价刷新任务失败", {
     method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(`启动竞价刷新任务失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<BackgroundJobState>;
-}
+  });}
 
 export async function getAuctionSnapshotJob(jobId: string): Promise<BackgroundJobState> {
-  const response = await apiFetch(`${API_BASE_URL}/api/auction/snapshot/jobs/${encodeURIComponent(jobId)}`);
-  if (!response.ok) {
-    throw new Error(`读取竞价刷新任务失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<BackgroundJobState>;
-}
+  return apiGet<BackgroundJobState>(`${API_BASE_URL}/api/auction/snapshot/jobs/${encodeURIComponent(jobId)}`, "读取竞价刷新任务失败");}
 
 export async function getAuctionTimeline(limit = 8): Promise<AuctionTimelineResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/auction/timeline?limit=${encodeURIComponent(limit)}`);
-  if (!response.ok) {
-    throw new Error(`读取竞价时间轴失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<AuctionTimelineResponse>;
-}
+  return apiGet<AuctionTimelineResponse>(`${API_BASE_URL}/api/auction/timeline?limit=${encodeURIComponent(limit)}`, "读取竞价时间轴失败");}
 
 export async function getAuctionModelTop3(
   tradeDate: string,
@@ -385,78 +267,38 @@ export async function getAuctionModelTop3(
 
 export async function createAuctionModelTop3Job(tradeDate: string): Promise<BackgroundJobState> {
   const params = new URLSearchParams({ trade_date: tradeDate });
-  const response = await apiFetch(`${API_BASE_URL}/api/auction/model/top3/jobs?${params.toString()}`, {
+  return apiSend<BackgroundJobState>(`${API_BASE_URL}/api/auction/model/top3/jobs?${params.toString()}`, "启动竞价模型Top3生成任务失败", {
     method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(`启动竞价模型Top3生成任务失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<BackgroundJobState>;
-}
+  });}
 
 export async function getAuctionModelTop3Job(jobId: string): Promise<BackgroundJobState> {
-  const response = await apiFetch(`${API_BASE_URL}/api/auction/model/top3/jobs/${encodeURIComponent(jobId)}`);
-  if (!response.ok) {
-    throw new Error(`读取竞价模型Top3生成任务失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<BackgroundJobState>;
-}
+  return apiGet<BackgroundJobState>(`${API_BASE_URL}/api/auction/model/top3/jobs/${encodeURIComponent(jobId)}`, "读取竞价模型Top3生成任务失败");}
 
 export async function getAuctionModelLiveConfirmation(tradeDate: string): Promise<AuctionTop3LiveConfirmationResponse> {
   const params = new URLSearchParams({ trade_date: tradeDate });
-  const response = await apiFetch(`${API_BASE_URL}/api/auction/model/top3/live-confirmation?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取竞价模型Top3实盘确认失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<AuctionTop3LiveConfirmationResponse>;
-}
+  return apiGet<AuctionTop3LiveConfirmationResponse>(`${API_BASE_URL}/api/auction/model/top3/live-confirmation?${params.toString()}`, "读取竞价模型Top3实盘确认失败");}
 
 export async function getAuctionReviewLatest(): Promise<AuctionReviewSummary> {
-  const response = await apiFetch(`${API_BASE_URL}/api/auction/review/latest`);
-  if (!response.ok) {
-    throw new Error(`读取竞价复盘失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<AuctionReviewSummary>;
-}
+  return apiGet<AuctionReviewSummary>(`${API_BASE_URL}/api/auction/review/latest`, "读取竞价复盘失败");}
 
 export async function getAuctionReview(tradeDate?: string, limit = 100): Promise<AuctionReviewSummary> {
   const params = new URLSearchParams({ limit: String(limit) });
   if (tradeDate) {
     params.set("trade_date", tradeDate);
   }
-  const response = await apiFetch(`${API_BASE_URL}/api/auction/review?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取竞价复盘记录失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<AuctionReviewSummary>;
-}
+  return apiGet<AuctionReviewSummary>(`${API_BASE_URL}/api/auction/review?${params.toString()}`, "读取竞价复盘记录失败");}
 
 export async function finalizeAuctionReview(tradeDate: string): Promise<AuctionReviewSummary> {
   const params = new URLSearchParams({ trade_date: tradeDate });
-  const response = await apiFetch(`${API_BASE_URL}/api/auction/review/finalize?${params.toString()}`, {
+  return apiSend<AuctionReviewSummary>(`${API_BASE_URL}/api/auction/review/finalize?${params.toString()}`, "生成竞价复盘失败", {
     method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(`生成竞价复盘失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<AuctionReviewSummary>;
-}
+  });}
 
 export async function getAuctionRuleSummary(limit = 2000): Promise<AuctionReviewSummary> {
-  const response = await apiFetch(`${API_BASE_URL}/api/auction/rules/summary?limit=${encodeURIComponent(limit)}`);
-  if (!response.ok) {
-    throw new Error(`读取竞价规则统计失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<AuctionReviewSummary>;
-}
+  return apiGet<AuctionReviewSummary>(`${API_BASE_URL}/api/auction/rules/summary?limit=${encodeURIComponent(limit)}`, "读取竞价规则统计失败");}
 
 export async function getSectorRadar(limit = 20): Promise<SectorRadarResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/sectors/radar?limit=${encodeURIComponent(limit)}`);
-  if (!response.ok) {
-    throw new Error(`读取板块资金流失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SectorRadarResponse>;
-}
+  return apiGet<SectorRadarResponse>(`${API_BASE_URL}/api/sectors/radar?limit=${encodeURIComponent(limit)}`, "读取板块资金流失败");}
 
 export async function getSectorWorkbench(
   options: {
@@ -484,12 +326,7 @@ export async function getSectorWorkbench(
     params.set("stock_limit", String(options.stockLimit));
   }
   const suffix = params.toString();
-  const response = await apiFetch(`${API_BASE_URL}/api/sectors/workbench${suffix ? `?${suffix}` : ""}`);
-  if (!response.ok) {
-    throw new Error(`读取题材工作台失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SectorWorkbenchResponse>;
-}
+  return apiGet<SectorWorkbenchResponse>(`${API_BASE_URL}/api/sectors/workbench${suffix ? `?${suffix}` : ""}`, "读取题材工作台失败");}
 
 export async function getSectorWorkbenchStatus(tradeDate?: string | null): Promise<SectorWorkbenchStatusResponse> {
   const params = new URLSearchParams();
@@ -497,12 +334,7 @@ export async function getSectorWorkbenchStatus(tradeDate?: string | null): Promi
     params.set("trade_date", tradeDate);
   }
   const suffix = params.toString();
-  const response = await apiFetch(`${API_BASE_URL}/api/sectors/workbench/status${suffix ? `?${suffix}` : ""}`);
-  if (!response.ok) {
-    throw new Error(`读取板块采样状态失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SectorWorkbenchStatusResponse>;
-}
+  return apiGet<SectorWorkbenchStatusResponse>(`${API_BASE_URL}/api/sectors/workbench/status${suffix ? `?${suffix}` : ""}`, "读取板块采样状态失败");}
 
 export async function getSectorReplicaRadar(
   options: {
@@ -526,12 +358,7 @@ export async function getSectorReplicaRadar(
     params.set("stock_limit", String(options.stockLimit));
   }
   const suffix = params.toString();
-  const response = await apiFetch(`${API_BASE_URL}/api/sectors/replica/radar${suffix ? `?${suffix}` : ""}`);
-  if (!response.ok) {
-    throw new Error(`读取短线侠兼容板块雷达失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SectorReplicaRadarResponse>;
-}
+  return apiGet<SectorReplicaRadarResponse>(`${API_BASE_URL}/api/sectors/replica/radar${suffix ? `?${suffix}` : ""}`, "读取短线侠兼容板块雷达失败");}
 
 export async function getSectorReplicaBoardStocks(
   boardCode: string,
@@ -556,14 +383,7 @@ export async function getSectorReplicaBoardStocks(
     params.set("limit", String(options.limit));
   }
   const suffix = params.toString();
-  const response = await apiFetch(
-    `${API_BASE_URL}/api/sectors/replica/boards/${encodeURIComponent(boardCode)}/stocks${suffix ? `?${suffix}` : ""}`,
-  );
-  if (!response.ok) {
-    throw new Error(`读取板块成分股失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SectorReplicaStocksResponse>;
-}
+  return apiSend<SectorReplicaStocksResponse>(`${API_BASE_URL}/api/sectors/replica/boards/${encodeURIComponent(boardCode)}/stocks${suffix ? `?${suffix}` : ""}`, "读取板块成分股失败");}
 
 export async function getPlateRotationReference(
   limit = 10,
@@ -575,24 +395,14 @@ export async function getPlateRotationReference(
     source,
     days: String(days),
   });
-  const response = await apiFetch(`${API_BASE_URL}/api/sectors/plate-reference?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取短线题材参考榜失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<PlateRotationReferenceResponse>;
-}
+  return apiGet<PlateRotationReferenceResponse>(`${API_BASE_URL}/api/sectors/plate-reference?${params.toString()}`, "读取短线题材参考榜失败");}
 
 export async function getShortTermSentiment(tradeDate: string, limit = 50): Promise<ShortTermSentimentResponse> {
   const params = new URLSearchParams({
     trade_date: tradeDate,
     limit: String(limit),
   });
-  const response = await apiFetch(`${API_BASE_URL}/api/short-term/sentiment?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取短线情绪失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ShortTermSentimentResponse>;
-}
+  return apiGet<ShortTermSentimentResponse>(`${API_BASE_URL}/api/short-term/sentiment?${params.toString()}`, "读取短线情绪失败");}
 
 export async function getMarketSentimentPercentile(
   asOf?: string,
@@ -600,23 +410,13 @@ export async function getMarketSentimentPercentile(
 ): Promise<SentimentPercentileResponse> {
   const params = new URLSearchParams({ refresh: String(refresh) });
   if (asOf) params.set("as_of", asOf);
-  const response = await apiFetch(`${API_BASE_URL}/api/short-term/sentiment/percentile?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取市场情绪百分位失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SentimentPercentileResponse>;
-}
+  return apiGet<SentimentPercentileResponse>(`${API_BASE_URL}/api/short-term/sentiment/percentile?${params.toString()}`, "读取市场情绪百分位失败");}
 
 export async function getMarketSentimentAnalysis(
   tradeDate: string,
 ): Promise<SentimentPercentileAnalysisResponse> {
   const params = new URLSearchParams({ trade_date: tradeDate });
-  const response = await apiFetch(`${API_BASE_URL}/api/short-term/sentiment/percentile/analysis?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取市场情绪解读失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SentimentPercentileAnalysisResponse>;
-}
+  return apiGet<SentimentPercentileAnalysisResponse>(`${API_BASE_URL}/api/short-term/sentiment/percentile/analysis?${params.toString()}`, "读取市场情绪解读失败");}
 
 export async function generateMarketSentimentAnalysis(
   tradeDate: string,
@@ -626,15 +426,7 @@ export async function generateMarketSentimentAnalysis(
     trade_date: tradeDate,
     force: String(force),
   });
-  const response = await apiFetch(
-    `${API_BASE_URL}/api/short-term/sentiment/percentile/analysis/generate?${params.toString()}`,
-    { method: "POST" },
-  );
-  if (!response.ok) {
-    throw new Error(`生成市场情绪解读失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SentimentPercentileAnalysisResponse>;
-}
+  return apiSend<SentimentPercentileAnalysisResponse>(`${API_BASE_URL}/api/short-term/sentiment/percentile/analysis/generate?${params.toString()}`, "生成市场情绪解读失败", { method: "POST" },);}
 
 export async function getSentimentDecision(
   tradeDate: string,
@@ -646,26 +438,16 @@ export async function getSentimentDecision(
     limit: String(limit),
     refresh: String(refresh),
   });
-  const response = await apiFetch(`${API_BASE_URL}/api/short-term/sentiment/decision?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取情绪交易许可失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SentimentDecisionResponse>;
-}
+  return apiGet<SentimentDecisionResponse>(`${API_BASE_URL}/api/short-term/sentiment/decision?${params.toString()}`, "读取情绪交易许可失败");}
 
 export async function archiveSentimentDecision(tradeDate: string, limit = 80): Promise<SentimentDecisionResponse> {
   const params = new URLSearchParams({
     trade_date: tradeDate,
     limit: String(limit),
   });
-  const response = await apiFetch(`${API_BASE_URL}/api/short-term/sentiment/review/archive?${params.toString()}`, {
+  return apiSend<SentimentDecisionResponse>(`${API_BASE_URL}/api/short-term/sentiment/review/archive?${params.toString()}`, "归档情绪结论失败", {
     method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(`归档情绪结论失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SentimentDecisionResponse>;
-}
+  });}
 
 export async function getSentimentWatchlistAlerts(
   tradeDate: string,
@@ -677,12 +459,7 @@ export async function getSentimentWatchlistAlerts(
     limit: String(limit),
     refresh: String(refresh),
   });
-  const response = await apiFetch(`${API_BASE_URL}/api/short-term/sentiment/watchlist-alerts?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取自选股情绪联动失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SentimentWatchlistAlertsResponse>;
-}
+  return apiGet<SentimentWatchlistAlertsResponse>(`${API_BASE_URL}/api/short-term/sentiment/watchlist-alerts?${params.toString()}`, "读取自选股情绪联动失败");}
 
 export async function getSentimentSummary(
   tradeDate: string,
@@ -694,12 +471,7 @@ export async function getSentimentSummary(
     limit: String(limit),
     refresh: String(refresh),
   });
-  const response = await apiFetch(`${API_BASE_URL}/api/short-term/sentiment/summary?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取短线情绪概览失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SentimentSummaryResponse>;
-}
+  return apiGet<SentimentSummaryResponse>(`${API_BASE_URL}/api/short-term/sentiment/summary?${params.toString()}`, "读取短线情绪概览失败");}
 
 export async function getSentimentDetail(
   tradeDate: string,
@@ -711,12 +483,7 @@ export async function getSentimentDetail(
     limit: String(limit),
     refresh: String(refresh),
   });
-  const response = await apiFetch(`${API_BASE_URL}/api/short-term/sentiment/detail?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取短线情绪详情失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SentimentDetailResponse>;
-}
+  return apiGet<SentimentDetailResponse>(`${API_BASE_URL}/api/short-term/sentiment/detail?${params.toString()}`, "读取短线情绪详情失败");}
 
 export async function getMarketEmotionSnapshot(
   tradeDate: string,
@@ -728,12 +495,7 @@ export async function getMarketEmotionSnapshot(
     include_distribution: String(includeDistribution),
     limit: String(limit),
   });
-  const response = await apiFetch(`${API_BASE_URL}/api/short-term/market-emotion?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取市场情绪仪表盘失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<MarketEmotionSnapshotResponse>;
-}
+  return apiGet<MarketEmotionSnapshotResponse>(`${API_BASE_URL}/api/short-term/market-emotion?${params.toString()}`, "读取市场情绪仪表盘失败");}
 
 export async function getShortTermIntradaySentiment(
   tradeDate: string,
@@ -747,12 +509,7 @@ export async function getShortTermIntradaySentiment(
     period,
     count: String(count),
   });
-  const response = await apiFetch(`${API_BASE_URL}/api/short-term/sentiment/intraday?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取盘中情绪失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ShortTermIntradaySentimentResponse>;
-}
+  return apiGet<ShortTermIntradaySentimentResponse>(`${API_BASE_URL}/api/short-term/sentiment/intraday?${params.toString()}`, "读取盘中情绪失败");}
 
 export async function getShortTermIntradaySignalDigest(
   tradeDate: string,
@@ -766,73 +523,38 @@ export async function getShortTermIntradaySignalDigest(
     period,
     count: String(count),
   });
-  const response = await apiFetch(`${API_BASE_URL}/api/short-term/sentiment/intraday/digest?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`生成短线提醒草稿失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ShortTermIntradaySignalDigest>;
-}
+  return apiGet<ShortTermIntradaySignalDigest>(`${API_BASE_URL}/api/short-term/sentiment/intraday/digest?${params.toString()}`, "生成短线提醒草稿失败");}
 
 export async function getSentimentMonitorStatus(): Promise<SentimentMonitorStatus> {
-  const response = await apiFetch(`${API_BASE_URL}/api/short-term/sentiment/monitor/status`);
-  if (!response.ok) {
-    throw new Error(`读取后台监控状态失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SentimentMonitorStatus>;
-}
+  return apiGet<SentimentMonitorStatus>(`${API_BASE_URL}/api/short-term/sentiment/monitor/status`, "读取后台监控状态失败");}
 
 export async function saveSentimentMonitorConfig(
   payload: SentimentMonitorConfig,
 ): Promise<SentimentMonitorStatus> {
-  const response = await apiFetch(`${API_BASE_URL}/api/short-term/sentiment/monitor/config`, {
+  return apiSend<SentimentMonitorStatus>(`${API_BASE_URL}/api/short-term/sentiment/monitor/config`, "保存后台监控配置失败", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    throw new Error(`保存后台监控配置失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SentimentMonitorStatus>;
-}
+  });}
 
 export async function startSentimentMonitor(): Promise<SentimentMonitorStatus> {
-  const response = await apiFetch(`${API_BASE_URL}/api/short-term/sentiment/monitor/start`, {
+  return apiSend<SentimentMonitorStatus>(`${API_BASE_URL}/api/short-term/sentiment/monitor/start`, "启动后台监控失败", {
     method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(`启动后台监控失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SentimentMonitorStatus>;
-}
+  });}
 
 export async function stopSentimentMonitor(): Promise<SentimentMonitorStatus> {
-  const response = await apiFetch(`${API_BASE_URL}/api/short-term/sentiment/monitor/stop`, {
+  return apiSend<SentimentMonitorStatus>(`${API_BASE_URL}/api/short-term/sentiment/monitor/stop`, "停止后台监控失败", {
     method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(`停止后台监控失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SentimentMonitorStatus>;
-}
+  });}
 
 export async function runSentimentMonitorOnce(tradeDate?: string): Promise<SentimentMonitorStatus> {
   const suffix = tradeDate ? `?trade_date=${encodeURIComponent(tradeDate)}` : "";
-  const response = await apiFetch(`${API_BASE_URL}/api/short-term/sentiment/monitor/run-once${suffix}`, {
+  return apiSend<SentimentMonitorStatus>(`${API_BASE_URL}/api/short-term/sentiment/monitor/run-once${suffix}`, "手动采样失败", {
     method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(`手动采样失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<SentimentMonitorStatus>;
-}
+  });}
 
 export async function getRuntimeSettings(): Promise<RuntimeSettingsResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/settings`);
-  if (!response.ok) {
-    throw new Error(`读取设置失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<RuntimeSettingsResponse>;
-}
+  return apiGet<RuntimeSettingsResponse>(`${API_BASE_URL}/api/settings`, "读取设置失败");}
 
 export async function saveRuntimeSettings(payload: {
   candidate_provider: "recent_limit_up" | "thsdk";
@@ -852,40 +574,25 @@ export async function saveRuntimeSettings(payload: {
   ai_analysis?: AiAnalysisSettingsUpdate;
   auction_top3_training?: AuctionTop3TrainingSettings;
 }): Promise<RuntimeSettingsResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/settings`, {
+  return apiSend<RuntimeSettingsResponse>(`${API_BASE_URL}/api/settings`, "保存设置失败", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    throw new Error(`保存设置失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<RuntimeSettingsResponse>;
-}
+  });}
 
 export async function sendNotificationMessage(payload: {
   title: string;
   message_text: string;
   channel_ids?: string[];
 }): Promise<NotificationSendResult> {
-  const response = await apiFetch(`${API_BASE_URL}/api/notifications/send`, {
+  return apiSend<NotificationSendResult>(`${API_BASE_URL}/api/notifications/send`, "发送通知失败", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    throw new Error(`发送通知失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<NotificationSendResult>;
-}
+  });}
 
 export async function checkRuntimeSettingsHealth(symbol = "605289.SH"): Promise<RuntimeSettingsHealthResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/settings/health?symbol=${encodeURIComponent(symbol)}`);
-  if (!response.ok) {
-    throw new Error(`健康检查失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<RuntimeSettingsHealthResponse>;
-}
+  return apiGet<RuntimeSettingsHealthResponse>(`${API_BASE_URL}/api/settings/health?symbol=${encodeURIComponent(symbol)}`, "健康检查失败");}
 
 export async function createScreenRun(
   tradeDate: string,
@@ -929,42 +636,20 @@ export async function createScreenRunJob(
     exclude_gsgf_hard_risk?: boolean;
   } = {},
 ): Promise<ScreenRunJobState> {
-  const response = await apiFetch(`${API_BASE_URL}/api/screen/runs/jobs`, {
+  return apiSend<ScreenRunJobState>(`${API_BASE_URL}/api/screen/runs/jobs`, "启动筛选任务失败", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ trade_date: tradeDate, limit, scan_limit: scanLimit, filters, ...options }),
-  });
-  if (!response.ok) {
-    throw new Error(`启动筛选任务失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ScreenRunJobState>;
-}
+  });}
 
 export async function getScreenRunJob(jobId: string): Promise<ScreenRunJobState> {
-  const response = await apiFetch(`${API_BASE_URL}/api/screen/runs/jobs/${encodeURIComponent(jobId)}`);
-  if (!response.ok) {
-    throw new Error(`读取筛选任务失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ScreenRunJobState>;
-}
+  return apiGet<ScreenRunJobState>(`${API_BASE_URL}/api/screen/runs/jobs/${encodeURIComponent(jobId)}`, "读取筛选任务失败");}
 
 export async function getCzscShadowScreeningJob(jobId: string): Promise<CzscShadowScreeningJobResponse> {
-  const response = await apiFetch(
-    `${API_BASE_URL}/api/chanlun/screening/shadow/jobs/${encodeURIComponent(jobId)}`,
-  );
-  if (!response.ok) {
-    throw new Error(`读取CZSC研究任务失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<CzscShadowScreeningJobResponse>;
-}
+  return apiSend<CzscShadowScreeningJobResponse>(`${API_BASE_URL}/api/chanlun/screening/shadow/jobs/${encodeURIComponent(jobId)}`, "读取CZSC研究任务失败");}
 
 export async function getLatestScreenRun(): Promise<StrongStockScreeningResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/screen/runs/latest`);
-  if (!response.ok) {
-    throw new Error(`读取最近筛选失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<StrongStockScreeningResponse>;
-}
+  return apiGet<StrongStockScreeningResponse>(`${API_BASE_URL}/api/screen/runs/latest`, "读取最近筛选失败");}
 
 export async function runGsgfBacktest({
   symbols,
@@ -977,7 +662,7 @@ export async function runGsgfBacktest({
   minHistory?: number;
   count?: number;
 }): Promise<GsgfBacktestSummary> {
-  const response = await apiFetch(`${API_BASE_URL}/api/gsgf/backtest`, {
+  return apiSend<GsgfBacktestSummary>(`${API_BASE_URL}/api/gsgf/backtest`, "运行股是股非回测失败", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -986,12 +671,7 @@ export async function runGsgfBacktest({
       min_history: minHistory,
       count,
     }),
-  });
-  if (!response.ok) {
-    throw new Error(`运行股是股非回测失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<GsgfBacktestSummary>;
-}
+  });}
 
 export async function runGsgfCalibration({
   tradeDates,
@@ -1004,7 +684,7 @@ export async function runGsgfCalibration({
   scanLimit?: number;
   count?: number;
 }): Promise<GsgfRealCalibrationSummary> {
-  const response = await apiFetch(`${API_BASE_URL}/api/gsgf/calibration`, {
+  return apiSend<GsgfRealCalibrationSummary>(`${API_BASE_URL}/api/gsgf/calibration`, "运行股是股非真实样本校准失败", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -1013,12 +693,7 @@ export async function runGsgfCalibration({
       scan_limit: scanLimit,
       count,
     }),
-  });
-  if (!response.ok) {
-    throw new Error(`运行股是股非真实样本校准失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<GsgfRealCalibrationSummary>;
-}
+  });}
 
 export async function getLatestGsgfReview(): Promise<GsgfReviewSummary | null> {
   const response = await apiFetch(`${API_BASE_URL}/api/gsgf/review/latest`);
@@ -1042,7 +717,7 @@ export async function createGsgfCalibrationJob({
   scanLimit?: number;
   count?: number;
 }): Promise<BackgroundJobState> {
-  const response = await apiFetch(`${API_BASE_URL}/api/gsgf/calibration/jobs`, {
+  return apiSend<BackgroundJobState>(`${API_BASE_URL}/api/gsgf/calibration/jobs`, "启动股是股非校准任务失败", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -1051,30 +726,15 @@ export async function createGsgfCalibrationJob({
       scan_limit: scanLimit,
       count,
     }),
-  });
-  if (!response.ok) {
-    throw new Error(`启动股是股非校准任务失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<BackgroundJobState>;
-}
+  });}
 
 export async function getGsgfCalibrationJob(jobId: string): Promise<BackgroundJobState> {
-  const response = await apiFetch(`${API_BASE_URL}/api/gsgf/calibration/jobs/${encodeURIComponent(jobId)}`);
-  if (!response.ok) {
-    throw new Error(`读取股是股非校准任务失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<BackgroundJobState>;
-}
+  return apiGet<BackgroundJobState>(`${API_BASE_URL}/api/gsgf/calibration/jobs/${encodeURIComponent(jobId)}`, "读取股是股非校准任务失败");}
 
 export async function cancelGsgfCalibrationJob(jobId: string): Promise<BackgroundJobState> {
-  const response = await apiFetch(`${API_BASE_URL}/api/gsgf/calibration/jobs/${encodeURIComponent(jobId)}/cancel`, {
+  return apiSend<BackgroundJobState>(`${API_BASE_URL}/api/gsgf/calibration/jobs/${encodeURIComponent(jobId)}/cancel`, "取消股是股非校准任务失败", {
     method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(`取消股是股非校准任务失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<BackgroundJobState>;
-}
+  });}
 
 export async function getLatestGsgfCalibration(): Promise<GsgfRealCalibrationSummary | null> {
   const response = await apiFetch(`${API_BASE_URL}/api/gsgf/calibration/latest`);
@@ -1088,20 +748,10 @@ export async function getLatestGsgfCalibration(): Promise<GsgfRealCalibrationSum
 }
 
 export async function getGsgfModelHealth(): Promise<GsgfModelHealth> {
-  const response = await apiFetch(`${API_BASE_URL}/api/gsgf/health`);
-  if (!response.ok) {
-    throw new Error(`读取股是股非模型健康失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<GsgfModelHealth>;
-}
+  return apiGet<GsgfModelHealth>(`${API_BASE_URL}/api/gsgf/health`, "读取股是股非模型健康失败");}
 
 export async function generateModelMaintenancePacket(): Promise<ModelMaintenancePacket> {
-  const response = await apiFetch(`${API_BASE_URL}/api/model-maintenance/packets/generate`, { method: "POST" });
-  if (!response.ok) {
-    throw new Error(`生成模型维护复盘包失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ModelMaintenancePacket>;
-}
+  return apiSend<ModelMaintenancePacket>(`${API_BASE_URL}/api/model-maintenance/packets/generate`, "生成模型维护复盘包失败", { method: "POST" });}
 
 export async function getLatestModelMaintenancePacket(): Promise<ModelMaintenancePacket | null> {
   const response = await apiFetch(`${API_BASE_URL}/api/model-maintenance/packets/latest`);
@@ -1115,12 +765,7 @@ export async function getLatestModelMaintenancePacket(): Promise<ModelMaintenanc
 }
 
 export async function getModelMaintenancePacket(packetId: string): Promise<ModelMaintenancePacket> {
-  const response = await apiFetch(`${API_BASE_URL}/api/model-maintenance/packets/${encodeURIComponent(packetId)}`);
-  if (!response.ok) {
-    throw new Error(`读取模型维护数据包失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ModelMaintenancePacket>;
-}
+  return apiGet<ModelMaintenancePacket>(`${API_BASE_URL}/api/model-maintenance/packets/${encodeURIComponent(packetId)}`, "读取模型维护数据包失败");}
 
 export async function getLatestModelMaintenanceReport(): Promise<ModelMaintenanceReport | null> {
   const response = await apiFetch(`${API_BASE_URL}/api/model-maintenance/reports/latest`);
@@ -1134,78 +779,40 @@ export async function getLatestModelMaintenanceReport(): Promise<ModelMaintenanc
 }
 
 export async function getAuctionTop3TrainingSummary(): Promise<AuctionTop3TrainingSummary> {
-  const response = await apiFetch(`${API_BASE_URL}/api/model-maintenance/auction-top3/training/summary`);
-  if (!response.ok) {
-    throw new Error(`读取竞价 Top3 训练摘要失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<AuctionTop3TrainingSummary>;
-}
+  return apiGet<AuctionTop3TrainingSummary>(`${API_BASE_URL}/api/model-maintenance/auction-top3/training/summary`, "读取竞价 Top3 训练摘要失败");}
 
 export async function getAuctionTop3TrainingPerformance(): Promise<AuctionTop3PerformanceResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/model-maintenance/auction-top3/training/performance`);
-  if (!response.ok) {
-    throw new Error(`读取竞价 Top3 模拟收益失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<AuctionTop3PerformanceResponse>;
-}
+  return apiGet<AuctionTop3PerformanceResponse>(`${API_BASE_URL}/api/model-maintenance/auction-top3/training/performance`, "读取竞价 Top3 模拟收益失败");}
 
 export async function generateAuctionTop3TrainingSamples(
   tradeDate?: string,
 ): Promise<AuctionTop3TrainingGenerateResponse> {
   const suffix = tradeDate ? `?trade_date=${encodeURIComponent(tradeDate)}` : "";
-  const response = await apiFetch(`${API_BASE_URL}/api/model-maintenance/auction-top3/training/generate${suffix}`, {
+  return apiSend<AuctionTop3TrainingGenerateResponse>(`${API_BASE_URL}/api/model-maintenance/auction-top3/training/generate${suffix}`, "生成竞价 Top3 训练样本失败", {
     method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(`生成竞价 Top3 训练样本失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<AuctionTop3TrainingGenerateResponse>;
-}
+  });}
 
 export async function analyzeModelMaintenance(): Promise<ModelMaintenanceReport> {
-  const response = await apiFetch(`${API_BASE_URL}/api/model-maintenance/analyze`, { method: "POST" });
-  if (!response.ok) {
-    throw new Error(`生成模型维护 AI 分析失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ModelMaintenanceReport>;
-}
+  return apiSend<ModelMaintenanceReport>(`${API_BASE_URL}/api/model-maintenance/analyze`, "生成模型维护 AI 分析失败", { method: "POST" });}
 
 export async function updateModelMaintenanceSuggestion(
   suggestionId: string,
   action: "accept" | "ignore" | "snooze",
 ): Promise<ModelMaintenanceSuggestion> {
-  const response = await apiFetch(
-    `${API_BASE_URL}/api/model-maintenance/suggestions/${encodeURIComponent(suggestionId)}/${action}`,
-    { method: "POST" },
-  );
-  if (!response.ok) {
-    throw new Error(`更新模型维护建议失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ModelMaintenanceSuggestion>;
-}
+  return apiSend<ModelMaintenanceSuggestion>(`${API_BASE_URL}/api/model-maintenance/suggestions/${encodeURIComponent(suggestionId)}/${action}`, "更新模型维护建议失败", { method: "POST" },);}
 
 export async function buildGsgfTradePlan(analysis: GsgfAnalysis): Promise<GsgfTradePlan> {
-  const response = await apiFetch(`${API_BASE_URL}/api/gsgf/trade-plan`, {
+  return apiSend<GsgfTradePlan>(`${API_BASE_URL}/api/gsgf/trade-plan`, "生成股是股非交易计划失败", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ analysis }),
-  });
-  if (!response.ok) {
-    throw new Error(`生成股是股非交易计划失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<GsgfTradePlan>;
-}
+  });}
 
 export async function saveLatestGsgfReviewSnapshot(): Promise<GsgfReviewSnapshotResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/gsgf/review/snapshots/latest`, {
+  return apiSend<GsgfReviewSnapshotResponse>(`${API_BASE_URL}/api/gsgf/review/snapshots/latest`, "保存股是股非复盘快照失败", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-  });
-  if (!response.ok) {
-    throw new Error(`保存股是股非复盘快照失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<GsgfReviewSnapshotResponse>;
-}
+  });}
 
 export async function recheckGsgfReview({
   windows = [1, 3, 5, 10],
@@ -1214,16 +821,11 @@ export async function recheckGsgfReview({
   windows?: number[];
   count?: number;
 } = {}): Promise<GsgfReviewSummary> {
-  const response = await apiFetch(`${API_BASE_URL}/api/gsgf/review/recheck`, {
+  return apiSend<GsgfReviewSummary>(`${API_BASE_URL}/api/gsgf/review/recheck`, "复查股是股非信号失败", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ windows, count }),
-  });
-  if (!response.ok) {
-    throw new Error(`复查股是股非信号失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<GsgfReviewSummary>;
-}
+  });}
 
 export async function createIntradaySnapshot({
   gsgfContext = {},
@@ -1262,44 +864,24 @@ export async function createIntradaySnapshot({
 }
 
 export async function getWatchlistPool(): Promise<WatchlistPoolResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/watchlist/pool`);
-  if (!response.ok) {
-    throw new Error(`读取自选股股票池失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<WatchlistPoolResponse>;
-}
+  return apiGet<WatchlistPoolResponse>(`${API_BASE_URL}/api/watchlist/pool`, "读取自选股股票池失败");}
 
 export async function saveWatchlistPool(content: string): Promise<WatchlistPoolResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/watchlist/pool`, {
+  return apiSend<WatchlistPoolResponse>(`${API_BASE_URL}/api/watchlist/pool`, "保存自选股股票池失败", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content }),
-  });
-  if (!response.ok) {
-    throw new Error(`保存自选股股票池失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<WatchlistPoolResponse>;
-}
+  });}
 
 export async function addWatchlistPoolItem(item: WatchlistPoolItemRequest): Promise<WatchlistPoolResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/watchlist/pool/items`, {
+  return apiSend<WatchlistPoolResponse>(`${API_BASE_URL}/api/watchlist/pool/items`, "加入自选股失败", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(item),
-  });
-  if (!response.ok) {
-    throw new Error(`加入自选股失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<WatchlistPoolResponse>;
-}
+  });}
 
 export async function getWatchlistGsgfStatus(): Promise<WatchlistGsgfStatusResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/watchlist/gsgf-status`);
-  if (!response.ok) {
-    throw new Error(`读取自选股结构触发失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<WatchlistGsgfStatusResponse>;
-}
+  return apiGet<WatchlistGsgfStatusResponse>(`${API_BASE_URL}/api/watchlist/gsgf-status`, "读取自选股结构触发失败");}
 
 export async function getStockKline(
   symbol: string,
@@ -1310,30 +892,13 @@ export async function getStockKline(
   if (typeof optionsOrCount !== "number" || options.period) {
     params.set("period", options.period ?? "1d");
   }
-  const response = await apiFetch(
-    `${API_BASE_URL}/api/stocks/${encodeURIComponent(symbol)}/kline?${params.toString()}`,
-  );
-  if (!response.ok) {
-    throw new Error(`读取K线失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<StockKlineResponse>;
-}
+  return apiSend<StockKlineResponse>(`${API_BASE_URL}/api/stocks/${encodeURIComponent(symbol)}/kline?${params.toString()}`, "读取K线失败");}
 
 export async function getStockQuote(symbol: string): Promise<StockQuoteResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/stocks/${encodeURIComponent(symbol)}/quote`);
-  if (!response.ok) {
-    throw new Error(`读取实时行情失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<StockQuoteResponse>;
-}
+  return apiGet<StockQuoteResponse>(`${API_BASE_URL}/api/stocks/${encodeURIComponent(symbol)}/quote`, "读取实时行情失败");}
 
 export async function getStockResearch(symbol: string): Promise<StockResearchResponse> {
-  const response = await apiFetch(`${API_BASE_URL}/api/stocks/${encodeURIComponent(symbol)}/research`);
-  if (!response.ok) {
-    throw new Error(`读取个股研究失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<StockResearchResponse>;
-}
+  return apiGet<StockResearchResponse>(`${API_BASE_URL}/api/stocks/${encodeURIComponent(symbol)}/research`, "读取个股研究失败");}
 
 export async function getChanlunAnalysis(
   symbol: string,
@@ -1348,42 +913,21 @@ export async function getChanlunAnalysis(
     lookback: String(options.lookback ?? 220),
     include_observing: String(options.includeObserving ?? false),
   });
-  const response = await apiFetch(
-    `${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/analysis?${params.toString()}`,
-  );
-  if (!response.ok) {
-    throw new Error(`读取缠论分析失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ChanlunAnalysisResponse>;
-}
+  return apiSend<ChanlunAnalysisResponse>(`${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/analysis?${params.toString()}`, "读取缠论分析失败");}
 
 export async function getCzscResearchSignals(
   symbol: string,
   options: { lookback?: number } = {},
 ): Promise<CzscResearchSnapshot> {
   const params = new URLSearchParams({ lookback: String(options.lookback ?? 220) });
-  const response = await apiFetch(
-    `${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/research-signals?${params.toString()}`,
-  );
-  if (!response.ok) {
-    throw new Error(`读取缠论研究信号失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<CzscResearchSnapshot>;
-}
+  return apiSend<CzscResearchSnapshot>(`${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/research-signals?${params.toString()}`, "读取缠论研究信号失败");}
 
 export async function getChanlunWorkspace(
   symbol: string,
   options: { lookback?: number } = {},
 ): Promise<ChanlunWorkspaceResponse> {
   const params = new URLSearchParams({ lookback: String(options.lookback ?? 220) });
-  const response = await apiFetch(
-    `${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/workspace?${params.toString()}`,
-  );
-  if (!response.ok) {
-    throw new Error(`读取缠论工作台失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ChanlunWorkspaceResponse>;
-}
+  return apiSend<ChanlunWorkspaceResponse>(`${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/workspace?${params.toString()}`, "读取缠论工作台失败");}
 
 export async function getChanlunReplay(
   symbol: string,
@@ -1393,14 +937,7 @@ export async function getChanlunReplay(
     period: options.period ?? "1d",
     lookback: String(options.lookback ?? 220),
   });
-  const response = await apiFetch(
-    `${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/replays?${params.toString()}`,
-  );
-  if (!response.ok) {
-    throw new Error(`读取缠论历史回放失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ChanlunReplayResponse>;
-}
+  return apiSend<ChanlunReplayResponse>(`${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/replays?${params.toString()}`, "读取缠论历史回放失败");}
 
 export async function getChanlunBacktest(
   symbol: string,
@@ -1413,14 +950,7 @@ export async function getChanlunBacktest(
   if (options.horizons?.length) {
     params.set("horizons", options.horizons.join(","));
   }
-  const response = await apiFetch(
-    `${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/backtests?${params.toString()}`,
-  );
-  if (!response.ok) {
-    throw new Error(`读取缠论绩效回测失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ChanlunBacktestResponse>;
-}
+  return apiSend<ChanlunBacktestResponse>(`${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/backtests?${params.toString()}`, "读取缠论绩效回测失败");}
 
 export async function getChanlunAlerts(
   options: { symbol?: string; limit?: number } = {},
@@ -1429,12 +959,7 @@ export async function getChanlunAlerts(
   if (options.symbol) {
     params.set("symbol", options.symbol);
   }
-  const response = await apiFetch(`${API_BASE_URL}/api/chanlun/alerts?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`读取缠论预警失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ChanlunAlertListResponse>;
-}
+  return apiGet<ChanlunAlertListResponse>(`${API_BASE_URL}/api/chanlun/alerts?${params.toString()}`, "读取缠论预警失败");}
 
 export async function refreshChanlunAlerts(
   symbol: string,
@@ -1444,72 +969,36 @@ export async function refreshChanlunAlerts(
     period: options.period ?? "1d",
     lookback: String(options.lookback ?? 220),
   });
-  const response = await apiFetch(
-    `${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/alerts/refresh?${params.toString()}`,
-    { method: "POST" },
-  );
-  if (!response.ok) {
-    throw new Error(`刷新缠论预警失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ChanlunAlertRefreshResponse>;
-}
+  return apiSend<ChanlunAlertRefreshResponse>(`${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/alerts/refresh?${params.toString()}`, "刷新缠论预警失败", { method: "POST" },);}
 
 export async function createChanlunPaperOrderDraft(
   symbol: string,
   options: { quantity?: number; lookback?: number } = {},
 ): Promise<ChanlunPaperOrder> {
   const params = new URLSearchParams({ lookback: String(options.lookback ?? 220) });
-  const response = await apiFetch(
-    `${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/paper-orders/drafts?${params.toString()}`,
-    {
+  return apiSend<ChanlunPaperOrder>(`${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/paper-orders/drafts?${params.toString()}`, "创建缠论模拟订单草案失败", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ quantity: options.quantity ?? 100 }),
-    },
-  );
-  if (!response.ok) {
-    throw new Error(`创建缠论模拟订单草案失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ChanlunPaperOrder>;
-}
+    },);}
 
 export async function approveChanlunPaperOrder(orderId: string): Promise<ChanlunPaperOrder> {
-  const response = await apiFetch(`${API_BASE_URL}/api/chanlun/paper-orders/${encodeURIComponent(orderId)}/approve`, {
+  return apiSend<ChanlunPaperOrder>(`${API_BASE_URL}/api/chanlun/paper-orders/${encodeURIComponent(orderId)}/approve`, "确认缠论模拟订单失败", {
     method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(`确认缠论模拟订单失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ChanlunPaperOrder>;
-}
+  });}
 
 export async function cancelChanlunPaperOrder(orderId: string): Promise<ChanlunPaperOrder> {
-  const response = await apiFetch(`${API_BASE_URL}/api/chanlun/paper-orders/${encodeURIComponent(orderId)}/cancel`, {
+  return apiSend<ChanlunPaperOrder>(`${API_BASE_URL}/api/chanlun/paper-orders/${encodeURIComponent(orderId)}/cancel`, "撤销缠论模拟订单失败", {
     method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(`撤销缠论模拟订单失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ChanlunPaperOrder>;
-}
+  });}
 
 export async function fillChanlunPaperOrder(orderId: string): Promise<ChanlunPaperOrder> {
-  const response = await apiFetch(`${API_BASE_URL}/api/chanlun/paper-orders/${encodeURIComponent(orderId)}/fill`, {
+  return apiSend<ChanlunPaperOrder>(`${API_BASE_URL}/api/chanlun/paper-orders/${encodeURIComponent(orderId)}/fill`, "更新缠论模拟成交失败", {
     method: "POST",
-  });
-  if (!response.ok) {
-    throw new Error(`更新缠论模拟成交失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ChanlunPaperOrder>;
-}
+  });}
 
 export async function getChanlunPaperAccount(): Promise<ChanlunPaperAccount> {
-  const response = await apiFetch(`${API_BASE_URL}/api/chanlun/paper-account`);
-  if (!response.ok) {
-    throw new Error(`读取缠论模拟账户失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ChanlunPaperAccount>;
-}
+  return apiGet<ChanlunPaperAccount>(`${API_BASE_URL}/api/chanlun/paper-account`, "读取缠论模拟账户失败");}
 
 export async function searchStockSymbols(
   query: string,
@@ -1519,12 +1008,7 @@ export async function searchStockSymbols(
     query,
     limit: String(options.limit ?? 20),
   });
-  const response = await apiFetch(`${API_BASE_URL}/api/chanlun/symbols/search?${params.toString()}`);
-  if (!response.ok) {
-    throw new Error(`搜索股票失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<ChanlunSymbolSearchResponse>;
-}
+  return apiGet<ChanlunSymbolSearchResponse>(`${API_BASE_URL}/api/chanlun/symbols/search?${params.toString()}`, "搜索股票失败");}
 
 export const searchChanlunSymbols = searchStockSymbols;
 
@@ -1537,26 +1021,14 @@ export async function createChanlunBackfillJob(
     lookback: request.lookback ?? 220,
     ...(request.history_days === undefined ? {} : { history_days: request.history_days }),
   };
-  const response = await apiFetch(`${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/backfill`, {
+  return apiSend<BackgroundJobState>(`${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/backfill`, "启动缠论历史补齐失败", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
-  });
-  if (!response.ok) {
-    throw new Error(`启动缠论历史补齐失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<BackgroundJobState>;
-}
+  });}
 
 export async function getChanlunBackfillJob(
   symbol: string,
   jobId: string,
 ): Promise<BackgroundJobState> {
-  const response = await apiFetch(
-    `${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/backfill/${encodeURIComponent(jobId)}`,
-  );
-  if (!response.ok) {
-    throw new Error(`读取缠论历史补齐任务失败：${response.status} ${await response.text()}`);
-  }
-  return response.json() as Promise<BackgroundJobState>;
-}
+  return apiSend<BackgroundJobState>(`${API_BASE_URL}/api/chanlun/stocks/${encodeURIComponent(symbol)}/backfill/${encodeURIComponent(jobId)}`, "读取缠论历史补齐任务失败");}

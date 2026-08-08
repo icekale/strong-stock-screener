@@ -1184,11 +1184,18 @@ class EastmoneyMarketOverviewProvider:
     def _fetch_tickflow_display_indices(self) -> list[MarketIndexSnapshot]:
         if self.realtime_quote_provider is None:
             raise ValueError("tickflow display index source disabled")
+        source_name = getattr(self.realtime_quote_provider, "source_name", "TickFlow")
         quotes = self.realtime_quote_provider.get_quotes(DISPLAY_INDEX_SYMBOLS)
         items_by_symbol: dict[str, MarketIndexSnapshot] = {}
         for quote in quotes:
-            symbol = str(getattr(quote, "symbol", "") or "")
-            if symbol not in DISPLAY_INDEX_NAMES:
+            code = str(getattr(quote, "symbol", "") or "").split(".", 1)[0]
+            # 东财等源会把指数代码按股票规则映射（如 000001 → 000001.SZ），
+            # 这里按代码反查展示位，保证 000001.SH 上证等指数正确归位。
+            symbol = next(
+                (candidate for candidate in DISPLAY_INDEX_SYMBOLS if candidate.startswith(code)),
+                None,
+            )
+            if symbol is None:
                 continue
             items_by_symbol[symbol] = MarketIndexSnapshot(
                 symbol=symbol,
@@ -1196,7 +1203,7 @@ class EastmoneyMarketOverviewProvider:
                 last_price=_number(getattr(quote, "last_price", None)),
                 change_pct=_number(getattr(quote, "pct_change", None)),
                 turnover_cny=_number(getattr(quote, "turnover_cny", None)),
-                source="TickFlow 实时指数",
+                source=f"{source_name} 实时指数",
             )
         if not items_by_symbol:
             raise ValueError("empty tickflow display indices")
@@ -1207,33 +1214,44 @@ class EastmoneyMarketOverviewProvider:
         ]
 
     def _fetch_index_snapshot(self) -> list[dict[str, Any]]:
-        response = self.http_client.get(
-            "https://push2.eastmoney.com/api/qt/ulist.np/get",
-            params={
-                "secids": ",".join(INDEX_SECIDS),
-                "fields": "f2,f3,f6,f12,f14,f104,f105,f106",
-            },
-            headers={"User-Agent": USER_AGENT},
-            timeout=self.timeout_seconds,
-        )
-        response.raise_for_status()
-        rows = _extract_diff(response.json())
-        if not rows:
-            raise ValueError("empty index snapshot")
-        return rows
+        for host in _CLIST_HOSTS:
+            try:
+                response = self.http_client.get(
+                    f"{host}/api/qt/ulist.np/get",
+                    params={
+                        "secids": ",".join(INDEX_SECIDS),
+                        "fields": "f2,f3,f6,f12,f14,f104,f105,f106",
+                    },
+                    headers={"User-Agent": USER_AGENT},
+                    timeout=self.timeout_seconds,
+                )
+                response.raise_for_status()
+                rows = _extract_diff(response.json())
+                if rows:
+                    return rows
+            except Exception:
+                continue
+        raise ValueError("empty index snapshot")
 
     def _fetch_display_index_snapshot(self) -> list[MarketIndexSnapshot]:
-        response = self.http_client.get(
-            "https://push2.eastmoney.com/api/qt/ulist.np/get",
-            params={
-                "secids": ",".join(DISPLAY_INDEX_SECIDS),
-                "fields": "f2,f3,f6,f12,f14",
-            },
-            headers={"User-Agent": USER_AGENT},
-            timeout=self.timeout_seconds,
-        )
-        response.raise_for_status()
-        rows = _extract_diff(response.json())
+        rows: list[dict[str, Any]] = []
+        for host in _CLIST_HOSTS:
+            try:
+                response = self.http_client.get(
+                    f"{host}/api/qt/ulist.np/get",
+                    params={
+                        "secids": ",".join(DISPLAY_INDEX_SECIDS),
+                        "fields": "f2,f3,f6,f12,f14",
+                    },
+                    headers={"User-Agent": USER_AGENT},
+                    timeout=self.timeout_seconds,
+                )
+                response.raise_for_status()
+                rows = _extract_diff(response.json())
+                if rows:
+                    break
+            except Exception:
+                continue
         if not rows:
             raise ValueError("empty display index snapshot")
         items_by_symbol: dict[str, MarketIndexSnapshot] = {}

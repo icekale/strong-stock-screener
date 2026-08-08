@@ -948,6 +948,115 @@ def test_market_overview_does_not_replace_incomplete_previous_snapshot_with_olde
 
 
 def test_market_overview_uses_tickflow_display_indices_before_eastmoney() -> None:
+    tickflow_provider = FakeTickFlowIndexQuoteProvider(
+        [
+            TickFlowQuote(
+                symbol="000001.SH",
+                name="上证指数",
+                last_price=4027.26,
+                pct_change=-2.25,
+                turnover_cny=10,
+                quote_time="2026-06-30T10:00:00+08:00",
+            ),
+            TickFlowQuote(
+                symbol="399001.SZ",
+                name="深证成指",
+                last_price=15782.22,
+                pct_change=-3.43,
+                turnover_cny=20,
+                quote_time="2026-06-30T10:00:00+08:00",
+            ),
+            TickFlowQuote(
+                symbol="399006.SZ",
+                name="创业板指",
+                last_price=3188.66,
+                pct_change=1.25,
+                turnover_cny=999,
+                quote_time="2026-06-30T10:00:00+08:00",
+            ),
+            TickFlowQuote(
+                symbol="000688.SH",
+                name="科创50",
+                last_price=1020.48,
+                pct_change=0.86,
+                turnover_cny=888,
+                quote_time="2026-06-30T10:00:00+08:00",
+            ),
+        ]
+    )
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FakeMarketOverviewHttpClient(),
+        realtime_quote_provider=tickflow_provider,
+        ifind_index_provider=FakeIfindIndexProvider(error=ValueError("ifind down")),
+    )
+
+    overview = provider.get_overview()
+
+    assert [index.symbol for index in overview.indices] == [
+        "000001.SH",
+        "399001.SZ",
+        "399006.SZ",
+        "000688.SH",
+    ]
+    assert any(status.source == "TickFlow 指数展示" for status in overview.source_status)
+
+
+def test_market_overview_remaps_eastmoney_index_codes_by_display_position() -> None:
+    # 东财把指数代码按股票规则映射（000001 → 000001.SZ），应按代码反查展示位归位。
+    class FakeEastmoneyIndexQuoteProvider:
+        source_name = "东方财富实时行情"
+
+        def get_quotes(self, symbols: list[str]) -> list[TickFlowQuote]:
+            del symbols
+            return [
+                TickFlowQuote(
+                    symbol="000001.SZ",
+                    name="上证指数",
+                    last_price=4027.26,
+                    pct_change=-2.25,
+                    turnover_cny=10,
+                    quote_time="2026-06-30T10:00:00+08:00",
+                ),
+                TickFlowQuote(
+                    symbol="399001.SZ",
+                    name="深证成指",
+                    last_price=15782.22,
+                    pct_change=-3.43,
+                    turnover_cny=20,
+                    quote_time="2026-06-30T10:00:00+08:00",
+                ),
+                TickFlowQuote(
+                    symbol="399006.SZ",
+                    name="创业板指",
+                    last_price=3188.66,
+                    pct_change=1.25,
+                    turnover_cny=999,
+                    quote_time="2026-06-30T10:00:00+08:00",
+                ),
+                TickFlowQuote(
+                    symbol="000688.SH",
+                    name="科创50",
+                    last_price=1020.48,
+                    pct_change=0.86,
+                    turnover_cny=888,
+                    quote_time="2026-06-30T10:00:00+08:00",
+                ),
+            ]
+
+    provider = EastmoneyMarketOverviewProvider(
+        http_client=FakeMarketOverviewHttpClient(),
+        realtime_quote_provider=FakeEastmoneyIndexQuoteProvider(),
+    )
+
+    indices = provider._fetch_tickflow_display_indices()
+
+    assert [index.symbol for index in indices] == [
+        "000001.SH",
+        "399001.SZ",
+        "399006.SZ",
+        "000688.SH",
+    ]
+    assert all(index.source == "东方财富实时行情 实时指数" for index in indices)
     quote_provider = FakeTickFlowIndexQuoteProvider(
         quotes=[
             TickFlowQuote(symbol="000001.SH", name="上证指数", last_price=4027.26, pct_change=-2.25, turnover_cny=1_600_000_000_000),

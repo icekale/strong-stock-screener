@@ -6,9 +6,7 @@ defineOptions({
 
 <template>
   <DarkModeContainer class="h-full flex-center">
-    <a href="https://github.com/honghuangdc/soybean-admin/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">
-      Copyright MIT © 2021 Soybean
-    </a>
+    <span class="text-xs text-gray-400">StockMaster · A 股强势股工作台</span>
   </DarkModeContainer>
 </template>
 

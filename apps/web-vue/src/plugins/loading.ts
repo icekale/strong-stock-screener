@@ -53,25 +53,34 @@ function getLogoSvg() {
         xmlns="http://www.w3.org/2000/svg"
       >
         <defs>
-          <linearGradient id="sm-logo-bg" x1="0" y1="0" x2="1" y2="1">
+          <linearGradient id="sm-loading-bg" x1="0" y1="0" x2="1" y2="1">
             <stop offset="0" stop-color="#3a6ea5" />
             <stop offset="1" stop-color="#245b8a" />
           </linearGradient>
         </defs>
-        <rect x="10" y="10" width="180" height="180" rx="42" fill="url(#sm-logo-bg)" />
+        <rect x="10" y="10" width="180" height="180" rx="44" fill="url(#sm-loading-bg)" />
         <path
-          d="M 52 150 L 78 120 L 94 128 L 126 76 L 118 68 L 140 52 L 150 76 L 140 74 L 124 92"
+          d="M 54 152 L 86 122 L 100 130 L 130 82"
           fill="none"
           stroke="#ffffff"
-          stroke-width="9"
+          stroke-width="10"
           stroke-linecap="round"
           stroke-linejoin="round"
           opacity="0.92"
         />
-        <line x1="80" y1="150" x2="80" y2="112" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.85" />
-        <line x1="112" y1="122" x2="112" y2="82" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.85" />
-        <rect x="68" y="120" width="24" height="30" rx="5" fill="#43cf7c" />
-        <rect x="100" y="88" width="24" height="34" rx="5" fill="#ff4d4f" />
+        <path
+          d="M 130 82 L 122 72 L 146 56 L 160 82 L 146 76"
+          fill="none"
+          stroke="#ffffff"
+          stroke-width="10"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          opacity="0.92"
+        />
+        <line x1="86" y1="156" x2="86" y2="118" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.85" />
+        <line x1="118" y1="126" x2="118" y2="88" stroke="#ffffff" stroke-width="5" stroke-linecap="round" opacity="0.85" />
+        <rect x="74" y="124" width="24" height="30" rx="5" fill="#43cf7c" />
+        <rect x="106" y="92" width="24" height="34" rx="5" fill="#ff4d4f" />
       </svg>
   `;
 

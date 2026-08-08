@@ -9,7 +9,7 @@ class Settings(BaseSettings):
     app_env: str = "development"
     data_dir: Path = Path("./data")
     candidate_provider: str = "recent_limit_up"
-    kline_provider: str = "tickflow"
+    kline_provider: str = "eastmoney"
     quote_provider: str = "tickflow"
     tickflow_api_key: str = Field(
         default="",

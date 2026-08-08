@@ -536,11 +536,14 @@ def test_default_chanlun_daily_provider_is_raw_without_changing_general_kline_pr
     ):
         monkeypatch.delattr(app.state, attribute, raising=False)
 
+    from app.providers.eastmoney_kline import EastmoneyKlineProvider
+
     general_provider = _kline_provider()
     chanlun_provider = _chanlun_analysis_service().daily_provider
 
-    assert isinstance(general_provider, TickFlowDailyKlineProvider)
-    assert isinstance(chanlun_provider, TickFlowDailyKlineProvider)
+    # 默认 kline_provider=eastmoney（免费）：选股日K前复权，chanlun 日K不复权
+    assert isinstance(general_provider, EastmoneyKlineProvider)
+    assert isinstance(chanlun_provider, EastmoneyKlineProvider)
     assert general_provider.adjust == "forward"
     assert chanlun_provider.adjust == "none"
     assert _daily_adjustment_mode(chanlun_provider) == "raw_unadjusted"

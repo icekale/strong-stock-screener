@@ -3,6 +3,7 @@ from pathlib import Path
 
 from app.models import KlineBar, StrongStockDataUnavailable
 from app.providers.baidu_kline import parse_baidu_kline_payload
+from app.providers.eastmoney_kline import EastmoneyKlineProvider, _parse_kline_payload, _to_secid
 from app.providers.concept_blocks import _concept_tags_from_payload
 from app.providers.kline_fallback import FallbackKlineProvider
 from app.providers.ifind import IfindMcpProvider
@@ -2475,3 +2476,76 @@ def test_tdx_mcp_provider_status_reports_missing_key() -> None:
     assert status.source == "通达信MCP"
     assert status.status == "missing_key"
     assert "TDX_API_KEY" in status.detail
+
+
+# ---------------------------------------------------------------------------
+# EastmoneyKlineProvider（免费日K，替代收费 TickFlow）
+# ---------------------------------------------------------------------------
+
+
+def test_eastmoney_kline_provider_maps_payload_and_caps_count() -> None:
+    payload = {
+        "rc": 0,
+        "data": {
+            "klines": [
+                "2026-06-10,10.0,11.0,11.5,9.8,1000,11000.00,1.00,10.0,0.01,0.02",
+                "2026-06-11,11.0,12.0,12.5,10.8,1500,18000.00,1.20,9.09,0.01,0.02",
+                "2026-06-12,12.0,13.0,13.5,11.8,2000,26000.00,1.40,8.33,0.01,0.02",
+            ]
+        },
+    }
+    provider = EastmoneyKlineProvider(http_client=FakeHttpClient(payload))
+
+    bars = provider.get_klines("600000.SH", count=2)
+
+    assert len(bars) == 2
+    # 东财 volume 单位为手 → ×100 对齐 tickflow 的股单位
+    assert bars[0].date == "2026-06-11"
+    assert bars[0].volume == 1500 * 100
+    assert bars[0].amount == 18000.00
+    assert bars[-1].close == 13.0
+    # 请求应带前复权参数
+    params = client_last_params(provider)
+    assert params["fqt"] == "1"
+
+
+def test_eastmoney_kline_provider_unadjusted_for_chanlun() -> None:
+    payload = {"rc": 0, "data": {"klines": ["2026-07-01,8.0,8.2,8.3,7.9,500,40000.00,1.0,2.5,0.0,0.1"]}}
+    provider = EastmoneyKlineProvider(adjust="none", http_client=FakeHttpClient(payload))
+
+    bars = provider.get_klines("600000.SH", count=220)
+
+    assert bars[0].date == "2026-07-01"
+    assert provider.http_client.last_request["params"]["fqt"] == "0"
+
+
+def test_eastmoney_kline_provider_raises_on_empty() -> None:
+    from app.models import StrongStockDataUnavailable
+
+    provider = EastmoneyKlineProvider(http_client=FakeHttpClient({"rc": 0, "data": None}))
+    try:
+        provider.get_klines("600000.SH", count=220)
+    except StrongStockDataUnavailable as exc:
+        assert "东方财富日K为空" in str(exc)
+    else:
+        raise AssertionError("expected empty payload to fail")
+
+
+def test_eastmoney_to_secid_mapping() -> None:
+    assert _to_secid("600000.SH") == "1.600000"
+    assert _to_secid("000001.SZ") == "0.000001"
+    assert _to_secid("920001.BJ") == "0.920001"
+    assert _to_secid("invalid") is None
+
+
+def test_eastmoney_parse_kline_payload_skips_bad_rows() -> None:
+    payload = {"data": {"klines": ["bad-row", "2026-06-10,10.0,11.0,11.5,9.8,1000,11000.00,1.0,10.0,0.0,0.0"]}}
+
+    bars = _parse_kline_payload(payload)
+
+    assert len(bars) == 1
+    assert bars[0].date == "2026-06-10"
+
+
+def client_last_params(provider: EastmoneyKlineProvider) -> dict[str, object]:
+    return provider.http_client.last_request["params"]

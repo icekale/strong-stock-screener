@@ -17,8 +17,8 @@ from app.services.notification_channels import (
 from app.services.sentiment_monitor import SentimentMonitorConfig
 
 CandidateProviderName = Literal["recent_limit_up", "thsdk"]
-KlineProviderName = Literal["tickflow"]
-QuoteProviderName = Literal["tickflow"]
+KlineProviderName = Literal["tickflow", "eastmoney"]
+QuoteProviderName = Literal["tickflow", "eastmoney"]
 IfindServiceId = Literal[
     "hexin-ifind-ds-stock-mcp",
     "hexin-ifind-ds-news-mcp",

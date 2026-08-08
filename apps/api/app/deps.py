@@ -43,6 +43,7 @@ from app.providers.tdx_mcp import TdxMcpProvider
 from app.providers.tdx_minute_history import TdxMinuteHistoryProvider
 from app.providers.tencent_quote import TencentQuoteProvider
 from app.providers.thsdk_candidates import ThsdkCandidateProvider
+from app.providers.eastmoney_kline import EastmoneyKlineProvider
 from app.providers.tickflow import TickFlowDailyKlineProvider, TickFlowQuoteProvider
 from app.services.auction_model import (
     AuctionModelResultStore,
@@ -908,6 +909,15 @@ def _chanlun_daily_provider() -> object:
     if injected is not None:
         return injected
     settings = _effective_settings()
+    if getattr(settings, "kline_provider", "eastmoney") == "eastmoney":
+        return _cached_default_provider(
+            attribute="default_chanlun_daily_provider",
+            key=("eastmoney", settings.provider_timeout_seconds),
+            factory=lambda: EastmoneyKlineProvider(
+                timeout_seconds=settings.provider_timeout_seconds,
+                adjust="none",
+            ),
+        )
     return _cached_default_provider(
         attribute="default_chanlun_daily_provider",
         key=(settings.tickflow_api_key, settings.tickflow_base_url, settings.provider_timeout_seconds),
@@ -993,6 +1003,16 @@ def _kline_provider() -> object:
     if injected is not None:
         return injected
     settings = _effective_settings()
+    provider_name = getattr(settings, "kline_provider", "eastmoney")
+    if provider_name == "eastmoney":
+        return _cached_default_provider(
+            attribute="default_kline_provider",
+            key=("eastmoney", settings.provider_timeout_seconds),
+            factory=lambda: EastmoneyKlineProvider(
+                timeout_seconds=settings.provider_timeout_seconds,
+                adjust="forward",
+            ),
+        )
     return _cached_default_provider(
         attribute="default_kline_provider",
         key=(settings.tickflow_api_key, settings.tickflow_base_url, settings.provider_timeout_seconds),

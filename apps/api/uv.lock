@@ -2787,6 +2787,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "akshare" },
+    { name = "curl-cffi" },
     { name = "czsc" },
     { name = "fastapi" },
     { name = "httpx" },
@@ -2820,6 +2821,7 @@ research = [
 [package.metadata]
 requires-dist = [
     { name = "akshare", specifier = ">=1.16.0" },
+    { name = "curl-cffi", specifier = ">=0.15.0" },
     { name = "czsc", specifier = "==0.10.12" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "httpx", specifier = ">=0.25.0,<0.26.0" },

@@ -158,7 +158,7 @@ def build_sector_workbench_response(
     else:
         themes = _themes_from_industries(ranking_items, mode=mode)[:bounded_limit]
         status = StrongStockSourceStatus(
-            source="TickFlow行业聚合",
+            source="行业聚合",
             status="success",
             detail=f"概念映射不可用，使用行业兜底聚合 {len(themes)} 个行业",
         )
@@ -351,7 +351,7 @@ def _themes_from_industries(
                 change_pct=round(avg_change, 2) if avg_change is not None else None,
                 leader=leader.name or leader.symbol,
                 member_count=len(members),
-                source="TickFlow全A实时行情行业聚合",
+                source="全A实时行情行业聚合",
                 flow_status="estimated",
             )
         )

@@ -203,7 +203,7 @@ class EtfThreeFactorMonitor:
         try:
             quotes = self.quote_provider.get_quotes(symbols)
         except Exception as exc:
-            return {}, f"TickFlow行情请求失败: {exc.__class__.__name__}"
+            return {}, f"实时行情请求失败: {exc.__class__.__name__}"
         quote_by_symbol = {
             str(getattr(quote, "symbol")): quote
             for quote in quotes
@@ -212,9 +212,9 @@ class EtfThreeFactorMonitor:
         for symbol in symbols:
             quote = quote_by_symbol.get(symbol)
             if quote is None:
-                return {}, f"TickFlow行情缺失 {symbol}"
+                return {}, f"实时行情缺失 {symbol}"
             if _quote_trade_date(getattr(quote, "quote_time", None)) != trade_date:
-                return {}, f"TickFlow行情过期 {symbol}"
+                return {}, f"实时行情过期 {symbol}"
         return quote_by_symbol, None
 
     def _post_close_scan(
@@ -306,7 +306,7 @@ class EtfThreeFactorMonitor:
             model_version=MONITOR_MODEL_VERSION,
             source_status=[
                 StrongStockSourceStatus(
-                    source="TickFlow行情",
+                    source="实时行情",
                     status="success",
                     detail=quote_detail,
                 ),
@@ -479,7 +479,7 @@ class EtfThreeFactorMonitor:
             score=volume_factor_score(volume_ratio),
             value=volume_ratio,
             status="available" if volume_ratio is not None else "missing",
-            source="TickFlow成交量",
+            source="实时成交量",
             data_date=trade_date if average_volume is not None else None,
             updated_at=quote_time,
             detail=(
@@ -497,7 +497,7 @@ class EtfThreeFactorMonitor:
             score=direction_score,
             value=etf_change,
             status="available" if direction_score is not None else "missing",
-            source="TickFlow行情",
+            source="实时行情",
             data_date=trade_date,
             updated_at=quote_time,
             detail=(

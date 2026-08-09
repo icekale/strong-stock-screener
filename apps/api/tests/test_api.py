@@ -2291,8 +2291,8 @@ def test_settings_health_check_reports_provider_probes(tmp_path: Path) -> None:
     payload = response.json()
     probe_names = [item["name"] for item in payload["probes"]]
     assert "fake K线" in probe_names
-    assert "TickFlow 实时行情" in probe_names
-    assert "TickFlow 当日分钟线" in probe_names
+    assert "实时行情" in probe_names
+    assert "当日分钟线" in probe_names
     assert all(isinstance(item["latency_ms"], int) for item in payload["probes"])
 
 
@@ -3702,14 +3702,14 @@ def test_sector_radar_falls_back_to_tickflow_industry_aggregation_when_primary_s
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["flow_source"] == "TickFlow全A实时行情行业聚合"
+    assert payload["flow_source"] == "全A实时行情行业聚合"
     assert payload["inflow"][0]["name"] == "电池"
     assert payload["inflow"][0]["net_flow_cny"] > 0
     assert {item["name"] for item in payload["inflow"]} >= {"机器人", "电池"}
     assert payload["outflow"] == []
     assert payload["source_status"][0]["source"] == "empty fake板块资金流"
     assert payload["source_status"][1]["source"] == "通达信MCP板块兜底"
-    assert payload["source_status"][2]["source"] == "TickFlow行业聚合"
+    assert payload["source_status"][2]["source"] == "行业聚合"
 
 
 def test_sector_workbench_endpoint_returns_theme_mode_and_source_status(tmp_path: Path) -> None:
@@ -3940,7 +3940,7 @@ def test_sector_workbench_endpoint_explicit_industry_scope_ignores_theme_snapsho
     payload = response.json()
     assert payload["scope"] == "industry"
     assert payload["themes"][0]["scope"] == "industry"
-    assert payload["source_status"][0]["source"] == "TickFlow行业聚合"
+    assert payload["source_status"][0]["source"] == "行业聚合"
     assert all(item["source"] != "题材快照" for item in payload["source_status"])
 
 
@@ -4055,7 +4055,7 @@ def test_sector_workbench_endpoint_schedules_tickflow_intraday_history_when_miss
     assert response.status_code == 200
     payload = response.json()
     assert any(
-        item["source"] == "TickFlow 当日分钟线" and item["status"] == "stale"
+        item["source"] == "当日分钟线" and item["status"] == "stale"
         for item in payload["source_status"]
     )
 
@@ -4074,7 +4074,7 @@ def test_sector_workbench_endpoint_does_not_block_on_intraday_refresh_when_histo
     payload = response.json()
     assert quote_provider.intraday_calls == 0
     assert any(
-        item["source"] == "TickFlow 当日分钟线" and item["status"] == "stale"
+        item["source"] == "当日分钟线" and item["status"] == "stale"
         for item in payload["source_status"]
     )
 
@@ -4126,7 +4126,7 @@ def test_sector_workbench_endpoint_caches_tickflow_intraday_failure(tmp_path: Pa
     assert second.status_code == 200
     assert quote_provider.intraday_calls == 1
     assert any(
-        item["source"] == "TickFlow 当日分钟线"
+        item["source"] == "当日分钟线"
         and item["status"] == "failed"
         and "rate limited" in item["detail"]
         for item in second.json()["source_status"]
@@ -4745,8 +4745,8 @@ def test_intraday_snapshot_uses_latest_screen_run_symbols_without_empty_status(
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["source_status"][0]["source"] == "TickFlow 实时行情"
-    assert payload["source_status"][1]["source"] == "TickFlow 当日分钟线"
+    assert payload["source_status"][0]["source"] == "实时行情"
+    assert payload["source_status"][1]["source"] == "当日分钟线"
     assert payload["items"][0]["symbol"] == "603890.SH"
     assert payload["items"][0]["industry"] == "消费电子"
     assert payload["items"][0]["action"] == "reduce"

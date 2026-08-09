@@ -462,7 +462,7 @@ def _run_auction_snapshot_refresh_job(
     if should_cancel():
         raise RuntimeError("竞价刷新已取消")
     progress(0, 3, "准备刷新竞价快照")
-    progress(1, 3, "读取 TickFlow 全A实时行情")
+    progress(1, 3, "读取全A实时行情")
     result = _refresh_auction_snapshot(limit)
     if should_cancel():
         raise RuntimeError("竞价刷新已取消")
@@ -507,9 +507,9 @@ def _cached_sector_radar(limit: int) -> SectorRadarResponse:
             except Exception as tickflow_exc:
                 result.source_status.append(
                     StrongStockSourceStatus(
-                        source="TickFlow行业聚合",
+                        source="实时行情行业聚合",
                         status="failed",
-                        detail=f"TickFlow fallback failed: {tickflow_exc.__class__.__name__}",
+                        detail=f"实时行情行业聚合失败: {tickflow_exc.__class__.__name__}",
                     )
                 )
                 return result
@@ -542,7 +542,7 @@ def _cached_sector_intraday_series(
                 else exc.__class__.__name__
             )
             return [], StrongStockSourceStatus(
-                source="TickFlow 当日分钟线",
+                source="当日分钟线",
                 status="failed",
                 detail=f"历史分时曲线补齐失败: {reason[:180]}",
             )
@@ -630,7 +630,7 @@ def _sector_intraday_refresh_key(result: SectorWorkbenchResponse) -> str:
 
 def _tickflow_sector_radar(provider: object, limit: int) -> SectorRadarResponse:
     if not hasattr(provider, "get_market_rankings"):
-        raise StrongStockDataUnavailable("当前市场概览源不支持 TickFlow 全A实时排行榜")
+        raise StrongStockDataUnavailable("当前市场概览源不支持全A实时排行榜")
     ranking_limit = max(50, min(100, limit * 5))
     rankings = provider.get_market_rankings(limit=ranking_limit)
     items_by_symbol = {
@@ -639,7 +639,7 @@ def _tickflow_sector_radar(provider: object, limit: int) -> SectorRadarResponse:
         if item.symbol and item.industry
     }
     if not items_by_symbol:
-        raise StrongStockDataUnavailable("TickFlow 全A排行缺少行业分类，无法聚合板块")
+        raise StrongStockDataUnavailable("全A排行缺少行业分类，无法聚合板块")
 
     grouped: dict[str, list[object]] = defaultdict(list)
     for item in items_by_symbol.values():
@@ -672,7 +672,7 @@ def _tickflow_sector_radar(provider: object, limit: int) -> SectorRadarResponse:
         sector_items.append(
             SectorRadarItem(
                 name=industry,
-                source="TickFlow全A实时行情行业聚合",
+                source="全A实时行情行业聚合",
                 change_pct=round(avg_change, 2),
                 turnover_cny=round(turnover_cny, 2),
                 advance_count=advance_count,
@@ -693,17 +693,17 @@ def _tickflow_sector_radar(provider: object, limit: int) -> SectorRadarResponse:
         key=lambda item: (item.net_flow_cny or 0, -item.strength_score),
     )[:limit]
     if not inflow and not outflow:
-        raise StrongStockDataUnavailable("TickFlow 行业聚合没有生成有效净流向")
+        raise StrongStockDataUnavailable("行业聚合没有生成有效净流向")
 
     return SectorRadarResponse(
         trade_date=rankings.trade_date,
         capital_flow_status="estimated",
-        flow_source="TickFlow全A实时行情行业聚合",
+        flow_source="全A实时行情行业聚合",
         inflow=inflow,
         outflow=outflow,
         source_status=[
             StrongStockSourceStatus(
-                source="TickFlow行业聚合",
+                source="行业聚合",
                 status="success",
                 detail=f"按 {len(items_by_symbol)} 只全A排行股票聚合 {len(sector_items)} 个行业",
             ),

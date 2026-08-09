@@ -44,7 +44,7 @@ def build_sector_intraday_series(
     symbols = _dedupe_symbols([stock.symbol for stock in stocks])[:80]
     if not selected or not symbols:
         return [], StrongStockSourceStatus(
-            source="TickFlow 当日分钟线",
+            source="当日分钟线",
             status="unavailable",
             detail="缺少选中题材或成分股，无法补齐历史分时曲线",
         )
@@ -52,7 +52,7 @@ def build_sector_intraday_series(
     bars_by_symbol = quote_provider.get_intraday_bars(symbols, period="1m", count=count)
     if not any(bars_by_symbol.values()):
         return [], StrongStockSourceStatus(
-            source="TickFlow 当日分钟线",
+            source="当日分钟线",
             status="unavailable",
             detail=f"period=1m, count={count}, 未返回可用分钟线",
         )
@@ -70,12 +70,12 @@ def build_sector_intraday_series(
     series = [item for item in series if item.points]
     if not series:
         return [], StrongStockSourceStatus(
-            source="TickFlow 当日分钟线",
+            source="当日分钟线",
             status="unavailable",
             detail=f"period=1m, count={count}, 成分股分钟线无法聚合为选中题材",
         )
     return series, StrongStockSourceStatus(
-        source="TickFlow 当日分钟线",
+        source="当日分钟线",
         status="success",
         detail=f"period=1m, count={count}, 聚合 {len(symbols)} 只成分股补齐 {len(series)} 条分时曲线；强度为自建短线风格热度分，资金流为成交额估算",
     )

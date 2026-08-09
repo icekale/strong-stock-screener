@@ -61,7 +61,7 @@ class ChanlunPaperOrderService:
         if order.status != "simulated_open":
             raise ValueError("只有模拟挂单可以更新成交")
         if self.quote_provider is None:
-            raise ValueError("TickFlow 实时行情未配置")
+            raise ValueError("实时行情未配置")
         quotes = self.quote_provider.get_quotes([order.symbol])
         quote = next((item for item in quotes if item.symbol == order.symbol), None)
         if (
@@ -70,7 +70,7 @@ class ChanlunPaperOrderService:
             or quote.last_price <= 0
             or not getattr(quote, "quote_time", None)
         ):
-            raise ValueError("TickFlow 未返回有效实时行情")
+            raise ValueError("未返回有效实时行情")
         return self.store.fill(
             order_id,
             latest_price=quote.last_price,

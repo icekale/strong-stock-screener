@@ -35,7 +35,7 @@ from app.models import (
 from app.providers.capital_signals import OfficialCapitalDataProvider, SinaEtfHolderProvider
 from app.providers.heatmap import HeatmapProvider
 from app.providers.ifind import IfindMcpProvider
-from app.providers.market_overview import TICKFLOW_A_SHARE_UNIVERSE
+from app.providers.market_overview import A_SHARE_UNIVERSE
 from app.providers.tdx_mcp import TdxMcpProvider
 from app.providers import registry as _registry
 from app.providers.eastmoney_minute_history import EastmoneyMinuteHistoryProvider
@@ -542,7 +542,7 @@ def _chanlun_symbol_search_service() -> ChanlunSymbolSearchService:
 
     def load_symbols() -> object:
         try:
-            rows = _quote_provider().get_quotes_by_universe(TICKFLOW_A_SHARE_UNIVERSE)
+            rows = _quote_provider().get_quotes_by_universe(A_SHARE_UNIVERSE)
         except Exception:
             return chanlun_symbols._load_default_symbols()
         return rows or chanlun_symbols._load_default_symbols()

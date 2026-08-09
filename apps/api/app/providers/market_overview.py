@@ -36,7 +36,7 @@ TICKFLOW_INDEX_SYMBOLS = ["000001.SH", "399001.SZ", "899050.BJ"]
 IFIND_AGGREGATE_INDEX_SYMBOLS = {"000001.SH", "399001.SZ", "899050.BJ"}
 IFIND_INDEX_SYMBOLS = "000001.SH,399001.SZ,899050.BJ,399006.SZ,000688.SH"
 IFIND_INDEX_INDICATORS = "最新价,涨跌幅,成交额,上涨家数,下跌家数"
-TICKFLOW_A_SHARE_UNIVERSE = "CN_Equity_A"
+A_SHARE_UNIVERSE = "CN_Equity_A"
 DISPLAY_INDEX_NAMES = {
     "000001.SH": "上证",
     "399001.SZ": "深证",
@@ -131,7 +131,7 @@ class EastmoneyMarketOverviewProvider:
                     StrongStockSourceStatus(
                         source="iFinD 实时指数",
                         status="failed",
-                        detail=f"实时指数获取失败: {exc.__class__.__name__}; fallback 到 TickFlow",
+                        detail=f"实时指数获取失败: {exc.__class__.__name__}; fallback 到实时行情源",
                     )
                 )
 
@@ -343,15 +343,15 @@ class EastmoneyMarketOverviewProvider:
                     self._apply_turnover_change(turnover)
                     source_status.append(
                         StrongStockSourceStatus(
-                            source="TickFlow 指数日K",
+                            source="指数日K",
                             status="success",
-                            detail="TickFlow 日K成交额用于昨日对比",
+                            detail="指数日K成交额用于昨日对比",
                         )
                     )
                 except Exception as fallback_exc:
                     source_status.append(
                         StrongStockSourceStatus(
-                            source="TickFlow 指数日K",
+                            source="指数日K",
                             status="disabled" if self.daily_kline_provider is None else "failed",
                             detail=f"备用昨日成交额获取失败: {fallback_exc.__class__.__name__}",
                         )
@@ -397,7 +397,7 @@ class EastmoneyMarketOverviewProvider:
             try:
                 if tickflow_breadth is not None:
                     limit_up_count = tickflow_breadth["limit_up_count"]
-                    source = "TickFlow 全A涨停估算"
+                    source = "全A涨停估算"
                     detail = f"基于 {tickflow_breadth['stock_count']} 只全A实时行情按交易所规则估算，涨停 {limit_up_count} 只"
                 else:
                     limit_up_count = self._fetch_limit_up_count_from_realtime_rows()
@@ -437,7 +437,7 @@ class EastmoneyMarketOverviewProvider:
             try:
                 if tickflow_breadth is not None:
                     limit_down_count = tickflow_breadth["limit_down_count"]
-                    source = "TickFlow 全A跌停估算"
+                    source = "全A跌停估算"
                     detail = f"基于 {tickflow_breadth['stock_count']} 只全A实时行情按交易所规则估算，跌停 {limit_down_count} 只"
                 else:
                     limit_down_count = self._fetch_limit_down_count_from_realtime_rows()
@@ -520,7 +520,7 @@ class EastmoneyMarketOverviewProvider:
             )
 
     def get_pct_change_distribution(self) -> tuple[list[MarketEmotionBucket], StrongStockSourceStatus]:
-        source_name = getattr(self.realtime_quote_provider, "source_name", "实时行情")
+        source_name = getattr(self.realtime_quote_provider, "source_name", "TickFlow")
         tickflow_error: str | None = None
         if self.realtime_quote_provider is not None and hasattr(
             self.realtime_quote_provider, "get_quotes_by_universe"
@@ -576,21 +576,22 @@ class EastmoneyMarketOverviewProvider:
         quotes: list[object] = []
         tickflow_batch_count: int | None = None
         tickflow_universe_error: Exception | None = None
+        quote_source_name = getattr(self.realtime_quote_provider, "source_name", "TickFlow")
         if hasattr(self.realtime_quote_provider, "get_quotes_by_universe"):
             try:
-                quotes = self.realtime_quote_provider.get_quotes_by_universe(TICKFLOW_A_SHARE_UNIVERSE)
+                quotes = self.realtime_quote_provider.get_quotes_by_universe(A_SHARE_UNIVERSE)
                 source_status.append(
                     StrongStockSourceStatus(
-                        source="TickFlow 全A标的池",
+                        source=f"{quote_source_name} 全A标的池",
                         status="success",
-                        detail=f"{TICKFLOW_A_SHARE_UNIVERSE} 标的池直接返回 {len(quotes)} 条实时行情",
+                        detail=f"{A_SHARE_UNIVERSE} 标的池直接返回 {len(quotes)} 条实时行情",
                     )
                 )
             except Exception as exc:
                 tickflow_universe_error = exc
                 source_status.append(
                     StrongStockSourceStatus(
-                        source="TickFlow 全A标的池",
+                        source=f"{quote_source_name} 全A标的池",
                         status="failed",
                         detail=f"标的池请求失败: {exc}; fallback 到东方财富股票池分批查询",
                     )
@@ -603,7 +604,7 @@ class EastmoneyMarketOverviewProvider:
                 StrongStockSourceStatus(
                     source="东方财富全A股票池",
                     status="success",
-                    detail=f"股票池返回 {len(symbols)} 个标的，用于 TickFlow 批量实时行情查询",
+                    detail=f"股票池返回 {len(symbols)} 个标的，用于批量实时行情查询",
                 )
             )
             if not symbols:
@@ -626,9 +627,8 @@ class EastmoneyMarketOverviewProvider:
             if tickflow_universe_error is not None:
                 raise ValueError(f"empty tickflow full-a quotes after universe fallback: {tickflow_universe_error}")
             raise ValueError("empty tickflow full-a quotes")
-        source_name = getattr(self.realtime_quote_provider, "source_name", "TickFlow")
         pct_values = [item.pct_change for item in items]
-        buckets = _pct_change_buckets(pct_values, source=f"{source_name} 全A实时行情")
+        buckets = _pct_change_buckets(pct_values, source=f"{quote_source_name} 全A实时行情")
         trade_dates = [
             date
             for date in (_date_from_quote_time(item.quote_time) for item in items)
@@ -636,11 +636,11 @@ class EastmoneyMarketOverviewProvider:
         ]
         source_status.append(
             StrongStockSourceStatus(
-                source=f"{source_name} 全A实时行情",
+                source=f"{quote_source_name} 全A实时行情",
                 status="success",
                 detail=_tickflow_rankings_status_detail(
                     item_count=len(items),
-                    used_universe=any(status.source == "TickFlow 全A标的池" and status.status == "success" for status in source_status),
+                    used_universe=any(status.source == f"{quote_source_name} 全A标的池" and status.status == "success" for status in source_status),
                     batch_count=tickflow_batch_count,
                 ),
             )
@@ -1064,8 +1064,8 @@ class EastmoneyMarketOverviewProvider:
 
     def _fetch_tickflow_a_share_breadth(self) -> dict[str, int]:
         if not hasattr(self.realtime_quote_provider, "get_quotes_by_universe"):
-            raise ValueError("TickFlow provider does not support all-A universe quotes")
-        quotes = self.realtime_quote_provider.get_quotes_by_universe(TICKFLOW_A_SHARE_UNIVERSE)
+            raise ValueError("当前实时行情源不支持全A universe quotes")
+        quotes = self.realtime_quote_provider.get_quotes_by_universe(A_SHARE_UNIVERSE)
         values = [
             (
                 _number(getattr(quote, "pct_change", None)),
@@ -1074,7 +1074,7 @@ class EastmoneyMarketOverviewProvider:
             )
             for quote in quotes
         ]
-        return _summarize_a_share_breadth(values, source="TickFlow")
+        return _summarize_a_share_breadth(values, source="全A实时行情")
 
     def _fetch_eastmoney_a_share_breadth(self) -> dict[str, int]:
         rows = self._fetch_a_share_realtime_rows()

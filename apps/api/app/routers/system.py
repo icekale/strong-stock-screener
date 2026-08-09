@@ -345,11 +345,11 @@ def settings_health(symbol: str = "605289.SH") -> dict[str, object]:
                 lambda: _kline_provider().get_klines(symbol, count=5),
             ).model_dump(mode="json"),
             _probe(
-                "TickFlow 实时行情",
+                "实时行情",
                 lambda: quote_provider.get_quotes([symbol]),
             ).model_dump(mode="json"),
             _probe(
-                "TickFlow 当日分钟线",
+                "当日分钟线",
                 lambda: quote_provider.get_intraday_bars([symbol], period="1m", count=5),
             ).model_dump(mode="json"),
             _probe(

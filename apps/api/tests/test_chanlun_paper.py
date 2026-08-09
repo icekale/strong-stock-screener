@@ -459,7 +459,7 @@ def test_paper_service_does_not_fill_without_a_valid_realtime_quote(tmp_path: Pa
         initial_cash=10_000,
     )
 
-    with pytest.raises(ValueError, match="TickFlow 未返回有效实时行情"):
+    with pytest.raises(ValueError, match="未返回有效实时行情"):
         service.fill(draft.id)
 
     assert store.account(initial_cash=10_000).orders[0].status == "simulated_open"

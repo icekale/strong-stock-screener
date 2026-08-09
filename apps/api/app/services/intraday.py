@@ -54,11 +54,11 @@ class IntradayMonitor:
 
         quotes = self.quote_provider.get_quotes(requested_symbols)
         if not quotes:
-            raise StrongStockDataUnavailable("TickFlow 实时行情没有返回数据")
+            raise StrongStockDataUnavailable("实时行情没有返回数据")
 
         source_status = [
             StrongStockSourceStatus(
-                source="TickFlow 实时行情",
+                source="实时行情",
                 status="success",
                 detail=f"返回 {len(quotes)}/{len(requested_symbols)} 条报价",
             )
@@ -73,7 +73,7 @@ class IntradayMonitor:
             intraday_bars = {}
             source_status.append(
                 StrongStockSourceStatus(
-                    source="TickFlow 当日分钟线",
+                    source="当日分钟线",
                     status="failed",
                     detail=str(exc),
                 )
@@ -81,7 +81,7 @@ class IntradayMonitor:
         else:
             source_status.append(
                 StrongStockSourceStatus(
-                    source="TickFlow 当日分钟线",
+                    source="当日分钟线",
                     status="success",
                     detail=f"period={period}, count={count}",
                 )
@@ -149,7 +149,7 @@ def _intraday_item(
         turnover_cny=quote.turnover_cny,
         gsgf_intraday_confirmation=gsgf_confirmation,
         signals=signals,
-        source_trace=["TickFlow 实时行情", f"TickFlow {period} 当日分钟线"],
+        source_trace=["实时行情", f"{period} 当日分钟线"],
     )
 
 

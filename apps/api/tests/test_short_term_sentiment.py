@@ -900,7 +900,7 @@ def test_short_term_intraday_sentiment_adds_tickflow_actions_and_pool_tags() -> 
     assert result.items[0].action == "reduce"
     assert result.items[1].symbol == "603002.SH"
     assert "炸板池" in result.items[1].pool_tags
-    assert result.source_status[0].source == "TickFlow 实时行情"
+    assert result.source_status[0].source == "实时行情"
 
 
 def test_short_term_intraday_sentiment_api_uses_quote_provider() -> None:
@@ -967,9 +967,9 @@ def test_short_term_intraday_sentiment_degrades_when_minute_bars_rate_limited() 
     )
 
     assert result.metrics.watched_count == 3
-    assert result.source_status[0].source == "TickFlow 实时行情"
+    assert result.source_status[0].source == "实时行情"
     assert result.source_status[0].status == "success"
-    assert result.source_status[1].source == "TickFlow 当日分钟线"
+    assert result.source_status[1].source == "当日分钟线"
     assert result.source_status[1].status == "failed"
     assert "HTTP 429" in result.source_status[1].detail
     assert all(item.intraday_ma is None for item in result.items)

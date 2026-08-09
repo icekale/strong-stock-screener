@@ -291,7 +291,7 @@ def get_sector_workbench(
         result.series = intraday_history
         result.source_status.append(
             StrongStockSourceStatus(
-                source="TickFlow 当日分钟线",
+                source="当日分钟线",
                 status="success",
                 detail=f"读取本地持久化分钟线曲线 {len(intraday_history)} 条",
             )
@@ -312,7 +312,7 @@ def get_sector_workbench(
             _schedule_sector_intraday_refresh(result)
             result.source_status.append(
                 StrongStockSourceStatus(
-                    source="TickFlow 当日分钟线",
+                    source="当日分钟线",
                     status="stale",
                     detail="本地分钟线曲线未就绪，已触发后台补齐；本次先返回采样曲线",
                 )
@@ -322,7 +322,7 @@ def get_sector_workbench(
             result.series = []
         result.source_status.append(
             StrongStockSourceStatus(
-                source="TickFlow 当日分钟线",
+                source="当日分钟线",
                 status="disabled",
                 detail="题材快照未就绪，跳过分钟线补齐以保证首屏速度",
             )
@@ -333,7 +333,7 @@ def get_sector_workbench(
             result.series = []
         result.source_status.append(
             StrongStockSourceStatus(
-                source="TickFlow 当日分钟线",
+                source="当日分钟线",
                 status="stale",
                 detail=(
                     "本地分时曲线未就绪，已触发后台补齐；本次先返回当前快照"
@@ -405,7 +405,7 @@ def get_sector_replica_radar(
         )
         workbench.source_status.append(
             StrongStockSourceStatus(
-                source="TickFlow 当日分钟线",
+                source="当日分钟线",
                 status="stale",
                 detail=f"replica 缺少 {len(missing_series)} 条选中板块曲线，已触发后台补齐",
             )

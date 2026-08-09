@@ -731,7 +731,7 @@ def test_market_overview_falls_back_to_tickflow_index_history(tmp_path: Path) ->
     assert overview.turnover.previous_total_cny == 1_400_000_000_000
     assert overview.turnover.change_pct == 151.43
     assert any(
-        status.source == "TickFlow 指数日K" and status.status == "success"
+        status.source == "指数日K" and status.status == "success"
         for status in overview.source_status
     )
 

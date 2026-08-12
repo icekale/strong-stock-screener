@@ -3041,3 +3041,43 @@ def test_tencent_daily_kline_symbol_mapping() -> None:
     assert _tencent_kline_symbol("600000") == "sh600000"
     assert _tencent_kline_symbol("000001") == "sz000001"
     assert _tencent_kline_symbol("invalid") == ""
+
+
+def test_tencent_daily_kline_index_uses_unadjusted_kline_endpoint() -> None:
+    from app.providers.tencent_kline import TencentDailyKlineProvider, _is_tencent_index
+
+    # 指数（中证全指 000985）无复权，fqkline/get 返回空，必须走 kline/kline day
+    assert _is_tencent_index("sh000985")
+    assert _is_tencent_index("sz399001")
+    assert _is_tencent_index("bj899050")
+    assert not _is_tencent_index("sh600000")
+    assert not _is_tencent_index("sz000001")
+
+    payload = {
+        "data": {
+            "sh000985": {
+                "day": [
+                    ["2026-08-11", "5896.360", "5921.540", "5940.000", "5866.000", "1234567.000"],
+                    ["2026-08-12", "5921.540", "5950.000", "5960.000", "5900.000", "1300000.000"],
+                ]
+            }
+        }
+    }
+    provider = TencentDailyKlineProvider(http_client=FakeHttpClient(payload))
+
+    bars = provider.get_klines("000985.SH", count=220)
+
+    assert len(bars) == 2
+    assert bars[0].date == "2026-08-11"
+    assert bars[0].close == 5921.54
+    # 指数走 kline/kline（day）而非 fqkline（qfqday）
+    assert "appstock/app/kline/kline" in provider.http_client.last_request["url"]
+    assert provider.http_client.last_request["params"]["param"] == "sh000985,day,,,220"
+
+
+def test_tencent_daily_kline_index_maps_symbol_prefix() -> None:
+    from app.providers.tencent_kline import _tencent_kline_symbol
+
+    assert _tencent_kline_symbol("000985.SH") == "sh000985"
+    assert _tencent_kline_symbol("399001.SZ") == "sz399001"
+    assert _tencent_kline_symbol("899050.BJ") == "bj899050"

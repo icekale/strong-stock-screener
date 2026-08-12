@@ -41,7 +41,9 @@ class TencentDailyKlineProvider:
         if not code:
             return []
         try:
-            if self.adjust == "forward":
+            # 指数（上证 000xxx / 深证 399xxx / 北证 899xxx）无复权概念，
+            # fqkline/get 对指数返回空，必须走 kline/kline 的 day 接口。
+            if self.adjust == "forward" and not _is_tencent_index(code):
                 response = self.http_client.get(
                     "https://web.ifzq.gtimg.cn/appstock/app/fqkline/get",
                     params={"param": f"{code},day,,,{count},qfq"},
@@ -118,3 +120,11 @@ def _tencent_kline_symbol(symbol: str) -> str:
     if digits.startswith(("4", "8", "92")):
         return f"bj{digits}"
     return f"sz{digits}"
+
+
+def _is_tencent_index(code: str) -> bool:
+    """腾讯符号是否为指数：上证 000xxx、深证 399xxx、北证 899xxx。
+
+    指数无复权概念，fqkline/get 对指数返回空，需走 kline/kline 的 day 接口。
+    """
+    return code.startswith(("sh000", "sz399", "bj899"))

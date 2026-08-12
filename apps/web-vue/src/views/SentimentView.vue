@@ -44,13 +44,13 @@ const sentimentMetrics = computed<WorkbenchMetric[]>(() => {
   ];
 });
 
-async function load() {
+async function load(forceRefresh = false) {
   const generation = ++requestGeneration;
   loading.value = true;
   error.value = null;
   const results = await Promise.allSettled([
-    getSentimentSummary(tradeDate.value),
-    getSentimentDecision(tradeDate.value),
+    getSentimentSummary(tradeDate.value, 80, forceRefresh),
+    getSentimentDecision(tradeDate.value, 80, forceRefresh),
     getShortTermIntradaySentiment(tradeDate.value),
     getMarketEmotionSnapshot(tradeDate.value)
   ]);
@@ -70,7 +70,8 @@ function handleDateChange(value: string) {
 
 function handleRefresh() {
   percentileRefreshToken.value += 1;
-  void load();
+  // 强制 refresh=true：无快照时后端重新生成（否则只读缓存/返回空数据）
+  void load(true);
 }
 
 function formatPct(value: number | null | undefined) {

@@ -145,5 +145,8 @@ describe('SentimentView percentile integration', () => {
     await wrapper.get('[data-testid="sentiment-refresh"]').trigger('click');
     await flushPromises();
     expect(api.getMarketSentimentPercentile).toHaveBeenLastCalledWith(expect.any(String), true);
+    // 刷新按钮必须强制后端重新生成（refresh=true），否则无快照时只返回空数据
+    expect(api.getSentimentSummary).toHaveBeenLastCalledWith(expect.any(String), 80, true);
+    expect(api.getSentimentDecision).toHaveBeenLastCalledWith(expect.any(String), 80, true);
   });
 });

@@ -116,7 +116,8 @@ def test_post_cutoff_excludes_invalid_current_date_bar(tmp_path: Path) -> None:
         for bar in make_test_bars(1020)
     ]
     bars[-2] = bars[-2].model_copy(update={"date": "20260721"})
-    bars[-1] = bars[-1].model_copy(update={"date": "20260722", "amount": None})
+    # 当日 bar 数据非法（volume 缺失）应被排除，即使过了 15:10 截止时间
+    bars[-1] = bars[-1].model_copy(update={"date": "20260722", "volume": None})
 
     result = service_for(tmp_path, FakeProvider(bars)).get(
         refresh=True,

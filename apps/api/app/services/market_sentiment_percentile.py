@@ -57,7 +57,7 @@ def directional_amplitude(
 
 def calculate_sentiment_percentile(bars: list[KlineBar]) -> list[SentimentPercentilePoint]:
     normalized = _normalize_bars(bars)
-    amounts = [float(bar.amount) for bar in normalized]
+    amounts = [_volume_series(bar) for bar in normalized]
     returns: list[float | None] = [None] * len(normalized)
     amplitudes: list[float | None] = [None] * len(normalized)
     volume_trends: list[float | None] = [None] * len(normalized)
@@ -165,13 +165,28 @@ def _normalize_bars(bars: list[KlineBar]) -> list[KlineBar]:
 
 
 def validate_sentiment_bar(bar: KlineBar) -> None:
-    values = (bar.open, bar.high, bar.low, bar.close, bar.amount)
+    # amount 可缺失（腾讯指数兜底无成交额），此时 volume 因子退化为用成交量；
+    # amount 存在则必须为正，OHLC 与 volume 必须有效。
     if (
-        bar.amount is None
-        or not all(isfinite(float(value)) for value in values if value is not None)
-        or min(bar.open, bar.high, bar.low, bar.close, bar.amount) <= 0
+        bar.volume is None
+        or not isfinite(float(bar.volume))
+        or float(bar.volume) < 0
+        or not all(isfinite(float(value)) for value in (bar.open, bar.high, bar.low, bar.close))
+        or min(bar.open, bar.high, bar.low, bar.close) <= 0
+        or (bar.amount is not None and float(bar.amount) <= 0)
         or bar.high < bar.low
         or bar.high < max(bar.open, bar.close)
         or bar.low > min(bar.open, bar.close)
     ):
         raise ValueError(f"invalid market bar: {bar.date}")
+
+
+def _volume_series(bar: KlineBar) -> float:
+    """成交量因子序列：优先成交额（东财口径），缺失时退化为成交量（腾讯指数兜底）。
+
+    腾讯指数日K无成交额字段；作为历史序列的 rank 分位，成交量与成交额趋势
+    一致，量纲差异不影响相对排名。东财恢复后自动回到成交额口径。
+    """
+    if bar.amount is not None:
+        return float(bar.amount)
+    return float(bar.volume)

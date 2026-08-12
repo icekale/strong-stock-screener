@@ -129,7 +129,6 @@ def test_zero_price_range_skips_only_the_affected_composite_date() -> None:
         ("close", 0),
         ("amount", 0),
         ("amount", -1),
-        ("amount", None),
     ],
 )
 def test_non_positive_or_missing_required_market_values_raise_value_error(
@@ -139,6 +138,24 @@ def test_non_positive_or_missing_required_market_values_raise_value_error(
     bar = make_test_bar(0).model_copy(update={field: value})
     with pytest.raises(ValueError, match="invalid market bar"):
         calculate_sentiment_percentile([bar])
+
+
+def test_missing_amount_uses_volume_series() -> None:
+    # 腾讯指数兜底日K无成交额（amount=None），volume 因子退化为成交量序列
+    bars = make_test_bars(519)
+    missing_amount = [bar.model_copy(update={"amount": None}) for bar in bars]
+    with_volume = [bar.model_copy(update={"amount": None, "volume": bar.volume * 10}) for bar in bars]
+
+    result = calculate_sentiment_percentile(missing_amount)
+    scaled = calculate_sentiment_percentile(with_volume)
+
+    assert result
+    assert result[0].factors.volume.raw_value == missing_amount[-1].volume
+    # 整体量纲缩放不改变 rank 分位（score 一致，raw_value 随缩放变化）
+    assert [point.score for point in result] == [point.score for point in scaled]
+    assert [point.factors.volume.score for point in result] == [
+        point.factors.volume.score for point in scaled
+    ]
 
 
 def test_duplicate_dates_keep_the_last_record() -> None:

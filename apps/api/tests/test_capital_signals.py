@@ -1702,6 +1702,65 @@ def test_history_uses_fresh_compatible_snapshot_without_refresh(tmp_path: Path) 
     assert any(point.trade_date == "2026-07-17" for point in result.points)
 
 
+def test_overview_returns_existing_snapshot_without_waiting_for_slow_history_backfill(
+    tmp_path: Path,
+) -> None:
+    store = CapitalSignalStore(tmp_path)
+    store.save_share_history(
+        [
+            EtfSharePoint(
+                trade_date="2026-07-16",
+                symbol=symbol,
+                name=definition.name,
+                total_shares=1_000,
+            )
+            for symbol, definition in ALL_ETFS.items()
+            if symbol.endswith(".SH")
+        ]
+    )
+    initial = CapitalSignalService(
+        provider=FakeCapitalProvider(),
+        store=store,
+        holder_provider=FakeHolderProvider(),
+        clock=_clock,
+    ).overview(force=True)
+
+    started = threading.Event()
+    release = threading.Event()
+
+    class SlowHistoryProvider(FakeCapitalProvider):
+        def get_etf_share_history_rows(
+            self,
+            start_date: str,
+            end_date: str,
+            symbols: list[str] | tuple[str, ...],
+        ) -> CapitalProviderResult[EtfSharePoint]:
+            del start_date, end_date, symbols
+            started.set()
+            if not release.wait(timeout=2):
+                raise TimeoutError("test did not release history backfill")
+            return CapitalProviderResult(rows=[], source_status=[])
+
+    service = CapitalSignalService(
+        provider=SlowHistoryProvider(),
+        store=store,
+        holder_provider=FakeHolderProvider(),
+        clock=_clock,
+    )
+
+    began = time.monotonic()
+    result = service.overview()
+    elapsed = time.monotonic() - began
+
+    assert elapsed < 0.5
+    assert result.generated_at == initial.generated_at
+    assert started.wait(timeout=1)
+    release.set()
+    refresh_thread = getattr(service, "_refresh_thread", None)
+    if refresh_thread is not None:
+        refresh_thread.join(timeout=2)
+
+
 def test_overview_backfills_szse_history_even_when_snapshot_is_fresh(tmp_path: Path) -> None:
     store = CapitalSignalStore(tmp_path)
     store.save_share_history(
@@ -1780,7 +1839,13 @@ def test_overview_backfills_szse_history_even_when_snapshot_is_fresh(tmp_path: P
         clock=_clock,
     )
 
-    refreshed = service.overview()
+    first = service.overview()
+    refresh_thread = getattr(service, "_refresh_thread", None)
+    if refresh_thread is not None:
+        refresh_thread.join(timeout=2)
+    refreshed = store.load_snapshot()
+    assert refreshed is not None
+    assert first.generated_at == initial.generated_at
 
     item = next(item for item in refreshed.core_items if item.symbol == "159915.SZ")
     assert item.previous_total_shares == 900

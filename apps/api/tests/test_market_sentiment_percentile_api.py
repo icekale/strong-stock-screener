@@ -50,6 +50,17 @@ class FakePercentileService:
         return self.response
 
 
+class IdleSampler:
+    def start(self) -> None:
+        return None
+
+    def stop(self) -> None:
+        return None
+
+    def stop_and_wait(self) -> None:
+        return None
+
+
 class RaisingPercentileService:
     def __init__(self, error: StrongStockDataUnavailable) -> None:
         self.error = error
@@ -62,6 +73,7 @@ def test_percentile_api_returns_selected_history_and_metadata(monkeypatch) -> No
     fixture = percentile_response_fixture()
     service = FakePercentileService(fixture)
     monkeypatch.setattr(app.state, "market_sentiment_percentile_service", service, raising=False)
+    monkeypatch.setattr(app.state, "market_sentiment_analysis_sampler", IdleSampler(), raising=False)
 
     with TestClient(app) as client:
         response = client.get(
@@ -87,6 +99,7 @@ def test_percentile_api_rejects_invalid_date() -> None:
 def test_percentile_api_forwards_refresh_to_service(monkeypatch) -> None:
     service = FakePercentileService(percentile_response_fixture())
     monkeypatch.setattr(app.state, "market_sentiment_percentile_service", service, raising=False)
+    monkeypatch.setattr(app.state, "market_sentiment_analysis_sampler", IdleSampler(), raising=False)
 
     with TestClient(app) as client:
         response = client.get("/api/short-term/sentiment/percentile?refresh=true")

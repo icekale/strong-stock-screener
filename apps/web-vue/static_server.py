@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parent / "dist"
 INDEX_FILE = ROOT / "index.html"
 PORT = int(os.environ.get("PORT", "3110"))
 API_BASE = os.environ.get("API_INTERNAL_URL", "http://127.0.0.1:8010").rstrip("/")
+PROXY_TIMEOUT_SECONDS = 180
 
 
 class StaticHandler(BaseHTTPRequestHandler):
@@ -100,7 +101,7 @@ class StaticHandler(BaseHTTPRequestHandler):
                 method=self.command,
                 headers={k: v for k, v in self.headers.items() if k.lower() not in {"host", "content-length"}},
             )
-            with urllib.request.urlopen(request, timeout=30) as response:
+            with urllib.request.urlopen(request, timeout=PROXY_TIMEOUT_SECONDS) as response:
                 payload = response.read()
                 self.send_response(response.status)
                 for key, value in response.headers.items():

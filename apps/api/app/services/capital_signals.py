@@ -3,10 +3,11 @@ from app.services.common import latest_trade_date as _latest_weekday
 
 import hashlib
 import json
+import logging
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timedelta
 from math import isclose
-from threading import RLock
+from threading import RLock, Thread
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
@@ -115,8 +116,11 @@ class CapitalSignalService:
             str,
             tuple[datetime, list[StrongStockSourceStatus]],
         ] = {}
+        self._refresh_in_progress = False
+        self._refresh_thread: Thread | None = None
 
     def overview(self, *, force: bool = False) -> EtfRadarOverviewResponse:
+        refresh_thread: Thread | None = None
         with self._lock:
             now = self.clock()
             cached = self.store.load_snapshot()
@@ -131,293 +135,371 @@ class CapitalSignalService:
                 and cached.baseline_version == active_baseline_version
                 and cached.baseline_fingerprint == active_baseline_fingerprint
             )
-            history = self.store.load_share_history()
-            history, sse_history_status, sse_history_changed = (
-                self._ensure_sse_share_history(history, trade_date, now)
-            )
-            history, history_status, history_changed = self._ensure_szse_share_history(
-                history,
-                trade_date,
-                now,
-            )
-            history_status = [*sse_history_status, *history_status]
-            history_changed = sse_history_changed or history_changed
-            if (
-                not force
-                and reusable_snapshot
-                and _is_fresh(cached.generated_at, now, self.ttl_seconds)
-                and not history_changed
-            ):
-                if history_status or any(status.status == "stale" for status in baseline_status):
-                    return cached.model_copy(
-                        update={
-                            "source_status": [
-                                *cached.source_status,
-                                *baseline_status,
-                                *history_status,
-                            ]
-                        }
+            if not force and reusable_snapshot:
+                history = self.store.load_share_history()
+                needs_refresh = not _is_fresh(
+                    cached.generated_at, now, self.ttl_seconds
+                ) or self._history_needs_backfill(history, trade_date)
+                if needs_refresh and self._claim_background_refresh():
+                    refresh_thread = Thread(
+                        target=self._run_background_refresh,
+                        name="capital-signal-refresh",
+                        daemon=True,
                     )
-                return cached
-
-            symbols = list(ALL_ETFS)
-            preferred_trade_date = trade_date
-            sanitized_history = _discard_future_szse_rows(history, preferred_trade_date)
-            if sanitized_history != history:
-                self.store.save_share_history(sanitized_history)
-            history = sanitized_history
-            current_result = self.provider.get_etf_share_rows(trade_date, symbols)
-            fetched_current_rows = [
-                row
-                for row in current_result.rows
-                if row.trade_date == trade_date and row.symbol in ALL_ETFS
-            ]
-            current_request_failed = _has_request_failures(current_result)
-            sanitized_history, trusted_current_rows = _trusted_same_day_cache(
-                history,
-                trade_date=trade_date,
-                result=current_result,
-            )
-            if sanitized_history != history:
-                history = sanitized_history
-                self.store.save_share_history(history)
-            current_rows = _merge_share_history(trusted_current_rows, fetched_current_rows)
-            disclosure_status: list[StrongStockSourceStatus] = []
-            fallback_status: list[StrongStockSourceStatus] = []
-            if not current_request_failed and not _has_complete_core_coverage(fetched_current_rows):
-                candidate_dates = _available_trade_dates(
-                    current_result.available_trade_dates,
-                    before=preferred_trade_date,
-                )
-                if candidate_dates:
-                    attempted_dates: list[str] = []
-                    for candidate_date in candidate_dates:
-                        attempted_dates.append(candidate_date)
-                        fallback_result = self.provider.get_etf_share_rows(
-                            candidate_date, symbols
-                        )
-                        fallback_rows = [
-                            row
-                            for row in fallback_result.rows
-                            if row.trade_date == candidate_date and row.symbol in ALL_ETFS
-                        ]
-                        sanitized_history, trusted_fallback_rows = (
-                            _trusted_same_day_cache(
-                                history,
-                                trade_date=candidate_date,
-                                result=fallback_result,
-                            )
-                        )
-                        if sanitized_history != history:
-                            history = sanitized_history
-                            self.store.save_share_history(history)
-                        merged_fallback_rows = _merge_share_history(
-                            trusted_fallback_rows, fallback_rows
-                        )
-                        if _has_complete_core_coverage(merged_fallback_rows):
-                            trade_date = candidate_date
-                            current_result = fallback_result
-                            fetched_current_rows = fallback_rows
-                            current_rows = merged_fallback_rows
-                            disclosure_status.append(
-                                StrongStockSourceStatus(
-                                    source="ETF份额披露日期",
-                                    status="stale",
-                                    detail=(
-                                        f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
-                                        f"使用官方披露日期 {trade_date}"
-                                    ),
-                                )
-                            )
-                            break
-                        fallback_status.extend(fallback_result.source_status)
-                        if _has_request_failures(fallback_result):
-                            disclosure_status.append(
-                                StrongStockSourceStatus(
-                                    source="ETF份额披露日期",
-                                    status="stale",
-                                    detail=(
-                                        f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
-                                        f"官方日期 {candidate_date} 请求失败后不继续回溯"
-                                    ),
-                                )
-                            )
-                            break
-                    else:
-                        disclosure_status.append(
-                            StrongStockSourceStatus(
-                                source="ETF份额披露日期",
-                                status="stale",
-                                detail=(
-                                    f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
-                                    f"官方候选日期 {', '.join(attempted_dates)} 均未形成完整核心ETF披露"
-                                ),
-                            )
-                        )
-                elif not current_result.available_trade_dates:
-                    disclosure_status.append(
-                        StrongStockSourceStatus(
-                            source="ETF份额披露日期",
-                            status="stale",
-                            detail=(
-                                f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
-                                "官方响应未提供实际日期，不执行全量日期回溯"
-                            ),
-                        )
-                    )
-                else:
-                    disclosure_status.append(
-                        StrongStockSourceStatus(
-                            source="ETF份额披露日期",
-                            status="stale",
-                            detail=(
-                                f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
-                                "官方响应未提供更早可重试日期"
-                            ),
-                        )
-                    )
-            sanitized_history = _discard_future_szse_rows(history, trade_date)
-            if sanitized_history != history:
-                self.store.save_share_history(sanitized_history)
-            history = sanitized_history
-            if not current_rows:
-                if reusable_snapshot:
-                    return cached.model_copy(
-                        update={
-                            "source_status": [
-                                *cached.source_status,
-                                *baseline_status,
-                                *history_status,
-                                *disclosure_status,
-                                *current_result.source_status,
-                                *fallback_status,
-                                StrongStockSourceStatus(
-                                    source="ETF资金雷达缓存",
-                                    status="stale",
-                                    detail="远端刷新失败，返回最近持久化缓存",
-                                ),
-                            ]
-                        }
-                    )
-                incompatible_cache_status = (
-                    [
+                    self._refresh_thread = refresh_thread
+                result = cached
+                extra_status = [
+                    status for status in baseline_status if status.status == "stale"
+                ]
+                if needs_refresh:
+                    extra_status.append(
                         StrongStockSourceStatus(
                             source="ETF资金雷达缓存",
                             status="stale",
-                            detail="不兼容或基准已变化的缓存已忽略，返回空的新模型响应",
+                            detail="已返回最近快照，份额历史与刷新在后台继续",
                         )
-                    ]
-                    if cached is not None
-                    else []
-                )
-                return self._empty_overview(
-                    now,
-                    trade_date,
-                    [
-                        *baseline_status,
-                        *history_status,
-                        *disclosure_status,
-                        *current_result.source_status,
-                        *fallback_status,
-                        *incompatible_cache_status,
-                    ],
-                    baselines,
-                )
-
-            previous_date = _previous_weekday(trade_date)
-            fetched_keys = {(row.trade_date, row.symbol) for row in fetched_current_rows}
-            retained_count = sum(
-                (row.trade_date, row.symbol) not in fetched_keys for row in current_rows
-            )
-            current_status = [
-                *history_status,
-                *disclosure_status,
-                *current_result.source_status,
-                *fallback_status,
-            ]
-            if retained_count > 0:
-                current_status.append(
-                    StrongStockSourceStatus(
-                        source="ETF份额缓存",
-                        status="stale",
-                        detail=f"本次部分刷新，保留 {retained_count} 只同日缓存记录",
                     )
+                if extra_status:
+                    result = cached.model_copy(
+                        update={
+                            "source_status": [
+                                *cached.source_status,
+                                *extra_status,
+                            ]
+                        }
+                    )
+            else:
+                history = self.store.load_share_history()
+                history, sse_history_status, sse_history_changed = (
+                    self._ensure_sse_share_history(history, trade_date, now)
                 )
-            previous_by_symbol = _latest_share_before(history, trade_date)
-            missing_sse = [
-                symbol
-                for symbol in (row.symbol for row in current_rows)
-                if symbol.endswith(".SH") and symbol not in previous_by_symbol
-            ]
-            previous_status: list[StrongStockSourceStatus] = []
-            history_before_merge = history
-            if missing_sse:
-                previous_result = self.provider.get_etf_share_rows(previous_date, missing_sse)
-                fetched_previous_rows = [
-                    row
-                    for row in previous_result.rows
-                    if row.symbol in missing_sse and row.trade_date < trade_date
-                ]
-                history = _merge_share_history(history, fetched_previous_rows)
-                previous_by_symbol = _latest_share_before(history, trade_date)
-                previous_status = previous_result.source_status
-
-            current_by_symbol = {row.symbol: row for row in current_rows}
-            baseline_by_symbol = _latest_applicable_baselines(baselines, trade_date)
-            activity_by_symbol = _calculate_activity_rows(
-                trade_date=trade_date,
-                current_by_symbol=current_by_symbol,
-                previous_by_symbol=previous_by_symbol,
-                baseline_by_symbol=baseline_by_symbol,
-            )
-            history = _merge_share_history(history, current_rows)
-            excess_flow_items = build_activity_metrics(history, symbols=ALL_ETFS).items
-            excess_flow_by_symbol = {
-                item.symbol: item
-                for item in excess_flow_items
-                if item.trade_date == trade_date
-            }
-            activity_by_symbol = {
-                symbol: item.model_copy(
-                    update={
-                        "share_change_20d_avg_abs": excess_flow_by_symbol[symbol].share_change_20d_avg_abs,
-                        "share_change_20d_multiple": excess_flow_by_symbol[symbol].share_change_20d_multiple,
-                        "is_tenfold_share_change": excess_flow_by_symbol[symbol].is_tenfold_share_change,
-                    }
+                history, history_status, history_changed = self._ensure_szse_share_history(
+                    history,
+                    trade_date,
+                    now,
                 )
-                if symbol in excess_flow_by_symbol
-                else item
-                for symbol, item in activity_by_symbol.items()
-            }
-            core_items = [activity_by_symbol[symbol] for symbol in CORE_ETFS]
-            validation_items = [activity_by_symbol[symbol] for symbol in VALIDATION_ETFS]
-            validation_groups = _validation_groups(activity_by_symbol)
-            activity = _activity_summary(core_items, validation_groups)
-            items = [_legacy_radar_item(item) for item in core_items]
+                history_status = [*sse_history_status, *history_status]
+                history_changed = sse_history_changed or history_changed
+                if (
+                    not force
+                    and reusable_snapshot
+                    and _is_fresh(cached.generated_at, now, self.ttl_seconds)
+                    and not history_changed
+                ):
+                    if history_status or any(status.status == "stale" for status in baseline_status):
+                        result = cached.model_copy(
+                            update={
+                                "source_status": [
+                                    *cached.source_status,
+                                    *baseline_status,
+                                    *history_status,
+                                ]
+                            }
+                        )
+                    else:
+                        result = cached
+                else:
+                    symbols = list(ALL_ETFS)
+                    preferred_trade_date = trade_date
+                    sanitized_history = _discard_future_szse_rows(history, preferred_trade_date)
+                    if sanitized_history != history:
+                        self.store.save_share_history(sanitized_history)
+                    history = sanitized_history
+                    current_result = self.provider.get_etf_share_rows(trade_date, symbols)
+                    fetched_current_rows = [
+                        row
+                        for row in current_result.rows
+                        if row.trade_date == trade_date and row.symbol in ALL_ETFS
+                    ]
+                    current_request_failed = _has_request_failures(current_result)
+                    sanitized_history, trusted_current_rows = _trusted_same_day_cache(
+                        history,
+                        trade_date=trade_date,
+                        result=current_result,
+                    )
+                    if sanitized_history != history:
+                        history = sanitized_history
+                        self.store.save_share_history(history)
+                    current_rows = _merge_share_history(trusted_current_rows, fetched_current_rows)
+                    disclosure_status: list[StrongStockSourceStatus] = []
+                    fallback_status: list[StrongStockSourceStatus] = []
+                    if not current_request_failed and not _has_complete_core_coverage(fetched_current_rows):
+                        candidate_dates = _available_trade_dates(
+                            current_result.available_trade_dates,
+                            before=preferred_trade_date,
+                        )
+                        if candidate_dates:
+                            attempted_dates: list[str] = []
+                            for candidate_date in candidate_dates:
+                                attempted_dates.append(candidate_date)
+                                fallback_result = self.provider.get_etf_share_rows(
+                                    candidate_date, symbols
+                                )
+                                fallback_rows = [
+                                    row
+                                    for row in fallback_result.rows
+                                    if row.trade_date == candidate_date and row.symbol in ALL_ETFS
+                                ]
+                                sanitized_history, trusted_fallback_rows = (
+                                    _trusted_same_day_cache(
+                                        history,
+                                        trade_date=candidate_date,
+                                        result=fallback_result,
+                                    )
+                                )
+                                if sanitized_history != history:
+                                    history = sanitized_history
+                                    self.store.save_share_history(history)
+                                merged_fallback_rows = _merge_share_history(
+                                    trusted_fallback_rows, fallback_rows
+                                )
+                                if _has_complete_core_coverage(merged_fallback_rows):
+                                    trade_date = candidate_date
+                                    current_result = fallback_result
+                                    fetched_current_rows = fallback_rows
+                                    current_rows = merged_fallback_rows
+                                    disclosure_status.append(
+                                        StrongStockSourceStatus(
+                                            source="ETF份额披露日期",
+                                            status="stale",
+                                            detail=(
+                                                f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
+                                                f"使用官方披露日期 {trade_date}"
+                                            ),
+                                        )
+                                    )
+                                    break
+                                fallback_status.extend(fallback_result.source_status)
+                                if _has_request_failures(fallback_result):
+                                    disclosure_status.append(
+                                        StrongStockSourceStatus(
+                                            source="ETF份额披露日期",
+                                            status="stale",
+                                            detail=(
+                                                f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
+                                                f"官方日期 {candidate_date} 请求失败后不继续回溯"
+                                            ),
+                                        )
+                                    )
+                                    break
+                            else:
+                                disclosure_status.append(
+                                    StrongStockSourceStatus(
+                                        source="ETF份额披露日期",
+                                        status="stale",
+                                        detail=(
+                                            f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
+                                            f"官方候选日期 {', '.join(attempted_dates)} 均未形成完整核心ETF披露"
+                                        ),
+                                    )
+                                )
+                        elif not current_result.available_trade_dates:
+                            disclosure_status.append(
+                                StrongStockSourceStatus(
+                                    source="ETF份额披露日期",
+                                    status="stale",
+                                    detail=(
+                                        f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
+                                        "官方响应未提供实际日期，不执行全量日期回溯"
+                                    ),
+                                )
+                            )
+                        else:
+                            disclosure_status.append(
+                                StrongStockSourceStatus(
+                                    source="ETF份额披露日期",
+                                    status="stale",
+                                    detail=(
+                                        f"目标交易日 {preferred_trade_date} 新鲜官方行未覆盖全部核心ETF；"
+                                        "官方响应未提供更早可重试日期"
+                                    ),
+                                )
+                            )
+                    sanitized_history = _discard_future_szse_rows(history, trade_date)
+                    if sanitized_history != history:
+                        self.store.save_share_history(sanitized_history)
+                    history = sanitized_history
+                    if not current_rows:
+                        if reusable_snapshot:
+                            result = cached.model_copy(
+                                update={
+                                    "source_status": [
+                                        *cached.source_status,
+                                        *baseline_status,
+                                        *history_status,
+                                        *disclosure_status,
+                                        *current_result.source_status,
+                                        *fallback_status,
+                                        StrongStockSourceStatus(
+                                            source="ETF资金雷达缓存",
+                                            status="stale",
+                                            detail="远端刷新失败，返回最近持久化缓存",
+                                        ),
+                                    ]
+                                }
+                            )
+                        else:
+                            incompatible_cache_status = (
+                                [
+                                    StrongStockSourceStatus(
+                                        source="ETF资金雷达缓存",
+                                        status="stale",
+                                        detail="不兼容或基准已变化的缓存已忽略，返回空的新模型响应",
+                                    )
+                                ]
+                                if cached is not None
+                                else []
+                            )
+                            result = self._empty_overview(
+                                now,
+                                trade_date,
+                                [
+                                    *baseline_status,
+                                    *history_status,
+                                    *disclosure_status,
+                                    *current_result.source_status,
+                                    *fallback_status,
+                                    *incompatible_cache_status,
+                                ],
+                                baselines,
+                            )
+                    else:
+                        previous_date = _previous_weekday(trade_date)
+                        fetched_keys = {(row.trade_date, row.symbol) for row in fetched_current_rows}
+                        retained_count = sum(
+                            (row.trade_date, row.symbol) not in fetched_keys for row in current_rows
+                        )
+                        current_status = [
+                            *history_status,
+                            *disclosure_status,
+                            *current_result.source_status,
+                            *fallback_status,
+                        ]
+                        if retained_count > 0:
+                            current_status.append(
+                                StrongStockSourceStatus(
+                                    source="ETF份额缓存",
+                                    status="stale",
+                                    detail=f"本次部分刷新，保留 {retained_count} 只同日缓存记录",
+                                )
+                            )
+                        previous_by_symbol = _latest_share_before(history, trade_date)
+                        missing_sse = [
+                            symbol
+                            for symbol in (row.symbol for row in current_rows)
+                            if symbol.endswith(".SH") and symbol not in previous_by_symbol
+                        ]
+                        previous_status: list[StrongStockSourceStatus] = []
+                        history_before_merge = history
+                        if missing_sse:
+                            previous_result = self.provider.get_etf_share_rows(previous_date, missing_sse)
+                            fetched_previous_rows = [
+                                row
+                                for row in previous_result.rows
+                                if row.symbol in missing_sse and row.trade_date < trade_date
+                            ]
+                            history = _merge_share_history(history, fetched_previous_rows)
+                            previous_by_symbol = _latest_share_before(history, trade_date)
+                            previous_status = previous_result.source_status
 
-            if history != history_before_merge:
-                self.store.save_share_history(history)
-            generated_at = now.isoformat(timespec="seconds")
-            snapshot = EtfRadarOverviewResponse(
-                generated_at=generated_at,
-                trade_date=trade_date,
-                as_of=generated_at,
-                signal_stage=_signal_stage(now, trade_date),
-                model_version=MODEL_VERSION,
-                source_status=[*baseline_status, *current_status, *previous_status],
-                valid_etf_count=activity.available_core_count,
-                expected_etf_count=len(CORE_ETFS),
-                items=items,
-                pool_version=POOL_VERSION,
-                baseline_version=_baseline_version(baseline_by_symbol),
-                baseline_fingerprint=_baseline_fingerprint(baseline_by_symbol),
-                activity=activity,
-                core_items=core_items,
-                validation_items=validation_items,
-                validation_groups=validation_groups,
-            )
-            self.store.save_snapshot(snapshot)
-            return snapshot
+                        current_by_symbol = {row.symbol: row for row in current_rows}
+                        baseline_by_symbol = _latest_applicable_baselines(baselines, trade_date)
+                        activity_by_symbol = _calculate_activity_rows(
+                            trade_date=trade_date,
+                            current_by_symbol=current_by_symbol,
+                            previous_by_symbol=previous_by_symbol,
+                            baseline_by_symbol=baseline_by_symbol,
+                        )
+                        history = _merge_share_history(history, current_rows)
+                        excess_flow_items = build_activity_metrics(history, symbols=ALL_ETFS).items
+                        excess_flow_by_symbol = {
+                            item.symbol: item
+                            for item in excess_flow_items
+                            if item.trade_date == trade_date
+                        }
+                        activity_by_symbol = {
+                            symbol: item.model_copy(
+                                update={
+                                    "share_change_20d_avg_abs": excess_flow_by_symbol[symbol].share_change_20d_avg_abs,
+                                    "share_change_20d_multiple": excess_flow_by_symbol[symbol].share_change_20d_multiple,
+                                    "is_tenfold_share_change": excess_flow_by_symbol[symbol].is_tenfold_share_change,
+                                }
+                            )
+                            if symbol in excess_flow_by_symbol
+                            else item
+                            for symbol, item in activity_by_symbol.items()
+                        }
+                        core_items = [activity_by_symbol[symbol] for symbol in CORE_ETFS]
+                        validation_items = [activity_by_symbol[symbol] for symbol in VALIDATION_ETFS]
+                        validation_groups = _validation_groups(activity_by_symbol)
+                        activity = _activity_summary(core_items, validation_groups)
+                        items = [_legacy_radar_item(item) for item in core_items]
+
+                        if history != history_before_merge:
+                            self.store.save_share_history(history)
+                        generated_at = now.isoformat(timespec="seconds")
+                        snapshot = EtfRadarOverviewResponse(
+                            generated_at=generated_at,
+                            trade_date=trade_date,
+                            as_of=generated_at,
+                            signal_stage=_signal_stage(now, trade_date),
+                            model_version=MODEL_VERSION,
+                            source_status=[*baseline_status, *current_status, *previous_status],
+                            valid_etf_count=activity.available_core_count,
+                            expected_etf_count=len(CORE_ETFS),
+                            items=items,
+                            pool_version=POOL_VERSION,
+                            baseline_version=_baseline_version(baseline_by_symbol),
+                            baseline_fingerprint=_baseline_fingerprint(baseline_by_symbol),
+                            activity=activity,
+                            core_items=core_items,
+                            validation_items=validation_items,
+                            validation_groups=validation_groups,
+                        )
+                        self.store.save_snapshot(snapshot)
+                        result = snapshot
+        if refresh_thread is not None:
+            refresh_thread.start()
+        return result
+
+    def _history_needs_backfill(self, history: list[EtfSharePoint], trade_date: str) -> bool:
+        history_end_date = _previous_weekday(trade_date)
+        sse_start = (
+            datetime.fromisoformat(history_end_date).date()
+            - timedelta(days=_SSE_HISTORY_BACKFILL_DAYS)
+        ).isoformat()
+        szse_start = (
+            datetime.fromisoformat(history_end_date).date()
+            - timedelta(days=_SZSE_HISTORY_BACKFILL_DAYS)
+        ).isoformat()
+        sse_symbols = tuple(symbol for symbol in ALL_ETFS if symbol.endswith(".SH"))
+        szse_symbols = tuple(symbol for symbol in ALL_ETFS if symbol.endswith(".SZ"))
+        return not _has_sse_history_coverage(
+            history,
+            symbols=sse_symbols,
+            start_date=sse_start,
+            end_date=history_end_date,
+        ) or not _has_szse_history_coverage(
+            history,
+            symbols=szse_symbols,
+            start_date=szse_start,
+            end_date=history_end_date,
+        )
+
+    def _claim_background_refresh(self) -> bool:
+        if self._refresh_in_progress:
+            return False
+        self._refresh_in_progress = True
+        return True
+
+    def _run_background_refresh(self) -> None:
+        try:
+            self.overview(force=True)
+        except Exception:
+            logging.getLogger(__name__).exception("background ETF radar refresh failed")
+        finally:
+            with self._lock:
+                self._refresh_in_progress = False
 
     def _ensure_sse_share_history(
         self,
@@ -543,31 +625,44 @@ class CapitalSignalService:
             return result
 
     def history(self, *, days: int = 120) -> EtfRadarHistoryResponse:
+        refresh_thread: Thread | None = None
         with self._lock:
             now = self.clock()
             trade_date = _latest_weekday(now)
             history = self.store.load_share_history()
-            history, sse_history_status, _ = self._ensure_sse_share_history(
-                history,
-                trade_date,
-                now,
-            )
-            history, history_status, _ = self._ensure_szse_share_history(
-                history,
-                trade_date,
-                now,
-            )
-            history_status = [*sse_history_status, *history_status]
             snapshot = self.store.load_snapshot()
-            if (
-                snapshot is not None
-                and _is_compatible_snapshot(snapshot)
-                and _is_fresh(snapshot.generated_at, now, self.ttl_seconds)
-            ):
+            reusable_snapshot = snapshot is not None and _is_compatible_snapshot(snapshot)
+            if reusable_snapshot:
+                if self._history_needs_backfill(history, trade_date) and self._claim_background_refresh():
+                    refresh_thread = Thread(
+                        target=self._run_background_refresh,
+                        name="capital-signal-refresh",
+                        daemon=True,
+                    )
+                    self._refresh_thread = refresh_thread
+                history_status = []
                 disclosed_trade_date = snapshot.trade_date
             else:
-                disclosed_trade_date = self.overview().trade_date
-                history = self.store.load_share_history()
+                history, sse_history_status, _ = self._ensure_sse_share_history(
+                    history,
+                    trade_date,
+                    now,
+                )
+                history, history_status, _ = self._ensure_szse_share_history(
+                    history,
+                    trade_date,
+                    now,
+                )
+                history_status = [*sse_history_status, *history_status]
+                if (
+                    snapshot is not None
+                    and _is_compatible_snapshot(snapshot)
+                    and _is_fresh(snapshot.generated_at, now, self.ttl_seconds)
+                ):
+                    disclosed_trade_date = snapshot.trade_date
+                else:
+                    disclosed_trade_date = self.overview().trade_date
+                    history = self.store.load_share_history()
             if any(row.symbol in ALL_ETFS and row.symbol.endswith(".SZ") for row in history):
                 sanitized_history = _discard_future_szse_rows(history, disclosed_trade_date)
                 if sanitized_history != history:
@@ -614,6 +709,8 @@ class CapitalSignalService:
             if latest_date is not None
             else "无归档数据；返回最近 0 个可用交易日"
         )
+        if refresh_thread is not None:
+            refresh_thread.start()
         return EtfRadarHistoryResponse(
             generated_at=generated_at,
             trade_date=trade_date,
